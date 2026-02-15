@@ -47,18 +47,30 @@ All commands support `--dry-run`, `--verbose`, and `--config <path>`.
 
 ## How It Works
 
-```
-Sources                    Library                  Targets
-┌─────────────────┐       ┌──────────────┐       ┌─────────────────┐
-│ Plugin cache     │──┐   │              │   ┌──▶│ Antigravity     │
-│ (23 skills)      │  │   │  Consolidated│   │   │ (symlinks)      │
-├─────────────────┤  ├──▶│  skill       ├───┤   ├─────────────────┤
-│ ~/.claude/skills │  │   │  library     │   │   │ Codex           │
-│ (8 skills)       │──┤   │              │   └──▶│ (MCP config)    │
-├─────────────────┤  │   │  (symlinks)  │       ├─────────────────┤
-│ ~/my-skills      │──┘   │              │       │ OpenClaw        │
-│ (18 skills)      │      └──────────────┘       │ (MCP config)    │
-└─────────────────┘                               └─────────────────┘
+```mermaid
+graph LR
+    subgraph Sources
+        S1["Plugin cache<br/>(23 skills)"]
+        S2["~/.claude/skills<br/>(8 skills)"]
+        S3["~/my-skills<br/>(18 skills)"]
+    end
+
+    subgraph Library
+        L["Consolidated<br/>skill library<br/>(symlinks)"]
+    end
+
+    subgraph Targets
+        T1["Antigravity<br/>(symlinks)"]
+        T2["Codex<br/>(MCP config)"]
+        T3["OpenClaw<br/>(MCP config)"]
+    end
+
+    S1 --> L
+    S2 --> L
+    S3 --> L
+    L --> T1
+    L --> T2
+    L --> T3
 ```
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
