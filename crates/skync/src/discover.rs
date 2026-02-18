@@ -108,18 +108,40 @@ fn discover_claude_plugins_from_json(
     let mut skills = Vec::new();
 
     if let Some(arr) = plugins.as_array() {
-        for plugin in arr {
-            if let Some(install_path) = plugin.get("installPath").and_then(|v| v.as_str()) {
-                let skills_dir = PathBuf::from(install_path).join("skills");
-                if skills_dir.is_dir() {
-                    let mut dir_skills = scan_for_skills(&skills_dir, source_name)?;
-                    skills.append(&mut dir_skills);
-                }
+        // v1 format: flat array of plugin objects with "installPath"
+        scan_install_records(arr, source_name, &mut skills)?;
+    } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
+        // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
+        for records in obj.values() {
+            if let Some(arr) = records.as_array() {
+                scan_install_records(arr, source_name, &mut skills)?;
             }
         }
+    } else {
+        eprintln!(
+            "warning: unrecognized installed_plugins.json format in {}",
+            json_path.display()
+        );
     }
 
     Ok(skills)
+}
+
+/// Scan an array of plugin install records for skills at each `installPath`.
+fn scan_install_records(
+    records: &[serde_json::Value],
+    source_name: &str,
+    skills: &mut Vec<DiscoveredSkill>,
+) -> Result<()> {
+    for record in records {
+        if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
+            let skills_dir = PathBuf::from(install_path).join("skills");
+            if skills_dir.is_dir() {
+                skills.append(&mut scan_for_skills(&skills_dir, source_name)?);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
