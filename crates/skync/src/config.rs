@@ -259,6 +259,14 @@ mod tests {
     }
 
     #[test]
+    fn config_load_fails_on_malformed_toml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "this is [[[not valid toml").unwrap();
+        assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
     fn config_parses_full_toml() {
         let toml_str = r#"
 library_dir = "~/.local/share/skync/skills"
