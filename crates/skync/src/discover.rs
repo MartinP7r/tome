@@ -108,18 +108,40 @@ fn discover_claude_plugins_from_json(
     let mut skills = Vec::new();
 
     if let Some(arr) = plugins.as_array() {
-        for plugin in arr {
-            if let Some(install_path) = plugin.get("installPath").and_then(|v| v.as_str()) {
-                let skills_dir = PathBuf::from(install_path).join("skills");
-                if skills_dir.is_dir() {
-                    let mut dir_skills = scan_for_skills(&skills_dir, source_name)?;
-                    skills.append(&mut dir_skills);
-                }
+        // v1 format: flat array of plugin objects with "installPath"
+        scan_install_records(arr, source_name, &mut skills)?;
+    } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
+        // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
+        for records in obj.values() {
+            if let Some(arr) = records.as_array() {
+                scan_install_records(arr, source_name, &mut skills)?;
             }
         }
+    } else {
+        eprintln!(
+            "warning: unrecognized installed_plugins.json format in {}",
+            json_path.display()
+        );
     }
 
     Ok(skills)
+}
+
+/// Scan an array of plugin install records for skills at each `installPath`.
+fn scan_install_records(
+    records: &[serde_json::Value],
+    source_name: &str,
+    skills: &mut Vec<DiscoveredSkill>,
+) -> Result<()> {
+    for record in records {
+        if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
+            let skills_dir = PathBuf::from(install_path).join("skills");
+            if skills_dir.is_dir() {
+                skills.append(&mut scan_for_skills(&skills_dir, source_name)?);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
@@ -283,5 +305,78 @@ mod tests {
         let skills = discover_claude_plugins(&source).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "plugin-skill");
+    }
+
+    #[test]
+    fn discover_claude_plugins_reads_v2_json() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create two plugins with skills at their install paths
+        let plugin_a_dir = tmp.path().join("plugin-a-install");
+        create_skill(&plugin_a_dir.join("skills"), "swift-skill");
+
+        let plugin_b_dir = tmp.path().join("plugin-b-install");
+        create_skill(&plugin_b_dir.join("skills"), "rust-skill");
+
+        // v2 format: { "version": 2, "plugins": { "name@registry": [ { "installPath": ... } ] } }
+        let json = serde_json::json!({
+            "version": 2,
+            "plugins": {
+                "swift-skill@swift-registry": [
+                    {
+                        "scope": "user",
+                        "installPath": plugin_a_dir.to_str().unwrap(),
+                        "version": "1.0.0",
+                        "installedAt": "2025-12-15T02:47:14.944Z"
+                    }
+                ],
+                "rust-skill@rust-registry": [
+                    {
+                        "scope": "user",
+                        "installPath": plugin_b_dir.to_str().unwrap(),
+                        "version": "2.0.0",
+                        "installedAt": "2026-01-05T04:13:51.923Z"
+                    }
+                ]
+            }
+        });
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        let source = Source {
+            name: "plugins".into(),
+            path: tmp.path().to_path_buf(),
+            source_type: SourceType::ClaudePlugins,
+        };
+        let skills = discover_claude_plugins(&source).unwrap();
+        assert_eq!(skills.len(), 2);
+
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"swift-skill"));
+        assert!(names.contains(&"rust-skill"));
+    }
+
+    #[test]
+    fn discover_claude_plugins_unknown_format() {
+        let tmp = TempDir::new().unwrap();
+
+        // Unknown format: an object with no "plugins" key and not an array
+        let json = serde_json::json!({
+            "version": 99,
+            "something_else": "unexpected"
+        });
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        let skills =
+            discover_claude_plugins_from_json(&tmp.path().join("installed_plugins.json"), "test")
+                .unwrap();
+        assert!(skills.is_empty());
     }
 }
