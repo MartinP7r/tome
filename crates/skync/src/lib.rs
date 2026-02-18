@@ -79,6 +79,13 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
     }
     let cleanup_result = cleanup::cleanup_library(&config.library_dir, dry_run)?;
 
+    let mut removed_from_targets = 0usize;
+    for (_name, target) in config.targets.iter() {
+        if let Some(ref skills_dir) = target.skills_dir {
+            removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        }
+    }
+
     // Report
     if dry_run {
         println!("{}", style("Dry run — no changes made").yellow());
@@ -106,6 +113,13 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
         println!(
             "  Cleaned {} stale link(s)",
             style(cleanup_result.removed_from_library).yellow()
+        );
+    }
+
+    if removed_from_targets > 0 {
+        println!(
+            "  Cleaned {} stale target link(s)",
+            style(removed_from_targets).yellow()
         );
     }
 
