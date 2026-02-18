@@ -251,4 +251,70 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(parsed["mcpServers"]["skync"]["command"].as_str() == Some("skync-mcp"));
     }
+
+    #[test]
+    fn distribute_mcp_preserves_existing_servers() {
+        let library = TempDir::new().unwrap();
+        let mcp_dir = TempDir::new().unwrap();
+        let mcp_path = mcp_dir.path().join(".mcp.json");
+
+        // Pre-populate with an existing server entry
+        let existing = serde_json::json!({
+            "mcpServers": {
+                "other-server": {
+                    "command": "other-cmd",
+                    "args": ["--flag"]
+                }
+            }
+        });
+        std::fs::write(&mcp_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Mcp,
+            skills_dir: None,
+            mcp_config: Some(mcp_path.clone()),
+        };
+
+        let result = distribute_to_target(library.path(), "codex", &target, false).unwrap();
+        assert_eq!(result.linked, 1);
+
+        // Verify both entries exist
+        let content = std::fs::read_to_string(&mcp_path).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert!(parsed["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
+        assert!(parsed["mcpServers"]["skync"]["command"].as_str() == Some("skync-mcp"));
+
+        // Run again — should be idempotent, other-server still there
+        let result2 = distribute_to_target(library.path(), "codex", &target, false).unwrap();
+        assert_eq!(result2.unchanged, 1);
+        let content2 = std::fs::read_to_string(&mcp_path).unwrap();
+        let parsed2: serde_json::Value = serde_json::from_str(&content2).unwrap();
+        assert!(parsed2["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
+    }
+
+    #[test]
+    fn distribute_symlinks_skips_non_symlink_collision() {
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        setup_library(library.path(), &["skill-a"]);
+
+        // Pre-create a regular file at the target link path (collision)
+        std::fs::write(target_dir.path().join("skill-a"), "not a symlink").unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Symlink,
+            skills_dir: Some(target_dir.path().to_path_buf()),
+            mcp_config: None,
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        assert_eq!(result.linked, 0);
+        assert_eq!(result.unchanged, 0);
+
+        // The regular file should be unchanged
+        let content = std::fs::read_to_string(target_dir.path().join("skill-a")).unwrap();
+        assert_eq!(content, "not a symlink");
+    }
 }
