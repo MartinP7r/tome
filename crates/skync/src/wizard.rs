@@ -192,7 +192,9 @@ fn configure_targets() -> Result<Targets> {
                     mcp_config: Some(expand_tilde(&PathBuf::from(path))),
                 });
             }
-            _ => {}
+            _ => {
+                eprintln!("warning: unexpected target index {idx}, skipping");
+            }
         }
     }
 

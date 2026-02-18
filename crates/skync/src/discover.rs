@@ -82,6 +82,10 @@ fn discover_claude_plugins(source: &Source) -> Result<Vec<DiscoveredSkill>> {
         if let Some(ref path) = parent_json
             && path.exists()
         {
+            eprintln!(
+                "warning: installed_plugins.json not found at '{}', trying parent directory",
+                plugins_json_path.display()
+            );
             return discover_claude_plugins_from_json(path, &source.name);
         }
 
