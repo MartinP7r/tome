@@ -121,4 +121,24 @@ mod tests {
         let removed = cleanup_target(target.path(), library.path(), false).unwrap();
         assert_eq!(removed, 1);
     }
+
+    #[test]
+    fn cleanup_target_preserves_external_symlinks() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Broken symlink pointing INTO library dir (should be removed)
+        let library_phantom = library.path().join("deleted-skill");
+        unix_fs::symlink(&library_phantom, target.path().join("library-link")).unwrap();
+
+        // Broken symlink pointing OUTSIDE library dir (should be preserved)
+        unix_fs::symlink("/some/external/path", target.path().join("external-link")).unwrap();
+
+        let removed = cleanup_target(target.path(), library.path(), false).unwrap();
+        assert_eq!(removed, 1);
+        // Library-pointing broken link was removed
+        assert!(!target.path().join("library-link").exists());
+        // External broken link is preserved
+        assert!(target.path().join("external-link").is_symlink());
+    }
 }
