@@ -17,16 +17,24 @@ use config::Config;
 
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
+    if matches!(cli.command, Command::Init) {
+        if let Err(e) = Config::load_or_default(cli.config.as_deref()) {
+            eprintln!(
+                "warning: existing config is malformed ({}), the wizard will create a new one",
+                e
+            );
+        }
+        let config = wizard::run(cli.dry_run)?;
+        if !cli.dry_run {
+            sync(&config, cli.dry_run, cli.verbose)?;
+        }
+        return Ok(());
+    }
+
     let config = Config::load_or_default(cli.config.as_deref())?;
 
     match cli.command {
-        Command::Init => {
-            let config = wizard::run(cli.dry_run)?;
-            if !cli.dry_run {
-                // Run initial sync after wizard
-                sync(&config, cli.dry_run, cli.verbose)?;
-            }
-        }
+        Command::Init => unreachable!(),
         Command::Sync => sync(&config, cli.dry_run, cli.verbose)?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
