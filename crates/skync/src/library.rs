@@ -147,4 +147,24 @@ mod tests {
         let actual_target = std::fs::read_link(library.path().join("my-skill")).unwrap();
         assert_eq!(actual_target, skill2.path);
     }
+
+    #[test]
+    fn consolidate_skips_non_symlink_collision() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        let skill = make_skill(source.path(), "my-skill");
+
+        // Pre-create a regular file at the library link path (collision)
+        std::fs::write(library.path().join("my-skill"), "not a symlink").unwrap();
+
+        let result = consolidate(&[skill], library.path(), false).unwrap();
+        assert_eq!(result.created, 0);
+        assert_eq!(result.unchanged, 0);
+        assert_eq!(result.updated, 0);
+
+        // The regular file should be unchanged
+        let content = std::fs::read_to_string(library.path().join("my-skill")).unwrap();
+        assert_eq!(content, "not a symlink");
+    }
 }
