@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::paths::resolve_symlink_target;
+
 /// Result of cleanup operation.
 #[derive(Debug, Default)]
 pub struct CleanupResult {
@@ -24,7 +26,8 @@ pub fn cleanup_library(library_dir: &Path, dry_run: bool) -> Result<CleanupResul
         let path = entry.path();
 
         if path.is_symlink() {
-            let target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)?;
+            let target = resolve_symlink_target(&path, &raw_target);
             // Check if the symlink target still exists
             if !target.exists() {
                 if !dry_run {
@@ -56,7 +59,8 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
         let path = entry.path();
 
         if path.is_symlink() {
-            let target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)?;
+            let target = resolve_symlink_target(&path, &raw_target);
 
             // Remove if it points into the library dir but the library entry is gone
             if target.starts_with(library_dir) && !target.exists() {
@@ -120,6 +124,36 @@ mod tests {
 
         let removed = cleanup_target(target.path(), library.path(), false).unwrap();
         assert_eq!(removed, 1);
+    }
+
+    #[test]
+    fn cleanup_handles_relative_symlinks() {
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+
+        // Valid relative symlink: library/my-skill -> ../sources/my-skill
+        let source_dir = tmp.path().join("sources/my-skill");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        unix_fs::symlink(
+            std::path::Path::new("../sources/my-skill"),
+            library.join("my-skill"),
+        )
+        .unwrap();
+
+        // Broken relative symlink: library/gone -> ../sources/gone (doesn't exist)
+        unix_fs::symlink(
+            std::path::Path::new("../sources/gone"),
+            library.join("gone"),
+        )
+        .unwrap();
+
+        let result = cleanup_library(&library, false).unwrap();
+        assert_eq!(result.removed_from_library, 1);
+        // Valid relative symlink should be preserved
+        assert!(library.join("my-skill").is_symlink());
+        // Broken one should be removed
+        assert!(!library.join("gone").exists());
     }
 
     #[test]

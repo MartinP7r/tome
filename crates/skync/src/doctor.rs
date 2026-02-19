@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::cleanup;
 use crate::config::Config;
+use crate::paths::resolve_symlink_target;
 
 /// Diagnose and optionally repair issues.
 pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
@@ -88,13 +89,14 @@ fn check_library(library_dir: &Path) -> Result<usize> {
         let path = entry.path();
 
         if path.is_symlink() {
-            let target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)?;
+            let target = resolve_symlink_target(&path, &raw_target);
             if !target.exists() {
                 println!(
                     "  {} broken symlink: {} -> {}",
                     style("x").red(),
                     path.display(),
-                    target.display()
+                    raw_target.display()
                 );
                 issues += 1;
             }
@@ -127,7 +129,8 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
         let path = entry.path();
 
         if path.is_symlink() {
-            let target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)?;
+            let target = resolve_symlink_target(&path, &raw_target);
             if target.starts_with(library_dir) && !target.exists() {
                 println!(
                     "  {} {}: stale symlink {}",

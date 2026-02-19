@@ -3,6 +3,7 @@ use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
 use crate::discover::DiscoveredSkill;
+use crate::paths::symlink_points_to;
 
 /// Result of a consolidation operation.
 #[derive(Debug, Default)]
@@ -20,8 +21,10 @@ pub fn consolidate(
     library_dir: &Path,
     dry_run: bool,
 ) -> Result<ConsolidateResult> {
-    std::fs::create_dir_all(library_dir)
-        .with_context(|| format!("failed to create library dir {}", library_dir.display()))?;
+    if !dry_run {
+        std::fs::create_dir_all(library_dir)
+            .with_context(|| format!("failed to create library dir {}", library_dir.display()))?;
+    }
 
     let mut result = ConsolidateResult::default();
 
@@ -29,10 +32,7 @@ pub fn consolidate(
         let link_path = library_dir.join(&skill.name);
 
         if link_path.is_symlink() {
-            let current_target = std::fs::read_link(&link_path)
-                .with_context(|| format!("failed to read symlink {}", link_path.display()))?;
-
-            if current_target == skill.path {
+            if symlink_points_to(&link_path, &skill.path) {
                 result.unchanged += 1;
                 continue;
             }
@@ -119,6 +119,40 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_idempotent_with_relative_symlink() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp = TempDir::new().unwrap();
+        let source_dir = tmp.path().join("sources/my-skill");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::write(source_dir.join("SKILL.md"), "# test").unwrap();
+
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+
+        // Manually create a relative symlink: library/my-skill -> ../sources/my-skill
+        unix_fs::symlink(
+            std::path::Path::new("../sources/my-skill"),
+            lib_dir.join("my-skill"),
+        )
+        .unwrap();
+
+        let skill = DiscoveredSkill {
+            name: "my-skill".to_string(),
+            path: source_dir,
+            source_name: "test".into(),
+        };
+
+        let result = consolidate(&[skill], &lib_dir, false).unwrap();
+        assert_eq!(
+            result.unchanged, 1,
+            "relative symlink should be recognized as matching"
+        );
+        assert_eq!(result.updated, 0);
+        assert_eq!(result.created, 0);
+    }
+
+    #[test]
     fn consolidate_dry_run_no_changes() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
@@ -146,6 +180,18 @@ mod tests {
 
         let actual_target = std::fs::read_link(library.path().join("my-skill")).unwrap();
         assert_eq!(actual_target, skill2.path);
+    }
+
+    #[test]
+    fn consolidate_dry_run_doesnt_create_dir() {
+        let tmp = TempDir::new().unwrap();
+        let nonexistent_lib = tmp.path().join("does-not-exist");
+        let source = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        let result = consolidate(&[skill], &nonexistent_lib, true).unwrap();
+        assert_eq!(result.created, 1);
+        assert!(!nonexistent_lib.exists());
     }
 
     #[test]

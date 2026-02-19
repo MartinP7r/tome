@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use std::path::PathBuf;
@@ -35,7 +35,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
     };
 
     // Step 5: Save config
-    let config_path = default_config_path();
+    let config_path = default_config_path()?;
     println!();
     println!(
         "Config will be saved to: {}",
@@ -63,7 +63,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
 fn configure_sources() -> Result<Vec<Source>> {
     println!("{}", style("Step 1: Skill sources").bold());
 
-    let known_sources = find_known_sources();
+    let known_sources = find_known_sources()?;
     let mut sources = Vec::new();
 
     if !known_sources.is_empty() {
@@ -102,7 +102,7 @@ fn configure_sources() -> Result<Vec<Source>> {
 
         sources.push(Source {
             name,
-            path: expand_tilde(&PathBuf::from(&custom)),
+            path: expand_tilde(&PathBuf::from(&custom))?,
             source_type: SourceType::Directory,
         });
     }
@@ -115,7 +115,7 @@ fn configure_library() -> Result<PathBuf> {
     println!("{}", style("Step 2: Library location").bold());
 
     let default = dirs::home_dir()
-        .expect("could not determine home directory")
+        .context("could not determine home directory")?
         .join(".local/share/skync/skills");
 
     let options = vec![
@@ -133,7 +133,7 @@ fn configure_library() -> Result<PathBuf> {
         default
     } else {
         let custom: String = Input::new().with_prompt("Library path").interact_text()?;
-        expand_tilde(&PathBuf::from(custom))
+        expand_tilde(&PathBuf::from(custom))?
     };
 
     println!();
@@ -154,7 +154,9 @@ fn configure_targets() -> Result<Targets> {
     for idx in selections {
         match idx {
             0 => {
-                let default_path = dirs::home_dir().unwrap().join(".gemini/antigravity/skills");
+                let default_path = dirs::home_dir()
+                    .context("could not determine home directory")?
+                    .join(".gemini/antigravity/skills");
                 let path: String = Input::new()
                     .with_prompt("Antigravity skills directory")
                     .default(default_path.display().to_string())
@@ -162,12 +164,14 @@ fn configure_targets() -> Result<Targets> {
                 targets.antigravity = Some(TargetConfig {
                     enabled: true,
                     method: DistributionMethod::Symlink,
-                    skills_dir: Some(expand_tilde(&PathBuf::from(path))),
+                    skills_dir: Some(expand_tilde(&PathBuf::from(path))?),
                     mcp_config: None,
                 });
             }
             1 => {
-                let default_path = dirs::home_dir().unwrap().join(".codex/.mcp.json");
+                let default_path = dirs::home_dir()
+                    .context("could not determine home directory")?
+                    .join(".codex/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("Codex MCP config path")
                     .default(default_path.display().to_string())
@@ -176,11 +180,13 @@ fn configure_targets() -> Result<Targets> {
                     enabled: true,
                     method: DistributionMethod::Mcp,
                     skills_dir: None,
-                    mcp_config: Some(expand_tilde(&PathBuf::from(path))),
+                    mcp_config: Some(expand_tilde(&PathBuf::from(path))?),
                 });
             }
             2 => {
-                let default_path = dirs::home_dir().unwrap().join(".openclaw/.mcp.json");
+                let default_path = dirs::home_dir()
+                    .context("could not determine home directory")?
+                    .join(".openclaw/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("OpenClaw MCP config path")
                     .default(default_path.display().to_string())
@@ -189,7 +195,7 @@ fn configure_targets() -> Result<Targets> {
                     enabled: true,
                     method: DistributionMethod::Mcp,
                     skills_dir: None,
-                    mcp_config: Some(expand_tilde(&PathBuf::from(path))),
+                    mcp_config: Some(expand_tilde(&PathBuf::from(path))?),
                 });
             }
             _ => {
@@ -222,8 +228,8 @@ fn configure_exclusions() -> Result<Vec<String>> {
 }
 
 /// Scan well-known locations for existing skills.
-fn find_known_sources() -> Vec<Source> {
-    let home = dirs::home_dir().expect("could not determine home directory");
+fn find_known_sources() -> Result<Vec<Source>> {
+    let home = dirs::home_dir().context("could not determine home directory")?;
     let mut sources = Vec::new();
 
     // Claude plugins cache
@@ -256,5 +262,5 @@ fn find_known_sources() -> Vec<Source> {
         });
     }
 
-    sources
+    Ok(sources)
 }

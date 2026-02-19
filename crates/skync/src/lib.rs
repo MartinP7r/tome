@@ -6,6 +6,7 @@ pub mod distribute;
 pub mod doctor;
 pub mod library;
 pub mod mcp;
+pub mod paths;
 pub mod status;
 pub mod wizard;
 
@@ -169,7 +170,7 @@ fn list(config: &Config) -> Result<()> {
 /// Show or print config information.
 fn show_config(config: &Config, path_only: bool) -> Result<()> {
     if path_only {
-        println!("{}", config::default_config_path().display());
+        println!("{}", config::default_config_path()?.display());
     } else {
         let toml_str = toml::to_string_pretty(config)?;
         println!("{}", toml_str);

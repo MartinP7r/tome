@@ -103,7 +103,7 @@ impl Config {
                 .with_context(|| format!("failed to read {}", path.display()))?;
             let mut config: Config = toml::from_str(&content)
                 .with_context(|| format!("failed to parse {}", path.display()))?;
-            config.expand_tildes();
+            config.expand_tildes()?;
             Ok(config)
         } else {
             Ok(Self::default())
@@ -114,7 +114,7 @@ impl Config {
     pub fn load_or_default(cli_path: Option<&Path>) -> Result<Self> {
         let path = match cli_path {
             Some(p) => p.to_path_buf(),
-            None => default_config_path(),
+            None => default_config_path()?,
         };
         Self::load(&path)
     }
@@ -131,30 +131,32 @@ impl Config {
     }
 
     /// Expand `~` in all path fields.
-    fn expand_tildes(&mut self) {
-        self.library_dir = expand_tilde(&self.library_dir);
+    fn expand_tildes(&mut self) -> Result<()> {
+        self.library_dir = expand_tilde(&self.library_dir)?;
         for source in &mut self.sources {
-            source.path = expand_tilde(&source.path);
+            source.path = expand_tilde(&source.path)?;
         }
         if let Some(ref mut t) = self.targets.antigravity {
-            expand_target_tildes(t);
+            expand_target_tildes(t)?;
         }
         if let Some(ref mut t) = self.targets.codex {
-            expand_target_tildes(t);
+            expand_target_tildes(t)?;
         }
         if let Some(ref mut t) = self.targets.openclaw {
-            expand_target_tildes(t);
+            expand_target_tildes(t)?;
         }
+        Ok(())
     }
 }
 
-fn expand_target_tildes(t: &mut TargetConfig) {
+fn expand_target_tildes(t: &mut TargetConfig) -> Result<()> {
     if let Some(ref mut p) = t.skills_dir {
-        *p = expand_tilde(p);
+        *p = expand_tilde(p)?;
     }
     if let Some(ref mut p) = t.mcp_config {
-        *p = expand_tilde(p);
+        *p = expand_tilde(p)?;
     }
+    Ok(())
 }
 
 impl Default for Config {
@@ -169,23 +171,23 @@ impl Default for Config {
 }
 
 /// Expand `~` prefix to the user's home directory.
-pub fn expand_tilde(path: &Path) -> PathBuf {
+pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     if let Ok(stripped) = path.strip_prefix("~") {
-        dirs::home_dir()
-            .expect("could not determine home directory")
-            .join(stripped)
+        Ok(dirs::home_dir()
+            .context("could not determine home directory")?
+            .join(stripped))
     } else {
-        path.to_path_buf()
+        Ok(path.to_path_buf())
     }
 }
 
 /// Default config file path: ~/.config/skync/config.toml
-pub fn default_config_path() -> PathBuf {
-    dirs::home_dir()
-        .expect("could not determine home directory")
+pub fn default_config_path() -> Result<PathBuf> {
+    Ok(dirs::home_dir()
+        .context("could not determine home directory")?
         .join(".config")
         .join("skync")
-        .join("config.toml")
+        .join("config.toml"))
 }
 
 mod defaults {
@@ -193,7 +195,7 @@ mod defaults {
 
     pub fn library_dir() -> PathBuf {
         dirs::home_dir()
-            .expect("could not determine home directory")
+            .expect("could not determine home directory — is $HOME set?")
             .join(".local")
             .join("share")
             .join("skync")
@@ -208,7 +210,7 @@ mod tests {
 
     #[test]
     fn expand_tilde_expands_home() {
-        let result = expand_tilde(Path::new("~/foo/bar"));
+        let result = expand_tilde(Path::new("~/foo/bar")).unwrap();
         assert!(result.is_absolute());
         assert!(result.ends_with("foo/bar"));
     }
@@ -216,13 +218,13 @@ mod tests {
     #[test]
     fn expand_tilde_leaves_absolute_unchanged() {
         let path = Path::new("/absolute/path");
-        assert_eq!(expand_tilde(path), PathBuf::from("/absolute/path"));
+        assert_eq!(expand_tilde(path).unwrap(), PathBuf::from("/absolute/path"));
     }
 
     #[test]
     fn expand_tilde_leaves_relative_unchanged() {
         let path = Path::new("relative/path");
-        assert_eq!(expand_tilde(path), PathBuf::from("relative/path"));
+        assert_eq!(expand_tilde(path).unwrap(), PathBuf::from("relative/path"));
     }
 
     #[test]

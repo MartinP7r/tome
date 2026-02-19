@@ -171,7 +171,13 @@ fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>
         .min_depth(1)
         .max_depth(2)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(|e| match e {
+            Ok(entry) => Some(entry),
+            Err(err) => {
+                eprintln!("warning: skipping entry in {}: {}", dir.display(), err);
+                None
+            }
+        })
     {
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()

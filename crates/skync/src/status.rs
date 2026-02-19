@@ -14,7 +14,13 @@ pub fn show(config: &Config) -> Result<()> {
     );
 
     // Count skills in library
-    let lib_count = count_entries(&config.library_dir);
+    let lib_count = match count_entries(&config.library_dir) {
+        Ok(n) => format!("{}", n),
+        Err(e) => {
+            eprintln!("warning: could not read library: {}", e);
+            "?".to_string()
+        }
+    };
     println!("  {} skills consolidated", style(lib_count).cyan());
     println!();
 
@@ -24,9 +30,16 @@ pub fn show(config: &Config) -> Result<()> {
         println!("  (none configured)");
     } else {
         for source in &config.sources {
-            let count = discover::discover_source(source)
-                .map(|s| s.len())
-                .unwrap_or(0);
+            let count = match discover::discover_source(source) {
+                Ok(s) => format!("{}", s.len()),
+                Err(e) => {
+                    eprintln!(
+                        "warning: could not discover skills from '{}': {}",
+                        source.name, e
+                    );
+                    "?".to_string()
+                }
+            };
             println!(
                 "  {:<40} {} skills",
                 style(source.path.display()).dim(),
@@ -54,38 +67,50 @@ pub fn show(config: &Config) -> Result<()> {
     println!();
 
     // Health check
-    let broken = count_broken_symlinks(&config.library_dir);
-    if broken == 0 {
-        println!("{} {}", style("Health:").bold(), style("All good").green());
-    } else {
-        println!(
-            "{} {}",
-            style("Health:").bold(),
-            style(format!("{} broken symlinks", broken)).red()
-        );
-    }
+    let health = match count_broken_symlinks(&config.library_dir) {
+        Ok(0) => format!("{}", style("All good").green()),
+        Ok(n) => format!("{}", style(format!("{} broken symlinks", n)).red()),
+        Err(e) => {
+            eprintln!("warning: could not check library health: {}", e);
+            format!("{}", style("unknown").yellow())
+        }
+    };
+    println!("{} {}", style("Health:").bold(), health);
 
     Ok(())
 }
 
-fn count_entries(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| entries.count())
-        .unwrap_or(0)
+fn count_entries(dir: &Path) -> Result<usize> {
+    Ok(std::fs::read_dir(dir)?.count())
 }
 
-fn count_broken_symlinks(dir: &Path) -> usize {
-    std::fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .filter(|e| {
-                    let path = e.path();
-                    // is_symlink() checks the link itself; exists() follows it —
-                    // a symlink that exists but whose target doesn't yields true + false
-                    path.is_symlink() && !path.exists()
-                })
-                .count()
+fn count_broken_symlinks(dir: &Path) -> Result<usize> {
+    Ok(std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let path = e.path();
+            // is_symlink() checks the link itself; exists() follows it —
+            // a symlink that exists but whose target doesn't yields true + false
+            path.is_symlink() && !path.exists()
         })
-        .unwrap_or(0)
+        .count())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use std::path::PathBuf;
+
+    #[test]
+    fn status_handles_missing_library_gracefully() {
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/skync/library"),
+            ..Config::default()
+        };
+
+        // show() should not return an error — it warns and shows "?" instead
+        let result = show(&config);
+        assert!(result.is_ok());
+    }
 }

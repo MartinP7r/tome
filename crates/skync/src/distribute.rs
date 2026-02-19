@@ -3,6 +3,7 @@ use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
 use crate::config::{DistributionMethod, TargetConfig};
+use crate::paths::symlink_points_to;
 
 /// Result of distributing skills to a single target.
 #[derive(Debug, Default)]
@@ -48,8 +49,10 @@ fn distribute_symlinks(
         )
     })?;
 
-    std::fs::create_dir_all(skills_dir)
-        .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
+    if !dry_run {
+        std::fs::create_dir_all(skills_dir)
+            .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
+    }
 
     let mut result = DistributeResult {
         target_name: target_name.to_string(),
@@ -67,8 +70,7 @@ fn distribute_symlinks(
         let target_link = skills_dir.join(&skill_name);
 
         if target_link.is_symlink() {
-            let current = std::fs::read_link(&target_link)?;
-            if current == library_skill_path {
+            if symlink_points_to(&target_link, &library_skill_path) {
                 result.unchanged += 1;
                 continue;
             }
@@ -143,14 +145,17 @@ fn distribute_mcp(
     }
 
     // Add/update the skync MCP server entry
-    servers.as_object_mut().unwrap().insert(
-        "skync".into(),
-        serde_json::json!({
-            "command": "skync-mcp",
-            "args": [],
-            "env": {}
-        }),
-    );
+    servers
+        .as_object_mut()
+        .context("mcpServers is not a JSON object")?
+        .insert(
+            "skync".into(),
+            serde_json::json!({
+                "command": "skync-mcp",
+                "args": [],
+                "env": {}
+            }),
+        );
 
     if !dry_run {
         if let Some(parent) = mcp_config_path.parent() {
@@ -215,6 +220,44 @@ mod tests {
         let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
         assert_eq!(result.linked, 0);
         assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn distribute_idempotent_with_canonicalized_paths() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp = TempDir::new().unwrap();
+        let lib_dir = tmp.path().join("library");
+        let target_dir = tmp.path().join("target");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        // Create a library entry
+        let skill_src = tmp.path().join("source/skill-a");
+        std::fs::create_dir_all(&skill_src).unwrap();
+        std::fs::write(skill_src.join("SKILL.md"), "# test").unwrap();
+        unix_fs::symlink(&skill_src, lib_dir.join("skill-a")).unwrap();
+
+        // Manually create a relative symlink in target: ../library/skill-a
+        unix_fs::symlink(
+            std::path::Path::new("../library/skill-a"),
+            target_dir.join("skill-a"),
+        )
+        .unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Symlink,
+            skills_dir: Some(target_dir.clone()),
+            mcp_config: None,
+        };
+
+        let result = distribute_to_target(&lib_dir, "test", &target, false).unwrap();
+        assert_eq!(
+            result.unchanged, 1,
+            "relative symlink should be recognized as matching"
+        );
+        assert_eq!(result.linked, 0);
     }
 
     #[test]
@@ -291,6 +334,50 @@ mod tests {
         let content2 = std::fs::read_to_string(&mcp_path).unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&content2).unwrap();
         assert!(parsed2["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
+    }
+
+    #[test]
+    fn distribute_mcp_rejects_non_object_mcp_servers() {
+        let library = TempDir::new().unwrap();
+        let mcp_dir = TempDir::new().unwrap();
+        let mcp_path = mcp_dir.path().join(".mcp.json");
+
+        // mcpServers is a string, not an object
+        std::fs::write(&mcp_path, r#"{ "mcpServers": "not-an-object" }"#).unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Mcp,
+            skills_dir: None,
+            mcp_config: Some(mcp_path),
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, false);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a JSON object"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn distribute_symlinks_dry_run_doesnt_create_dir() {
+        let library = TempDir::new().unwrap();
+        let tmp = TempDir::new().unwrap();
+        let nonexistent_target = tmp.path().join("does-not-exist");
+        setup_library(library.path(), &["skill-a"]);
+
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Symlink,
+            skills_dir: Some(nonexistent_target.clone()),
+            mcp_config: None,
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, true).unwrap();
+        assert_eq!(result.linked, 1); // counted but not created
+        assert!(!nonexistent_target.exists());
     }
 
     #[test]
