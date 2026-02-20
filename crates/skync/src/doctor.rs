@@ -1,3 +1,5 @@
+//! Diagnose and optionally repair issues such as broken symlinks and missing source paths.
+
 use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;

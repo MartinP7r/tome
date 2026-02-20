@@ -1,3 +1,5 @@
+//! Symlink path utilities — resolving relative symlink targets and comparing symlink destinations.
+
 use std::path::{Path, PathBuf};
 
 /// Resolve a symlink's raw target to an absolute path.

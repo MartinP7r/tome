@@ -1,3 +1,5 @@
+//! CLI argument parsing with clap. Defines the `Cli` struct and `Command` enum.
+
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 

@@ -1,3 +1,6 @@
+//! Consolidate discovered skills into the library directory via symlinks.
+//! Idempotent — unchanged links are skipped, stale links are updated.
+
 use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
 use std::path::Path;
