@@ -17,6 +17,12 @@ pub fn run(dry_run: bool) -> Result<Config> {
     println!("This wizard will help you configure skill sources and targets.");
     println!();
 
+    println!("{}", style("How it works:").bold());
+    println!("  Skillet uses symlinks — your original files are never moved or copied.");
+    println!("  The library and targets contain links pointing back to where your skills");
+    println!("  actually live. Removing skillet leaves all your original files untouched.");
+    println!();
+
     // Step 1: Discover and select sources
     let sources = configure_sources()?;
 
@@ -260,6 +266,16 @@ fn find_known_sources() -> Result<Vec<Source>> {
         sources.push(Source {
             name: "codex-skills".into(),
             path: codex_skills,
+            source_type: SourceType::Directory,
+        });
+    }
+
+    // Antigravity skills
+    let antigravity_skills = home.join(".gemini/antigravity/skills");
+    if antigravity_skills.is_dir() {
+        sources.push(Source {
+            name: "antigravity-skills".into(),
+            path: antigravity_skills,
             source_type: SourceType::Directory,
         });
     }
