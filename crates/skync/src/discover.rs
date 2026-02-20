@@ -1,3 +1,6 @@
+//! Skill discovery from configured sources. Supports `ClaudePlugins` and `Directory` source types,
+//! with deduplication (first source wins) and exclusion filtering.
+
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

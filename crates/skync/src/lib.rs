@@ -1,14 +1,17 @@
-pub mod cleanup;
+//! Skync — sync AI coding skills across tools.
+//! Re-exports all modules and contains the core `sync()` pipeline: discover, consolidate, distribute, cleanup.
+
+pub(crate) mod cleanup;
 pub mod cli;
 pub mod config;
-pub mod discover;
-pub mod distribute;
-pub mod doctor;
-pub mod library;
+pub(crate) mod discover;
+pub(crate) mod distribute;
+pub(crate) mod doctor;
+pub(crate) mod library;
 pub mod mcp;
-pub mod paths;
-pub mod status;
-pub mod wizard;
+pub(crate) mod paths;
+pub(crate) mod status;
+pub(crate) mod wizard;
 
 use anyhow::Result;
 use console::style;

@@ -1,3 +1,5 @@
+//! Remove broken and stale symlinks from the library and target directories.
+
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -7,7 +9,6 @@ use crate::paths::resolve_symlink_target;
 #[derive(Debug, Default)]
 pub struct CleanupResult {
     pub removed_from_library: usize,
-    pub removed_from_targets: usize,
 }
 
 /// Remove stale symlinks from the library (broken or pointing to deleted sources).

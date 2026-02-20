@@ -1,3 +1,5 @@
+//! Read-only summary of the library state, configured sources, targets, and overall health.
+
 use anyhow::Result;
 use console::style;
 use std::path::Path;

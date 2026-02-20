@@ -50,7 +50,7 @@ Thin wrapper: loads config, calls `skync::mcp::serve()`. Exists so MCP-only cons
 - **Symlinks everywhere**: Library and target distribution both use Unix symlinks (`std::os::unix::fs::symlink`). Originals are never moved or copied. This means the project is Unix-only.
 - **Targets struct is hardcoded**: `config::Targets` has named fields (antigravity, codex, openclaw) — not a generic vec. The v0.2 roadmap plans to replace this with a connector trait and `Vec<Target>`.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
-- **Error handling**: `anyhow` for the application, `thiserror` is a dependency but not yet used for custom error types. Missing sources/paths produce warnings (stderr) rather than hard errors.
+- **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
 ## Testing
 

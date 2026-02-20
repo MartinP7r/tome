@@ -1,3 +1,5 @@
+//! Thin binary entry point — parses CLI args and delegates to `skync::run()`.
+
 use std::process::ExitCode;
 
 use clap::Parser;

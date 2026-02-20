@@ -1,3 +1,5 @@
+//! MCP server implementation using rmcp. Exposes `list_skills` and `read_skill` tools over stdio.
+
 use rmcp::{
     ErrorData as McpError, ServerHandler, ServiceExt, handler::server::tool::ToolRouter,
     handler::server::wrapper::Parameters, model::*, schemars, tool, tool_handler, tool_router,
@@ -8,7 +10,7 @@ use crate::config::Config;
 use crate::discover;
 
 #[derive(Debug, Clone)]
-pub struct SkyncServer {
+pub(crate) struct SkyncServer {
     config: Config,
     tool_router: ToolRouter<Self>,
 }
@@ -23,7 +25,7 @@ impl SkyncServer {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ReadSkillRequest {
+pub(crate) struct ReadSkillRequest {
     #[schemars(description = "The skill name (directory name) to read")]
     pub name: String,
 }

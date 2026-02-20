@@ -1,3 +1,5 @@
+//! Distribute library skills to target tools via symlinks or MCP config entries.
+
 use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
 use std::path::Path;

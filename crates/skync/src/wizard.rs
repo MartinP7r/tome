@@ -1,3 +1,5 @@
+//! Interactive `skync init` setup wizard using dialoguer. Auto-discovers known source locations.
+
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
