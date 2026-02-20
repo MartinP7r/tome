@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
-use crate::config::{DistributionMethod, TargetConfig};
+use crate::config::{TargetConfig, TargetMethod};
 use crate::paths::symlink_points_to;
 
 /// Result of distributing skills to a single target.
@@ -29,11 +29,13 @@ pub fn distribute_to_target(
         });
     }
 
-    match target.method {
-        DistributionMethod::Symlink => {
-            distribute_symlinks(library_dir, target_name, target, dry_run)
+    match &target.method {
+        TargetMethod::Symlink { skills_dir } => {
+            distribute_symlinks(library_dir, target_name, skills_dir, dry_run)
         }
-        DistributionMethod::Mcp => distribute_mcp(library_dir, target_name, target, dry_run),
+        TargetMethod::Mcp { mcp_config } => {
+            distribute_mcp(target_name, mcp_config, dry_run)
+        }
     }
 }
 
@@ -41,16 +43,9 @@ pub fn distribute_to_target(
 fn distribute_symlinks(
     library_dir: &Path,
     target_name: &str,
-    target: &TargetConfig,
+    skills_dir: &Path,
     dry_run: bool,
 ) -> Result<DistributeResult> {
-    let skills_dir = target.skills_dir.as_ref().with_context(|| {
-        format!(
-            "target '{}' uses symlink method but has no skills_dir",
-            target_name
-        )
-    })?;
-
     if !dry_run {
         std::fs::create_dir_all(skills_dir)
             .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
@@ -108,18 +103,10 @@ fn distribute_symlinks(
 
 /// Distribute via MCP config (write server entry into .mcp.json).
 fn distribute_mcp(
-    _library_dir: &Path,
     target_name: &str,
-    target: &TargetConfig,
+    mcp_config_path: &Path,
     dry_run: bool,
 ) -> Result<DistributeResult> {
-    let mcp_config_path = target.mcp_config.as_ref().with_context(|| {
-        format!(
-            "target '{}' uses mcp method but has no mcp_config",
-            target_name
-        )
-    })?;
-
     let mut result = DistributeResult {
         target_name: target_name.to_string(),
         ..Default::default()
@@ -179,7 +166,7 @@ fn distribute_mcp(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::DistributionMethod;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn setup_library(dir: &Path, skill_names: &[&str]) {
@@ -198,9 +185,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: Some(target_dir.path().to_path_buf()),
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
         };
 
         let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
@@ -217,9 +204,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: Some(target_dir.path().to_path_buf()),
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
         };
 
         distribute_to_target(library.path(), "test", &target, false).unwrap();
@@ -253,9 +240,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: Some(target_dir.clone()),
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.clone(),
+            },
         };
 
         let result = distribute_to_target(&lib_dir, "test", &target, false).unwrap();
@@ -271,9 +258,9 @@ mod tests {
         let library = TempDir::new().unwrap();
         let target = TargetConfig {
             enabled: false,
-            method: DistributionMethod::Symlink,
-            skills_dir: None,
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: PathBuf::from("/unused"),
+            },
         };
 
         let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
@@ -288,9 +275,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Mcp,
-            skills_dir: None,
-            mcp_config: Some(mcp_path.clone()),
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path.clone(),
+            },
         };
 
         let result = distribute_to_target(library.path(), "codex", &target, false).unwrap();
@@ -320,9 +307,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Mcp,
-            skills_dir: None,
-            mcp_config: Some(mcp_path.clone()),
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path.clone(),
+            },
         };
 
         let result = distribute_to_target(library.path(), "codex", &target, false).unwrap();
@@ -353,9 +340,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Mcp,
-            skills_dir: None,
-            mcp_config: Some(mcp_path),
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path,
+            },
         };
 
         let result = distribute_to_target(library.path(), "test", &target, false);
@@ -376,52 +363,14 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: Some(nonexistent_target.clone()),
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: nonexistent_target.clone(),
+            },
         };
 
         let result = distribute_to_target(library.path(), "test", &target, true).unwrap();
         assert_eq!(result.linked, 1); // counted but not created
         assert!(!nonexistent_target.exists());
-    }
-
-    #[test]
-    fn distribute_symlink_errors_without_skills_dir() {
-        let library = TempDir::new().unwrap();
-        let target = TargetConfig {
-            enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: None,
-            mcp_config: None,
-        };
-
-        let result = distribute_to_target(library.path(), "test", &target, false);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("has no skills_dir"),
-            "unexpected error: {err_msg}"
-        );
-    }
-
-    #[test]
-    fn distribute_mcp_errors_without_mcp_config() {
-        let library = TempDir::new().unwrap();
-        let target = TargetConfig {
-            enabled: true,
-            method: DistributionMethod::Mcp,
-            skills_dir: None,
-            mcp_config: None,
-        };
-
-        let result = distribute_to_target(library.path(), "test", &target, false);
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("has no mcp_config"),
-            "unexpected error: {err_msg}"
-        );
     }
 
     #[test]
@@ -435,9 +384,9 @@ mod tests {
 
         let target = TargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
-            skills_dir: Some(target_dir.path().to_path_buf()),
-            mcp_config: None,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
         };
 
         let result = distribute_to_target(library.path(), "test", &target, false).unwrap();

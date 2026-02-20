@@ -21,7 +21,7 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
     println!("{}", style("Checking targets...").bold());
     for (name, t) in config.targets.iter() {
         if t.enabled
-            && let Some(ref skills_dir) = t.skills_dir
+            && let Some(skills_dir) = t.skills_dir()
         {
             let target_issues = check_target_dir(name, skills_dir, &config.library_dir)?;
             total_issues += target_issues;
@@ -57,7 +57,7 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
             }
 
             for (name, t) in config.targets.iter() {
-                if let Some(ref skills_dir) = t.skills_dir {
+                if let Some(skills_dir) = t.skills_dir() {
                     let removed = cleanup::cleanup_target(skills_dir, &config.library_dir, false)?;
                     if removed > 0 {
                         println!(

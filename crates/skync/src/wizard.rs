@@ -6,7 +6,7 @@ use dialoguer::{Confirm, Input, MultiSelect, Select};
 use std::path::PathBuf;
 
 use crate::config::{
-    Config, DistributionMethod, Source, SourceType, TargetConfig, Targets, default_config_path,
+    Config, Source, SourceType, TargetConfig, TargetMethod, Targets, default_config_path,
     expand_tilde,
 };
 
@@ -165,9 +165,9 @@ fn configure_targets() -> Result<Targets> {
                     .interact_text()?;
                 targets.antigravity = Some(TargetConfig {
                     enabled: true,
-                    method: DistributionMethod::Symlink,
-                    skills_dir: Some(expand_tilde(&PathBuf::from(path))?),
-                    mcp_config: None,
+                    method: TargetMethod::Symlink {
+                        skills_dir: expand_tilde(&PathBuf::from(path))?,
+                    },
                 });
             }
             1 => {
@@ -180,9 +180,9 @@ fn configure_targets() -> Result<Targets> {
                     .interact_text()?;
                 targets.codex = Some(TargetConfig {
                     enabled: true,
-                    method: DistributionMethod::Mcp,
-                    skills_dir: None,
-                    mcp_config: Some(expand_tilde(&PathBuf::from(path))?),
+                    method: TargetMethod::Mcp {
+                        mcp_config: expand_tilde(&PathBuf::from(path))?,
+                    },
                 });
             }
             2 => {
@@ -195,9 +195,9 @@ fn configure_targets() -> Result<Targets> {
                     .interact_text()?;
                 targets.openclaw = Some(TargetConfig {
                     enabled: true,
-                    method: DistributionMethod::Mcp,
-                    skills_dir: None,
-                    mcp_config: Some(expand_tilde(&PathBuf::from(path))?),
+                    method: TargetMethod::Mcp {
+                        mcp_config: expand_tilde(&PathBuf::from(path))?,
+                    },
                 });
             }
             _ => {

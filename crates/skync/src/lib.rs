@@ -94,7 +94,7 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
-        if let Some(ref skills_dir) = target.skills_dir {
+        if let Some(skills_dir) = target.skills_dir() {
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
         }
