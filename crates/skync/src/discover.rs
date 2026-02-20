@@ -8,11 +8,74 @@ use walkdir::WalkDir;
 
 use crate::config::{Config, Source, SourceType};
 
+/// A validated skill name.
+///
+/// Lenient validation: rejects empty names and path separators.
+/// Warns on names that don't match the strict `[a-z0-9-]+` pattern
+/// (which will become a hard requirement in v0.3).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct SkillName(String);
+
+impl SkillName {
+    pub fn new(name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        anyhow::ensure!(!name.is_empty(), "skill name cannot be empty");
+        anyhow::ensure!(
+            !name.contains('/') && !name.contains('\\'),
+            "skill name contains path separator: '{name}'"
+        );
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            eprintln!(
+                "warning: skill name '{}' should be lowercase letters, digits, or hyphens",
+                name
+            );
+        }
+        Ok(Self(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SkillName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for SkillName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for SkillName {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.0)
+    }
+}
+
+impl PartialEq<str> for SkillName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for SkillName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
 /// A discovered skill with its metadata.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
     /// Skill name (directory name)
-    pub name: String,
+    pub name: SkillName,
     /// Path to the skill directory (contains SKILL.md)
     pub path: PathBuf,
     /// Which source this skill came from
@@ -32,19 +95,20 @@ pub fn discover_all(config: &Config) -> Result<Vec<DiscoveredSkill>> {
         let source_skills = discover_source(source)?;
 
         for skill in source_skills {
-            if config.exclude.contains(&skill.name) {
+            if config.exclude.iter().any(|e| e == skill.name.as_str()) {
                 continue;
             }
 
-            if let Some(&existing_idx) = seen.get(&skill.name) {
+            let name_str = skill.name.as_str().to_string();
+            if let Some(&existing_idx) = seen.get(&name_str) {
                 let existing = &skills[existing_idx];
                 conflicts.push((
-                    skill.name.clone(),
+                    name_str,
                     existing.source_name.clone(),
                     skill.source_name.clone(),
                 ));
             } else {
-                seen.insert(skill.name.clone(), skills.len());
+                seen.insert(name_str, skills.len());
                 skills.push(skill);
             }
         }
@@ -185,13 +249,20 @@ fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()
             && let Some(skill_dir) = entry.path().parent()
-            && let Some(name) = skill_dir.file_name().and_then(|n| n.to_str())
+            && let Some(name_str) = skill_dir.file_name().and_then(|n| n.to_str())
         {
-            skills.push(DiscoveredSkill {
-                name: name.to_string(),
-                path: skill_dir.to_path_buf(),
-                source_name: source_name.to_string(),
-            });
+            match SkillName::new(name_str) {
+                Ok(name) => {
+                    skills.push(DiscoveredSkill {
+                        name,
+                        path: skill_dir.to_path_buf(),
+                        source_name: source_name.to_string(),
+                    });
+                }
+                Err(e) => {
+                    eprintln!("warning: skipping skill in {}: {}", skill_dir.display(), e);
+                }
+            }
         }
     }
 
@@ -391,5 +462,24 @@ mod tests {
             discover_claude_plugins_from_json(&tmp.path().join("installed_plugins.json"), "test")
                 .unwrap();
         assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn skill_name_rejects_empty() {
+        assert!(SkillName::new("").is_err());
+    }
+
+    #[test]
+    fn skill_name_rejects_path_separator() {
+        assert!(SkillName::new("foo/bar").is_err());
+        assert!(SkillName::new("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn skill_name_accepts_valid() {
+        let name = SkillName::new("my-skill-123").unwrap();
+        assert_eq!(name.as_str(), "my-skill-123");
+        assert_eq!(name.to_string(), "my-skill-123");
+        assert_eq!(name, *"my-skill-123");
     }
 }
