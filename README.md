@@ -1,4 +1,4 @@
-# skync
+# skillet
 
 Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
 
@@ -10,38 +10,38 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 - Standalone skills only exist for one tool
 - Switching tools means losing access to your skill library
 
-**skync** consolidates all skills into a single library and distributes them everywhere.
+**skillet** consolidates all skills into a single library and distributes them everywhere.
 
 ## Install
 
 ```bash
-cargo install skync
+cargo install skillet
 ```
 
 ## Quick Start
 
 ```bash
 # Interactive setup — discovers sources, configures targets
-skync init
+skillet init
 
 # Sync skills to all configured targets
-skync sync
+skillet sync
 
 # Check what's configured
-skync status
+skillet status
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `skync init` | Interactive wizard to configure sources and targets |
-| `skync sync` | Discover, consolidate, and distribute skills |
-| `skync status` | Show library, sources, targets, and health |
-| `skync list` | List all discovered skills with sources |
-| `skync doctor` | Diagnose and repair broken symlinks |
-| `skync serve` | Start the MCP server (stdio) |
-| `skync config` | Show current configuration |
+| `skillet init` | Interactive wizard to configure sources and targets |
+| `skillet sync` | Discover, consolidate, and distribute skills |
+| `skillet status` | Show library, sources, targets, and health |
+| `skillet list` | List all discovered skills with sources |
+| `skillet doctor` | Diagnose and repair broken symlinks |
+| `skillet serve` | Start the MCP server (stdio) |
+| `skillet config` | Show current configuration |
 
 All commands support `--dry-run`, `--verbose`, and `--config <path>`.
 
@@ -80,10 +80,10 @@ graph LR
 
 ## Configuration
 
-TOML at `~/.config/skync/config.toml`:
+TOML at `~/.config/skillet/config.toml`:
 
 ```toml
-library_dir = "~/.local/share/skync/skills"
+library_dir = "~/.local/share/skillet/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]
@@ -109,14 +109,14 @@ mcp_config = "~/.codex/.mcp.json"
 
 ## MCP Server
 
-skync includes a built-in MCP server for tools that support the Model Context Protocol:
+skillet includes a built-in MCP server for tools that support the Model Context Protocol:
 
 ```bash
 # Standalone binary
-skync-mcp
+skillet-mcp
 
 # Or via the CLI
-skync serve
+skillet serve
 ```
 
 The server exposes two tools:

@@ -6,10 +6,10 @@
 - **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
 - **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
 - **Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk
-- **Optional git init for library**: Ask during `skync init` whether to initialize a git repo in the library directory for change tracking across syncs
+- **Optional git init for library**: Ask during `skillet init` whether to initialize a git repo in the library directory for change tracking across syncs
 - **Expand wizard auto-discovery**: Add `~/.copilot/skills/`, `.github/skills/`, `$HOME/.agents/skills/`, `.cursor/`, `.gemini/antigravity/` to the wizard's known source locations
 - **Fix `installed_plugins.json` v2 parsing**: Current parser expects a flat JSON array (v1); v2 wraps plugins in `{ "version": 2, "plugins": { "name@registry": [...] } }` — discovery silently finds nothing. Support both formats going forward.
-- **Finalize tool name**: Decide on final name before v0.2, when the name gets written into targets' MCP configs and becomes harder to change. Leading candidate: **skillet**.
+- ~~**Finalize tool name**: Decided on **skillet** — *"Cook once, serve everywhere."*~~
 - **Improve doc comments for `cargo doc`**: Add module-level `//!` docs, expand struct/function docs, add `# Examples` to key public APIs.
 - **GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.
 
@@ -34,7 +34,7 @@ The current model hardcodes targets as struct fields and keeps source/target log
 
 ## v0.3.x — Skill Validation & Linting
 
-Add YAML frontmatter parsing and a `skync lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
+Add YAML frontmatter parsing and a `skillet lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
 
 ### Frontmatter Parsing
 
@@ -43,7 +43,7 @@ Add YAML frontmatter parsing and a `skync lint` command that catches cross-tool 
 - Parse frontmatter during discovery (enrich `DiscoveredSkill`)
 - Store parsed metadata for validation, MCP responses, and status display
 
-### `skync lint` Command
+### `skillet lint` Command
 
 Validation checks ordered by severity:
 
@@ -68,8 +68,8 @@ Validation checks ordered by severity:
 
 ### Enhance Existing Commands
 
-- **`skync doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
-- **`skync status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
+- **`skillet doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
+- **`skillet status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
 
 ### Target-Aware Warnings (Future)
 
@@ -83,11 +83,11 @@ Requires the v0.2 connector architecture. When distributing to specific targets,
 Make the skill library reproducible across machines via a lockfile and per-machine preferences.
 
 - **Library as canonical home**: Local skills live directly in the library (real directories, not symlinks). Managed skills (Claude marketplace, future registries) are symlinked in from their package manager locations.
-- **`skync.lock`**: Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
-- **Per-machine preferences** (`~/.config/skync/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
-- **`skync update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
+- **`skillet.lock`**: Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
+- **Per-machine preferences** (`~/.config/skillet/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
+- **`skillet update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
 - **Claude marketplace first**: First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
-- **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `skync update` (gitignored), lockfile tracked.
+- **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `skillet update` (gitignored), lockfile tracked.
 
 ## v0.5 — Git Sources
 
@@ -98,7 +98,7 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 
 ## v0.6 — Watch Mode
 
-- `skync watch` for auto-sync on filesystem changes
+- `skillet watch` for auto-sync on filesystem changes
 - Debounced fsnotify-based watcher
 - Optional desktop notification on sync
 
@@ -107,9 +107,9 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 - **Plugin registry**: Browse and install community skill packs
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
-- **Homebrew formula**: `brew install skync`
+- **Homebrew formula**: `brew install skillet`
 - **Backup snapshots**: Optional tarball backup of library state before destructive operations
-- **Token budget estimation**: Show estimated token cost per skill per target tool in `skync status` output
-- **Security audit command**: `skync audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
-- **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`skync suggest-skills`)
+- **Token budget estimation**: Show estimated token cost per skill per target tool in `skillet status` output
+- **Security audit command**: `skillet audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
+- **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`skillet suggest-skills`)
 - **Plugin output generation**: Package the skill library as a distributable Claude plugin, Cursor plugin, etc.

@@ -25,8 +25,8 @@ clean:
 	cargo clean
 
 install:
-	cargo install --path crates/skync
-	cargo install --path crates/skync-mcp
+	cargo install --path crates/skillet
+	cargo install --path crates/skillet-mcp
 
 ci: fmt-check lint test
 	@echo "All checks passed"

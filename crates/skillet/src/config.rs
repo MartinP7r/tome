@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// Top-level configuration for skync.
+/// Top-level configuration for skillet.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// Where the consolidated skill library lives
@@ -307,12 +307,12 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Default config file path: ~/.config/skync/config.toml
+/// Default config file path: ~/.config/skillet/config.toml
 pub fn default_config_path() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .context("could not determine home directory")?
         .join(".config")
-        .join("skync")
+        .join("skillet")
         .join("config.toml"))
 }
 
@@ -324,7 +324,7 @@ mod defaults {
             .expect("could not determine home directory — is $HOME set?")
             .join(".local")
             .join("share")
-            .join("skync")
+            .join("skillet")
             .join("skills")
     }
 }
@@ -538,7 +538,7 @@ mod tests {
     #[test]
     fn config_parses_full_toml() {
         let toml_str = r#"
-library_dir = "~/.local/share/skync/skills"
+library_dir = "~/.local/share/skillet/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]
