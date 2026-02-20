@@ -67,7 +67,7 @@ impl SkyncServer {
         let skills = discover::discover_all(&self.config)
             .map_err(|e| McpError::internal_error(format!("discovery failed: {e}"), None))?;
 
-        let skill = skills.iter().find(|s| s.name == name);
+        let skill = skills.iter().find(|s| s.name.as_str() == name);
 
         match skill {
             Some(skill) => {

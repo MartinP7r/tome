@@ -89,7 +89,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# test").unwrap();
         DiscoveredSkill {
-            name: name.to_string(),
+            name: crate::discover::SkillName::new(name).unwrap(),
             path: skill_dir,
             source_name: "test".into(),
         }
@@ -141,7 +141,7 @@ mod tests {
         .unwrap();
 
         let skill = DiscoveredSkill {
-            name: "my-skill".to_string(),
+            name: crate::discover::SkillName::new("my-skill").unwrap(),
             path: source_dir,
             source_name: "test".into(),
         };
