@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
 
@@ -82,14 +82,17 @@ fn check_library(library_dir: &Path) -> Result<usize> {
     }
 
     let mut issues = 0;
-    let entries = std::fs::read_dir(library_dir)?;
+    let entries = std::fs::read_dir(library_dir)
+        .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", library_dir.display()))?;
         let path = entry.path();
 
         if path.is_symlink() {
-            let raw_target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
             if !target.exists() {
                 println!(
@@ -122,14 +125,17 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
     }
 
     let mut issues = 0;
-    let entries = std::fs::read_dir(skills_dir)?;
+    let entries = std::fs::read_dir(skills_dir)
+        .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", skills_dir.display()))?;
         let path = entry.path();
 
         if path.is_symlink() {
-            let raw_target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
             if target.starts_with(library_dir) && !target.exists() {
                 println!(

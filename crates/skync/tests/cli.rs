@@ -211,6 +211,55 @@ fn config_path_prints_default_path() {
         .stdout(predicate::str::contains("config.toml"));
 }
 
+// -- Sync with targets --
+
+#[test]
+fn sync_distributes_to_symlink_target() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    // Don't create target_dir — sync should create it
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+
+[targets.antigravity]
+enabled = true
+method = "symlink"
+skills_dir = "{}"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    )
+    .unwrap();
+
+    skync()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"));
+
+    // Library has the skill
+    assert!(library_dir.join("my-skill").is_symlink());
+    // Target also has the skill
+    assert!(target_dir.join("my-skill").is_symlink());
+}
+
 // -- Doctor --
 
 #[test]

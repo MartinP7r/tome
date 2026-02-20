@@ -130,6 +130,53 @@ impl Config {
             .with_context(|| format!("failed to write {}", path.display()))
     }
 
+    /// Validate config for common misconfigurations.
+    pub fn validate(&self) -> Result<()> {
+        // library_dir exists but is a file, not a directory
+        if self.library_dir.exists() && !self.library_dir.is_dir() {
+            anyhow::bail!(
+                "library_dir exists but is not a directory: {}",
+                self.library_dir.display()
+            );
+        }
+
+        // Empty source names
+        for source in &self.sources {
+            anyhow::ensure!(!source.name.is_empty(), "source name cannot be empty");
+        }
+
+        // Duplicate source names
+        let mut seen = std::collections::HashSet::new();
+        for source in &self.sources {
+            anyhow::ensure!(
+                seen.insert(&source.name),
+                "duplicate source name: '{}'",
+                source.name
+            );
+        }
+
+        // Target method/field consistency
+        for (name, target) in self.targets.iter() {
+            match target.method {
+                DistributionMethod::Symlink if target.skills_dir.is_none() => {
+                    anyhow::bail!(
+                        "target '{}' uses symlink method but skills_dir is not set",
+                        name
+                    );
+                }
+                DistributionMethod::Mcp if target.mcp_config.is_none() => {
+                    anyhow::bail!(
+                        "target '{}' uses mcp method but mcp_config is not set",
+                        name
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// Expand `~` in all path fields.
     fn expand_tildes(&mut self) -> Result<()> {
         self.library_dir = expand_tilde(&self.library_dir)?;
@@ -266,6 +313,129 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "this is [[[not valid toml").unwrap();
         assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn validate_passes_for_valid_config() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/nonexistent-lib"),
+            exclude: Vec::new(),
+            sources: vec![Source {
+                name: "test".into(),
+                path: PathBuf::from("/tmp/source"),
+                source_type: SourceType::Directory,
+            }],
+            targets: Targets {
+                antigravity: Some(TargetConfig {
+                    enabled: true,
+                    method: DistributionMethod::Symlink,
+                    skills_dir: Some(PathBuf::from("/tmp/target")),
+                    mcp_config: None,
+                }),
+                ..Default::default()
+            },
+        };
+        config.validate().unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_empty_source_name() {
+        let config = Config {
+            sources: vec![Source {
+                name: "".into(),
+                path: PathBuf::from("/tmp"),
+                source_type: SourceType::Directory,
+            }],
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("cannot be empty"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_source_names() {
+        let config = Config {
+            sources: vec![
+                Source {
+                    name: "dupe".into(),
+                    path: PathBuf::from("/tmp/a"),
+                    source_type: SourceType::Directory,
+                },
+                Source {
+                    name: "dupe".into(),
+                    path: PathBuf::from("/tmp/b"),
+                    source_type: SourceType::Directory,
+                },
+            ],
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate source name"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_symlink_target_without_skills_dir() {
+        let config = Config {
+            targets: Targets {
+                antigravity: Some(TargetConfig {
+                    enabled: true,
+                    method: DistributionMethod::Symlink,
+                    skills_dir: None,
+                    mcp_config: None,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("skills_dir is not set"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mcp_target_without_mcp_config() {
+        let config = Config {
+            targets: Targets {
+                codex: Some(TargetConfig {
+                    enabled: true,
+                    method: DistributionMethod::Mcp,
+                    skills_dir: None,
+                    mcp_config: None,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("mcp_config is not set"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_library_dir_that_is_a_file() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file_path = dir.path().join("not-a-dir");
+        std::fs::write(&file_path, "I'm a file").unwrap();
+
+        let config = Config {
+            library_dir: file_path,
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("not a directory"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

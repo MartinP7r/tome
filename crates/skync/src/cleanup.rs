@@ -22,11 +22,13 @@ pub fn cleanup_library(library_dir: &Path, dry_run: bool) -> Result<CleanupResul
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", library_dir.display()))?;
         let path = entry.path();
 
         if path.is_symlink() {
-            let raw_target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
             // Check if the symlink target still exists
             if !target.exists() {
@@ -55,11 +57,13 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
         .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
         let path = entry.path();
 
         if path.is_symlink() {
-            let raw_target = std::fs::read_link(&path)?;
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
 
             // Remove if it points into the library dir but the library entry is gone

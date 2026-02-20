@@ -64,7 +64,8 @@ fn distribute_symlinks(
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", library_dir.display()))?;
         let skill_name = entry.file_name();
         let library_skill_path = entry.path();
         let target_link = skills_dir.join(&skill_name);
@@ -76,7 +77,9 @@ fn distribute_symlinks(
             }
             // Update stale link
             if !dry_run {
-                std::fs::remove_file(&target_link)?;
+                std::fs::remove_file(&target_link).with_context(|| {
+                    format!("failed to remove stale symlink {}", target_link.display())
+                })?;
             }
         } else if target_link.exists() {
             eprintln!(
@@ -159,7 +162,8 @@ fn distribute_mcp(
 
     if !dry_run {
         if let Some(parent) = mcp_config_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create dir {}", parent.display()))?;
         }
         let content = serde_json::to_string_pretty(&mcp_doc)?;
         std::fs::write(mcp_config_path, content)
@@ -378,6 +382,44 @@ mod tests {
         let result = distribute_to_target(library.path(), "test", &target, true).unwrap();
         assert_eq!(result.linked, 1); // counted but not created
         assert!(!nonexistent_target.exists());
+    }
+
+    #[test]
+    fn distribute_symlink_errors_without_skills_dir() {
+        let library = TempDir::new().unwrap();
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Symlink,
+            skills_dir: None,
+            mcp_config: None,
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, false);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("has no skills_dir"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn distribute_mcp_errors_without_mcp_config() {
+        let library = TempDir::new().unwrap();
+        let target = TargetConfig {
+            enabled: true,
+            method: DistributionMethod::Mcp,
+            skills_dir: None,
+            mcp_config: None,
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, false);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("has no mcp_config"),
+            "unexpected error: {err_msg}"
+        );
     }
 
     #[test]

@@ -33,6 +33,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let config = Config::load_or_default(cli.config.as_deref())?;
+    config.validate()?;
 
     match cli.command {
         Command::Init => unreachable!(),

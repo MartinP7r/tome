@@ -111,3 +111,91 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
     service.waiting().await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Config, Source, SourceType, Targets};
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    fn test_config(source_path: PathBuf) -> Config {
+        Config {
+            library_dir: PathBuf::from("/tmp/unused-library"),
+            exclude: Vec::new(),
+            sources: vec![Source {
+                name: "test".into(),
+                path: source_path,
+                source_type: SourceType::Directory,
+            }],
+            targets: Targets::default(),
+        }
+    }
+
+    fn extract_text(result: &CallToolResult) -> String {
+        result.content[0]
+            .as_text()
+            .expect("expected text content")
+            .text
+            .clone()
+    }
+
+    #[test]
+    fn list_skills_with_no_sources() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/unused"),
+            exclude: Vec::new(),
+            sources: Vec::new(),
+            targets: Targets::default(),
+        };
+        let server = SkyncServer::new(config);
+        let result = server.list_skills().unwrap();
+        let text = extract_text(&result);
+        assert!(text.contains("No skills found"), "unexpected: {text}");
+    }
+
+    #[test]
+    fn list_skills_returns_skills() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
+
+        let server = SkyncServer::new(test_config(tmp.path().to_path_buf()));
+        let result = server.list_skills().unwrap();
+        let text = extract_text(&result);
+        assert!(text.contains("my-skill"), "unexpected: {text}");
+        assert!(text.contains("1 skill(s) found"), "unexpected: {text}");
+    }
+
+    #[test]
+    fn read_skill_returns_content() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nSome content.").unwrap();
+
+        let server = SkyncServer::new(test_config(tmp.path().to_path_buf()));
+        let result = server
+            .read_skill(Parameters(ReadSkillRequest {
+                name: "my-skill".into(),
+            }))
+            .unwrap();
+        let text = extract_text(&result);
+        assert!(text.contains("Some content."), "unexpected: {text}");
+    }
+
+    #[test]
+    fn read_skill_not_found() {
+        let tmp = TempDir::new().unwrap();
+        let server = SkyncServer::new(test_config(tmp.path().to_path_buf()));
+        let result = server
+            .read_skill(Parameters(ReadSkillRequest {
+                name: "nonexistent".into(),
+            }))
+            .unwrap();
+        assert_eq!(result.is_error, Some(true));
+        let text = extract_text(&result);
+        assert!(text.contains("not found"), "unexpected: {text}");
+    }
+}
