@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::{Confirm, Input, MultiSelect, Select};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::{
     Config, Source, SourceType, TargetConfig, TargetMethod, Targets, default_config_path,
@@ -290,18 +290,33 @@ fn find_source_target_overlaps(sources: &[Source], targets: &Targets) -> Vec<(St
 /// Scan well-known locations for existing skills.
 fn find_known_sources() -> Result<Vec<Source>> {
     let home = dirs::home_dir().context("could not determine home directory")?;
+    find_known_sources_in(&home)
+}
 
-    let sources = KNOWN_SOURCES
-        .iter()
-        .filter_map(|(name, rel_path, source_type)| {
-            let path = home.join(rel_path);
-            path.is_dir().then(|| Source {
-                name: (*name).into(),
-                path,
-                source_type: source_type.clone(),
-            })
-        })
-        .collect();
+/// Scan well-known locations relative to `home` for existing skills.
+///
+/// Uses `std::fs::metadata()` instead of `path.is_dir()` so that permission
+/// errors surface as warnings rather than being silently swallowed.
+fn find_known_sources_in(home: &Path) -> Result<Vec<Source>> {
+    let mut sources = Vec::new();
+
+    for (name, rel_path, source_type) in KNOWN_SOURCES {
+        let path = home.join(rel_path);
+        match std::fs::metadata(&path) {
+            Ok(meta) if meta.is_dir() => {
+                sources.push(Source {
+                    name: (*name).into(),
+                    path,
+                    source_type: source_type.clone(),
+                });
+            }
+            Ok(_) => {} // exists but not a directory — skip
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // expected — skip
+            Err(e) => {
+                eprintln!("warning: could not check {}: {}", path.display(), e);
+            }
+        }
+    }
 
     Ok(sources)
 }
@@ -310,6 +325,46 @@ fn find_known_sources() -> Result<Vec<Source>> {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    #[test]
+    fn find_known_sources_in_empty_home_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let sources = find_known_sources_in(tmp.path()).unwrap();
+        assert!(sources.is_empty());
+    }
+
+    #[test]
+    fn find_known_sources_in_discovers_existing_dirs() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create one of the known source directories
+        let skills_dir = tmp.path().join(".claude/skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+
+        let sources = find_known_sources_in(tmp.path()).unwrap();
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].name, "claude-skills");
+        assert_eq!(sources[0].path, skills_dir);
+        assert_eq!(sources[0].source_type, SourceType::Directory);
+    }
+
+    #[test]
+    fn find_known_sources_in_skips_files_with_same_name() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create a file (not a directory) at a known source path
+        let claude_dir = tmp.path().join(".claude");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        std::fs::write(claude_dir.join("skills"), "not a directory").unwrap();
+
+        let sources = find_known_sources_in(tmp.path()).unwrap();
+        // The file should be skipped — only directories are included
+        assert!(
+            sources.is_empty(),
+            "expected no sources when path is a file, got: {sources:?}"
+        );
+    }
 
     #[test]
     fn detects_source_target_overlap() {

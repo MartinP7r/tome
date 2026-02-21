@@ -37,7 +37,7 @@ pub struct Source {
     pub source_type: SourceType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceType {
     /// Reads installed_plugins.json for plugin-based discovery
