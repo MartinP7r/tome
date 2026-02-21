@@ -17,6 +17,12 @@ pub fn run(dry_run: bool) -> Result<Config> {
     println!("This wizard will help you configure skill sources and targets.");
     println!();
 
+    println!("{}", style("How it works:").bold());
+    println!("  Skillet uses symlinks — your original files are never moved or copied.");
+    println!("  The library and targets contain links pointing back to where your skills");
+    println!("  actually live. Removing skillet leaves all your original files untouched.");
+    println!();
+
     // Step 1: Discover and select sources
     let sources = configure_sources()?;
 
@@ -145,6 +151,8 @@ fn configure_library() -> Result<PathBuf> {
 fn configure_targets() -> Result<Targets> {
     println!("{}", style("Step 3: Distribution targets").bold());
 
+    let home = dirs::home_dir().context("could not determine home directory")?;
+
     let tools = &["Antigravity", "Codex (via MCP)", "OpenClaw (via MCP)"];
     let selections = MultiSelect::new()
         .with_prompt("Which tools should receive skills?")
@@ -156,9 +164,7 @@ fn configure_targets() -> Result<Targets> {
     for idx in selections {
         match idx {
             0 => {
-                let default_path = dirs::home_dir()
-                    .context("could not determine home directory")?
-                    .join(".gemini/antigravity/skills");
+                let default_path = home.join(".gemini/antigravity/skills");
                 let path: String = Input::new()
                     .with_prompt("Antigravity skills directory")
                     .default(default_path.display().to_string())
@@ -171,9 +177,7 @@ fn configure_targets() -> Result<Targets> {
                 });
             }
             1 => {
-                let default_path = dirs::home_dir()
-                    .context("could not determine home directory")?
-                    .join(".codex/.mcp.json");
+                let default_path = home.join(".codex/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("Codex MCP config path")
                     .default(default_path.display().to_string())
@@ -186,9 +190,7 @@ fn configure_targets() -> Result<Targets> {
                 });
             }
             2 => {
-                let default_path = dirs::home_dir()
-                    .context("could not determine home directory")?
-                    .join(".openclaw/.mcp.json");
+                let default_path = home.join(".openclaw/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("OpenClaw MCP config path")
                     .default(default_path.display().to_string())
@@ -229,40 +231,37 @@ fn configure_exclusions() -> Result<Vec<String>> {
     Ok(exclude)
 }
 
+/// Well-known skill locations: (name, relative path from $HOME, source type).
+const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
+    (
+        "claude-plugins",
+        ".claude/plugins/cache",
+        SourceType::ClaudePlugins,
+    ),
+    ("claude-skills", ".claude/skills", SourceType::Directory),
+    ("codex-skills", ".codex/skills", SourceType::Directory),
+    (
+        "antigravity-skills",
+        ".gemini/antigravity/skills",
+        SourceType::Directory,
+    ),
+];
+
 /// Scan well-known locations for existing skills.
 fn find_known_sources() -> Result<Vec<Source>> {
     let home = dirs::home_dir().context("could not determine home directory")?;
-    let mut sources = Vec::new();
 
-    // Claude plugins cache
-    let claude_plugins = home.join(".claude/plugins/cache");
-    if claude_plugins.is_dir() {
-        sources.push(Source {
-            name: "claude-plugins".into(),
-            path: claude_plugins,
-            source_type: SourceType::ClaudePlugins,
-        });
-    }
-
-    // Claude standalone skills
-    let claude_skills = home.join(".claude/skills");
-    if claude_skills.is_dir() {
-        sources.push(Source {
-            name: "claude-skills".into(),
-            path: claude_skills,
-            source_type: SourceType::Directory,
-        });
-    }
-
-    // Codex skills
-    let codex_skills = home.join(".codex/skills");
-    if codex_skills.is_dir() {
-        sources.push(Source {
-            name: "codex-skills".into(),
-            path: codex_skills,
-            source_type: SourceType::Directory,
-        });
-    }
+    let sources = KNOWN_SOURCES
+        .iter()
+        .filter_map(|(name, rel_path, source_type)| {
+            let path = home.join(rel_path);
+            path.is_dir().then(|| Source {
+                name: (*name).into(),
+                path,
+                source_type: source_type.clone(),
+            })
+        })
+        .collect();
 
     Ok(sources)
 }
