@@ -32,6 +32,20 @@ pub fn run(dry_run: bool) -> Result<Config> {
     // Step 3: Configure targets
     let targets = configure_targets()?;
 
+    // Warn if any source path overlaps with a symlink target path
+    let overlaps = find_source_target_overlaps(&sources, &targets);
+    for (name, path) in &overlaps {
+        println!(
+            "  {} \"{}\" ({}) is both a source and a target — this may cause circular symlinks",
+            style("warning:").yellow().bold(),
+            name,
+            path.display()
+        );
+    }
+    if !overlaps.is_empty() {
+        println!();
+    }
+
     // Step 4: Exclusions
     let exclude = configure_exclusions()?;
 
@@ -247,6 +261,32 @@ const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
     ),
 ];
 
+/// Check if any source path matches a symlink target path.
+///
+/// Returns `(source_name, overlapping_path)` pairs for each conflict.
+/// Only compares against `Symlink` targets (not `Mcp`), since MCP config
+/// files are JSON configs, not skills directories.
+fn find_source_target_overlaps(sources: &[Source], targets: &Targets) -> Vec<(String, PathBuf)> {
+    let target_paths: Vec<PathBuf> = targets
+        .iter()
+        .filter_map(|(_, config)| config.skills_dir().map(|p| p.to_path_buf()))
+        .collect();
+
+    sources
+        .iter()
+        .filter(|source| {
+            target_paths.iter().any(|tp| {
+                // Try canonicalize for symlink-resolved comparison, fall back to exact match
+                match (source.path.canonicalize(), tp.canonicalize()) {
+                    (Ok(src), Ok(tgt)) => src == tgt,
+                    _ => source.path == *tp,
+                }
+            })
+        })
+        .map(|source| (source.name.clone(), source.path.clone()))
+        .collect()
+}
+
 /// Scan well-known locations for existing skills.
 fn find_known_sources() -> Result<Vec<Source>> {
     let home = dirs::home_dir().context("could not determine home directory")?;
@@ -264,4 +304,85 @@ fn find_known_sources() -> Result<Vec<Source>> {
         .collect();
 
     Ok(sources)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn detects_source_target_overlap() {
+        let sources = vec![Source {
+            name: "antigravity-skills".into(),
+            path: PathBuf::from("/home/user/.gemini/antigravity/skills"),
+            source_type: SourceType::Directory,
+        }];
+
+        let targets = Targets {
+            antigravity: Some(TargetConfig {
+                enabled: true,
+                method: TargetMethod::Symlink {
+                    skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
+                },
+            }),
+            codex: None,
+            openclaw: None,
+        };
+
+        let overlaps = find_source_target_overlaps(&sources, &targets);
+        assert_eq!(overlaps.len(), 1);
+        assert_eq!(overlaps[0].0, "antigravity-skills");
+        assert_eq!(
+            overlaps[0].1,
+            PathBuf::from("/home/user/.gemini/antigravity/skills")
+        );
+    }
+
+    #[test]
+    fn no_overlap_when_paths_differ() {
+        let sources = vec![Source {
+            name: "claude-skills".into(),
+            path: PathBuf::from("/home/user/.claude/skills"),
+            source_type: SourceType::Directory,
+        }];
+
+        let targets = Targets {
+            antigravity: Some(TargetConfig {
+                enabled: true,
+                method: TargetMethod::Symlink {
+                    skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
+                },
+            }),
+            codex: None,
+            openclaw: None,
+        };
+
+        let overlaps = find_source_target_overlaps(&sources, &targets);
+        assert!(overlaps.is_empty());
+    }
+
+    #[test]
+    fn no_overlap_with_mcp_targets() {
+        let sources = vec![Source {
+            name: "codex-skills".into(),
+            path: PathBuf::from("/home/user/.codex/.mcp.json"),
+            source_type: SourceType::Directory,
+        }];
+
+        let targets = Targets {
+            antigravity: None,
+            codex: Some(TargetConfig {
+                enabled: true,
+                method: TargetMethod::Mcp {
+                    mcp_config: PathBuf::from("/home/user/.codex/.mcp.json"),
+                },
+            }),
+            openclaw: None,
+        };
+
+        // MCP targets should not be compared — mcp_config is a JSON file, not a skills dir
+        let overlaps = find_source_target_overlaps(&sources, &targets);
+        assert!(overlaps.is_empty());
+    }
 }
