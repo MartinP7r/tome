@@ -36,7 +36,7 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 4. **Cleanup** (`cleanup.rs`) — Remove broken symlinks from library and targets.
 
 **Other modules:**
-- `wizard.rs` — Interactive `skillet init` setup using `dialoguer` (MultiSelect, Input, Confirm). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`).
+- `wizard.rs` — Interactive `skillet init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
 - `config.rs` — TOML config at `~/.config/skillet/config.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
 - `doctor.rs` — Diagnoses broken symlinks and missing source paths; optionally repairs via cleanup.
 - `status.rs` — Read-only summary of library, sources, targets, and health.
