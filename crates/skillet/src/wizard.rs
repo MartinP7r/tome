@@ -89,21 +89,27 @@ fn configure_sources() -> Result<Vec<Source>> {
     let mut sources = Vec::new();
 
     if !known_sources.is_empty() {
-        println!("Found skills in these locations:");
         let labels: Vec<String> = known_sources
             .iter()
             .map(|s| format!("{} ({})", s.path.display(), s.source_type))
             .collect();
 
         let selections = MultiSelect::new()
-            .with_prompt("Select sources to include")
+            .with_prompt("Found skills in these locations — select sources to include")
             .items(&labels)
             .defaults(&vec![true; known_sources.len()])
+            .report(false)
             .interact()?;
 
-        for idx in selections {
-            sources.push(known_sources[idx].clone());
+        for idx in &selections {
+            sources.push(known_sources[*idx].clone());
         }
+
+        println!(
+            "  {} {} source(s) selected",
+            style("✓").green(),
+            selections.len()
+        );
     }
 
     // Offer to add custom paths
