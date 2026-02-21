@@ -1,7 +1,7 @@
-use skync::config::Config;
+use skillet::config::Config;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Config::load_or_default(None)?;
-    skync::mcp::serve(config).await
+    skillet::mcp::serve(config).await
 }

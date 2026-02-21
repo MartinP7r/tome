@@ -5,16 +5,16 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
-    name = "skync",
+    name = "skillet",
     version,
     about = "Sync AI coding skills across tools",
-    after_help = "Examples:\n  skync init\n  skync sync --dry-run\n  skync status\n  skync list\n  skync doctor"
+    after_help = "Examples:\n  skillet init\n  skillet sync --dry-run\n  skillet status\n  skillet list\n  skillet doctor"
 )]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Command,
 
-    /// Path to config file (default: ~/.config/skync/config.toml)
+    /// Path to config file (default: ~/.config/skillet/config.toml)
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 

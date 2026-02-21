@@ -3,8 +3,8 @@ use assert_fs::TempDir;
 use predicates::prelude::*;
 use std::os::unix::fs as unix_fs;
 
-fn skync() -> Command {
-    cargo_bin_cmd!("skync")
+fn skillet() -> Command {
+    cargo_bin_cmd!("skillet")
 }
 
 fn write_config(dir: &std::path::Path, sources_toml: &str) -> std::path::PathBuf {
@@ -37,7 +37,7 @@ fn create_skill(dir: &std::path::Path, name: &str) {
 
 #[test]
 fn help_shows_usage() {
-    skync()
+    skillet()
         .arg("--help")
         .assert()
         .success()
@@ -48,7 +48,7 @@ fn help_shows_usage() {
 
 #[test]
 fn version_shows_version() {
-    skync()
+    skillet()
         .arg("--version")
         .assert()
         .success()
@@ -62,7 +62,7 @@ fn list_with_no_sources_shows_message() {
     let tmp = TempDir::new().unwrap();
     let config = write_config(tmp.path(), "");
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "list"])
         .assert()
         .success()
@@ -84,7 +84,7 @@ fn list_shows_discovered_skills() {
         ),
     );
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "list"])
         .assert()
         .success()
@@ -111,7 +111,7 @@ fn sync_dry_run_makes_no_changes() {
         ),
     );
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "--dry-run", "sync"])
         .assert()
         .success()
@@ -141,7 +141,7 @@ fn sync_creates_library_symlinks() {
         ),
     );
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "sync"])
         .assert()
         .success()
@@ -169,13 +169,13 @@ fn sync_idempotent() {
     let config_str = config.to_str().unwrap();
 
     // First sync
-    skync()
+    skillet()
         .args(["--config", config_str, "sync"])
         .assert()
         .success();
 
     // Second sync — should report 0 created, 1 unchanged
-    skync()
+    skillet()
         .args(["--config", config_str, "sync"])
         .assert()
         .success()
@@ -189,7 +189,7 @@ fn status_shows_library_info() {
     let tmp = TempDir::new().unwrap();
     let config = write_config(tmp.path(), "");
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "status"])
         .assert()
         .success()
@@ -204,7 +204,7 @@ fn status_shows_library_info() {
 
 #[test]
 fn config_path_prints_default_path() {
-    skync()
+    skillet()
         .args(["config", "--path"])
         .assert()
         .success()
@@ -248,7 +248,7 @@ skills_dir = "{}"
     )
     .unwrap();
 
-    skync()
+    skillet()
         .args(["--config", config_path.to_str().unwrap(), "sync"])
         .assert()
         .success()
@@ -267,7 +267,7 @@ fn doctor_with_clean_state() {
     let tmp = TempDir::new().unwrap();
     let config = write_config(tmp.path(), "");
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "doctor"])
         .assert()
         .success()
@@ -285,7 +285,7 @@ fn doctor_detects_broken_symlinks() {
 
     let config = write_config(tmp.path(), "");
 
-    skync()
+    skillet()
         .args(["--config", config.to_str().unwrap(), "--dry-run", "doctor"])
         .assert()
         .success()

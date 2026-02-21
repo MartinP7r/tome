@@ -1,13 +1,13 @@
 # MCP Server
 
-skync includes a built-in MCP server for tools that support the Model Context Protocol:
+skillet includes a built-in MCP server for tools that support the Model Context Protocol:
 
 ```bash
 # Standalone binary
-skync-mcp
+skillet-mcp
 
 # Or via the CLI
-skync serve
+skillet serve
 ```
 
 The server exposes two tools:

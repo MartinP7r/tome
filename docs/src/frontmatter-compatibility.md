@@ -95,13 +95,13 @@ All standard-compliant tools silently ignore unknown frontmatter fields. The VS 
 | Skill body size | ~6000 chars | Windsurf |
 | Skill body size | ~5000 tokens | General recommendation |
 
-## How skync Uses This
+## How skillet Uses This
 
-skync currently symlinks skill directories as-is without parsing frontmatter. The v0.3.x release will add:
+skillet currently symlinks skill directories as-is without parsing frontmatter. The v0.3.x release will add:
 
 - **Frontmatter parsing** during discovery
-- **`skync lint`** command with tiered validation (errors, warnings, info)
-- **`skync doctor`** frontmatter health checks
-- **`skync status`** metadata summary per skill
+- **`skillet lint`** command with tiered validation (errors, warnings, info)
+- **`skillet doctor`** frontmatter health checks
+- **`skillet status`** metadata summary per skill
 
 See the [Roadmap](roadmap.md) for details.

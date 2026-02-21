@@ -1,9 +1,9 @@
 # Configuration
 
-TOML at `~/.config/skync/config.toml`:
+TOML at `~/.config/skillet/config.toml`:
 
 ```toml
-library_dir = "~/.local/share/skync/skills"
+library_dir = "~/.local/share/skillet/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]

@@ -1,4 +1,4 @@
-//! Interactive `skync init` setup wizard using dialoguer. Auto-discovers known source locations.
+//! Interactive `skillet init` setup wizard using dialoguer. Auto-discovers known source locations.
 
 use anyhow::{Context, Result};
 use console::style;
@@ -13,7 +13,7 @@ use crate::config::{
 /// Run the interactive setup wizard.
 pub fn run(dry_run: bool) -> Result<Config> {
     println!();
-    println!("{}", style("Welcome to skync setup!").bold().cyan());
+    println!("{}", style("Welcome to skillet setup!").bold().cyan());
     println!("This wizard will help you configure skill sources and targets.");
     println!();
 
@@ -118,7 +118,7 @@ fn configure_library() -> Result<PathBuf> {
 
     let default = dirs::home_dir()
         .context("could not determine home directory")?
-        .join(".local/share/skync/skills");
+        .join(".local/share/skillet/skills");
 
     let options = vec![
         format!("{} (default)", default.display()),
