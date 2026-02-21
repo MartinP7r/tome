@@ -115,4 +115,46 @@ mod tests {
         let result = show(&config);
         assert!(result.is_ok());
     }
+
+    // -- count_entries --
+
+    #[test]
+    fn count_entries_empty_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert_eq!(count_entries(dir.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_entries_with_files() {
+        let dir = tempfile::TempDir::new().unwrap();
+        for name in ["a", "b", "c"] {
+            std::fs::write(dir.path().join(name), "").unwrap();
+        }
+        assert_eq!(count_entries(dir.path()).unwrap(), 3);
+    }
+
+    // -- count_broken_symlinks --
+
+    #[test]
+    fn count_broken_symlinks_empty_dir() {
+        let dir = tempfile::TempDir::new().unwrap();
+        assert_eq!(count_broken_symlinks(dir.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_broken_symlinks_detects_broken() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let real_target = tempfile::TempDir::new().unwrap();
+
+        // Valid symlink
+        unix_fs::symlink(real_target.path(), dir.path().join("valid")).unwrap();
+        // Broken symlink
+        unix_fs::symlink("/nonexistent/target", dir.path().join("broken")).unwrap();
+        // Regular file (not a symlink — should not be counted)
+        std::fs::write(dir.path().join("regular"), "data").unwrap();
+
+        assert_eq!(count_broken_symlinks(dir.path()).unwrap(), 1);
+    }
 }

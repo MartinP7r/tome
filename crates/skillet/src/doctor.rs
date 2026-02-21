@@ -179,3 +179,110 @@ fn check_config(config: &Config) -> Result<usize> {
 
     Ok(issues)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{Source, SourceType};
+    use std::os::unix::fs as unix_fs;
+    use std::path::PathBuf;
+    use tempfile::TempDir;
+
+    // -- check_library --
+
+    #[test]
+    fn check_library_missing_dir() {
+        let result = check_library(Path::new("/nonexistent/library")).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_library_no_issues() {
+        let lib = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        let target = target_dir.path().join("real-skill");
+        std::fs::create_dir(&target).unwrap();
+
+        unix_fs::symlink(&target, lib.path().join("my-skill")).unwrap();
+
+        let result = check_library(lib.path()).unwrap();
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn check_library_broken_symlink() {
+        let lib = TempDir::new().unwrap();
+        unix_fs::symlink("/nonexistent/target", lib.path().join("broken")).unwrap();
+
+        let result = check_library(lib.path()).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    // -- check_target_dir --
+
+    #[test]
+    fn check_target_dir_missing_dir() {
+        let lib = TempDir::new().unwrap();
+        let result =
+            check_target_dir("test-target", Path::new("/nonexistent/target"), lib.path()).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_target_dir_stale_symlink() {
+        let lib = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+
+        // Symlink inside target_dir pointing into library at a path that doesn't exist
+        let stale_target = lib.path().join("deleted-skill");
+        unix_fs::symlink(&stale_target, target_dir.path().join("skill-link")).unwrap();
+
+        let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_target_dir_ignores_external_symlinks() {
+        let lib = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+
+        // Symlink pointing outside the library — doctor should ignore it
+        unix_fs::symlink("/some/other/place", target_dir.path().join("external")).unwrap();
+
+        let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
+        assert_eq!(result, 0);
+    }
+
+    // -- check_config --
+
+    #[test]
+    fn check_config_missing_source() {
+        let config = Config {
+            sources: vec![Source {
+                name: "gone".to_string(),
+                path: PathBuf::from("/nonexistent/source"),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let result = check_config(&config).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_config_valid_sources() {
+        let source_dir = TempDir::new().unwrap();
+        let config = Config {
+            sources: vec![Source {
+                name: "real".to_string(),
+                path: source_dir.path().to_path_buf(),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let result = check_config(&config).unwrap();
+        assert_eq!(result, 0);
+    }
+}
