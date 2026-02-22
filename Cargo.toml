@@ -35,3 +35,26 @@ lto = true
 strip = true
 codegen-units = 1
 panic = "abort"
+
+# Config for 'dist'
+[workspace.metadata.dist]
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.30.3"
+# CI backends to support
+ci = "github"
+# Where to host releases
+hosting = "github"
+# Target platforms to build apps for (Rust target-triple syntax)
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
+# The installers to generate for each app
+installers = ["homebrew"]
+# A GitHub repo to push Homebrew formulas to
+tap = "MartinP7r/homebrew-tap"
+# Customize the Homebrew formula name
+formula = "tome"
+# Publish jobs to run in CI
+publish-jobs = ["homebrew"]
+
+[profile.dist]
+inherits = "release"
+lto = "thin"
