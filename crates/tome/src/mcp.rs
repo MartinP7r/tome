@@ -11,16 +11,17 @@ use crate::discover;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TomeServer {
-    config: Config,
+    skills: Vec<discover::DiscoveredSkill>,
     tool_router: ToolRouter<Self>,
 }
 
 impl TomeServer {
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
+    pub fn new(config: Config) -> anyhow::Result<Self> {
+        let skills = discover::discover_all(&config)?;
+        Ok(Self {
+            skills,
             tool_router: Self::tool_router(),
-        }
+        })
     }
 }
 
@@ -34,8 +35,7 @@ pub(crate) struct ReadSkillRequest {
 impl TomeServer {
     #[tool(description = "List all skills available in the tome library")]
     fn list_skills(&self) -> Result<CallToolResult, McpError> {
-        let skills = discover::discover_all(&self.config)
-            .map_err(|e| McpError::internal_error(format!("discovery failed: {e}"), None))?;
+        let skills = &self.skills;
 
         if skills.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
@@ -45,7 +45,7 @@ impl TomeServer {
 
         let mut lines = Vec::with_capacity(skills.len() + 1);
         lines.push(format!("{} skill(s) found:\n", skills.len()));
-        for skill in &skills {
+        for skill in skills {
             lines.push(format!(
                 "- {} (source: {}, path: {})",
                 skill.name,
@@ -64,10 +64,7 @@ impl TomeServer {
         &self,
         Parameters(ReadSkillRequest { name }): Parameters<ReadSkillRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let skills = discover::discover_all(&self.config)
-            .map_err(|e| McpError::internal_error(format!("discovery failed: {e}"), None))?;
-
-        let skill = skills.iter().find(|s| s.name.as_str() == name);
+        let skill = self.skills.iter().find(|s| s.name.as_str() == name);
 
         match skill {
             Some(skill) => {
@@ -108,7 +105,7 @@ impl ServerHandler for TomeServer {
 
 /// Start the MCP server on stdio.
 pub async fn serve(config: Config) -> anyhow::Result<()> {
-    let server = TomeServer::new(config);
+    let server = TomeServer::new(config)?;
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -150,7 +147,7 @@ mod tests {
             sources: Vec::new(),
             targets: Targets::default(),
         };
-        let server = TomeServer::new(config);
+        let server = TomeServer::new(config).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("No skills found"), "unexpected: {text}");
@@ -163,7 +160,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("my-skill"), "unexpected: {text}");
@@ -177,7 +174,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nSome content.").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "my-skill".into(),
@@ -190,7 +187,7 @@ mod tests {
     #[test]
     fn read_skill_not_found() {
         let tmp = TempDir::new().unwrap();
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "nonexistent".into(),

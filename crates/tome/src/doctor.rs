@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use console::style;
+use dialoguer::Confirm;
 use std::path::Path;
 
 use crate::cleanup;
@@ -45,27 +46,35 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
         );
 
         if !dry_run {
-            println!();
-            println!("{}", style("Repairing...").bold());
-            let cleanup_result = cleanup::cleanup_library(&config.library_dir, false)?;
-            if cleanup_result.removed_from_library > 0 {
-                println!(
-                    "  {} Removed {} broken symlink(s) from library",
-                    style("fixed").green(),
-                    cleanup_result.removed_from_library
-                );
-            }
+            let confirmed = Confirm::new()
+                .with_prompt("Repair these issues?")
+                .default(true)
+                .interact()?;
 
-            for (name, t) in config.targets.iter() {
-                if let Some(skills_dir) = t.skills_dir() {
-                    let removed = cleanup::cleanup_target(skills_dir, &config.library_dir, false)?;
-                    if removed > 0 {
-                        println!(
-                            "  {} Removed {} stale symlink(s) from {}",
-                            style("fixed").green(),
-                            removed,
-                            name
-                        );
+            if confirmed {
+                println!();
+                println!("{}", style("Repairing...").bold());
+                let cleanup_result = cleanup::cleanup_library(&config.library_dir, false)?;
+                if cleanup_result.removed_from_library > 0 {
+                    println!(
+                        "  {} Removed {} broken symlink(s) from library",
+                        style("fixed").green(),
+                        cleanup_result.removed_from_library
+                    );
+                }
+
+                for (name, t) in config.targets.iter() {
+                    if let Some(skills_dir) = t.skills_dir() {
+                        let removed =
+                            cleanup::cleanup_target(skills_dir, &config.library_dir, false)?;
+                        if removed > 0 {
+                            println!(
+                                "  {} Removed {} stale symlink(s) from {}",
+                                style("fixed").green(),
+                                removed,
+                                name
+                            );
+                        }
                     }
                 }
             }
