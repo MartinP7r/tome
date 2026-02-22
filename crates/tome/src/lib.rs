@@ -30,7 +30,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         let config = wizard::run(cli.dry_run)?;
         if !cli.dry_run {
-            sync(&config, cli.dry_run, cli.verbose)?;
+            sync(&config, cli.dry_run, cli.verbose, cli.quiet)?;
         }
         return Ok(());
     }
@@ -40,13 +40,13 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
-        Command::Sync => sync(&config, cli.dry_run, cli.verbose)?,
+        Command::Sync => sync(&config, cli.dry_run, cli.verbose, cli.quiet)?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
         Command::Serve => {
             tokio::runtime::Runtime::new()?.block_on(mcp::serve(config))?;
         }
-        Command::List => list(&config)?,
+        Command::List => list(&config, cli.quiet)?,
         Command::Config { path } => show_config(&config, path)?,
     }
 
@@ -54,7 +54,7 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
+fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
     // 1. Discover
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
@@ -62,7 +62,9 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
     let skills = discover::discover_all(config)?;
 
     if skills.is_empty() {
-        println!("No skills found. Run `tome init` to configure sources.");
+        if !quiet {
+            println!("No skills found. Run `tome init` to configure sources.");
+        }
         return Ok(());
     }
 
@@ -98,6 +100,10 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
         }
+    }
+
+    if quiet {
+        return Ok(());
     }
 
     // Report
@@ -141,7 +147,11 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
 }
 
 /// List all discovered skills.
-fn list(config: &Config) -> Result<()> {
+fn list(config: &Config, quiet: bool) -> Result<()> {
+    if quiet {
+        return Ok(());
+    }
+
     let skills = discover::discover_all(config)?;
 
     if skills.is_empty() {
