@@ -1,13 +1,13 @@
 # MCP Server
 
-skillet includes a built-in MCP server for tools that support the Model Context Protocol:
+tome includes a built-in MCP server for tools that support the Model Context Protocol:
 
 ```bash
 # Standalone binary
-skillet-mcp
+tome-mcp
 
 # Or via the CLI
-skillet serve
+tome serve
 ```
 
 The server exposes two tools:

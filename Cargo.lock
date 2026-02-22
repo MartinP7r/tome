@@ -1111,36 +1111,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillet"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "assert_fs",
- "clap",
- "console",
- "dialoguer",
- "dirs",
- "predicates",
- "rmcp",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "walkdir",
-]
-
-[[package]]
-name = "skillet-mcp"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "skillet",
- "tokio",
-]
-
-[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1277,6 +1247,36 @@ dependencies = [
  "futures-sink",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tome"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "assert_fs",
+ "clap",
+ "console",
+ "dialoguer",
+ "dirs",
+ "predicates",
+ "rmcp",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "walkdir",
+]
+
+[[package]]
+name = "tome-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tome",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-# skillet
+# tome
 
 Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
 
@@ -10,38 +10,38 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 - Standalone skills only exist for one tool
 - Switching tools means losing access to your skill library
 
-**skillet** consolidates all skills into a single library and distributes them everywhere.
+**tome** consolidates all skills into a single library and distributes them everywhere.
 
 ## Install
 
 ```bash
-cargo install skillet
+cargo install tome
 ```
 
 ## Quick Start
 
 ```bash
 # Interactive setup — discovers sources, configures targets
-skillet init
+tome init
 
 # Sync skills to all configured targets
-skillet sync
+tome sync
 
 # Check what's configured
-skillet status
+tome status
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `skillet init` | Interactive wizard to configure sources and targets |
-| `skillet sync` | Discover, consolidate, and distribute skills |
-| `skillet status` | Show library, sources, targets, and health |
-| `skillet list` | List all discovered skills with sources |
-| `skillet doctor` | Diagnose and repair broken symlinks |
-| `skillet serve` | Start the MCP server (stdio) |
-| `skillet config` | Show current configuration |
+| `tome init` | Interactive wizard to configure sources and targets |
+| `tome sync` | Discover, consolidate, and distribute skills |
+| `tome status` | Show library, sources, targets, and health |
+| `tome list` | List all discovered skills with sources |
+| `tome doctor` | Diagnose and repair broken symlinks |
+| `tome serve` | Start the MCP server (stdio) |
+| `tome config` | Show current configuration |
 
 All commands support `--dry-run`, `--verbose`, and `--config <path>`.
 
@@ -80,10 +80,10 @@ graph LR
 
 ## Configuration
 
-TOML at `~/.config/skillet/config.toml`:
+TOML at `~/.config/tome/config.toml`:
 
 ```toml
-library_dir = "~/.local/share/skillet/skills"
+library_dir = "~/.local/share/tome/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]
@@ -109,14 +109,14 @@ mcp_config = "~/.codex/.mcp.json"
 
 ## MCP Server
 
-skillet includes a built-in MCP server for tools that support the Model Context Protocol:
+tome includes a built-in MCP server for tools that support the Model Context Protocol:
 
 ```bash
 # Standalone binary
-skillet-mcp
+tome-mcp
 
 # Or via the CLI
-skillet serve
+tome serve
 ```
 
 The server exposes two tools:

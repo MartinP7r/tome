@@ -1,4 +1,4 @@
-//! Skillet — sync AI coding skills across tools.
+//! Tome — sync AI coding skills across tools.
 //! Re-exports all modules and contains the core `sync()` pipeline: discover, consolidate, distribute, cleanup.
 
 pub(crate) mod cleanup;
@@ -62,7 +62,7 @@ fn sync(config: &Config, dry_run: bool, verbose: bool) -> Result<()> {
     let skills = discover::discover_all(config)?;
 
     if skills.is_empty() {
-        println!("No skills found. Run `skillet init` to configure sources.");
+        println!("No skills found. Run `tome init` to configure sources.");
         return Ok(());
     }
 
@@ -145,7 +145,7 @@ fn list(config: &Config) -> Result<()> {
     let skills = discover::discover_all(config)?;
 
     if skills.is_empty() {
-        println!("No skills found. Run `skillet init` to configure sources.");
+        println!("No skills found. Run `tome init` to configure sources.");
         return Ok(());
     }
 

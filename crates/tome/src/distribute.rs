@@ -126,22 +126,22 @@ fn distribute_mcp(
         .entry("mcpServers")
         .or_insert_with(|| serde_json::json!({}));
 
-    // Check if skillet entry already exists and is correct
-    if let Some(existing) = servers.get("skillet")
-        && existing.get("command").and_then(|v| v.as_str()) == Some("skillet-mcp")
+    // Check if tome entry already exists and is correct
+    if let Some(existing) = servers.get("tome")
+        && existing.get("command").and_then(|v| v.as_str()) == Some("tome-mcp")
     {
         result.unchanged = 1;
         return Ok(result);
     }
 
-    // Add/update the skillet MCP server entry
+    // Add/update the tome MCP server entry
     servers
         .as_object_mut()
         .context("mcpServers is not a JSON object")?
         .insert(
-            "skillet".into(),
+            "tome".into(),
             serde_json::json!({
-                "command": "skillet-mcp",
+                "command": "tome-mcp",
                 "args": [],
                 "env": {}
             }),
@@ -283,7 +283,7 @@ mod tests {
 
         let content = std::fs::read_to_string(&mcp_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(parsed["mcpServers"]["skillet"]["command"].as_str() == Some("skillet-mcp"));
+        assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
     }
 
     #[test]
@@ -317,7 +317,7 @@ mod tests {
         let content = std::fs::read_to_string(&mcp_path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
         assert!(parsed["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
-        assert!(parsed["mcpServers"]["skillet"]["command"].as_str() == Some("skillet-mcp"));
+        assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
 
         // Run again — should be idempotent, other-server still there
         let result2 = distribute_to_target(library.path(), "codex", &target, false).unwrap();

@@ -1,6 +1,6 @@
 # Test Setup
 
-skillet has two layers of tests: **unit tests** co-located with each module, and **integration tests** that exercise the compiled binary end-to-end. All tests run in CI on both Ubuntu and macOS.
+tome has two layers of tests: **unit tests** co-located with each module, and **integration tests** that exercise the compiled binary end-to-end. All tests run in CI on both Ubuntu and macOS.
 
 ## Test Architecture
 
@@ -30,12 +30,12 @@ Each module has a `mod tests` block that tests its public functions in isolation
 
 ### Integration Tests (`tests/cli.rs`)
 
-These compile the `skillet` binary and run it as a subprocess using `assert_cmd`. They verify the full CLI flow: argument parsing, config loading, pipeline execution, and output formatting.
+These compile the `tome` binary and run it as a subprocess using `assert_cmd`. They verify the full CLI flow: argument parsing, config loading, pipeline execution, and output formatting.
 
 ```mermaid
 graph LR
     subgraph Integration["tests/cli.rs"]
-        CMD["assert_cmd<br/>spawns skillet binary"]
+        CMD["assert_cmd<br/>spawns tome binary"]
         TMP["assert_fs::TempDir<br/>isolated filesystem"]
         PRED["predicates<br/>stdout assertions"]
         CMD --> TMP
@@ -123,8 +123,8 @@ Tests the distribution step (push skills from library to target tools).
 | `distribute_symlinks_creates_links` | Symlink method creates links in target dir |
 | `distribute_symlinks_idempotent` | Second run → `linked=0, unchanged=1` |
 | `distribute_disabled_target_is_noop` | `enabled: false` → no work done |
-| `distribute_mcp_creates_config` | MCP method creates `.mcp.json` with skillet entry |
-| `distribute_mcp_preserves_existing_servers` | Adding skillet entry doesn't clobber existing servers |
+| `distribute_mcp_creates_config` | MCP method creates `.mcp.json` with tome entry |
+| `distribute_mcp_preserves_existing_servers` | Adding tome entry doesn't clobber existing servers |
 | `distribute_symlinks_skips_non_symlink_collision` | Regular file at target path → skipped, file untouched |
 
 The `distribute_mcp_preserves_existing_servers` test also verifies idempotency on the second run.
@@ -142,7 +142,7 @@ Tests stale symlink removal from library and target directories.
 
 ### `tests/cli.rs` — 11 integration tests
 
-Each test compiles and runs the `skillet` binary in a temp directory with a custom config.
+Each test compiles and runs the `tome` binary in a temp directory with a custom config.
 
 | Test | Command | What it verifies |
 |------|---------|-----------------|
@@ -163,7 +163,7 @@ Each test compiles and runs the `skillet` binary in a temp directory with a cust
 Every test creates its own `TempDir` that is automatically cleaned up when the test ends. This means:
 
 - Tests never interfere with each other (no shared state)
-- Tests never touch the real `~/.config/skillet/` or `~/.local/share/skillet/`
+- Tests never touch the real `~/.config/tome/` or `~/.local/share/tome/`
 - No manual cleanup is needed
 - Tests can run in parallel safely
 
@@ -204,16 +204,16 @@ Defined in the workspace `Cargo.toml` and used via `[dev-dependencies]`:
 make test              # or: cargo test
 
 # Just one crate
-cargo test -p skillet
+cargo test -p tome
 
 # A specific test by name
 cargo test test_name
 
 # Tests in a specific module
-cargo test -p skillet -- discover::tests
+cargo test -p tome -- discover::tests
 
 # Only integration tests
-cargo test -p skillet --test cli
+cargo test -p tome --test cli
 
 # With output (see println! from tests)
 cargo test -- --nocapture

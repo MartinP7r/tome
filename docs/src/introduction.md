@@ -10,25 +10,25 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 - Standalone skills only exist for one tool
 - Switching tools means losing access to your skill library
 
-**skillet** consolidates all skills into a single library and distributes them everywhere.
+**tome** consolidates all skills into a single library and distributes them everywhere.
 
 ## Install
 
 ```bash
-cargo install skillet
+cargo install tome
 ```
 
 ## Quick Start
 
 ```bash
 # Interactive setup — discovers sources, configures targets
-skillet init
+tome init
 
 # Sync skills to all configured targets
-skillet sync
+tome sync
 
 # Check what's configured
-skillet status
+tome status
 ```
 
 ## How It Works

@@ -95,13 +95,13 @@ All standard-compliant tools silently ignore unknown frontmatter fields. The VS 
 | Skill body size | ~6000 chars | Windsurf |
 | Skill body size | ~5000 tokens | General recommendation |
 
-## How skillet Uses This
+## How tome Uses This
 
-skillet currently symlinks skill directories as-is without parsing frontmatter. The v0.3.x release will add:
+tome currently symlinks skill directories as-is without parsing frontmatter. The v0.3.x release will add:
 
 - **Frontmatter parsing** during discovery
-- **`skillet lint`** command with tiered validation (errors, warnings, info)
-- **`skillet doctor`** frontmatter health checks
-- **`skillet status`** metadata summary per skill
+- **`tome lint`** command with tiered validation (errors, warnings, info)
+- **`tome doctor`** frontmatter health checks
+- **`tome status`** metadata summary per skill
 
 See the [Roadmap](roadmap.md) for details.

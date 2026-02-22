@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::config::Config;
 use crate::discover;
 
-/// Display the current status of the skillet system.
+/// Display the current status of the tome system.
 pub fn show(config: &Config) -> Result<()> {
     println!(
         "{} {}",
@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn status_handles_missing_library_gracefully() {
         let config = Config {
-            library_dir: PathBuf::from("/nonexistent/skillet/library"),
+            library_dir: PathBuf::from("/nonexistent/tome/library"),
             ..Config::default()
         };
 

@@ -1,6 +1,6 @@
 # AI Coding Tool Landscape
 
-Research into agent file formats (skills, rules, memory, hooks, agents, plugins), invocation methods, context loading strategies, and format differences across AI coding tools — informing skillet's connector architecture.
+Research into agent file formats (skills, rules, memory, hooks, agents, plugins), invocation methods, context loading strategies, and format differences across AI coding tools — informing tome's connector architecture.
 
 *Last updated: February 2026*
 
@@ -200,7 +200,7 @@ Use type hints on all function signatures...
 | **Lifecycle** | `HEARTBEAT.md` (periodic task checklist), `BOOTSTRAP.md` (startup) |
 | **Config format** | JSON5 (`openclaw.json`) allowing comments |
 
-OpenClaw has the richest file taxonomy — 8 separate config files loaded at session start into the system prompt. This gives fine-grained control but means more files for skillet to discover and potentially sync.
+OpenClaw has the richest file taxonomy — 8 separate config files loaded at session start into the system prompt. This gives fine-grained control but means more files for tome to discover and potentially sync.
 
 ---
 
@@ -231,7 +231,7 @@ Nanobot is essentially an OpenClaw-compatible agent in a fraction of the code. S
 | **Config** | Minimal — focuses on LLM backend configuration |
 | **MCP** | Supported for tool integration |
 
-PicoClaw prioritizes extreme minimalism. For skillet, it would likely be an MCP target rather than a skill directory target.
+PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP target rather than a skill directory target.
 
 ---
 
@@ -302,7 +302,7 @@ Amp is a useful case study — their migration from custom commands to Agent Ski
 | **MCP** | Core mechanism — 100+ servers in toolkit catalog. Auto-OAuth on HTTP 401. |
 | **Config** | TOML at `~/.config/goose/` |
 
-Goose is built entirely around MCP — extensions are MCP servers, not skill directories. For skillet, Goose is exclusively an MCP target.
+Goose is built entirely around MCP — extensions are MCP servers, not skill directories. For tome, Goose is exclusively an MCP target.
 
 ---
 
@@ -336,7 +336,7 @@ Each tool reads project-level instructions from a differently-named markdown fil
 | Cursor | *(rules only)* | — | `.cursor/rules/*.mdc` | Glob + activation mode |
 | Windsurf | `global_rules.md` | `~/.windsurf/` | `.windsurf/rules/` | Activation mode per rule |
 
-### What this means for skillet
+### What this means for tome
 
 A "rule" that should apply everywhere needs to exist as up to 5 different files:
 - `CLAUDE.md` (Claude Code)
@@ -1226,7 +1226,7 @@ graph TD
     OClaw --> Nano
 ```
 
-### skillet Connector Mapping
+### tome Connector Mapping
 
 ```mermaid
 graph LR
@@ -1239,7 +1239,7 @@ graph LR
         S6["Copilot .instructions.md"]
     end
 
-    subgraph "skillet Library"
+    subgraph "tome Library"
         L["Canonical format<br/>(SKILL.md standard)"]
     end
 
@@ -1333,15 +1333,15 @@ Auto-memories grow unbounded. Large instruction files consume context budget, le
 Cursor rules behave differently depending on which LLM backend is active. The same `.mdc` rule may work with Claude but fail with GPT-4. Agent Skills are more consistent because the SKILL.md body is pure natural language.
 
 ### Migration Pain
-No tool provides automatic format conversion. Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to anything else, requires manual work. This is the gap skillet aims to fill.
+No tool provides automatic format conversion. Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to anything else, requires manual work. This is the gap tome aims to fill.
 
 ---
 
-## 19. What This Means for skillet
+## 19. What This Means for tome
 
 ### Format Families to Support
 
-Based on this research, skillet's connector architecture needs to handle four format families:
+Based on this research, tome's connector architecture needs to handle four format families:
 
 | Family | Tools | Distribution Method | Translation Needed |
 |--------|-------|-------------------|--------------------|
@@ -1387,7 +1387,7 @@ Based on this research, skillet's connector architecture needs to handle four fo
    - **Windsurf:** Generate rules with appropriate activation mode from skill description
    - **Copilot:** Generate `.instructions.md` with `description` and `applyTo` frontmatter
 
-4. **MCP config for tool-based targets** — Tools that consume skills via MCP get a config entry pointing at the skillet MCP server rather than direct file access. Goose is the primary MCP-only target.
+4. **MCP config for tool-based targets** — Tools that consume skills via MCP get a config entry pointing at the tome MCP server rather than direct file access. Goose is the primary MCP-only target.
 
 5. **OpenClaw/Nanobot as special cases** — Their 8-file workspace model means a connector needs to map skills into the appropriate slot (AGENTS.md for instructions, TOOLS.md for capabilities, etc.) or just target their skills directory.
 
@@ -1404,7 +1404,7 @@ Based on this research, skillet's connector architecture needs to handle four fo
 | **Plugins** | No | 3 tools have plugin systems, all with different manifests |
 | **Memory** | No | 7 tools have memory, all with different storage, lifecycle, retrieval |
 
-Tool-specific skill extensions are lost in translation — skillet should preserve them in metadata when syncing between tools of the same type, but can safely drop them when translating to a different format family.
+Tool-specific skill extensions are lost in translation — tome should preserve them in metadata when syncing between tools of the same type, but can safely drop them when translating to a different format family.
 
 ### The Convergence Trend
 
@@ -1413,7 +1413,7 @@ As of Feb 2026, the industry is consolidating around:
 2. **MCP** for portable tool integrations — universal adoption
 3. **Markdown instruction files** for project rules — same concept, different filenames
 
-Everything else (hooks, agents, plugins, memory) remains fragmented with no signs of standardization. For skillet, this means the v1 focus on skills + MCP + instruction files covers the portable surface area. Extended structures would require per-tool connectors with no format translation possible.
+Everything else (hooks, agents, plugins, memory) remains fragmented with no signs of standardization. For tome, this means the v1 focus on skills + MCP + instruction files covers the portable surface area. Extended structures would require per-tool connectors with no format translation possible.
 
 ---
 

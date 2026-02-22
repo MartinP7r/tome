@@ -18,32 +18,32 @@ make release        # cargo build --release (LTO + strip)
 Run a single test:
 ```bash
 cargo test test_name                          # by test function name
-cargo test -p skillet -- discover::tests        # module-scoped in a crate
-cargo test -p skillet --test cli                # integration tests only
+cargo test -p tome -- discover::tests        # module-scoped in a crate
+cargo test -p tome --test cli                # integration tests only
 ```
 
 ## Architecture
 
 Rust workspace (edition 2024) with two crates producing two binaries:
 
-### `crates/skillet` — CLI (`skillet`)
-The main binary. All domain logic lives here as a library (`lib.rs` re-exports all modules) with a thin `main.rs` that parses CLI args and calls `skillet::run()`.
+### `crates/tome` — CLI (`tome`)
+The main binary. All domain logic lives here as a library (`lib.rs` re-exports all modules) with a thin `main.rs` that parses CLI args and calls `tome::run()`.
 
-**Sync pipeline** (`lib.rs::sync`) — the core flow that `skillet sync` and `skillet init` both invoke:
+**Sync pipeline** (`lib.rs::sync`) — the core flow that `tome sync` and `tome init` both invoke:
 1. **Discover** (`discover.rs`) — Scan configured sources for `*/SKILL.md` dirs. Two source types: `ClaudePlugins` (reads `installed_plugins.json`) and `Directory` (flat walkdir scan). First source wins on name conflicts; exclusion list applied.
-2. **Consolidate** (`library.rs`) — Symlink each discovered skill into `~/.local/share/skillet/skills/{name}` → original path. Idempotent: unchanged links are skipped, stale links updated.
-3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir) and `Mcp` (writes a `skillet` entry into the target's `.mcp.json`).
+2. **Consolidate** (`library.rs`) — Symlink each discovered skill into `~/.local/share/tome/skills/{name}` → original path. Idempotent: unchanged links are skipped, stale links updated.
+3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir) and `Mcp` (writes a `tome` entry into the target's `.mcp.json`).
 4. **Cleanup** (`cleanup.rs`) — Remove broken symlinks from library and targets.
 
 **Other modules:**
-- `wizard.rs` — Interactive `skillet init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
-- `config.rs` — TOML config at `~/.config/skillet/config.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
+- `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
+- `config.rs` — TOML config at `~/.config/tome/config.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
 - `doctor.rs` — Diagnoses broken symlinks and missing source paths; optionally repairs via cleanup.
 - `status.rs` — Read-only summary of library, sources, targets, and health.
 - `mcp.rs` — MCP server implementation using `rmcp`. Exposes `list_skills` and `read_skill` tools over stdio.
 
-### `crates/skillet-mcp` — Standalone MCP binary (`skillet-mcp`)
-Thin wrapper: loads config, calls `skillet::mcp::serve()`. Exists so MCP-only consumers don't need the full CLI. The same server is also reachable via `skillet serve`.
+### `crates/tome-mcp` — Standalone MCP binary (`tome-mcp`)
+Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consumers don't need the full CLI. The same server is also reachable via `tome serve`.
 
 ## Key Patterns
 
@@ -54,7 +54,7 @@ Thin wrapper: loads config, calls `skillet::mcp::serve()`. Exists so MCP-only co
 
 ## Testing
 
-Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integration tests in `crates/skillet/tests/cli.rs` exercise the binary via `assert_cmd`. Tests use `tempfile::TempDir` for filesystem isolation — no cleanup needed.
+Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integration tests in `crates/tome/tests/cli.rs` exercise the binary via `assert_cmd`. Tests use `tempfile::TempDir` for filesystem isolation — no cleanup needed.
 
 ## CI
 

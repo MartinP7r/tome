@@ -5,11 +5,12 @@
 - **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — `dialoguer` doesn't surface these by default
 - **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
 - **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
+- **Modern TUI with welcome ASCII art**: Replace plain text output with a polished TUI; open `tome init` with ASCII art of a tome/spellbook as the welcome screen
 - ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
-- **Optional git init for library**: Ask during `skillet init` whether to initialize a git repo in the library directory for change tracking across syncs
+- **Optional git init for library**: Ask during `tome init` whether to initialize a git repo in the library directory for change tracking across syncs
 - **Expand wizard auto-discovery**: ~~Added `~/.gemini/antigravity/skills`.~~ `~/.copilot/skills/` and `~/.cursor/` don't exist as official home-dir paths — Copilot uses per-project `.github/skills/` and Cursor uses per-project `.cursor/rules/`. Per-project sources deferred to v0.2 connector architecture.
 - ~~**Fix `installed_plugins.json` v2 parsing**: Current parser expects a flat JSON array (v1); v2 wraps plugins in `{ "version": 2, "plugins": { "name@registry": [...] } }` — discovery silently finds nothing. Support both formats going forward.~~
-- ~~**Finalize tool name**: Decided on **skillet** — *"Cook once, serve everywhere."*~~
+- ~~**Finalize tool name**: Decided on **tome** — *"Cook once, serve everywhere."*~~
 - **Improve doc comments for `cargo doc`**: Add module-level `//!` docs, expand struct/function docs, add `# Examples` to key public APIs.
 - **GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.
 
@@ -20,6 +21,7 @@ The current model hardcodes targets as struct fields and keeps source/target log
 - **Generic `[[targets]]` array**: Replace the hardcoded `Targets` struct with a `Vec<Target>` — same shape as sources. Each target has a `name`, `path`, `type`, and connector-specific options
 - **Connector trait**: Unified interface for both source and target behavior — discovery format, distribution method (symlink, MCP config, copy), and format translation needs
 - **Built-in connectors**: Claude (plugins + standalone), Codex, Antigravity, Cursor, Windsurf, OpenCode, Nanobot, PicoClaw, OpenClaw, VS Code Copilot, Amp, Goose
+- **Gemini CLI connector**: Investigate sandbox mode — Gemini CLI may use a different skills/context folder depending on whether it runs in sandbox or not; connector may need to detect or allow configuring which path to target
 - **Bidirectional by design**: Any connector can act as both source and target — discover skills *from* Cursor rules and distribute *to* Cursor rules
 - **Format awareness per connector**: Each connector declares its native format — the pipeline handles translation between them (e.g., SKILL.md ↔ Cursor rules ↔ Windsurf conventions)
 - Support syncing `.claude/rules/` and agent definitions alongside skills
@@ -34,7 +36,7 @@ The current model hardcodes targets as struct fields and keeps source/target log
 
 ## v0.3.x — Skill Validation & Linting
 
-Add YAML frontmatter parsing and a `skillet lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
+Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
 
 ### Frontmatter Parsing
 
@@ -43,7 +45,7 @@ Add YAML frontmatter parsing and a `skillet lint` command that catches cross-too
 - Parse frontmatter during discovery (enrich `DiscoveredSkill`)
 - Store parsed metadata for validation, MCP responses, and status display
 
-### `skillet lint` Command
+### `tome lint` Command
 
 Validation checks ordered by severity:
 
@@ -68,8 +70,8 @@ Validation checks ordered by severity:
 
 ### Enhance Existing Commands
 
-- **`skillet doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
-- **`skillet status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
+- **`tome doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
+- **`tome status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
 
 ### Target-Aware Warnings (Future)
 
@@ -83,11 +85,11 @@ Requires the v0.2 connector architecture. When distributing to specific targets,
 Make the skill library reproducible across machines via a lockfile and per-machine preferences.
 
 - **Library as canonical home**: Local skills live directly in the library (real directories, not symlinks). Managed skills (Claude marketplace, future registries) are symlinked in from their package manager locations.
-- **`skillet.lock`**: Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
-- **Per-machine preferences** (`~/.config/skillet/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
-- **`skillet update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
+- **`tome.lock`**: Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
+- **Per-machine preferences** (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
+- **`tome update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
 - **Claude marketplace first**: First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
-- **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `skillet update` (gitignored), lockfile tracked.
+- **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `tome update` (gitignored), lockfile tracked.
 
 ## v0.5 — Git Sources
 
@@ -98,7 +100,7 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 
 ## v0.6 — Watch Mode
 
-- `skillet watch` for auto-sync on filesystem changes
+- `tome watch` for auto-sync on filesystem changes
 - Debounced fsnotify-based watcher
 - Optional desktop notification on sync
 
@@ -107,9 +109,9 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 - **Plugin registry**: Browse and install community skill packs
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
-- **Homebrew formula**: `brew install skillet`
+- **Homebrew formula**: `brew install tome`
 - **Backup snapshots**: Optional tarball backup of library state before destructive operations
-- **Token budget estimation**: Show estimated token cost per skill per target tool in `skillet status` output
-- **Security audit command**: `skillet audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
-- **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`skillet suggest-skills`)
+- **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
+- **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
+- **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`tome suggest-skills`)
 - **Plugin output generation**: Package the skill library as a distributable Claude plugin, Cursor plugin, etc.

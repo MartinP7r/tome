@@ -1,9 +1,9 @@
 # Configuration
 
-TOML at `~/.config/skillet/config.toml`:
+TOML at `~/.config/tome/config.toml`:
 
 ```toml
-library_dir = "~/.local/share/skillet/skills"
+library_dir = "~/.local/share/tome/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]

@@ -1,17 +1,17 @@
 [package]
-name = "skillet-mcp"
+name = "tome-mcp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "MCP server for skillet skill distribution"
+description = "MCP server for tome skill distribution"
 
 [[bin]]
-name = "skillet-mcp"
+name = "tome-mcp"
 path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true
-skillet = { path = "../skillet" }
+tome = { path = "../tome" }

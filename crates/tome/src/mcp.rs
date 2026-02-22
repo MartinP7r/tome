@@ -10,12 +10,12 @@ use crate::config::Config;
 use crate::discover;
 
 #[derive(Debug, Clone)]
-pub(crate) struct SkilletServer {
+pub(crate) struct TomeServer {
     config: Config,
     tool_router: ToolRouter<Self>,
 }
 
-impl SkilletServer {
+impl TomeServer {
     pub fn new(config: Config) -> Self {
         Self {
             config,
@@ -31,15 +31,15 @@ pub(crate) struct ReadSkillRequest {
 }
 
 #[tool_router]
-impl SkilletServer {
-    #[tool(description = "List all skills available in the skillet library")]
+impl TomeServer {
+    #[tool(description = "List all skills available in the tome library")]
     fn list_skills(&self) -> Result<CallToolResult, McpError> {
         let skills = discover::discover_all(&self.config)
             .map_err(|e| McpError::internal_error(format!("discovery failed: {e}"), None))?;
 
         if skills.is_empty() {
             return Ok(CallToolResult::success(vec![Content::text(
-                "No skills found. Run `skillet init` to configure sources.",
+                "No skills found. Run `tome init` to configure sources.",
             )]));
         }
 
@@ -89,15 +89,15 @@ impl SkilletServer {
 }
 
 #[tool_handler]
-impl ServerHandler for SkilletServer {
+impl ServerHandler for TomeServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             instructions: Some(
-                "Skillet MCP server — exposes discovered AI coding skills for reading".into(),
+                "Tome MCP server — exposes discovered AI coding skills for reading".into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation {
-                name: "skillet-mcp".into(),
+                name: "tome-mcp".into(),
                 version: env!("CARGO_PKG_VERSION").into(),
                 ..Default::default()
             },
@@ -108,7 +108,7 @@ impl ServerHandler for SkilletServer {
 
 /// Start the MCP server on stdio.
 pub async fn serve(config: Config) -> anyhow::Result<()> {
-    let server = SkilletServer::new(config);
+    let server = TomeServer::new(config);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -150,7 +150,7 @@ mod tests {
             sources: Vec::new(),
             targets: Targets::default(),
         };
-        let server = SkilletServer::new(config);
+        let server = TomeServer::new(config);
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("No skills found"), "unexpected: {text}");
@@ -163,7 +163,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
 
-        let server = SkilletServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("my-skill"), "unexpected: {text}");
@@ -177,7 +177,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nSome content.").unwrap();
 
-        let server = SkilletServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "my-skill".into(),
@@ -190,7 +190,7 @@ mod tests {
     #[test]
     fn read_skill_not_found() {
         let tmp = TempDir::new().unwrap();
-        let server = SkilletServer::new(test_config(tmp.path().to_path_buf()));
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()));
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "nonexistent".into(),

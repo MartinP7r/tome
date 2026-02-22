@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 authors = ["Martin Pfundmair <dev@martinp7r.com>"]
-repository = "https://github.com/martinP7r/skillet"
+repository = "https://github.com/martinP7r/tome"
 
 [workspace.dependencies]
 anyhow = "1"
