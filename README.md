@@ -3,6 +3,13 @@
 *Your skills, leather-bound.*
 
 <p align="center">
+  <a href="https://github.com/MartinP7r/tome/actions/workflows/ci.yml"><img src="https://github.com/MartinP7r/tome/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/MartinP7r/tome/releases"><img src="https://img.shields.io/github/v/release/MartinP7r/tome" alt="Latest release" /></a>
+  <img src="https://img.shields.io/github/downloads/MartinP7r/tome/total" alt="Downloads" />
+  <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" />
+</p>
+
+<p align="center">
   <img src="docs/gfx/mage.svg" alt="tome mascot" width="560" />
 </p>
 
