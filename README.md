@@ -1,12 +1,13 @@
-<table><tr>
-<td valign="bottom"><h1>tome</h1><em>Your skills, leather-bound.</em></td>
-<td align="right" valign="top">
-  <a href="https://github.com/MartinP7r/tome/actions/workflows/ci.yml"><img src="https://github.com/MartinP7r/tome/actions/workflows/ci.yml/badge.svg" alt="CI" /></a><br/>
+<p align="right">
+  <a href="https://github.com/MartinP7r/tome/actions/workflows/ci.yml"><img src="https://github.com/MartinP7r/tome/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="https://github.com/MartinP7r/tome/releases"><img src="https://img.shields.io/github/v/release/MartinP7r/tome" alt="Latest release" /></a>
-  <img src="https://img.shields.io/github/downloads/MartinP7r/tome/total" alt="Downloads" /><br/>
+  <img src="https://img.shields.io/github/downloads/MartinP7r/tome/total" alt="Downloads" />
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" />
-</td>
-</tr></table>
+</p>
+
+# tome
+
+*Your skills, leather-bound.*
 
 <p align="center">
   <img src="docs/gfx/mage.svg" alt="tome mascot" width="560" />
