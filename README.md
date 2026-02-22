@@ -3,7 +3,7 @@
 *Your skills, leather-bound.*
 
 <p align="center">
-  <img src="docs/gfx/mage.webp" alt="tome mascot" width="280" style="border-radius: 16px;" />
+  <img src="docs/gfx/mage.svg" alt="tome mascot" width="560" />
 </p>
 
 Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
