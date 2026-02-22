@@ -11,6 +11,9 @@ description = "MCP server for tome skill distribution"
 name = "tome-mcp"
 path = "src/main.rs"
 
+[package.metadata.dist]
+installers = []
+
 [dependencies]
 anyhow.workspace = true
 tokio.workspace = true
