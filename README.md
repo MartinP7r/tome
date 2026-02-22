@@ -1,5 +1,7 @@
 # tome
 
+*Your skills, leather-bound.*
+
 Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
 
 ## Why
