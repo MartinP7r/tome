@@ -2,6 +2,10 @@
 
 *Your skills, leather-bound.*
 
+<p align="center">
+  <img src="docs/gfx/mage.webp" alt="tome mascot" width="280" style="border-radius: 16px;" />
+</p>
+
 Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
 
 ## Why
@@ -35,15 +39,15 @@ tome status
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `tome init` | Interactive wizard to configure sources and targets |
-| `tome sync` | Discover, consolidate, and distribute skills |
-| `tome status` | Show library, sources, targets, and health |
-| `tome list` | List all discovered skills with sources |
-| `tome doctor` | Diagnose and repair broken symlinks |
-| `tome serve` | Start the MCP server (stdio) |
-| `tome config` | Show current configuration |
+| Command       | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `tome init`   | Interactive wizard to configure sources and targets |
+| `tome sync`   | Discover, consolidate, and distribute skills        |
+| `tome status` | Show library, sources, targets, and health          |
+| `tome list`   | List all discovered skills with sources             |
+| `tome doctor` | Diagnose and repair broken symlinks                 |
+| `tome serve`  | Start the MCP server (stdio)                        |
+| `tome config` | Show current configuration                          |
 
 All commands support `--dry-run`, `--verbose`, and `--config <path>`.
 
