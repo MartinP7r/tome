@@ -1251,7 +1251,7 @@ dependencies = [
 
 [[package]]
 name = "tome"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1272,7 +1272,7 @@ dependencies = [
 
 [[package]]
 name = "tome-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "tokio",
