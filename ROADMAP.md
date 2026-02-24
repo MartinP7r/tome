@@ -90,6 +90,7 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 - **`tome update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
 - **Claude marketplace first**: First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
 - **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `tome update` (gitignored), lockfile tracked.
+- **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
 
 ## v0.5 — Git Sources
 
@@ -110,7 +111,7 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
 - **Homebrew formula**: `brew install tome`
-- **Backup snapshots**: Optional tarball backup of library state before destructive operations
+- ~~**Backup snapshots**: Optional tarball backup of library state before destructive operations~~ → moved to v0.4 as git-backed backup (#94)
 - **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
 - **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
 - **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`tome suggest-skills`)
