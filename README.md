@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow" alt="License: MIT" />
 </p>
 
-# tome
+# tome 📖
 
 *Your skills, leather-bound.*
 
@@ -27,8 +27,9 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 
 ## Install
 
+**Homebrew** (macOS/Linux):
 ```bash
-cargo install tome
+brew install MartinP7r/tap/tome
 ```
 
 ## Quick Start
