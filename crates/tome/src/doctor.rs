@@ -11,6 +11,12 @@ use crate::paths::resolve_symlink_target;
 
 /// Diagnose and optionally repair issues.
 pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
+    // Not yet initialised — no config file, no library directory
+    if !config.library_dir.is_dir() && config.sources.is_empty() {
+        println!("Not configured yet. Run `tome init` to get started.");
+        return Ok(());
+    }
+
     let mut total_issues = 0;
 
     // Check library
@@ -293,5 +299,19 @@ mod tests {
 
         let result = check_config(&config).unwrap();
         assert_eq!(result, 0);
+    }
+
+    // -- diagnose (pre-init guard) --
+
+    #[test]
+    fn diagnose_shows_init_prompt_when_unconfigured() {
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/library"),
+            ..Config::default()
+        };
+
+        // Pre-init guard triggers: no library dir + no sources → friendly message, no error
+        let result = diagnose(&config, true);
+        assert!(result.is_ok());
     }
 }

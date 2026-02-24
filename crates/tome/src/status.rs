@@ -9,6 +9,12 @@ use crate::discover;
 
 /// Display the current status of the tome system.
 pub fn show(config: &Config) -> Result<()> {
+    // Not yet initialised — no config file, no library directory
+    if !config.library_dir.is_dir() && config.sources.is_empty() {
+        println!("Not configured yet. Run `tome init` to get started.");
+        return Ok(());
+    }
+
     println!(
         "{} {}",
         style("Library:").bold(),
@@ -105,13 +111,33 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn status_handles_missing_library_gracefully() {
+    fn status_shows_init_prompt_when_unconfigured() {
         let config = Config {
             library_dir: PathBuf::from("/nonexistent/tome/library"),
             ..Config::default()
         };
 
-        // show() should not return an error — it warns and shows "?" instead
+        // Pre-init guard triggers: no library dir + no sources → friendly message, no error
+        let result = show(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn status_warns_when_library_missing_but_sources_configured() {
+        use crate::config::{Source, SourceType};
+
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/tome/library"),
+            sources: vec![Source {
+                name: "test".to_string(),
+                path: PathBuf::from("/nonexistent/source"),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        // Guard does NOT trigger because sources is non-empty.
+        // show() still returns Ok (it warns on stderr but does not error).
         let result = show(&config);
         assert!(result.is_ok());
     }

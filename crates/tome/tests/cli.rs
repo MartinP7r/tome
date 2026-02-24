@@ -291,3 +291,30 @@ fn doctor_detects_broken_symlinks() {
         .success()
         .stdout(predicate::str::contains("1 issue(s)"));
 }
+
+// -- Pre-init state (no config file) --
+
+#[test]
+fn status_without_config_shows_init_prompt() {
+    tome()
+        .args(["--config", "/nonexistent/config.toml", "status"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Not configured yet"))
+        .stdout(predicate::str::contains("tome init"));
+}
+
+#[test]
+fn doctor_without_config_shows_init_prompt() {
+    tome()
+        .args([
+            "--config",
+            "/nonexistent/config.toml",
+            "--dry-run",
+            "doctor",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Not configured yet"))
+        .stdout(predicate::str::contains("tome init"));
+}
