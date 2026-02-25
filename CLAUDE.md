@@ -12,7 +12,8 @@ make fmt            # cargo fmt
 make fmt-check      # cargo fmt -- --check
 make ci             # fmt-check + lint + test (matches CI pipeline)
 make install        # install both binaries via cargo install
-make release        # cargo build --release (LTO + strip)
+make build-release  # cargo build --release (LTO + strip)
+make release VERSION=0.1.4  # bump version, PR, merge, tag, push (triggers CI release)
 ```
 
 Run a single test:

@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.1.3"
+version = "0.1.4"
 edition = "2024"
 license = "MIT"
 authors = ["Martin Pfundmair <dev@martinp7r.com>"]
@@ -54,6 +54,8 @@ tap = "MartinP7r/homebrew-tap"
 formula = "tome"
 # Publish jobs to run in CI
 publish-jobs = ["homebrew"]
+# Allow CI file modifications (e.g. Dependabot bumps) without failing the release
+allow-dirty = ["ci"]
 
 [profile.dist]
 inherits = "release"
