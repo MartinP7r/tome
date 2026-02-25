@@ -105,6 +105,18 @@ Make the skill library reproducible across machines via a lockfile and per-machi
 - Debounced fsnotify-based watcher
 - Optional desktop notification on sync
 
+## Future — Companion macOS App
+
+Native macOS skill manager app (inspired by [CodexSkillManager](https://github.com/Dimillian/CodexSkillManager)):
+
+- **Browse & manage library**: View all skills in the tome library with rendered Markdown previews using [swift-markdown-ui](https://github.com/gonzalezreal/swift-markdown-ui)
+- **Visual skill editing**: Edit skill frontmatter and body with live preview
+- **Sync trigger**: Run `tome sync` from the GUI with status feedback
+- **Source & target management**: Configure sources and targets visually instead of editing `config.toml`
+- **Health dashboard**: Surface `tome doctor` and `tome status` diagnostics in a native UI
+- **Import/export**: Import skills from folders or zip files; export skills for sharing
+- **Tech stack**: SwiftUI (macOS 15+), swift-markdown-ui for rendering, invokes `tome` CLI under the hood
+
 ## Future Ideas
 
 - **Plugin registry**: Browse and install community skill packs
