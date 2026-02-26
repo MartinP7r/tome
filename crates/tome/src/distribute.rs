@@ -12,6 +12,8 @@ use crate::paths::symlink_points_to;
 pub struct DistributeResult {
     pub changed: usize,
     pub unchanged: usize,
+    /// Skills skipped because a non-symlink file already exists at the destination.
+    pub skipped: usize,
     pub target_name: String,
 }
 
@@ -86,6 +88,7 @@ fn distribute_symlinks(
                 "warning: {} exists in target and is not a symlink, skipping",
                 target_link.display()
             );
+            result.skipped += 1;
             continue;
         }
 

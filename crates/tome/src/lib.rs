@@ -148,19 +148,34 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
 
     // Report
     println!("{}", style("Sync complete").green().bold());
+    let lib_skipped = if consolidate_result.skipped > 0 {
+        format!(
+            ", {} skipped (path conflict)",
+            style(consolidate_result.skipped).yellow()
+        )
+    } else {
+        String::new()
+    };
     println!(
-        "  Library: {} created, {} unchanged, {} updated",
+        "  Library: {} created, {} unchanged, {} updated{}",
         style(consolidate_result.created).cyan(),
         consolidate_result.unchanged,
-        consolidate_result.updated
+        consolidate_result.updated,
+        lib_skipped
     );
 
     for dr in &distribute_results {
+        let skipped_note = if dr.skipped > 0 {
+            format!(", {} skipped (path conflict)", style(dr.skipped).yellow())
+        } else {
+            String::new()
+        };
         println!(
-            "  {}: {} linked, {} unchanged",
+            "  {}: {} linked, {} unchanged{}",
             style(&dr.target_name).bold(),
             style(dr.changed).cyan(),
-            dr.unchanged
+            dr.unchanged,
+            skipped_note
         );
     }
 
