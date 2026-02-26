@@ -43,6 +43,7 @@ pub fn run(cli: Cli) -> Result<()> {
             );
         }
         let config = wizard::run(cli.dry_run)?;
+        config.validate()?;
         if !cli.dry_run {
             sync(&config, cli.dry_run, cli.verbose, cli.quiet)?;
         }
@@ -182,11 +183,11 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
 
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool) -> Result<()> {
+    let skills = discover::discover_all(config)?;
+
     if quiet {
         return Ok(());
     }
-
-    let skills = discover::discover_all(config)?;
 
     if skills.is_empty() {
         println!("No skills found. Run `tome init` to configure sources.");
