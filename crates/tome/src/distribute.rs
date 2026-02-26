@@ -54,6 +54,11 @@ fn distribute_symlinks(
         ..Default::default()
     };
 
+    // Library may not exist yet on a first dry-run (consolidate skips creating it).
+    if !library_dir.is_dir() {
+        return Ok(result);
+    }
+
     // Read all entries in library (these are symlinks to skill dirs)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
@@ -350,6 +355,26 @@ mod tests {
             err_msg.contains("not a JSON object"),
             "unexpected error: {err_msg}"
         );
+    }
+
+    #[test]
+    fn distribute_symlinks_dry_run_with_nonexistent_library() {
+        // Library doesn't exist yet (fresh install dry-run). Should return Ok with zero counts.
+        let tmp = TempDir::new().unwrap();
+        let nonexistent_library = tmp.path().join("library-never-created");
+        let target_dir = TempDir::new().unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
+        };
+
+        let result =
+            distribute_to_target(&nonexistent_library, "test", &target, true).unwrap();
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.unchanged, 0);
     }
 
     #[test]
