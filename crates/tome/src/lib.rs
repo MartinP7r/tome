@@ -15,9 +15,23 @@ pub(crate) mod wizard;
 
 use anyhow::Result;
 use console::style;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use cli::{Cli, Command};
 use config::Config;
+
+/// Create a spinner with a consistent style.
+fn spinner(msg: &str) -> ProgressBar {
+    let sp = ProgressBar::new_spinner();
+    sp.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.cyan} {msg}")
+            .expect("valid template"),
+    );
+    sp.set_message(msg.to_string());
+    sp.enable_steady_tick(std::time::Duration::from_millis(80));
+    sp
+}
 
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
@@ -62,11 +76,17 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
         );
     }
 
+    let show_progress = !quiet && !verbose;
+
     // 1. Discover
+    let sp = show_progress.then(|| spinner("Discovering skills..."));
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
     let skills = discover::discover_all(config)?;
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
 
     if skills.is_empty() {
         if !quiet {
@@ -80,22 +100,31 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
     }
 
     // 2. Consolidate into library
+    let sp = show_progress.then(|| spinner("Consolidating to library..."));
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
     let consolidate_result = library::consolidate(&skills, &config.library_dir, dry_run)?;
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
 
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
+        let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
         let result = distribute::distribute_to_target(&config.library_dir, name, target, dry_run)?;
         distribute_results.push(result);
+        if let Some(sp) = sp {
+            sp.finish_and_clear();
+        }
     }
 
     // 4. Cleanup stale links
+    let sp = show_progress.then(|| spinner("Cleaning up stale links..."));
     if verbose {
         eprintln!("{}", style("Cleaning up stale links...").dim());
     }
@@ -107,6 +136,9 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
         }
+    }
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
     }
 
     if quiet {
@@ -161,22 +193,32 @@ fn list(config: &Config, quiet: bool) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "{:<30} {:<20} {}",
-        style("SKILL").bold(),
-        style("SOURCE").bold(),
-        style("PATH").bold()
-    );
+    use tabled::settings::{Modify, Style, object::Rows};
 
-    for skill in &skills {
-        println!(
-            "{:<30} {:<20} {}",
-            skill.name,
-            style(&skill.source_name).dim(),
-            style(skill.path.display()).dim()
-        );
+    let mut rows: Vec<[String; 3]> = Vec::with_capacity(skills.len() + 1);
+    rows.push([
+        "SKILL".to_string(),
+        "SOURCE".to_string(),
+        "PATH".to_string(),
+    ]);
+    for s in &skills {
+        rows.push([
+            s.name.to_string(),
+            s.source_name.clone(),
+            s.path.display().to_string(),
+        ]);
     }
 
+    let table = tabled::Table::from_iter(rows)
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                style(s).bold().to_string()
+            })),
+        )
+        .to_string();
+
+    println!("{table}");
     println!();
     println!("{} skill(s) total", skills.len());
 
