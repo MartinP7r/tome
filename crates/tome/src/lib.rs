@@ -56,7 +56,10 @@ pub fn run(cli: Cli) -> Result<()> {
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
     if dry_run && !quiet {
-        eprintln!("{}", style("[dry-run] No changes will be made").yellow().bold());
+        eprintln!(
+            "{}",
+            style("[dry-run] No changes will be made").yellow().bold()
+        );
     }
 
     // 1. Discover

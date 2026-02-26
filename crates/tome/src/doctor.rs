@@ -18,7 +18,10 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
     }
 
     if dry_run {
-        eprintln!("{}", style("[dry-run] No changes will be made").yellow().bold());
+        eprintln!(
+            "{}",
+            style("[dry-run] No changes will be made").yellow().bold()
+        );
     }
 
     let mut total_issues = 0;
