@@ -60,3 +60,9 @@ Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integrati
 ## CI
 
 GitHub Actions runs on both `ubuntu-latest` and `macos-latest`: fmt check, clippy with `-D warnings`, tests, and release build.
+
+## Releases
+
+Releases are managed by [cargo-dist](https://opensource.axo.dev/cargo-dist/). The release workflow (`release.yml`) is **generated and owned by cargo-dist** — don't edit it manually.
+
+**Important:** When bumping `cargo-dist-version` in `Cargo.toml`, always run `cargo dist init` afterwards to regenerate `release.yml`. We use `allow-dirty = ["ci"]` to tolerate Dependabot action bumps, but cargo-dist upgrades may require real workflow changes that won't be applied automatically.
