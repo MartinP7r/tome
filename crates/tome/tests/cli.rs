@@ -115,7 +115,8 @@ fn sync_dry_run_makes_no_changes() {
         .args(["--config", config.to_str().unwrap(), "--dry-run", "sync"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Dry run").and(predicate::str::contains("Sync complete")));
+        .stderr(predicate::str::contains("dry-run"))
+        .stdout(predicate::str::contains("Sync complete"));
 
     // Library should remain empty
     let library = tmp.path().join("library");
