@@ -260,6 +260,61 @@ mod tests {
     }
 
     #[test]
+    fn distribute_symlinks_updates_stale_link() {
+        use std::os::unix::fs as unix_fs;
+
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        setup_library(library.path(), &["skill-a"]);
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
+        };
+
+        // First distribute: creates the link
+        distribute_to_target(library.path(), "test", &target, false).unwrap();
+
+        // Simulate the target link now pointing somewhere else (stale)
+        let stale_path = target_dir.path().join("skill-a");
+        std::fs::remove_file(&stale_path).unwrap();
+        let other = TempDir::new().unwrap();
+        unix_fs::symlink(other.path(), &stale_path).unwrap();
+
+        // Second distribute: should update the stale link
+        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        assert_eq!(result.changed, 1, "stale link should be updated");
+        assert_eq!(result.unchanged, 0);
+
+        // Link should now point to the library entry
+        let link_target = std::fs::read_link(&stale_path).unwrap();
+        assert_eq!(link_target, library.path().join("skill-a"));
+    }
+
+    #[test]
+    fn distribute_mcp_dry_run_does_not_write_file() {
+        let library = TempDir::new().unwrap();
+        let mcp_dir = TempDir::new().unwrap();
+        let mcp_path = mcp_dir.path().join(".mcp.json");
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path.clone(),
+            },
+        };
+
+        let result = distribute_to_target(library.path(), "codex", &target, true).unwrap();
+        assert_eq!(result.changed, 1, "dry-run should count the change");
+        assert!(
+            !mcp_path.exists(),
+            "dry-run must not write the .mcp.json file"
+        );
+    }
+
+    #[test]
     fn distribute_disabled_target_is_noop() {
         let library = TempDir::new().unwrap();
         let target = TargetConfig {
@@ -374,8 +429,7 @@ mod tests {
             },
         };
 
-        let result =
-            distribute_to_target(&nonexistent_library, "test", &target, true).unwrap();
+        let result = distribute_to_target(&nonexistent_library, "test", &target, true).unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 0);
     }

@@ -75,8 +75,8 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
 
             // Match against both the original and canonical library path so we correctly
             // handle macOS /var -> /private/var symlinks and similar platform quirks.
-            let points_into_library = target.starts_with(library_dir)
-                || target.starts_with(&canonical_library);
+            let points_into_library =
+                target.starts_with(library_dir) || target.starts_with(&canonical_library);
 
             // Remove if it points into the library dir but the library entry is gone
             if points_into_library && !target.exists() {
@@ -170,6 +170,24 @@ mod tests {
         assert!(library.join("my-skill").is_symlink());
         // Broken one should be removed
         assert!(!library.join("gone").exists());
+    }
+
+    #[test]
+    fn cleanup_target_dry_run_preserves_stale_links() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Symlink in target pointing to a non-existent library entry
+        let phantom = library.path().join("deleted-skill");
+        unix_fs::symlink(&phantom, target.path().join("deleted-skill")).unwrap();
+
+        let removed = cleanup_target(target.path(), library.path(), true).unwrap();
+        assert_eq!(removed, 1, "dry-run should count the stale link");
+        // Symlink must still exist — dry-run must not remove anything
+        assert!(
+            target.path().join("deleted-skill").is_symlink(),
+            "dry-run should not remove the symlink"
+        );
     }
 
     #[test]

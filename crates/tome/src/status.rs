@@ -104,8 +104,7 @@ fn count_broken_symlinks(dir: &Path) -> Result<usize> {
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
-        let entry = entry
-            .with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
         let path = entry.path();
         // is_symlink() checks the link itself; exists() follows it —
         // a symlink that exists but whose target doesn't yields true + false
