@@ -54,6 +54,12 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
 
     let mut removed = 0;
 
+    // Canonicalize library_dir so that starts_with works when library_dir itself
+    // contains a symlink component (e.g., /var -> /private/var on macOS).
+    // We keep both forms so we can match symlinks created with either path variant.
+    let canonical_library =
+        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+
     let entries = std::fs::read_dir(target_dir)
         .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
@@ -67,8 +73,13 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
 
+            // Match against both the original and canonical library path so we correctly
+            // handle macOS /var -> /private/var symlinks and similar platform quirks.
+            let points_into_library = target.starts_with(library_dir)
+                || target.starts_with(&canonical_library);
+
             // Remove if it points into the library dir but the library entry is gone
-            if target.starts_with(library_dir) && !target.exists() {
+            if points_into_library && !target.exists() {
                 if !dry_run {
                     std::fs::remove_file(&path).with_context(|| {
                         format!("failed to remove stale symlink {}", path.display())
