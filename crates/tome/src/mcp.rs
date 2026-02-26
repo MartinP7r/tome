@@ -69,6 +69,33 @@ impl TomeServer {
         match skill {
             Some(skill) => {
                 let skill_md = skill.path.join("SKILL.md");
+
+                // Guard against a SKILL.md that is a symlink pointing outside the skill
+                // directory — an MCP client must not be able to read arbitrary files.
+                if skill_md.is_symlink() {
+                    let resolved = std::fs::canonicalize(&skill_md).map_err(|e| {
+                        McpError::internal_error(
+                            format!("failed to resolve {}: {e}", skill_md.display()),
+                            None,
+                        )
+                    })?;
+                    let base = std::fs::canonicalize(&skill.path).map_err(|e| {
+                        McpError::internal_error(
+                            format!("failed to resolve skill dir {}: {e}", skill.path.display()),
+                            None,
+                        )
+                    })?;
+                    if !resolved.starts_with(&base) {
+                        return Err(McpError::internal_error(
+                            format!(
+                                "SKILL.md in '{}' is a symlink that escapes the skill directory",
+                                skill.name
+                            ),
+                            None,
+                        ));
+                    }
+                }
+
                 let content = std::fs::read_to_string(&skill_md).map_err(|e| {
                     McpError::internal_error(
                         format!("failed to read {}: {e}", skill_md.display()),
@@ -182,6 +209,37 @@ mod tests {
             .unwrap();
         let text = extract_text(&result);
         assert!(text.contains("Some content."), "unexpected: {text}");
+    }
+
+    #[test]
+    fn read_skill_rejects_skill_md_symlink_escape() {
+        use std::os::unix::fs as unix_fs;
+
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        // Create a real SKILL.md so the skill is discovered at server startup.
+        std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
+
+        // After discovery, replace SKILL.md with a symlink pointing to a file outside the
+        // skill directory — simulating an attacker replacing the file post-startup.
+        let sensitive = tmp.path().join("sensitive.txt");
+        std::fs::write(&sensitive, "secret contents").unwrap();
+        std::fs::remove_file(skill_dir.join("SKILL.md")).unwrap();
+        unix_fs::symlink(&sensitive, skill_dir.join("SKILL.md")).unwrap();
+
+        let result = server.read_skill(Parameters(ReadSkillRequest {
+            name: "my-skill".into(),
+        }));
+
+        assert!(result.is_err(), "expected Err for symlink escape, got Ok");
+        let err = result.unwrap_err();
+        assert!(
+            format!("{err:?}").contains("escapes"),
+            "unexpected error: {err:?}"
+        );
     }
 
     #[test]
