@@ -1,11 +1,25 @@
 # Roadmap
 
+| Version    | Theme                  | Key Features                                                            |
+| ---------- | ---------------------- | ----------------------------------------------------------------------- |
+| **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs |
+| **v0.2**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |
+| **v0.3**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |
+| **v0.3.x** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |
+| **v0.4**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |
+| **v0.5**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |
+| **v0.6**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |
+
+---
+
 ## v0.1.x — Polish & UX
 
 - **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — `dialoguer` doesn't surface these by default
 - **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
 - **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
-- **Modern TUI with welcome ASCII art**: Replace plain text output with a polished TUI; open `tome init` with ASCII art of a tome/spellbook as the welcome screen
+- **Modern TUI with welcome ASCII art**: Replace plain text output with a polished TUI; open `tome init` with ASCII art of a tome/spellbook as the welcome screen. Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.
+- **Progress spinners for sync** (`indicatif`): Show spinners/progress during discover → consolidate → distribute steps instead of silent waits or verbose text dumps
+- **Table-formatted output** (`tabled`): Replace manual `format!` column alignment in `tome list` and `tome status` with proper table rendering — handles terminal width, truncation, and alignment automatically
 - ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
 - **Optional git init for library**: Ask during `tome init` whether to initialize a git repo in the library directory for change tracking across syncs
 - **Expand wizard auto-discovery**: ~~Added `~/.gemini/antigravity/skills`.~~ `~/.copilot/skills/` and `~/.cursor/` don't exist as official home-dir paths — Copilot uses per-project `.github/skills/` and Cursor uses per-project `.cursor/rules/`. Per-project sources deferred to v0.2 connector architecture.
@@ -26,6 +40,7 @@ The current model hardcodes targets as struct fields and keeps source/target log
 - **Format awareness per connector**: Each connector declares its native format — the pipeline handles translation between them (e.g., SKILL.md ↔ Cursor rules ↔ Windsurf conventions)
 - Support syncing `.claude/rules/` and agent definitions alongside skills
 - **Instruction file syncing**: Bidirectional sync of tool instruction files (CLAUDE.md ↔ AGENTS.md ↔ GEMINI.md ↔ copilot-instructions.md) — extract shared sections and distribute to each tool's native format
+- **npm-based skill sources** ([#97](https://github.com/MartinP7r/tome/issues/97)): Discover skills installed via `npx skills` (Vercel) and `npx openskills` — investigate install paths, manifest formats, and whether existing `Directory` source type suffices or a dedicated connector is needed
 
 ## v0.3 — Format Transforms
 
