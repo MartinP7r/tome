@@ -91,7 +91,14 @@ fn configure_sources() -> Result<Vec<Source>> {
     if !known_sources.is_empty() {
         let labels: Vec<String> = known_sources
             .iter()
-            .map(|s| format!("{} ({})", s.path.display(), s.source_type))
+            .map(|s| match s.source_type {
+                SourceType::ClaudePlugins => {
+                    format!("{} — installed marketplace plugins", s.path.display())
+                }
+                SourceType::Directory => {
+                    format!("{} ({})", s.path.display(), s.source_type)
+                }
+            })
             .collect();
 
         let selections = MultiSelect::new()
