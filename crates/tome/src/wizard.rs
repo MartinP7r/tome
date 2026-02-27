@@ -222,9 +222,10 @@ fn configure_targets() -> Result<Targets> {
                     },
                 });
             }
-            _ => {
-                eprintln!("warning: unexpected target index {idx}, skipping");
-            }
+            _ => unreachable!(
+                "MultiSelect returned index {idx} but tools array only has {} entries",
+                tools.len()
+            ),
         }
     }
 

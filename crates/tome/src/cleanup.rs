@@ -54,6 +54,12 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
 
     let mut removed = 0;
 
+    // Canonicalize library_dir so that starts_with works when library_dir itself
+    // contains a symlink component (e.g., /var -> /private/var on macOS).
+    // We keep both forms so we can match symlinks created with either path variant.
+    let canonical_library =
+        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+
     let entries = std::fs::read_dir(target_dir)
         .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
@@ -67,8 +73,13 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
 
+            // Match against both the original and canonical library path so we correctly
+            // handle macOS /var -> /private/var symlinks and similar platform quirks.
+            let points_into_library =
+                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+
             // Remove if it points into the library dir but the library entry is gone
-            if target.starts_with(library_dir) && !target.exists() {
+            if points_into_library && !target.exists() {
                 if !dry_run {
                     std::fs::remove_file(&path).with_context(|| {
                         format!("failed to remove stale symlink {}", path.display())
@@ -159,6 +170,24 @@ mod tests {
         assert!(library.join("my-skill").is_symlink());
         // Broken one should be removed
         assert!(!library.join("gone").exists());
+    }
+
+    #[test]
+    fn cleanup_target_dry_run_preserves_stale_links() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Symlink in target pointing to a non-existent library entry
+        let phantom = library.path().join("deleted-skill");
+        unix_fs::symlink(&phantom, target.path().join("deleted-skill")).unwrap();
+
+        let removed = cleanup_target(target.path(), library.path(), true).unwrap();
+        assert_eq!(removed, 1, "dry-run should count the stale link");
+        // Symlink must still exist — dry-run must not remove anything
+        assert!(
+            target.path().join("deleted-skill").is_symlink(),
+            "dry-run should not remove the symlink"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! Read-only summary of the library state, configured sources, targets, and overall health.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
 
@@ -89,19 +89,30 @@ pub fn show(config: &Config) -> Result<()> {
 }
 
 fn count_entries(dir: &Path) -> Result<usize> {
-    Ok(std::fs::read_dir(dir)?.count())
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        count += 1;
+    }
+    Ok(count)
 }
 
 fn count_broken_symlinks(dir: &Path) -> Result<usize> {
-    Ok(std::fs::read_dir(dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| {
-            let path = e.path();
-            // is_symlink() checks the link itself; exists() follows it —
-            // a symlink that exists but whose target doesn't yields true + false
-            path.is_symlink() && !path.exists()
-        })
-        .count())
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let path = entry.path();
+        // is_symlink() checks the link itself; exists() follows it —
+        // a symlink that exists but whose target doesn't yields true + false
+        if path.is_symlink() && !path.exists() {
+            count += 1;
+        }
+    }
+    Ok(count)
 }
 
 #[cfg(test)]

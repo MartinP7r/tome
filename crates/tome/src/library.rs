@@ -14,6 +14,8 @@ pub struct ConsolidateResult {
     pub created: usize,
     pub unchanged: usize,
     pub updated: usize,
+    /// Skills skipped because a non-symlink already exists at the library path.
+    pub skipped: usize,
 }
 
 /// Consolidate discovered skills into the library directory via symlinks.
@@ -60,6 +62,7 @@ pub fn consolidate(
                 "warning: {} exists and is not a symlink, skipping",
                 link_path.display()
             );
+            result.skipped += 1;
             continue;
         } else {
             // Create new symlink

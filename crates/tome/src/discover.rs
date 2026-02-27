@@ -183,9 +183,15 @@ fn discover_claude_plugins_from_json(
         scan_install_records(arr, source_name, &mut skills)?;
     } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
         // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
-        for records in obj.values() {
+        for (plugin_name, records) in obj {
             if let Some(arr) = records.as_array() {
                 scan_install_records(arr, source_name, &mut skills)?;
+            } else {
+                eprintln!(
+                    "warning: unexpected format for plugin '{}' in {} — expected array, skipping",
+                    plugin_name,
+                    json_path.display()
+                );
             }
         }
     } else {
@@ -217,7 +223,16 @@ fn scan_install_records(
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
 fn discover_directory(source: &Source) -> Result<Vec<DiscoveredSkill>> {
-    if !source.path.is_dir() {
+    if source.path.exists() {
+        if !source.path.is_dir() {
+            eprintln!(
+                "warning: source '{}' path exists but is not a directory: {} — skipping",
+                source.name,
+                source.path.display()
+            );
+            return Ok(Vec::new());
+        }
+    } else {
         eprintln!(
             "warning: source '{}' path does not exist: {}",
             source.name,
@@ -241,7 +256,19 @@ fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>
         .filter_map(|e| match e {
             Ok(entry) => Some(entry),
             Err(err) => {
-                eprintln!("warning: skipping entry in {}: {}", dir.display(), err);
+                // Distinguish root errors (whole source unreadable) from sub-entry errors.
+                // A root error means the walk immediately failed — this is likely a config
+                // or permissions issue that warrants a more visible warning.
+                let path = err.path().unwrap_or(dir);
+                if path == dir {
+                    eprintln!(
+                        "warning: cannot read source directory {}: {}",
+                        dir.display(),
+                        err
+                    );
+                } else {
+                    eprintln!("warning: skipping entry in {}: {}", dir.display(), err);
+                }
                 None
             }
         })
