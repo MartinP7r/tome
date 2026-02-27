@@ -276,6 +276,7 @@ fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()
             && let Some(skill_dir) = entry.path().parent()
+            && skill_dir != dir // skip SKILL.md at source root
             && let Some(name_str) = skill_dir.file_name().and_then(|n| n.to_str())
         {
             match SkillName::new(name_str) {
@@ -339,6 +340,28 @@ mod tests {
         };
         let skills = discover_directory(&source).unwrap();
         assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn discover_directory_skips_skill_md_at_source_root() {
+        let tmp = TempDir::new().unwrap();
+        // SKILL.md directly at the source root (not inside a subdirectory)
+        std::fs::write(
+            tmp.path().join("SKILL.md"),
+            "---\nname: root-skill\n---\n# Root",
+        )
+        .unwrap();
+        // A legitimate skill in a subdirectory
+        create_skill(tmp.path(), "real-skill");
+
+        let source = Source {
+            name: "test".into(),
+            path: tmp.path().to_path_buf(),
+            source_type: SourceType::Directory,
+        };
+        let skills = discover_directory(&source).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "real-skill");
     }
 
     #[test]
