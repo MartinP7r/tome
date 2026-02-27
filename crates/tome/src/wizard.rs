@@ -95,7 +95,9 @@ fn configure_sources() -> Result<Vec<Source>> {
             .collect();
 
         let selections = MultiSelect::new()
-            .with_prompt("Found skills in these locations — select sources to include")
+            .with_prompt(
+                "Found skills in these locations — select sources to include\n  (space to toggle, enter to confirm)",
+            )
             .items(&labels)
             .defaults(&vec![true; known_sources.len()])
             .report(false)
@@ -175,7 +177,7 @@ fn configure_targets() -> Result<Targets> {
 
     let tools = &["Antigravity", "Codex (via MCP)", "OpenClaw (via MCP)"];
     let selections = MultiSelect::new()
-        .with_prompt("Which tools should receive skills?")
+        .with_prompt("Which tools should receive skills?\n  (space to toggle, enter to confirm)")
         .items(tools)
         .interact()?;
 
