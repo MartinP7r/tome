@@ -17,7 +17,7 @@ pub(crate) struct TomeServer {
 
 impl TomeServer {
     pub fn new(config: Config) -> anyhow::Result<Self> {
-        let skills = discover::discover_all(&config)?;
+        let skills = discover::discover_all(&config, true)?;
         Ok(Self {
             skills,
             tool_router: Self::tool_router(),

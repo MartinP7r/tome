@@ -24,16 +24,15 @@ impl SkillName {
             !name.contains('/') && !name.contains('\\'),
             "skill name contains path separator: '{name}'"
         );
-        if !name
+        Ok(Self(name))
+    }
+
+    /// Whether this name follows the strict `[a-z0-9-]+` convention
+    /// (which will become a hard requirement in v0.3).
+    pub fn is_conventional(&self) -> bool {
+        self.0
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-        {
-            eprintln!(
-                "warning: skill name '{}' should be lowercase letters, digits, or hyphens",
-                name
-            );
-        }
-        Ok(Self(name))
     }
 
     pub fn as_str(&self) -> &str {
@@ -86,7 +85,8 @@ pub struct DiscoveredSkill {
 ///
 /// Returns deduplicated skills — first source wins on name conflicts.
 /// Applies exclusion list from config.
-pub fn discover_all(config: &Config) -> Result<Vec<DiscoveredSkill>> {
+/// When `quiet` is true, naming-convention and deduplication warnings are suppressed.
+pub fn discover_all(config: &Config, quiet: bool) -> Result<Vec<DiscoveredSkill>> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
     let mut conflicts: Vec<(String, String, String)> = Vec::new();
@@ -97,6 +97,13 @@ pub fn discover_all(config: &Config) -> Result<Vec<DiscoveredSkill>> {
         for skill in source_skills {
             if config.exclude.iter().any(|e| e == skill.name.as_str()) {
                 continue;
+            }
+
+            if !quiet && !skill.name.is_conventional() {
+                eprintln!(
+                    "warning: skill name '{}' should be lowercase letters, digits, or hyphens",
+                    skill.name
+                );
             }
 
             let name_str = skill.name.as_str().to_string();
@@ -114,11 +121,13 @@ pub fn discover_all(config: &Config) -> Result<Vec<DiscoveredSkill>> {
         }
     }
 
-    for (name, winner, loser) in &conflicts {
-        eprintln!(
-            "warning: skill '{}' found in both '{}' and '{}', using '{}'",
-            name, winner, loser, winner
-        );
+    if !quiet {
+        for (name, winner, loser) in &conflicts {
+            eprintln!(
+                "warning: skill '{}' found in both '{}' and '{}', using '{}'",
+                name, winner, loser, winner
+            );
+        }
     }
 
     Ok(skills)
@@ -365,7 +374,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config).unwrap();
+        let skills = discover_all(&config, false).unwrap();
         assert_eq!(skills.len(), 2);
 
         let shared = skills.iter().find(|s| s.name == "shared-skill").unwrap();
@@ -388,7 +397,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config).unwrap();
+        let skills = discover_all(&config, false).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "keep-me");
     }
@@ -508,5 +517,12 @@ mod tests {
         assert_eq!(name.as_str(), "my-skill-123");
         assert_eq!(name.to_string(), "my-skill-123");
         assert_eq!(name, *"my-skill-123");
+    }
+
+    #[test]
+    fn skill_name_conventional_check() {
+        assert!(SkillName::new("my-skill-123").unwrap().is_conventional());
+        assert!(!SkillName::new("My_Skill").unwrap().is_conventional());
+        assert!(!SkillName::new("UPPER").unwrap().is_conventional());
     }
 }
