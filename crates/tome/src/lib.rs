@@ -45,7 +45,7 @@ pub fn run(cli: Cli) -> Result<()> {
         let config = wizard::run(cli.dry_run)?;
         config.validate()?;
         if !cli.dry_run {
-            sync(&config, cli.dry_run, cli.verbose, cli.quiet)?;
+            sync(&config, cli.dry_run, false, cli.verbose, cli.quiet)?;
         }
         return Ok(());
     }
@@ -55,7 +55,7 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
-        Command::Sync => sync(&config, cli.dry_run, cli.verbose, cli.quiet)?,
+        Command::Sync { force } => sync(&config, cli.dry_run, force, cli.verbose, cli.quiet)?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
         Command::Serve => {
@@ -69,7 +69,7 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
+fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool) -> Result<()> {
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -105,7 +105,7 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
-    let consolidate_result = library::consolidate(&skills, &config.library_dir, dry_run)?;
+    let consolidate_result = library::consolidate(&skills, &config.library_dir, dry_run, force)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -117,7 +117,8 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
-        let result = distribute::distribute_to_target(&config.library_dir, name, target, dry_run)?;
+        let result =
+            distribute::distribute_to_target(&config.library_dir, name, target, dry_run, force)?;
         distribute_results.push(result);
         if let Some(sp) = sp {
             sp.finish_and_clear();

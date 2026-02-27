@@ -18,11 +18,13 @@ pub struct DistributeResult {
 }
 
 /// Distribute skills from the library to a target tool.
+/// When `force` is true, all symlinks are recreated even if they already point to the correct target.
 pub fn distribute_to_target(
     library_dir: &Path,
     target_name: &str,
     target: &TargetConfig,
     dry_run: bool,
+    force: bool,
 ) -> Result<DistributeResult> {
     if !target.enabled {
         return Ok(DistributeResult {
@@ -33,7 +35,7 @@ pub fn distribute_to_target(
 
     match &target.method {
         TargetMethod::Symlink { skills_dir } => {
-            distribute_symlinks(library_dir, target_name, skills_dir, dry_run)
+            distribute_symlinks(library_dir, target_name, skills_dir, dry_run, force)
         }
         TargetMethod::Mcp { mcp_config } => distribute_mcp(target_name, mcp_config, dry_run),
     }
@@ -45,6 +47,7 @@ fn distribute_symlinks(
     target_name: &str,
     skills_dir: &Path,
     dry_run: bool,
+    force: bool,
 ) -> Result<DistributeResult> {
     if !dry_run {
         std::fs::create_dir_all(skills_dir)
@@ -73,11 +76,11 @@ fn distribute_symlinks(
         let target_link = skills_dir.join(&skill_name);
 
         if target_link.is_symlink() {
-            if symlink_points_to(&target_link, &library_skill_path) {
+            if symlink_points_to(&target_link, &library_skill_path) && !force {
                 result.unchanged += 1;
                 continue;
             }
-            // Update stale link
+            // Update stale link (or force-recreating)
             if !dry_run {
                 std::fs::remove_file(&target_link).with_context(|| {
                     format!("failed to remove stale symlink {}", target_link.display())
@@ -196,7 +199,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
         assert_eq!(result.changed, 2);
         assert!(target_dir.path().join("skill-a").is_symlink());
         assert!(target_dir.path().join("skill-b").is_symlink());
@@ -215,10 +218,29 @@ mod tests {
             },
         };
 
-        distribute_to_target(library.path(), "test", &target, false).unwrap();
-        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        distribute_to_target(library.path(), "test", &target, false, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn distribute_symlinks_force_recreates_links() {
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        setup_library(library.path(), &["skill-a"]);
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
+        };
+
+        distribute_to_target(library.path(), "test", &target, false, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, true).unwrap();
+        assert_eq!(result.changed, 1, "force should recreate unchanged link");
+        assert_eq!(result.unchanged, 0);
     }
 
     #[test]
@@ -251,7 +273,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(&lib_dir, "test", &target, false).unwrap();
+        let result = distribute_to_target(&lib_dir, "test", &target, false, false).unwrap();
         assert_eq!(
             result.unchanged, 1,
             "relative symlink should be recognized as matching"
@@ -275,7 +297,7 @@ mod tests {
         };
 
         // First distribute: creates the link
-        distribute_to_target(library.path(), "test", &target, false).unwrap();
+        distribute_to_target(library.path(), "test", &target, false, false).unwrap();
 
         // Simulate the target link now pointing somewhere else (stale)
         let stale_path = target_dir.path().join("skill-a");
@@ -284,7 +306,7 @@ mod tests {
         unix_fs::symlink(other.path(), &stale_path).unwrap();
 
         // Second distribute: should update the stale link
-        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
         assert_eq!(result.changed, 1, "stale link should be updated");
         assert_eq!(result.unchanged, 0);
 
@@ -306,7 +328,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "codex", &target, true).unwrap();
+        let result = distribute_to_target(library.path(), "codex", &target, true, false).unwrap();
         assert_eq!(result.changed, 1, "dry-run should count the change");
         assert!(
             !mcp_path.exists(),
@@ -324,7 +346,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
         assert_eq!(result.changed, 0);
     }
 
@@ -341,7 +363,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "codex", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "codex", &target, false, false).unwrap();
         assert_eq!(result.changed, 1);
 
         let content = std::fs::read_to_string(&mcp_path).unwrap();
@@ -373,7 +395,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "codex", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "codex", &target, false, false).unwrap();
         assert_eq!(result.changed, 1);
 
         // Verify both entries exist
@@ -383,7 +405,7 @@ mod tests {
         assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
 
         // Run again — should be idempotent, other-server still there
-        let result2 = distribute_to_target(library.path(), "codex", &target, false).unwrap();
+        let result2 = distribute_to_target(library.path(), "codex", &target, false, false).unwrap();
         assert_eq!(result2.unchanged, 1);
         let content2 = std::fs::read_to_string(&mcp_path).unwrap();
         let parsed2: serde_json::Value = serde_json::from_str(&content2).unwrap();
@@ -406,7 +428,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "test", &target, false);
+        let result = distribute_to_target(library.path(), "test", &target, false, false);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -429,7 +451,8 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(&nonexistent_library, "test", &target, true).unwrap();
+        let result =
+            distribute_to_target(&nonexistent_library, "test", &target, true, false).unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 0);
     }
@@ -448,7 +471,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "test", &target, true).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, true, false).unwrap();
         assert_eq!(result.changed, 1); // counted but not created
         assert!(!nonexistent_target.exists());
     }
@@ -469,7 +492,7 @@ mod tests {
             },
         };
 
-        let result = distribute_to_target(library.path(), "test", &target, false).unwrap();
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 0);
 
