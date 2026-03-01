@@ -93,8 +93,10 @@ fn count_entries(dir: &Path) -> Result<usize> {
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
-        entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        count += 1;
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        if entry.path().is_symlink() {
+            count += 1;
+        }
     }
     Ok(count)
 }
@@ -162,12 +164,28 @@ mod tests {
     }
 
     #[test]
-    fn count_entries_with_files() {
+    fn count_entries_ignores_regular_files() {
         let dir = tempfile::TempDir::new().unwrap();
         for name in ["a", "b", "c"] {
             std::fs::write(dir.path().join(name), "").unwrap();
         }
-        assert_eq!(count_entries(dir.path()).unwrap(), 3);
+        assert_eq!(count_entries(dir.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_entries_counts_only_symlinks() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = tempfile::TempDir::new().unwrap();
+
+        // Two symlinks — should be counted
+        unix_fs::symlink(target.path(), dir.path().join("link_a")).unwrap();
+        unix_fs::symlink(target.path(), dir.path().join("link_b")).unwrap();
+        // One regular file — should be ignored
+        std::fs::write(dir.path().join("regular"), "data").unwrap();
+
+        assert_eq!(count_entries(dir.path()).unwrap(), 2);
     }
 
     // -- count_broken_symlinks --
