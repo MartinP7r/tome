@@ -86,6 +86,33 @@ pub fn run(dry_run: bool) -> Result<Config> {
     {
         config.save(&config_path)?;
         println!("{} Config saved!", style("done").green());
+
+        // Offer to git-init the library directory for change tracking
+        if !config.library_dir.join(".git").exists()
+            && Confirm::new()
+                .with_prompt("Initialize a git repo in the library directory for change tracking?")
+                .default(false)
+                .interact()?
+        {
+            std::fs::create_dir_all(&config.library_dir)?;
+            let status = std::process::Command::new("git")
+                .args(["init"])
+                .current_dir(&config.library_dir)
+                .status()
+                .context("failed to run git init")?;
+            if status.success() {
+                println!(
+                    "  {} Initialized git repo in {}",
+                    style("✓").green(),
+                    config.library_dir.display()
+                );
+            } else {
+                eprintln!(
+                    "warning: git init failed (exit code {})",
+                    status.code().unwrap_or(-1)
+                );
+            }
+        }
     }
 
     Ok(config)
