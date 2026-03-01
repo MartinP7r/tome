@@ -127,11 +127,20 @@ fn configure_sources() -> Result<Vec<Source>> {
     if !known_sources.is_empty() {
         let labels: Vec<String> = known_sources
             .iter()
-            .map(|s| format!("{} ({})", s.path.display(), s.source_type))
+            .map(|s| match s.source_type {
+                SourceType::ClaudePlugins => {
+                    format!("{} — installed marketplace plugins", s.path.display())
+                }
+                SourceType::Directory => {
+                    format!("{} ({})", s.path.display(), s.source_type)
+                }
+            })
             .collect();
 
         let selections = MultiSelect::new()
-            .with_prompt("Found skills in these locations — select sources to include")
+            .with_prompt(
+                "Found skills in these locations — select sources to include\n  (space to toggle, enter to confirm)",
+            )
             .items(&labels)
             .defaults(&vec![true; known_sources.len()])
             .report(false)
@@ -220,7 +229,7 @@ fn configure_targets() -> Result<Targets> {
         "OpenClaw (via MCP)",
     ];
     let selections = MultiSelect::new()
-        .with_prompt("Which tools should receive skills?")
+        .with_prompt("Which tools should receive skills?\n  (space to toggle, enter to confirm)")
         .items(tools)
         .interact()?;
 
