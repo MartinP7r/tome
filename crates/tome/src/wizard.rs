@@ -65,9 +65,36 @@ pub fn run(dry_run: bool) -> Result<Config> {
         targets,
     };
 
-    // Step 5: Save config
-    let config_path = default_config_path()?;
+    // Summary
+    step_divider("Summary");
+    println!(
+        "  Sources:    {}",
+        if config.sources.is_empty() {
+            style("none".to_string()).yellow()
+        } else {
+            style(format!("{}", config.sources.len())).cyan()
+        }
+    );
+    println!(
+        "  Library:    {}",
+        style(config.library_dir.display()).cyan()
+    );
+    let target_count = config.targets.iter().count();
+    println!(
+        "  Targets:    {}",
+        if target_count == 0 {
+            style("none".to_string()).yellow()
+        } else {
+            style(format!("{target_count}")).cyan()
+        }
+    );
+    if !config.exclude.is_empty() {
+        println!("  Exclusions: {}", style(config.exclude.join(", ")).dim());
+    }
     println!();
+
+    // Save config
+    let config_path = default_config_path()?;
     println!(
         "Config will be saved to: {}",
         style(config_path.display()).cyan()
@@ -118,8 +145,15 @@ pub fn run(dry_run: bool) -> Result<Config> {
     Ok(config)
 }
 
+fn step_divider(label: &str) {
+    println!(
+        "{}",
+        style(format!("── {label} ──────────────────────────────")).dim()
+    );
+}
+
 fn configure_sources() -> Result<Vec<Source>> {
-    println!("{}", style("Step 1: Skill sources").bold());
+    step_divider("Step 1: Skill sources");
 
     let known_sources = find_known_sources()?;
     let mut sources = Vec::new();
@@ -189,7 +223,7 @@ fn configure_sources() -> Result<Vec<Source>> {
 }
 
 fn configure_library() -> Result<PathBuf> {
-    println!("{}", style("Step 2: Library location").bold());
+    step_divider("Step 2: Library location");
 
     let default = dirs::home_dir()
         .context("could not determine home directory")?
@@ -218,7 +252,7 @@ fn configure_library() -> Result<PathBuf> {
 }
 
 fn configure_targets() -> Result<Targets> {
-    println!("{}", style("Step 3: Distribution targets").bold());
+    step_divider("Step 3: Distribution targets");
 
     let home = dirs::home_dir().context("could not determine home directory")?;
 
@@ -301,7 +335,7 @@ fn configure_targets() -> Result<Targets> {
 }
 
 fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<Vec<String>> {
-    println!("{}", style("Step 4: Exclusions").bold());
+    step_divider("Step 4: Exclusions");
 
     if skills.is_empty() {
         println!("  (no skills discovered yet — exclusions can be added manually to config)");
