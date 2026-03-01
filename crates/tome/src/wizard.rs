@@ -26,6 +26,15 @@ pub fn run(dry_run: bool) -> Result<Config> {
     // Step 1: Discover and select sources
     let sources = configure_sources()?;
 
+    // Discover skills now so step 4 can offer a MultiSelect
+    let discovered = {
+        let tmp = Config {
+            sources: sources.clone(),
+            ..Config::default()
+        };
+        crate::discover::discover_all(&tmp).unwrap_or_default()
+    };
+
     // Step 2: Choose library location
     let library_dir = configure_library()?;
 
@@ -47,7 +56,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
     }
 
     // Step 4: Exclusions
-    let exclude = configure_exclusions()?;
+    let exclude = configure_exclusions(&discovered)?;
 
     let config = Config {
         library_dir,
@@ -106,10 +115,14 @@ fn configure_sources() -> Result<Vec<Source>> {
         }
 
         println!(
-            "  {} {} source(s) selected",
+            "  {} {} source(s) selected:",
             style("✓").green(),
             selections.len()
         );
+        for idx in &selections {
+            let s = &known_sources[*idx];
+            println!("    • {} ({})", s.name, s.path.display());
+        }
     }
 
     // Offer to add custom paths
@@ -173,7 +186,12 @@ fn configure_targets() -> Result<Targets> {
 
     let home = dirs::home_dir().context("could not determine home directory")?;
 
-    let tools = &["Antigravity", "Codex (via MCP)", "OpenClaw (via MCP)"];
+    let tools = &[
+        "Claude Code (symlink)",
+        "Antigravity",
+        "Codex (via MCP)",
+        "OpenClaw (via MCP)",
+    ];
     let selections = MultiSelect::new()
         .with_prompt("Which tools should receive skills?")
         .items(tools)
@@ -184,6 +202,19 @@ fn configure_targets() -> Result<Targets> {
     for idx in selections {
         match idx {
             0 => {
+                let default_path = home.join(".claude/skills");
+                let path: String = Input::new()
+                    .with_prompt("Claude Code skills directory")
+                    .default(default_path.display().to_string())
+                    .interact_text()?;
+                targets.claude = Some(TargetConfig {
+                    enabled: true,
+                    method: TargetMethod::Symlink {
+                        skills_dir: expand_tilde(&PathBuf::from(path))?,
+                    },
+                });
+            }
+            1 => {
                 let default_path = home.join(".gemini/antigravity/skills");
                 let path: String = Input::new()
                     .with_prompt("Antigravity skills directory")
@@ -196,7 +227,7 @@ fn configure_targets() -> Result<Targets> {
                     },
                 });
             }
-            1 => {
+            2 => {
                 let default_path = home.join(".codex/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("Codex MCP config path")
@@ -209,7 +240,7 @@ fn configure_targets() -> Result<Targets> {
                     },
                 });
             }
-            2 => {
+            3 => {
                 let default_path = home.join(".openclaw/.mcp.json");
                 let path: String = Input::new()
                     .with_prompt("OpenClaw MCP config path")
@@ -233,21 +264,23 @@ fn configure_targets() -> Result<Targets> {
     Ok(targets)
 }
 
-fn configure_exclusions() -> Result<Vec<String>> {
+fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<Vec<String>> {
     println!("{}", style("Step 4: Exclusions").bold());
 
-    let input: String = Input::new()
-        .with_prompt("Exclude any skills? (comma-separated names, or Enter for none)")
-        .default(String::new())
-        .allow_empty(true)
-        .interact_text()?;
+    if skills.is_empty() {
+        println!("  (no skills discovered yet — exclusions can be added manually to config)");
+        println!();
+        return Ok(Vec::new());
+    }
 
-    let exclude: Vec<String> = input
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
+    let selections = MultiSelect::new()
+        .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
+        .items(&labels)
+        .defaults(&vec![false; labels.len()])
+        .interact()?;
 
+    let exclude = selections.iter().map(|&i| labels[i].clone()).collect();
     println!();
     Ok(exclude)
 }
@@ -388,6 +421,7 @@ mod tests {
                     skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
                 },
             }),
+            claude: None,
             codex: None,
             openclaw: None,
         };
@@ -416,12 +450,38 @@ mod tests {
                     skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
                 },
             }),
+            claude: None,
             codex: None,
             openclaw: None,
         };
 
         let overlaps = find_source_target_overlaps(&sources, &targets);
         assert!(overlaps.is_empty());
+    }
+
+    #[test]
+    fn detects_claude_source_target_overlap() {
+        let sources = vec![Source {
+            name: "claude-skills".into(),
+            path: PathBuf::from("/home/user/.claude/skills"),
+            source_type: SourceType::Directory,
+        }];
+
+        let targets = Targets {
+            antigravity: None,
+            claude: Some(TargetConfig {
+                enabled: true,
+                method: TargetMethod::Symlink {
+                    skills_dir: PathBuf::from("/home/user/.claude/skills"),
+                },
+            }),
+            codex: None,
+            openclaw: None,
+        };
+
+        let overlaps = find_source_target_overlaps(&sources, &targets);
+        assert_eq!(overlaps.len(), 1);
+        assert_eq!(overlaps[0].0, "claude-skills");
     }
 
     #[test]
@@ -434,6 +494,7 @@ mod tests {
 
         let targets = Targets {
             antigravity: None,
+            claude: None,
             codex: Some(TargetConfig {
                 enabled: true,
                 method: TargetMethod::Mcp {
