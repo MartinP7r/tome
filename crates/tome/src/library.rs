@@ -21,10 +21,12 @@ pub struct ConsolidateResult {
 /// Consolidate discovered skills into the library directory via symlinks.
 ///
 /// Each skill gets a symlink: `library_dir/{skill_name}` → `{skill.path}`
+/// When `force` is true, all symlinks are recreated even if they already point to the correct target.
 pub fn consolidate(
     skills: &[DiscoveredSkill],
     library_dir: &Path,
     dry_run: bool,
+    force: bool,
 ) -> Result<ConsolidateResult> {
     if !dry_run {
         std::fs::create_dir_all(library_dir)
@@ -37,12 +39,12 @@ pub fn consolidate(
         let link_path = library_dir.join(&skill.name);
 
         if link_path.is_symlink() {
-            if symlink_points_to(&link_path, &skill.path) {
+            if symlink_points_to(&link_path, &skill.path) && !force {
                 result.unchanged += 1;
                 continue;
             }
 
-            // Points somewhere else — update it
+            // Points somewhere else (or force-recreating) — update it
             if !dry_run {
                 std::fs::remove_file(&link_path).with_context(|| {
                     format!("failed to remove old symlink {}", link_path.display())
@@ -104,7 +106,7 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let result = consolidate(&[skill], library.path(), false).unwrap();
+        let result = consolidate(&[skill], library.path(), false, false).unwrap();
         assert_eq!(result.created, 1);
         assert_eq!(result.unchanged, 0);
 
@@ -118,10 +120,24 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false).unwrap();
-        let result = consolidate(std::slice::from_ref(&skill), library.path(), false).unwrap();
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let result =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
         assert_eq!(result.created, 0);
         assert_eq!(result.unchanged, 1);
+    }
+
+    #[test]
+    fn consolidate_force_recreates_links() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let result =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, true).unwrap();
+        assert_eq!(result.updated, 1, "force should recreate unchanged link");
+        assert_eq!(result.unchanged, 0);
     }
 
     #[test]
@@ -149,7 +165,7 @@ mod tests {
             source_name: "test".into(),
         };
 
-        let result = consolidate(&[skill], &lib_dir, false).unwrap();
+        let result = consolidate(&[skill], &lib_dir, false, false).unwrap();
         assert_eq!(
             result.unchanged, 1,
             "relative symlink should be recognized as matching"
@@ -164,7 +180,7 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let result = consolidate(&[skill], library.path(), true).unwrap();
+        let result = consolidate(&[skill], library.path(), true, false).unwrap();
         assert_eq!(result.created, 1);
 
         // Symlink should NOT exist
@@ -178,10 +194,11 @@ mod tests {
         let library = TempDir::new().unwrap();
 
         let skill1 = make_skill(source1.path(), "my-skill");
-        consolidate(&[skill1], library.path(), false).unwrap();
+        consolidate(&[skill1], library.path(), false, false).unwrap();
 
         let skill2 = make_skill(source2.path(), "my-skill");
-        let result = consolidate(std::slice::from_ref(&skill2), library.path(), false).unwrap();
+        let result =
+            consolidate(std::slice::from_ref(&skill2), library.path(), false, false).unwrap();
         assert_eq!(result.updated, 1);
 
         let actual_target = std::fs::read_link(library.path().join("my-skill")).unwrap();
@@ -195,7 +212,7 @@ mod tests {
         let source = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let result = consolidate(&[skill], &nonexistent_lib, true).unwrap();
+        let result = consolidate(&[skill], &nonexistent_lib, true, false).unwrap();
         assert_eq!(result.created, 1);
         assert!(!nonexistent_lib.exists());
     }
@@ -210,7 +227,7 @@ mod tests {
         // Pre-create a regular file at the library link path (collision)
         std::fs::write(library.path().join("my-skill"), "not a symlink").unwrap();
 
-        let result = consolidate(&[skill], library.path(), false).unwrap();
+        let result = consolidate(&[skill], library.path(), false, false).unwrap();
         assert_eq!(result.created, 0);
         assert_eq!(result.unchanged, 0);
         assert_eq!(result.updated, 0);

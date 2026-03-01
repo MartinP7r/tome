@@ -37,7 +37,11 @@ pub enum Command {
     Init,
 
     /// Discover, consolidate, and distribute skills
-    Sync,
+    Sync {
+        /// Recreate all symlinks even if they appear up-to-date
+        #[arg(short, long)]
+        force: bool,
+    },
 
     /// Show current state of skills, symlinks, and targets
     Status,
