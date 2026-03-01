@@ -359,7 +359,7 @@ fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<V
 const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
     (
         "claude-plugins",
-        ".claude/plugins/cache",
+        ".claude/plugins",
         SourceType::ClaudePlugins,
     ),
     ("claude-skills", ".claude/skills", SourceType::Directory),
