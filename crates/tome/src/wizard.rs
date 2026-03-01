@@ -32,7 +32,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
             sources: sources.clone(),
             ..Config::default()
         };
-        crate::discover::discover_all(&tmp).unwrap_or_default()
+        crate::discover::discover_all(&tmp, true).unwrap_or_default()
     };
 
     // Step 2: Choose library location

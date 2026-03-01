@@ -577,7 +577,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config).unwrap();
+        let skills = discover_all(&config, false).unwrap();
         assert_eq!(skills.len(), 2);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"skill-alpha"));
