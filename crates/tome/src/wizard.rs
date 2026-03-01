@@ -268,9 +268,7 @@ fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<V
     println!("{}", style("Step 4: Exclusions").bold());
 
     if skills.is_empty() {
-        println!(
-            "  (no skills discovered yet — exclusions can be added manually to config)"
-        );
+        println!("  (no skills discovered yet — exclusions can be added manually to config)");
         println!();
         return Ok(Vec::new());
     }
