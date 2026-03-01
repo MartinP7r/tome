@@ -176,16 +176,16 @@ fn discover_claude_plugins_from_json(
     let plugins: serde_json::Value = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse {}", json_path.display()))?;
 
-    let mut skills = Vec::new();
+    let mut raw_skills = Vec::new();
 
     if let Some(arr) = plugins.as_array() {
         // v1 format: flat array of plugin objects with "installPath"
-        scan_install_records(arr, source_name, &mut skills)?;
+        scan_install_records(arr, source_name, &mut raw_skills)?;
     } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
         // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
         for (plugin_name, records) in obj {
             if let Some(arr) = records.as_array() {
-                scan_install_records(arr, source_name, &mut skills)?;
+                scan_install_records(arr, source_name, &mut raw_skills)?;
             } else {
                 eprintln!(
                     "warning: unexpected format for plugin '{}' in {} — expected array, skipping",
@@ -200,6 +200,14 @@ fn discover_claude_plugins_from_json(
             json_path.display()
         );
     }
+
+    // Deduplicate within a single source — multiple install records can point to the
+    // same installPath, which would otherwise surface as spurious same-source conflicts.
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let skills = raw_skills
+        .into_iter()
+        .filter(|s| seen.insert(s.name.as_str().to_string()))
+        .collect();
 
     Ok(skills)
 }
@@ -489,6 +497,59 @@ mod tests {
             discover_claude_plugins_from_json(&tmp.path().join("installed_plugins.json"), "test")
                 .unwrap();
         assert!(skills.is_empty());
+    }
+
+    #[test]
+    fn discover_claude_plugins_deduplicates_within_source() {
+        let tmp = TempDir::new().unwrap();
+
+        // Two install records pointing to the same plugin dir → same skill
+        let plugin_dir = tmp.path().join("my-plugin");
+        create_skill(&plugin_dir.join("skills"), "shared-skill");
+
+        let json = serde_json::json!([
+            { "installPath": plugin_dir.to_str().unwrap() },
+            { "installPath": plugin_dir.to_str().unwrap() }
+        ]);
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        let source = Source {
+            name: "plugins".into(),
+            path: tmp.path().to_path_buf(),
+            source_type: SourceType::ClaudePlugins,
+        };
+        let skills = discover_claude_plugins(&source).unwrap();
+        // Should deduplicate to 1, not produce a spurious conflict
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "shared-skill");
+    }
+
+    #[test]
+    fn discover_all_with_partial_config_returns_skills() {
+        // Simulates what the wizard does: build a partial Config from selected
+        // sources and run discover_all to populate the exclusion picker.
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "skill-alpha");
+        create_skill(tmp.path(), "skill-beta");
+
+        let config = Config {
+            sources: vec![Source {
+                name: "wizard-test".into(),
+                path: tmp.path().to_path_buf(),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let skills = discover_all(&config).unwrap();
+        assert_eq!(skills.len(), 2);
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"skill-alpha"));
+        assert!(names.contains(&"skill-beta"));
     }
 
     #[test]

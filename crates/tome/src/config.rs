@@ -60,6 +60,8 @@ pub struct Targets {
     #[serde(default)]
     pub antigravity: Option<TargetConfig>,
     #[serde(default)]
+    pub claude: Option<TargetConfig>,
+    #[serde(default)]
     pub codex: Option<TargetConfig>,
     #[serde(default)]
     pub openclaw: Option<TargetConfig>,
@@ -70,6 +72,7 @@ impl Targets {
     pub fn iter(&self) -> impl Iterator<Item = (&str, &TargetConfig)> {
         [
             ("antigravity", self.antigravity.as_ref()),
+            ("claude", self.claude.as_ref()),
             ("codex", self.codex.as_ref()),
             ("openclaw", self.openclaw.as_ref()),
         ]
@@ -261,6 +264,9 @@ impl Config {
             source.path = expand_tilde(&source.path)?;
         }
         if let Some(ref mut t) = self.targets.antigravity {
+            expand_target_tildes(t)?;
+        }
+        if let Some(ref mut t) = self.targets.claude {
             expand_target_tildes(t)?;
         }
         if let Some(ref mut t) = self.targets.codex {
@@ -566,5 +572,63 @@ mcp_config = "~/.codex/.mcp.json"
         assert!(config.targets.antigravity.is_some());
         assert!(config.targets.codex.is_some());
         assert!(config.targets.openclaw.is_none());
+    }
+
+    #[test]
+    fn targets_iter_includes_claude() {
+        let targets = Targets {
+            antigravity: None,
+            claude: Some(TargetConfig {
+                enabled: true,
+                method: TargetMethod::Symlink {
+                    skills_dir: PathBuf::from("/tmp/claude-skills"),
+                },
+            }),
+            codex: None,
+            openclaw: None,
+        };
+        let names: Vec<&str> = targets.iter().map(|(name, _)| name).collect();
+        assert_eq!(names, vec!["claude"]);
+    }
+
+    #[test]
+    fn config_roundtrip_claude_target() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/skills"),
+            exclude: Vec::new(),
+            sources: Vec::new(),
+            targets: Targets {
+                antigravity: None,
+                claude: Some(TargetConfig {
+                    enabled: true,
+                    method: TargetMethod::Symlink {
+                        skills_dir: PathBuf::from("/tmp/claude-skills"),
+                    },
+                }),
+                codex: None,
+                openclaw: None,
+            },
+        };
+        let toml_str = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&toml_str).unwrap();
+        assert!(parsed.targets.claude.is_some());
+        let claude = parsed.targets.claude.unwrap();
+        assert!(claude.enabled);
+        assert_eq!(claude.skills_dir(), Some(Path::new("/tmp/claude-skills")));
+    }
+
+    #[test]
+    fn config_parses_claude_target_from_toml() {
+        let toml_str = r#"
+[targets.claude]
+enabled = true
+method = "symlink"
+skills_dir = "~/.claude/skills"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert!(config.targets.claude.is_some());
+        let claude = config.targets.claude.unwrap();
+        assert!(claude.enabled);
+        assert!(claude.skills_dir().is_some());
     }
 }
