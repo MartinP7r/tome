@@ -84,7 +84,7 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
-    let skills = discover::discover_all(config)?;
+    let skills = discover::discover_all(config, quiet)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -198,7 +198,7 @@ fn sync(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()
 
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool) -> Result<()> {
-    let skills = discover::discover_all(config)?;
+    let skills = discover::discover_all(config, quiet)?;
 
     if quiet {
         return Ok(());
