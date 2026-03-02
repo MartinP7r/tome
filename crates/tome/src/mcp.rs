@@ -70,33 +70,33 @@ impl TomeServer {
             Some(skill) => {
                 let skill_md = skill.path.join("SKILL.md");
 
-                // Guard against a SKILL.md that is a symlink pointing outside the skill
-                // directory — an MCP client must not be able to read arbitrary files.
-                if skill_md.is_symlink() {
-                    let resolved = std::fs::canonicalize(&skill_md).map_err(|e| {
-                        McpError::internal_error(
-                            format!("failed to resolve {}: {e}", skill_md.display()),
-                            None,
-                        )
-                    })?;
-                    let base = std::fs::canonicalize(&skill.path).map_err(|e| {
-                        McpError::internal_error(
-                            format!("failed to resolve skill dir {}: {e}", skill.path.display()),
-                            None,
-                        )
-                    })?;
-                    if !resolved.starts_with(&base) {
-                        return Err(McpError::internal_error(
-                            format!(
-                                "SKILL.md in '{}' is a symlink that escapes the skill directory",
-                                skill.name
-                            ),
-                            None,
-                        ));
-                    }
+                // Canonicalize both paths and verify SKILL.md resolves within
+                // the skill directory. This catches symlinks and hardlinks
+                // that escape the boundary. Reading from the resolved path
+                // narrows the TOCTOU window vs reading from the original.
+                let resolved = std::fs::canonicalize(&skill_md).map_err(|e| {
+                    McpError::internal_error(
+                        format!("failed to resolve {}: {e}", skill_md.display()),
+                        None,
+                    )
+                })?;
+                let base = std::fs::canonicalize(&skill.path).map_err(|e| {
+                    McpError::internal_error(
+                        format!("failed to resolve skill dir {}: {e}", skill.path.display()),
+                        None,
+                    )
+                })?;
+                if !resolved.starts_with(&base) {
+                    return Err(McpError::internal_error(
+                        format!(
+                            "SKILL.md in '{}' resolves outside the skill directory",
+                            skill.name
+                        ),
+                        None,
+                    ));
                 }
 
-                let content = std::fs::read_to_string(&skill_md).map_err(|e| {
+                let content = std::fs::read_to_string(&resolved).map_err(|e| {
                     McpError::internal_error(
                         format!("failed to read {}: {e}", skill_md.display()),
                         None,
@@ -237,7 +237,7 @@ mod tests {
         assert!(result.is_err(), "expected Err for symlink escape, got Ok");
         let err = result.unwrap_err();
         assert!(
-            format!("{err:?}").contains("escapes"),
+            format!("{err:?}").contains("resolves outside"),
             "unexpected error: {err:?}"
         );
     }
