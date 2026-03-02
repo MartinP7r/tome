@@ -82,6 +82,18 @@ impl Targets {
         .into_iter()
         .filter_map(|(name, config)| config.map(|c| (name, c)))
     }
+
+    /// Iterate mutably over all configured targets.
+    fn iter_mut(&mut self) -> impl Iterator<Item = &mut TargetConfig> {
+        [
+            self.antigravity.as_mut(),
+            self.claude.as_mut(),
+            self.codex.as_mut(),
+            self.openclaw.as_mut(),
+        ]
+        .into_iter()
+        .flatten()
+    }
 }
 
 /// How a target receives skills — each variant carries its required path.
@@ -282,16 +294,7 @@ impl Config {
         for source in &mut self.sources {
             source.path = expand_tilde(&source.path)?;
         }
-        if let Some(ref mut t) = self.targets.antigravity {
-            expand_target_tildes(t)?;
-        }
-        if let Some(ref mut t) = self.targets.claude {
-            expand_target_tildes(t)?;
-        }
-        if let Some(ref mut t) = self.targets.codex {
-            expand_target_tildes(t)?;
-        }
-        if let Some(ref mut t) = self.targets.openclaw {
+        for t in self.targets.iter_mut() {
             expand_target_tildes(t)?;
         }
         Ok(())
