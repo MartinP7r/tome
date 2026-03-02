@@ -2,7 +2,10 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+
+use crate::discover::SkillName;
 
 /// Top-level configuration for tome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,7 +16,7 @@ pub struct Config {
 
     /// Skills to exclude by name
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub exclude: BTreeSet<SkillName>,
 
     /// Skill sources — order determines priority for duplicates
     #[serde(default)]
@@ -311,7 +314,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             library_dir: defaults::library_dir(),
-            exclude: Vec::new(),
+            exclude: BTreeSet::new(),
             sources: Vec::new(),
             targets: Targets::default(),
         }
@@ -410,7 +413,7 @@ mod tests {
     fn config_roundtrip_toml() {
         let config = Config {
             library_dir: PathBuf::from("/tmp/skills"),
-            exclude: vec!["test-skill".into()],
+            exclude: [SkillName::new("test-skill").unwrap()].into(),
             sources: vec![Source {
                 name: "test".into(),
                 path: PathBuf::from("/tmp/source"),
@@ -438,7 +441,7 @@ mod tests {
     fn validate_passes_for_valid_config() {
         let config = Config {
             library_dir: PathBuf::from("/tmp/nonexistent-lib"),
-            exclude: Vec::new(),
+            exclude: BTreeSet::new(),
             sources: vec![Source {
                 name: "test".into(),
                 path: PathBuf::from("/tmp/source"),
@@ -629,7 +632,7 @@ mcp_config = "~/.codex/.mcp.json"
     fn config_roundtrip_claude_target() {
         let config = Config {
             library_dir: PathBuf::from("/tmp/skills"),
-            exclude: Vec::new(),
+            exclude: BTreeSet::new(),
             sources: Vec::new(),
             targets: Targets {
                 antigravity: None,

@@ -148,7 +148,7 @@ mod tests {
     fn test_config(source_path: PathBuf) -> Config {
         Config {
             library_dir: PathBuf::from("/tmp/unused-library"),
-            exclude: Vec::new(),
+            exclude: std::collections::BTreeSet::new(),
             sources: vec![Source {
                 name: "test".into(),
                 path: source_path,
@@ -170,7 +170,7 @@ mod tests {
     fn list_skills_with_no_sources() {
         let config = Config {
             library_dir: PathBuf::from("/tmp/unused"),
-            exclude: Vec::new(),
+            exclude: std::collections::BTreeSet::new(),
             sources: Vec::new(),
             targets: Targets::default(),
         };

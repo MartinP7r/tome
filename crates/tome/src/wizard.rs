@@ -98,7 +98,8 @@ pub fn run(dry_run: bool) -> Result<Config> {
         }
     );
     if !config.exclude.is_empty() {
-        println!("  Exclusions: {}", style(config.exclude.join(", ")).dim());
+        let names: Vec<_> = config.exclude.iter().map(|n| n.as_str()).collect();
+        println!("  Exclusions: {}", style(names.join(", ")).dim());
     }
     println!();
 
@@ -343,13 +344,15 @@ fn configure_targets() -> Result<Targets> {
     Ok(targets)
 }
 
-fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<Vec<String>> {
+fn configure_exclusions(
+    skills: &[crate::discover::DiscoveredSkill],
+) -> Result<std::collections::BTreeSet<crate::discover::SkillName>> {
     step_divider("Step 4: Exclusions");
 
     if skills.is_empty() {
         println!("  (no skills discovered yet — exclusions can be added manually to config)");
         println!();
-        return Ok(Vec::new());
+        return Ok(std::collections::BTreeSet::new());
     }
 
     let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
@@ -362,7 +365,10 @@ fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<V
         .max_length(max_rows)
         .interact()?;
 
-    let exclude = selections.iter().map(|&i| labels[i].clone()).collect();
+    let exclude = selections
+        .iter()
+        .filter_map(|&i| crate::discover::SkillName::new(labels[i].clone()).ok())
+        .collect();
     println!();
     Ok(exclude)
 }
