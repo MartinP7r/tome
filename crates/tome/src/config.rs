@@ -326,8 +326,10 @@ mod defaults {
     use std::path::PathBuf;
 
     pub fn library_dir() -> PathBuf {
+        // Best-effort default for serde; expand_tildes() and validate() will
+        // surface a proper error if home is unavailable.
         dirs::home_dir()
-            .expect("could not determine home directory — is $HOME set?")
+            .unwrap_or_else(|| PathBuf::from("~"))
             .join(".local")
             .join("share")
             .join("tome")
