@@ -297,8 +297,10 @@ fn doctor_detects_broken_symlinks() {
 
 #[test]
 fn status_without_config_shows_init_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let missing_config = tmp.path().join("config.toml");
     tome()
-        .args(["--config", "/nonexistent/config.toml", "status"])
+        .args(["--config", missing_config.to_str().unwrap(), "status"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Not configured yet"))
@@ -307,10 +309,12 @@ fn status_without_config_shows_init_prompt() {
 
 #[test]
 fn doctor_without_config_shows_init_prompt() {
+    let tmp = TempDir::new().unwrap();
+    let missing_config = tmp.path().join("config.toml");
     tome()
         .args([
             "--config",
-            "/nonexistent/config.toml",
+            missing_config.to_str().unwrap(),
             "--dry-run",
             "doctor",
         ])
