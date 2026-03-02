@@ -78,21 +78,19 @@ fn distribute_symlinks(
         // Skip skills whose original location is already inside this target dir.
         // This prevents circular symlinks when a directory is both a source and target
         // (e.g. ~/.claude/skills used as both).
-        if library_skill_path.is_symlink() {
-            if let Ok(original) = std::fs::read_link(&library_skill_path) {
-                let original_abs = if original.is_relative() {
-                    library_dir.join(&original)
-                } else {
-                    original
-                };
-                if let (Ok(orig), Ok(target)) =
-                    (original_abs.canonicalize(), skills_dir.canonicalize())
-                {
-                    if orig.starts_with(&target) {
-                        result.unchanged += 1;
-                        continue;
-                    }
-                }
+        if library_skill_path.is_symlink()
+            && let Ok(original) = std::fs::read_link(&library_skill_path)
+        {
+            let original_abs = if original.is_relative() {
+                library_dir.join(&original)
+            } else {
+                original
+            };
+            if let (Ok(orig), Ok(target)) = (original_abs.canonicalize(), skills_dir.canonicalize())
+                && orig.starts_with(&target)
+            {
+                result.unchanged += 1;
+                continue;
             }
         }
 
