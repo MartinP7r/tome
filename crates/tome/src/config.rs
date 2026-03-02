@@ -212,9 +212,23 @@ impl Config {
     }
 
     /// Load from CLI-provided path or default location.
+    ///
+    /// When an explicit path is provided and its parent directory does not
+    /// exist, this is treated as a configuration error (likely a typo).
+    /// A missing file in an existing directory is fine — first-run scenario.
     pub fn load_or_default(cli_path: Option<&Path>) -> Result<Self> {
         let path = match cli_path {
-            Some(p) => p.to_path_buf(),
+            Some(p) => {
+                if !p.exists() {
+                    let parent_exists = p.parent().is_some_and(|d| d.exists());
+                    anyhow::ensure!(
+                        parent_exists,
+                        "config file not found: {}",
+                        p.display()
+                    );
+                }
+                p.to_path_buf()
+            }
             None => default_config_path()?,
         };
         Self::load(&path)
@@ -373,6 +387,22 @@ mod tests {
     #[test]
     fn config_loads_defaults_when_file_missing() {
         let config = Config::load(Path::new("/nonexistent/path/config.toml")).unwrap();
+        assert!(config.sources.is_empty());
+    }
+
+    #[test]
+    fn load_or_default_errors_when_parent_dir_missing() {
+        let result = Config::load_or_default(Some(Path::new("/nonexistent/config.toml")));
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("config file not found"), "got: {msg}");
+    }
+
+    #[test]
+    fn load_or_default_returns_defaults_when_parent_exists() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing_file = tmp.path().join("config.toml");
+        let config = Config::load_or_default(Some(&missing_file)).unwrap();
         assert!(config.sources.is_empty());
     }
 
