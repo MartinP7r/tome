@@ -205,7 +205,9 @@ impl Config {
             config.expand_tildes()?;
             Ok(config)
         } else {
-            Ok(Self::default())
+            let mut config = Self::default();
+            config.expand_tildes()?;
+            Ok(config)
         }
     }
 
