@@ -149,6 +149,12 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
     }
 
     let mut issues = 0;
+
+    // Canonicalize library_dir so starts_with works when library_dir contains
+    // a symlink component (e.g., /var -> /private/var on macOS).
+    let canonical_library =
+        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+
     let entries = std::fs::read_dir(skills_dir)
         .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
 
@@ -161,7 +167,9 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
             let raw_target = std::fs::read_link(&path)
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
-            if target.starts_with(library_dir) && !target.exists() {
+            let points_into_library =
+                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+            if points_into_library && !target.exists() {
                 println!(
                     "  {} {}: stale symlink {}",
                     style("x").red(),
