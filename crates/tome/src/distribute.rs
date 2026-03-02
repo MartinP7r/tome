@@ -75,6 +75,25 @@ fn distribute_symlinks(
         let library_skill_path = entry.path();
         let target_link = skills_dir.join(&skill_name);
 
+        // Skip skills whose original location is already inside this target dir.
+        // This prevents circular symlinks when a directory is both a source and target
+        // (e.g. ~/.claude/skills used as both).
+        if library_skill_path.is_symlink()
+            && let Ok(original) = std::fs::read_link(&library_skill_path)
+        {
+            let original_abs = if original.is_relative() {
+                library_dir.join(&original)
+            } else {
+                original
+            };
+            if let (Ok(orig), Ok(target)) = (original_abs.canonicalize(), skills_dir.canonicalize())
+                && orig.starts_with(&target)
+            {
+                result.unchanged += 1;
+                continue;
+            }
+        }
+
         if target_link.is_symlink() {
             if symlink_points_to(&target_link, &library_skill_path) && !force {
                 result.unchanged += 1;
@@ -499,5 +518,34 @@ mod tests {
         // The regular file should be unchanged
         let content = std::fs::read_to_string(target_dir.path().join("skill-a")).unwrap();
         assert_eq!(content, "not a symlink");
+    }
+
+    #[test]
+    fn distribute_skips_skills_originating_from_target_dir() {
+        // Simulate: ~/.claude/skills is both a source and a target.
+        // The library has a symlink pointing into the target dir itself.
+        let source_and_target = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        // Create a real skill in what will be both source and target
+        let skill_dir = source_and_target.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# my-skill").unwrap();
+
+        // Library symlink points into source_and_target
+        unix_fs::symlink(&skill_dir, library.path().join("my-skill")).unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: source_and_target.path().to_path_buf(),
+            },
+        };
+
+        let result = distribute_to_target(library.path(), "test", &target, false, false).unwrap();
+        // Should be skipped (counted as unchanged), not warned about as a collision
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.skipped, 0);
+        assert_eq!(result.changed, 0);
     }
 }
