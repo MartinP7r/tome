@@ -13,7 +13,8 @@ use crate::config::{Config, Source, SourceType};
 /// Lenient validation: rejects empty names and path separators.
 /// Warns on names that don't match the strict `[a-z0-9-]+` pattern
 /// (which will become a hard requirement in v0.3).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
 pub struct SkillName(String);
 
 impl SkillName {
@@ -70,6 +71,24 @@ impl PartialEq<&str> for SkillName {
     }
 }
 
+impl TryFrom<String> for SkillName {
+    type Error = anyhow::Error;
+
+    fn try_from(s: String) -> Result<Self> {
+        Self::new(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SkillName {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        SkillName::new(s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// A discovered skill with its metadata.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
@@ -95,7 +114,7 @@ pub fn discover_all(config: &Config, quiet: bool) -> Result<Vec<DiscoveredSkill>
         let source_skills = discover_source(source)?;
 
         for skill in source_skills {
-            if config.exclude.iter().any(|e| e == skill.name.as_str()) {
+            if config.exclude.contains(&skill.name) {
                 continue;
             }
 
@@ -419,7 +438,7 @@ mod tests {
         create_skill(tmp.path(), "exclude-me");
 
         let config = Config {
-            exclude: vec!["exclude-me".into()],
+            exclude: [SkillName::new("exclude-me").unwrap()].into(),
             sources: vec![Source {
                 name: "test".into(),
                 path: tmp.path().to_path_buf(),
