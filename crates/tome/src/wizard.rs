@@ -1,7 +1,7 @@
 //! Interactive `tome init` setup wizard using dialoguer. Auto-discovers known source locations.
 
 use anyhow::{Context, Result};
-use console::style;
+use console::{Term, style};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use std::path::{Path, PathBuf};
 
@@ -344,10 +344,13 @@ fn configure_exclusions(skills: &[crate::discover::DiscoveredSkill]) -> Result<V
     }
 
     let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
+    // Cap visible rows to terminal height minus some overhead for prompt/chrome
+    let max_rows = Term::stderr().size().0.saturating_sub(6).max(5) as usize;
     let selections = MultiSelect::new()
         .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
         .items(&labels)
         .defaults(&vec![false; labels.len()])
+        .max_length(max_rows)
         .interact()?;
 
     let exclude = selections.iter().map(|&i| labels[i].clone()).collect();
