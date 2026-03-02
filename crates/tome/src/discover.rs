@@ -2,7 +2,7 @@
 //! with deduplication (first source wins) and exclusion filtering.
 
 use anyhow::{Context, Result};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -231,7 +231,7 @@ fn discover_claude_plugins_from_json(
 
     // Deduplicate within a single source — multiple install records can point to the
     // same installPath, which would otherwise surface as spurious same-source conflicts.
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
     let skills = raw_skills
         .into_iter()
         .filter(|s| seen.insert(s.name.as_str().to_string()))
@@ -259,18 +259,18 @@ fn scan_install_records(
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
 fn discover_directory(source: &Source) -> Result<Vec<DiscoveredSkill>> {
-    if source.path.exists() {
-        if !source.path.is_dir() {
-            eprintln!(
-                "warning: source '{}' path exists but is not a directory: {} — skipping",
-                source.name,
-                source.path.display()
-            );
-            return Ok(Vec::new());
-        }
-    } else {
+    if !source.path.exists() {
         eprintln!(
             "warning: source '{}' path does not exist: {}",
+            source.name,
+            source.path.display()
+        );
+        return Ok(Vec::new());
+    }
+
+    if !source.path.is_dir() {
+        eprintln!(
+            "warning: source '{}' path exists but is not a directory: {} — skipping",
             source.name,
             source.path.display()
         );
