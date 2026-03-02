@@ -261,6 +261,100 @@ skills_dir = "{}"
     assert!(target_dir.join("my-skill").is_symlink());
 }
 
+#[test]
+fn sync_lifecycle_cleans_up_removed_skills() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    std::fs::create_dir_all(&skills_dir).unwrap();
+    create_skill(&skills_dir, "keep-me");
+    create_skill(&skills_dir, "remove-me");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    // First sync — both skills should appear in library
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+    assert!(library_dir.join("keep-me").is_symlink());
+    assert!(library_dir.join("remove-me").is_symlink());
+
+    // Remove one skill from source
+    std::fs::remove_dir_all(skills_dir.join("remove-me")).unwrap();
+
+    // Second sync — stale library link should be cleaned up
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+    assert!(library_dir.join("keep-me").is_symlink());
+    assert!(
+        !library_dir.join("remove-me").exists(),
+        "stale symlink should have been cleaned up"
+    );
+}
+
+#[test]
+fn sync_force_recreates_all_links() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    std::fs::create_dir_all(&skills_dir).unwrap();
+    create_skill(&skills_dir, "my-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    // Initial sync
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+    assert!(library_dir.join("my-skill").is_symlink());
+
+    // Force sync should report recreated links, not "unchanged"
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync", "--force"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"))
+        .stdout(predicate::str::contains("updated").or(predicate::str::contains("created")));
+}
+
 // -- Doctor --
 
 #[test]
