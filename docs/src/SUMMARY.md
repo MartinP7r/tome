@@ -10,3 +10,4 @@
 - [Frontmatter Compatibility](frontmatter-compatibility.md)
 - [Test Setup](test-setup.md)
 - [Roadmap](roadmap.md)
+- [API Reference](/api/tome/index.html)

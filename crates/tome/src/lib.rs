@@ -1,5 +1,23 @@
 //! Tome — sync AI coding skills across tools.
-//! Re-exports all modules and contains the core `sync()` pipeline: discover, consolidate, distribute, cleanup.
+//!
+//! This crate provides both a CLI binary (`tome`) and a library for managing
+//! AI coding skills across multiple tools (Claude, Codex, Antigravity, OpenClaw).
+//!
+//! # Core pipeline
+//!
+//! The `sync` function drives the main workflow:
+//!
+//! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
+//! 2. **Consolidate** — symlink discovered skills into the library
+//! 3. **Distribute** — push library skills to target tools
+//! 4. **Cleanup** — remove broken symlinks
+//!
+//! # Public API
+//!
+//! - [`config`] — TOML configuration loading and validation
+//! - [`cli`] — command-line argument parsing (clap)
+//! - [`mcp`] — MCP server for exposing skills to AI tools
+//! - [`run()`] — entry point that dispatches CLI commands
 
 pub(crate) mod cleanup;
 pub mod cli;

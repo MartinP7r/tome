@@ -18,6 +18,20 @@ use crate::config::{Config, Source, SourceType};
 pub struct SkillName(String);
 
 impl SkillName {
+    /// Create a new skill name from any string-like value.
+    ///
+    /// Rejects empty names and names containing path separators (`/` or `\`).
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// let name = SkillName::new("my-skill").unwrap();
+    /// assert_eq!(name.as_str(), "my-skill");
+    ///
+    /// // Empty names and path separators are rejected
+    /// assert!(SkillName::new("").is_err());
+    /// assert!(SkillName::new("foo/bar").is_err());
+    /// ```
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
         anyhow::ensure!(!name.is_empty(), "skill name cannot be empty");

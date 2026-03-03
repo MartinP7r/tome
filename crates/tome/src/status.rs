@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
+use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::Config;
 use crate::discover;
@@ -37,6 +38,13 @@ pub fn show(config: &Config) -> Result<()> {
     if config.sources.is_empty() {
         println!("  (none configured)");
     } else {
+        let mut rows: Vec<[String; 4]> = Vec::with_capacity(config.sources.len() + 1);
+        rows.push([
+            "SOURCE".to_string(),
+            "TYPE".to_string(),
+            "PATH".to_string(),
+            "SKILLS".to_string(),
+        ]);
         for source in &config.sources {
             let count = match discover::discover_source(source) {
                 Ok(s) => format!("{}", s.len()),
@@ -48,29 +56,58 @@ pub fn show(config: &Config) -> Result<()> {
                     "?".to_string()
                 }
             };
-            println!(
-                "  {:<40} {} skills",
-                style(source.path.display()).dim(),
-                style(count).cyan()
-            );
+            rows.push([
+                source.name.clone(),
+                source.source_type.to_string(),
+                source.path.display().to_string(),
+                count,
+            ]);
         }
+        let table = tabled::Table::from_iter(rows)
+            .with(Style::blank())
+            .with(
+                Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                    style(s).bold().to_string()
+                })),
+            )
+            .to_string();
+        println!("{table}");
     }
     println!();
 
     // Targets
     println!("{}", style("Targets:").bold());
-    let mut any_target = false;
-    for (name, t) in config.targets.iter() {
-        any_target = true;
-        let status = if t.enabled {
-            style("enabled").green()
-        } else {
-            style("disabled").dim()
-        };
-        println!("  {:<20} {}", style(name).bold(), status);
-    }
-    if !any_target {
+    let target_entries: Vec<_> = config.targets.iter().collect();
+    if target_entries.is_empty() {
         println!("  (none configured)");
+    } else {
+        let mut rows: Vec<[String; 3]> = Vec::with_capacity(target_entries.len() + 1);
+        rows.push([
+            "TARGET".to_string(),
+            "STATUS".to_string(),
+            "METHOD".to_string(),
+        ]);
+        for (name, t) in &target_entries {
+            let status = if t.enabled {
+                style("enabled").green().to_string()
+            } else {
+                style("disabled").dim().to_string()
+            };
+            let method = match &t.method {
+                crate::config::TargetMethod::Symlink { .. } => "symlink",
+                crate::config::TargetMethod::Mcp { .. } => "mcp",
+            };
+            rows.push([name.to_string(), status, method.to_string()]);
+        }
+        let table = tabled::Table::from_iter(rows)
+            .with(Style::blank())
+            .with(
+                Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                    style(s).bold().to_string()
+                })),
+            )
+            .to_string();
+        println!("{table}");
     }
     println!();
 
@@ -151,6 +188,47 @@ mod tests {
 
         // Guard does NOT trigger because sources is non-empty.
         // show() still returns Ok (it warns on stderr but does not error).
+        let result = show(&config);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn status_shows_tables_with_configured_sources_and_targets() {
+        use crate::config::{Source, SourceType, TargetConfig, TargetMethod, Targets};
+        use std::os::unix::fs as unix_fs;
+
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        let source_dir = tempfile::TempDir::new().unwrap();
+        let target_skill = tempfile::TempDir::new().unwrap();
+
+        // Create a skill in the source
+        let skill = source_dir.path().join("my-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "# My Skill").unwrap();
+
+        // Create a symlink in the library
+        unix_fs::symlink(&skill, lib_dir.path().join("my-skill")).unwrap();
+
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            sources: vec![Source {
+                name: "test-source".to_string(),
+                path: source_dir.path().to_path_buf(),
+                source_type: SourceType::Directory,
+            }],
+            targets: Targets {
+                antigravity: Some(TargetConfig {
+                    enabled: true,
+                    method: TargetMethod::Symlink {
+                        skills_dir: target_skill.path().to_path_buf(),
+                    },
+                }),
+                ..Default::default()
+            },
+            ..Config::default()
+        };
+
+        // Should not error
         let result = show(&config);
         assert!(result.is_ok());
     }
