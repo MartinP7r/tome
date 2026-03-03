@@ -316,6 +316,17 @@ fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String
     format!("tome sync: {}", parts.join(", "))
 }
 
+/// Show or print config information.
+fn show_config(config: &Config, path_only: bool) -> Result<()> {
+    if path_only {
+        println!("{}", config::default_config_path()?.display());
+    } else {
+        let toml_str = toml::to_string_pretty(config)?;
+        println!("{}", toml_str);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,15 +348,4 @@ mod tests {
     fn commit_message_no_changes() {
         assert_eq!(sync_commit_message(0, 0, 0), "tome sync");
     }
-}
-
-/// Show or print config information.
-fn show_config(config: &Config, path_only: bool) -> Result<()> {
-    if path_only {
-        println!("{}", config::default_config_path()?.display());
-    } else {
-        let toml_str = toml::to_string_pretty(config)?;
-        println!("{}", toml_str);
-    }
-    Ok(())
 }

@@ -1244,8 +1244,8 @@ graph LR
     end
 
     subgraph "Target Connectors"
-        T1["Symlink targets<br/>(Claude, Codex, Antigravity,<br/>Copilot, OpenCode, Amp)"]
-        T2["MCP targets<br/>(Goose, PicoClaw, OpenClaw)"]
+        T1["Symlink targets<br/>(Claude, Codex, Antigravity,<br/>OpenClaw, Copilot, OpenCode, Amp)"]
+        T2["MCP targets<br/>(Goose, PicoClaw)"]
         T3["Format transform targets<br/>(Cursor .mdc, Windsurf rules,<br/>Copilot .instructions.md)"]
     end
 
@@ -1345,9 +1345,9 @@ Based on this research, tome's connector architecture needs to handle four forma
 
 | Family | Tools | Distribution Method | Translation Needed |
 |--------|-------|-------------------|--------------------|
-| **SKILL.md standard** | Claude Code, Codex, Copilot, Antigravity, OpenCode, Amp | Symlink (same format) | No — canonical format |
+| **SKILL.md standard** | Claude Code, Codex, Copilot, Antigravity, OpenClaw, OpenCode, Amp | Symlink (same format) | No — canonical format |
 | **Custom rules** | Cursor (.mdc), Windsurf (activation modes), Copilot (.instructions.md) | Copy with transform | Yes — SKILL.md ↔ native rules |
-| **MCP-only** | Goose, PicoClaw, OpenClaw (alt) | MCP config injection | No transform, just config entry |
+| **MCP-only** | Goose, PicoClaw | MCP config injection | No transform, just config entry |
 | **Config-only** | Aider | Config injection | Minimal (YAML config entry) |
 
 ### Syncable Structures (Today)
