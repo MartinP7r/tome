@@ -13,6 +13,10 @@ pub(crate) mod paths;
 pub(crate) mod status;
 pub(crate) mod wizard;
 
+use std::io::IsTerminal;
+use std::path::Path;
+use std::process::Command as GitCommand;
+
 use anyhow::Result;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -181,6 +185,16 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         );
     }
 
+    // Offer git commit if the library dir is a git repo with changes
+    if !dry_run && !quiet {
+        offer_git_commit(
+            &config.library_dir,
+            consolidate_result.created,
+            consolidate_result.updated,
+            cleanup_result.removed_from_library,
+        )?;
+    }
+
     Ok(())
 }
 
@@ -235,6 +249,93 @@ fn skipped_note(count: usize) -> String {
         format!(", {} skipped (path conflict)", style(count).yellow())
     } else {
         String::new()
+    }
+}
+
+/// If the library directory is a git repo with uncommitted changes, prompt the user to commit.
+fn offer_git_commit(
+    library_dir: &Path,
+    created: usize,
+    updated: usize,
+    removed: usize,
+) -> Result<()> {
+    if !library_dir.join(".git").exists() || !std::io::stdin().is_terminal() {
+        return Ok(());
+    }
+
+    let has_changes = GitCommand::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(library_dir)
+        .output()
+        .ok()
+        .is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+
+    if !has_changes {
+        return Ok(());
+    }
+
+    let msg = sync_commit_message(created, updated, removed);
+
+    let confirm = dialoguer::Confirm::new()
+        .with_prompt(format!("Commit library changes? ({})", msg))
+        .default(true)
+        .interact_opt()?;
+
+    if confirm != Some(true) {
+        return Ok(());
+    }
+
+    GitCommand::new("git")
+        .args(["add", "."])
+        .current_dir(library_dir)
+        .status()?;
+
+    GitCommand::new("git")
+        .args(["commit", "-m", &msg])
+        .current_dir(library_dir)
+        .status()?;
+
+    Ok(())
+}
+
+/// Build a commit message summarizing sync changes.
+fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String {
+    let mut parts = Vec::new();
+    if created > 0 {
+        parts.push(format!("{created} created"));
+    }
+    if updated > 0 {
+        parts.push(format!("{updated} updated"));
+    }
+    if removed > 0 {
+        parts.push(format!("{removed} removed"));
+    }
+    if parts.is_empty() {
+        return "tome sync".to_string();
+    }
+    format!("tome sync: {}", parts.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn commit_message_all_changes() {
+        assert_eq!(
+            sync_commit_message(3, 1, 2),
+            "tome sync: 3 created, 1 updated, 2 removed"
+        );
+    }
+
+    #[test]
+    fn commit_message_created_only() {
+        assert_eq!(sync_commit_message(5, 0, 0), "tome sync: 5 created");
+    }
+
+    #[test]
+    fn commit_message_no_changes() {
+        assert_eq!(sync_commit_message(0, 0, 0), "tome sync");
     }
 }
 
