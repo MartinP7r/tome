@@ -35,9 +35,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
         match crate::discover::discover_all(&tmp, true) {
             Ok(skills) => skills,
             Err(e) => {
-                eprintln!(
-                    "warning: could not discover skills from selected sources: {e}"
-                );
+                eprintln!("warning: could not discover skills from selected sources: {e}");
                 eprintln!("  (exclusions can be added manually to config later)");
                 Vec::new()
             }

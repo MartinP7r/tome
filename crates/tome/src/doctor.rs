@@ -77,7 +77,9 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
                 }
 
                 for (name, t) in config.targets.iter() {
-                    if t.enabled && let Some(skills_dir) = t.skills_dir() {
+                    if t.enabled
+                        && let Some(skills_dir) = t.skills_dir()
+                    {
                         let removed =
                             cleanup::cleanup_target(skills_dir, &config.library_dir, false)?;
                         if removed > 0 {
