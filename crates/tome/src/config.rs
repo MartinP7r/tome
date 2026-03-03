@@ -71,7 +71,10 @@ pub struct Targets {
 }
 
 impl Targets {
-    /// Iterate over all configured targets as (name, config) pairs.
+    /// Iterate over all configured targets as `(name, config)` pairs.
+    ///
+    /// Only includes targets that are present in the config (i.e. `Some`).
+    /// The name is one of `"antigravity"`, `"claude"`, `"codex"`, `"openclaw"`.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &TargetConfig)> {
         [
             ("antigravity", self.antigravity.as_ref()),
@@ -231,6 +234,16 @@ impl Config {
     /// When an explicit path is provided and its parent directory does not
     /// exist, this is treated as a configuration error (likely a typo).
     /// A missing file in an existing directory is fine — first-run scenario.
+    ///
+    /// # Examples
+    ///
+    /// ```text
+    /// // Load from default ~/.config/tome/config.toml
+    /// let config = Config::load_or_default(None)?;
+    ///
+    /// // Load from explicit path (parent dir must exist)
+    /// let config = Config::load_or_default(Some(Path::new("/tmp/tome.toml")))?;
+    /// ```
     pub fn load_or_default(cli_path: Option<&Path>) -> Result<Self> {
         let path = match cli_path {
             Some(p) => {
