@@ -589,41 +589,41 @@
 graph TB
     subgraph CLI["<b>tome CLI</b> &nbsp;(crates/tome)"]
         direction TB
-        MAIN["main.rs<br/><i>clap parsing → run()</i>"]
-        LIB["lib.rs<br/><i>sync pipeline orchestrator</i>"]
-        CLI_MOD["cli.rs<br/><i>Cli struct + Command enum</i>"]
-        WIZARD["wizard.rs<br/><i>interactive init (dialoguer)</i>"]
+        MAIN["main.rs<br><i>clap parsing → run()</i>"]
+        LIB["lib.rs<br><i>sync pipeline orchestrator</i>"]
+        CLI_MOD["cli.rs<br><i>Cli struct + Command enum</i>"]
+        WIZARD["wizard.rs<br><i>interactive init (dialoguer)</i>"]
     end
 
     subgraph SYNC["<b>Sync Pipeline</b>"]
         direction LR
-        DISC["discover.rs<br/><i>scan sources</i>"]
-        LIBR["library.rs<br/><i>consolidate symlinks</i>"]
-        DIST["distribute.rs<br/><i>push to targets</i>"]
-        CLEAN["cleanup.rs<br/><i>remove stale links</i>"]
+        DISC["discover.rs<br><i>scan sources</i>"]
+        LIBR["library.rs<br><i>consolidate symlinks</i>"]
+        DIST["distribute.rs<br><i>push to targets</i>"]
+        CLEAN["cleanup.rs<br><i>remove stale links</i>"]
     end
 
     subgraph SUPPORT["<b>Support Modules</b>"]
         direction TB
-        CONFIG["config.rs<br/><i>TOML load/save/validate</i>"]
-        DOC["doctor.rs<br/><i>diagnose + repair</i>"]
-        STATUS["status.rs<br/><i>read-only summary</i>"]
-        PATHS["paths.rs<br/><i>symlink path utils</i>"]
-        MCP["mcp.rs<br/><i>MCP server (rmcp)</i>"]
+        CONFIG["config.rs<br><i>TOML load/save/validate</i>"]
+        DOC["doctor.rs<br><i>diagnose + repair</i>"]
+        STATUS["status.rs<br><i>read-only summary</i>"]
+        PATHS["paths.rs<br><i>symlink path utils</i>"]
+        MCP["mcp.rs<br><i>MCP server (rmcp)</i>"]
     end
 
-    subgraph MCPBIN["<b>tome-mcp</b><br/><i>standalone binary</i>"]
-        MCPMAIN["main.rs<br/><i>load config → serve()</i>"]
+    subgraph MCPBIN["<b>tome-mcp</b><br><i>standalone binary</i>"]
+        MCPMAIN["main.rs<br><i>load config → serve()</i>"]
     end
 
     subgraph SOURCES["<b>Skill Sources</b>"]
-        S1["ClaudePlugins<br/><i>installed_plugins.json</i>"]
-        S2["Directory<br/><i>walkdir scan</i>"]
+        S1["ClaudePlugins<br><i>installed_plugins.json</i>"]
+        S2["Directory<br><i>walkdir scan</i>"]
     end
 
     subgraph TARGETS["<b>Distribution Targets</b>"]
-        T1["Symlink targets<br/><i>Antigravity, Claude</i>"]
-        T2["MCP targets<br/><i>Codex, OpenClaw</i>"]
+        T1["Symlink targets<br><i>Antigravity, Claude</i>"]
+        T2["MCP targets<br><i>Codex, OpenClaw</i>"]
     end
 
     MAIN --> LIB

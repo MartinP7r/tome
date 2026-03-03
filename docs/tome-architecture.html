@@ -1,0 +1,1183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>tome — Architecture Overview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --font-body: 'DM Sans', system-ui, sans-serif;
+      --font-mono: 'Fira Code', 'SF Mono', Consolas, monospace;
+
+      /* Blueprint dark-first palette */
+      --bg: #0a1628;
+      --bg-grid: rgba(42, 90, 140, 0.07);
+      --surface: #111d33;
+      --surface-elevated: #162844;
+      --border: rgba(255, 255, 255, 0.06);
+      --border-bright: rgba(255, 255, 255, 0.12);
+      --text: #c8d6e5;
+      --text-dim: #6b7fa0;
+
+      /* Accents */
+      --gold: #d4a73a;
+      --gold-dim: rgba(212, 167, 58, 0.12);
+      --teal: #3498db;
+      --teal-dim: rgba(52, 152, 219, 0.10);
+      --green: #27ae60;
+      --green-dim: rgba(39, 174, 96, 0.10);
+      --red: #e74c3c;
+      --red-dim: rgba(231, 76, 60, 0.10);
+      --slate: #34495e;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #edf2f7;
+        --bg-grid: rgba(42, 90, 140, 0.05);
+        --surface: #ffffff;
+        --surface-elevated: #f7fafc;
+        --border: rgba(0, 0, 0, 0.07);
+        --border-bright: rgba(0, 0, 0, 0.12);
+        --text: #1a2332;
+        --text-dim: #5a6b7f;
+        --gold: #b8860b;
+        --gold-dim: rgba(184, 134, 11, 0.08);
+        --teal: #2471a3;
+        --teal-dim: rgba(36, 113, 163, 0.08);
+        --green: #1e8449;
+        --green-dim: rgba(30, 132, 73, 0.08);
+        --red: #c0392b;
+        --red-dim: rgba(192, 57, 43, 0.08);
+        --slate: #5d6d7e;
+      }
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-body);
+      background: var(--bg);
+      background-image:
+        linear-gradient(var(--bg-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--bg-grid) 1px, transparent 1px);
+      background-size: 24px 24px;
+      color: var(--text);
+      line-height: 1.6;
+      overflow-wrap: break-word;
+      padding: 40px;
+    }
+
+    a { color: var(--teal); text-decoration: underline; }
+
+    /* ─── Responsive nav ─── */
+    .wrap {
+      max-width: 1320px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 0 44px;
+    }
+    .main { min-width: 0; }
+
+    .toc {
+      position: sticky;
+      top: 24px;
+      align-self: start;
+      padding: 14px 0;
+      grid-row: 1 / -1;
+      max-height: calc(100dvh - 48px);
+      overflow-y: auto;
+    }
+    .toc::-webkit-scrollbar { width: 3px; }
+    .toc::-webkit-scrollbar-thumb { background: var(--surface-elevated); border-radius: 2px; }
+
+    .toc-title {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--text-dim);
+      padding: 0 0 10px;
+      margin-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .toc a {
+      display: block;
+      font-size: 11px;
+      color: var(--text-dim);
+      text-decoration: none;
+      padding: 5px 8px;
+      border-radius: 5px;
+      border-left: 2px solid transparent;
+      transition: all 0.15s;
+      line-height: 1.4;
+      margin-bottom: 1px;
+    }
+    .toc a:hover { color: var(--text); background: var(--surface-elevated); }
+    .toc a.active { color: var(--gold); border-left-color: var(--gold); }
+
+    @media (max-width: 1000px) {
+      body { padding: 0 16px 40px; }
+      .wrap { grid-template-columns: 1fr; padding-top: 0; }
+      .toc {
+        position: sticky;
+        top: 0;
+        z-index: 200;
+        max-height: none;
+        display: flex;
+        gap: 4px;
+        align-items: center;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        background: var(--bg);
+        border-bottom: 1px solid var(--border);
+        padding: 10px 0;
+        margin: 0 -16px;
+        padding-left: 16px;
+        padding-right: 16px;
+        grid-row: auto;
+      }
+      .toc::-webkit-scrollbar { display: none; }
+      .toc-title { display: none; }
+      .toc a {
+        white-space: nowrap;
+        flex-shrink: 0;
+        border-left: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 4px 4px 0 0;
+        padding: 6px 10px;
+        font-size: 10px;
+      }
+      .toc a.active { border-left: none; border-bottom-color: var(--gold); background: var(--surface); }
+      .main { padding-top: 20px; }
+      .sec-head { scroll-margin-top: 52px; }
+    }
+
+    /* ─── Section headings ─── */
+    .sec-head {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--gold);
+      margin: 56px 0 20px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .sec-head::before {
+      content: '';
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--gold);
+      flex-shrink: 0;
+    }
+    .sec-head:first-of-type { margin-top: 0; }
+
+    h1 {
+      font-size: 42px;
+      font-weight: 700;
+      letter-spacing: -1px;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+    h1 span { color: var(--gold); }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-dim);
+      max-width: 560px;
+      margin-bottom: 40px;
+      line-height: 1.7;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--text);
+      margin: 0 0 12px;
+    }
+
+    h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 20px 0 8px;
+    }
+
+    p { margin-bottom: 12px; color: var(--text-dim); font-size: 14px; }
+
+    /* ─── Cards ─── */
+    .ve-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      position: relative;
+    }
+    .ve-card--elevated {
+      background: var(--surface-elevated);
+      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    }
+    .ve-card--hero {
+      background: color-mix(in srgb, var(--surface) 92%, var(--gold) 8%);
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+      border-color: color-mix(in srgb, var(--border) 50%, var(--gold) 50%);
+    }
+    .ve-card--recessed {
+      background: color-mix(in srgb, var(--bg) 70%, var(--surface) 30%);
+      box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+    }
+
+    .ve-card__label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .ve-card__label::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+    .ve-card__label--gold { color: var(--gold); }
+    .ve-card__label--teal { color: var(--teal); }
+    .ve-card__label--green { color: var(--green); }
+    .ve-card__label--red { color: var(--red); }
+
+    .ve-card__title {
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .ve-card__desc {
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    /* ─── Grid layouts ─── */
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .grid-2 > * { min-width: 0; }
+    @media (max-width: 700px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .grid-3 > * { min-width: 0; }
+    @media (max-width: 900px) { .grid-3 { grid-template-columns: 1fr; } }
+
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 20px;
+    }
+    .grid-4 > * { min-width: 0; }
+    @media (max-width: 900px) { .grid-4 { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 500px) { .grid-4 { grid-template-columns: 1fr; } }
+
+    /* ─── Pipeline ─── */
+    .pipeline {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 20px;
+    }
+    .pipeline__step {
+      min-width: 160px;
+      flex: 1;
+    }
+    .pipeline__arrow {
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      color: var(--gold);
+      font-size: 22px;
+      flex-shrink: 0;
+      font-family: var(--font-mono);
+    }
+
+    /* ─── Mermaid ─── */
+    .mermaid-wrap {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 32px 24px;
+      overflow: auto;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 400px;
+      margin-bottom: 24px;
+      cursor: grab;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+    .mermaid-wrap::-webkit-scrollbar { width: 6px; height: 6px; }
+    .mermaid-wrap::-webkit-scrollbar-track { background: transparent; }
+    .mermaid-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    .mermaid-wrap::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+    .mermaid-wrap.is-panning { cursor: grabbing; user-select: none; }
+
+    .mermaid-wrap--compact { min-height: 200px; }
+    .mermaid-wrap--tall { min-height: 600px; }
+
+    .mermaid-wrap .mermaid { zoom: 1.3; }
+
+    .zoom-controls {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      display: flex;
+      gap: 2px;
+      z-index: 10;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 2px;
+    }
+    .zoom-controls button {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-size: 14px;
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .zoom-controls button:hover { background: var(--border); color: var(--text); }
+
+    /* Mermaid SVG overrides */
+    .mermaid .nodeLabel { color: var(--text) !important; }
+    .mermaid .edgeLabel { color: var(--text-dim) !important; background-color: var(--bg) !important; }
+    .mermaid .edgeLabel rect { fill: var(--bg) !important; }
+    .mermaid .edgeLabel { font-family: var(--font-mono) !important; font-size: 12px !important; }
+    .mermaid .nodeLabel { font-family: var(--font-body) !important; font-size: 15px !important; }
+    .mermaid .node rect, .mermaid .node circle, .mermaid .node polygon { stroke-width: 1.5px; }
+    .mermaid .cluster rect { rx: 8; ry: 8; }
+
+    /* ─── Code blocks ─── */
+    .code-block {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: var(--text);
+    }
+    .code-block--scroll { max-height: 360px; overflow-y: auto; }
+
+    .code-file {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-bottom: 16px;
+    }
+    .code-file__header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+    .code-file__body {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      padding: 16px 20px;
+      background: var(--surface-elevated);
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 400px;
+      overflow: auto;
+      color: var(--text);
+    }
+
+    /* ─── Filesystem tree ─── */
+    .fs-tree {
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 2;
+      color: var(--text-dim);
+    }
+    .fs-tree .dir { color: var(--teal); font-weight: 600; }
+    .fs-tree .file { color: var(--text); }
+    .fs-tree .arrow { color: var(--gold); margin: 0 6px; }
+    .fs-tree .desc { color: var(--text-dim); font-size: 12px; font-family: var(--font-body); }
+    .fs-tree .indent { padding-left: 24px; }
+    .fs-tree .indent2 { padding-left: 48px; }
+
+    /* ─── Inline code ─── */
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.88em;
+      background: var(--surface-elevated);
+      padding: 2px 6px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+    }
+
+    /* ─── Detail list ─── */
+    .detail-list {
+      list-style: none;
+      padding: 0;
+    }
+    .detail-list li {
+      padding: 6px 0 6px 16px;
+      position: relative;
+      font-size: 13px;
+      color: var(--text-dim);
+      line-height: 1.5;
+    }
+    .detail-list li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      color: var(--gold);
+      font-weight: 700;
+    }
+    .detail-list li strong { color: var(--text); font-weight: 600; }
+
+    /* ─── Badge ─── */
+    .badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      border: 1px solid;
+    }
+    .badge--gold { color: var(--gold); border-color: var(--gold); background: var(--gold-dim); }
+    .badge--teal { color: var(--teal); border-color: var(--teal); background: var(--teal-dim); }
+    .badge--green { color: var(--green); border-color: var(--green); background: var(--green-dim); }
+
+    /* ─── Collapsible ─── */
+    details.collapsible { margin-bottom: 16px; }
+    details.collapsible summary {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 8px 0;
+    }
+    details.collapsible summary:hover { color: var(--text); }
+
+    /* ─── Animations ─── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(16px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .anim { animation: fadeUp 0.5s ease-out both; }
+    .anim-d1 { animation-delay: 0.1s; }
+    .anim-d2 { animation-delay: 0.2s; }
+    .anim-d3 { animation-delay: 0.3s; }
+    .anim-d4 { animation-delay: 0.4s; }
+    .anim-d5 { animation-delay: 0.5s; }
+
+    @media (prefers-reduced-motion: reduce) {
+      .anim { animation: none !important; opacity: 1 !important; }
+    }
+
+    /* ─── Extras ─── */
+    .version-badge {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--gold);
+      border: 1px solid var(--gold);
+      background: var(--gold-dim);
+      padding: 2px 10px;
+      border-radius: 20px;
+      margin-bottom: 16px;
+    }
+
+    .flow-note {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-dim);
+      text-align: center;
+      margin: -8px 0 20px;
+      letter-spacing: 0.5px;
+    }
+
+    .accent-border-gold { border-left: 3px solid var(--gold); }
+    .accent-border-teal { border-left: 3px solid var(--teal); }
+    .accent-border-green { border-left: 3px solid var(--green); }
+    .accent-border-red { border-left: 3px solid var(--red); }
+
+    .spacer { height: 24px; }
+    .spacer-sm { height: 12px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="toc" id="toc">
+    <div class="toc-title">Architecture</div>
+    <a href="#hero">Overview</a>
+    <a href="#s-pipeline">Sync Pipeline</a>
+    <a href="#s-modules">Module Map</a>
+    <a href="#s-sources">Sources</a>
+    <a href="#s-distribution">Distribution</a>
+    <a href="#s-filesystem">Filesystem</a>
+    <a href="#s-types">Key Types</a>
+  </nav>
+
+  <div class="main">
+
+    <!-- ═══════════ HERO ═══════════ -->
+    <div id="hero" style="margin-bottom: 48px;">
+      <div class="version-badge anim">v0.1.6 &middot; Rust 2024</div>
+      <h1 class="anim anim-d1"><span>tome</span> — Architecture</h1>
+      <p class="subtitle anim anim-d2">
+        A CLI tool that discovers AI coding skills (<code>SKILL.md</code> files) from multiple sources
+        and distributes them to coding assistants like Claude Code, Antigravity, Codex, and OpenClaw.
+        One library, many targets — originals are never moved or copied, only symlinked.
+      </p>
+
+      <div class="grid-4 anim anim-d3">
+        <div class="ve-card">
+          <div class="ve-card__label ve-card__label--gold">Crate</div>
+          <div class="ve-card__desc">Rust workspace with two binaries: <code>tome</code> (CLI) and <code>tome-mcp</code> (MCP server)</div>
+        </div>
+        <div class="ve-card">
+          <div class="ve-card__label ve-card__label--teal">Philosophy</div>
+          <div class="ve-card__desc">Symlinks everywhere — originals stay in place, library and targets reference them</div>
+        </div>
+        <div class="ve-card">
+          <div class="ve-card__label ve-card__label--green">Sources</div>
+          <div class="ve-card__desc">ClaudePlugins (installed_plugins.json) and Directory (walkdir scan for SKILL.md)</div>
+        </div>
+        <div class="ve-card">
+          <div class="ve-card__label ve-card__label--gold">Targets</div>
+          <div class="ve-card__desc">Claude Code, Antigravity, Codex, OpenClaw — via symlinks or MCP config injection</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ SYNC PIPELINE ═══════════ -->
+    <div id="s-pipeline" class="sec-head">Sync Pipeline</div>
+
+    <p>The core flow. Both <code>tome sync</code> and <code>tome init</code> invoke <code>sync()</code> in <code>lib.rs</code>.
+    Four stages execute in sequence — each is idempotent and supports <code>dry_run</code> mode.</p>
+
+    <div class="mermaid-wrap mermaid-wrap--tall">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      </div>
+      <pre class="mermaid">
+flowchart TD
+    subgraph SRC["Sources"]
+        S1["ClaudePlugins<br>source"]
+        S2["Directory<br>source"]
+    end
+
+    subgraph DISC["Stage 1 — Discover"]
+        D1["Scan each source for<br>*/SKILL.md directories"]
+        D2["Build SkillName map<br>first source wins"]
+        D3["Apply exclude list<br>from config"]
+    end
+
+    subgraph CONS["Stage 2 — Consolidate"]
+        C1["Symlink each skill<br>into library dir"]
+        C2["Skip unchanged<br>update stale links"]
+    end
+
+    LIB[("Library<br>~/.local/share/tome/skills/")]
+
+    subgraph DIST["Stage 3 — Distribute"]
+        DI1["Symlink method:<br>link into target skills dir"]
+        DI2["MCP method:<br>write entry to .mcp.json"]
+    end
+
+    subgraph TGTS["Targets"]
+        T1["Claude Code"]
+        T2["Antigravity"]
+        T3["Codex"]
+        T4["OpenClaw"]
+    end
+
+    subgraph CLN["Stage 4 — Cleanup"]
+        CL1["Remove broken<br>library symlinks"]
+        CL2["Remove stale<br>target symlinks"]
+    end
+
+    SRC --> D1
+    D1 --> D2
+    D2 --> D3
+    D3 -->|"Vec of DiscoveredSkill"| C1
+    C1 --> C2
+    C2 --> LIB
+    LIB --> DI1
+    LIB --> DI2
+    DI1 --> T1
+    DI1 --> T2
+    DI1 --> T3
+    DI1 --> T4
+    DI2 --> T1
+    LIB --> CL1
+    TGTS --> CL2
+
+    classDef srcStyle fill:#0d698b22,stroke:#0d698b,stroke-width:2px
+    classDef stageStyle fill:#d4a73a15,stroke:#d4a73a,stroke-width:1.5px
+    classDef libStyle fill:#27ae6022,stroke:#27ae60,stroke-width:2px
+    classDef tgtStyle fill:#3498db22,stroke:#3498db,stroke-width:1.5px
+
+    class S1,S2 srcStyle
+    class D1,D2,D3,C1,C2,DI1,DI2,CL1,CL2 stageStyle
+    class LIB libStyle
+    class T1,T2,T3,T4 tgtStyle
+      </pre>
+    </div>
+
+    <div class="flow-note">Sources &rarr; Discover &rarr; Consolidate &rarr; Library &rarr; Distribute &rarr; Targets &rarr; Cleanup</div>
+
+    <div class="grid-4">
+      <div class="ve-card accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">1. Discover</div>
+        <div class="ve-card__desc">Scans configured sources for <code>*/SKILL.md</code> directories. First source wins on name conflicts. Exclusion list filters unwanted skills.</div>
+      </div>
+      <div class="ve-card accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">2. Consolidate</div>
+        <div class="ve-card__desc">Creates symlinks from library to each discovered skill's original location. Unchanged links are skipped; stale links are updated.</div>
+      </div>
+      <div class="ve-card accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">3. Distribute</div>
+        <div class="ve-card__desc">Pushes library skills to each enabled target. Symlink targets get directory symlinks; MCP targets get a <code>tome</code> server entry.</div>
+      </div>
+      <div class="ve-card accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">4. Cleanup</div>
+        <div class="ve-card__desc">Removes broken symlinks from library (source deleted) and stale symlinks from targets (skill removed from library).</div>
+      </div>
+    </div>
+
+    <!-- ═══════════ MODULE MAP ═══════════ -->
+    <div id="s-modules" class="sec-head">Module Map</div>
+
+    <p>Two crates in the workspace. <code>crates/tome</code> holds all domain logic as a library plus a thin CLI binary.
+    <code>crates/tome-mcp</code> is a standalone MCP server binary that reuses the library.</p>
+
+    <div class="mermaid-wrap">
+      <div class="zoom-controls">
+        <button onclick="zoomDiagram(this, 1.2)" title="Zoom in">+</button>
+        <button onclick="zoomDiagram(this, 0.8)" title="Zoom out">&minus;</button>
+        <button onclick="resetZoom(this)" title="Reset zoom">&#8634;</button>
+      </div>
+      <pre class="mermaid">
+flowchart TD
+    MAIN["main.rs<br>CLI arg parsing"] --> RUN["lib.rs::run<br>Command dispatch"]
+
+    RUN -->|"tome init"| WIZ["wizard.rs<br>Interactive setup"]
+    RUN -->|"tome sync"| SYNC["lib.rs::sync<br>Pipeline orchestrator"]
+    RUN -->|"tome doctor"| DOC["doctor.rs<br>Diagnose and repair"]
+    RUN -->|"tome status"| STAT["status.rs<br>Read-only summary"]
+    RUN -->|"tome serve"| MCP["mcp.rs<br>MCP server via rmcp"]
+
+    SYNC --> DISC2["discover.rs"]
+    SYNC --> LIBM["library.rs"]
+    SYNC --> DISTM["distribute.rs"]
+    SYNC --> CLEANM["cleanup.rs"]
+
+    CONFIG["config.rs<br>TOML config loading"] -.-> RUN
+    CONFIG -.-> WIZ
+    CONFIG -.-> SYNC
+    CONFIG -.-> DOC
+    CONFIG -.-> STAT
+    CONFIG -.-> MCP
+
+    PATHS["paths.rs<br>Path utilities"] -.-> CONFIG
+    PATHS -.-> DISC2
+    PATHS -.-> LIBM
+
+    MCP2["tome-mcp crate<br>Standalone binary"] --> MCP
+
+    classDef entry fill:#d4a73a22,stroke:#d4a73a,stroke-width:2px
+    classDef pipeline fill:#0d698b22,stroke:#0d698b,stroke-width:1.5px
+    classDef support fill:#27ae6022,stroke:#27ae60,stroke-width:1.5px
+    classDef cmd fill:#3498db22,stroke:#3498db,stroke-width:1.5px
+
+    class MAIN,MCP2 entry
+    class DISC2,LIBM,DISTM,CLEANM pipeline
+    class CONFIG,PATHS support
+    class WIZ,DOC,STAT,MCP,RUN,SYNC cmd
+      </pre>
+    </div>
+
+    <div class="grid-3">
+      <div class="ve-card ve-card--elevated accent-border-teal">
+        <div class="ve-card__label ve-card__label--teal">Pipeline modules</div>
+        <ul class="detail-list">
+          <li><strong>discover.rs</strong> — Source scanning, SkillName validation</li>
+          <li><strong>library.rs</strong> — Symlink consolidation into library</li>
+          <li><strong>distribute.rs</strong> — Push skills to targets</li>
+          <li><strong>cleanup.rs</strong> — Stale symlink removal</li>
+        </ul>
+      </div>
+      <div class="ve-card ve-card--elevated accent-border-green">
+        <div class="ve-card__label ve-card__label--green">Command modules</div>
+        <ul class="detail-list">
+          <li><strong>wizard.rs</strong> — Interactive <code>tome init</code> via dialoguer</li>
+          <li><strong>doctor.rs</strong> — Diagnose broken symlinks, repair</li>
+          <li><strong>status.rs</strong> — Display library/target health</li>
+          <li><strong>mcp.rs</strong> — MCP server with list/read tools</li>
+        </ul>
+      </div>
+      <div class="ve-card ve-card--elevated accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">Infrastructure</div>
+        <ul class="detail-list">
+          <li><strong>config.rs</strong> — TOML loading, <code>Config</code> struct</li>
+          <li><strong>paths.rs</strong> — Tilde expansion, symlink resolution</li>
+          <li><strong>lib.rs</strong> — Re-exports, <code>sync()</code>, <code>run()</code></li>
+          <li><strong>main.rs</strong> — Thin entry, clap arg parsing</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- ═══════════ SOURCES ═══════════ -->
+    <div id="s-sources" class="sec-head">Sources</div>
+
+    <p>Sources tell tome where to find skills. Each source is scanned during the Discover stage.
+    The first source to claim a skill name wins — later duplicates are silently skipped.</p>
+
+    <div class="grid-2">
+      <div class="ve-card ve-card--hero accent-border-teal">
+        <div class="ve-card__label ve-card__label--teal">ClaudePlugins</div>
+        <div class="ve-card__title">Claude Plugin Cache</div>
+        <div class="ve-card__desc" style="margin-bottom: 12px;">
+          Reads <code>installed_plugins.json</code> (v1 or v2 format) from Claude's plugin cache directory.
+          Each cached plugin is checked for a <code>SKILL.md</code> file at its root.
+        </div>
+        <ul class="detail-list">
+          <li><strong>Default path:</strong> <code>~/.claude/plugins/cache</code></li>
+          <li><strong>Scans:</strong> JSON manifest → iterate cached plugins</li>
+          <li><strong>Handles:</strong> Both v1 (flat list) and v2 (structured) formats</li>
+          <li><strong>Skill name:</strong> Derived from plugin directory name</li>
+        </ul>
+      </div>
+      <div class="ve-card ve-card--hero accent-border-green">
+        <div class="ve-card__label ve-card__label--green">Directory</div>
+        <div class="ve-card__title">Flat Directory Scan</div>
+        <div class="ve-card__desc" style="margin-bottom: 12px;">
+          Walks a directory looking for <code>*/SKILL.md</code> — any subdirectory containing a SKILL.md
+          file is treated as a skill. Simple and universal.
+        </div>
+        <ul class="detail-list">
+          <li><strong>Common paths:</strong> <code>~/.claude/skills</code>, <code>~/.codex/skills</code>, <code>~/.gemini/antigravity/skills</code></li>
+          <li><strong>Scans:</strong> One level deep — <code>dir/*/SKILL.md</code></li>
+          <li><strong>Handles:</strong> Any directory structure with SKILL.md children</li>
+          <li><strong>Skill name:</strong> Subdirectory name (validated as SkillName)</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="ve-card ve-card--recessed" style="margin-bottom: 20px;">
+      <div class="ve-card__label ve-card__label--gold">Auto-discovery in wizard</div>
+      <div class="ve-card__desc">
+        During <code>tome init</code>, the wizard probes known locations and offers to add them:
+        <code>~/.claude/plugins/cache</code> (ClaudePlugins),
+        <code>~/.claude/skills</code>,
+        <code>~/.codex/skills</code>,
+        <code>~/.gemini/antigravity/skills</code> (all Directory type).
+        Users can also add custom directories interactively.
+      </div>
+    </div>
+
+    <!-- ═══════════ DISTRIBUTION ═══════════ -->
+    <div id="s-distribution" class="sec-head">Distribution</div>
+
+    <p>Two methods for pushing skills to targets. The method is configured per-target in the TOML config.
+    Each method is a variant of the <code>TargetMethod</code> enum — invalid combinations are impossible at the type level.</p>
+
+    <div class="grid-2">
+      <div class="ve-card ve-card--hero accent-border-green">
+        <div class="ve-card__label ve-card__label--green">Symlink</div>
+        <div class="ve-card__title">Directory Symlinks</div>
+        <div class="ve-card__desc" style="margin-bottom: 12px;">
+          Creates a symlink in the target's skills directory pointing to each skill in the library.
+          The target tool discovers skills by scanning its skills directory as usual.
+        </div>
+        <ul class="detail-list">
+          <li><strong>Chain:</strong> target/<em>skill</em> → library/<em>skill</em> → original</li>
+          <li><strong>Used by:</strong> Claude Code, Antigravity, Codex, OpenClaw</li>
+          <li><strong>Config key:</strong> <code>skills_dir</code></li>
+          <li><strong>Cleanup:</strong> Removes symlinks pointing to deleted library entries</li>
+        </ul>
+      </div>
+      <div class="ve-card ve-card--elevated accent-border-teal">
+        <div class="ve-card__label ve-card__label--teal">MCP</div>
+        <div class="ve-card__title">MCP Config Injection</div>
+        <div class="ve-card__desc" style="margin-bottom: 12px;">
+          Writes a <code>"tome"</code> server entry into the target's <code>.mcp.json</code> file.
+          The target tool connects to tome's MCP server, which exposes skills via <code>list_skills</code> and <code>read_skill</code> tools.
+        </div>
+        <ul class="detail-list">
+          <li><strong>Protocol:</strong> MCP over stdio (rmcp crate)</li>
+          <li><strong>Used by:</strong> Claude Code (as alternative to symlinks)</li>
+          <li><strong>Config key:</strong> <code>mcp_config</code> (path to .mcp.json)</li>
+          <li><strong>Cleanup:</strong> Removing the MCP entry is not yet automated</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="ve-card ve-card--recessed" style="margin-bottom: 20px;">
+      <div class="ve-card__label ve-card__label--gold">Two-hop symlink chain</div>
+      <div class="ve-card__desc">
+        With the Symlink method, each skill has a two-hop symlink chain. The original file is never moved.
+        <br><br>
+        <code>~/.claude/skills/my-skill</code> → <code>~/.local/share/tome/skills/my-skill</code> → <code>/original/path/my-skill</code>
+        <br><br>
+        The library is the single source of truth for which skills are active.
+        Cleanup walks each hop and removes links whose target no longer exists.
+      </div>
+    </div>
+
+    <!-- ═══════════ FILESYSTEM ═══════════ -->
+    <div id="s-filesystem" class="sec-head">Filesystem Layout</div>
+
+    <p>Three layers: config tells tome what to do, the library collects active skills, and targets receive them.</p>
+
+    <div class="ve-card ve-card--elevated" style="margin-bottom: 20px;">
+      <div class="fs-tree">
+        <div><span class="dir">~/.config/tome/</span></div>
+        <div class="indent"><span class="file">config.toml</span> <span class="desc">— Sources, targets, exclude list, library path</span></div>
+
+        <div class="spacer-sm"></div>
+        <div><span class="dir">~/.local/share/tome/</span></div>
+        <div class="indent"><span class="dir">skills/</span> <span class="desc">— The library (central skill registry)</span></div>
+        <div class="indent2"><span class="file">my-skill/</span> <span class="arrow">→</span> <span class="desc">/original/source/my-skill/</span></div>
+        <div class="indent2"><span class="file">another-skill/</span> <span class="arrow">→</span> <span class="desc">/other/source/another-skill/</span></div>
+
+        <div class="spacer-sm"></div>
+        <div><span class="dir">~/.claude/</span></div>
+        <div class="indent"><span class="dir">skills/</span> <span class="desc">— Claude Code target (symlinks from library)</span></div>
+        <div class="indent2"><span class="file">my-skill/</span> <span class="arrow">→</span> <span class="desc">~/.local/share/tome/skills/my-skill/</span></div>
+
+        <div class="spacer-sm"></div>
+        <div><span class="dir">~/.gemini/antigravity/</span></div>
+        <div class="indent"><span class="dir">skills/</span> <span class="desc">— Antigravity target</span></div>
+
+        <div class="spacer-sm"></div>
+        <div><span class="dir">~/.codex/</span></div>
+        <div class="indent"><span class="dir">skills/</span> <span class="desc">— Codex target</span></div>
+
+        <div class="spacer-sm"></div>
+        <div><span class="dir">~/.openclaw/</span></div>
+        <div class="indent"><span class="dir">skills/</span> <span class="desc">— OpenClaw target</span></div>
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="ve-card accent-border-gold">
+        <div class="ve-card__label ve-card__label--gold">Config</div>
+        <div class="ve-card__desc">
+          <code>~/.config/tome/config.toml</code><br>
+          Defines sources (what to scan), targets (where to push), exclude list, and library path.
+          <code>Config::load_or_default</code> handles missing files gracefully.
+        </div>
+      </div>
+      <div class="ve-card accent-border-teal">
+        <div class="ve-card__label ve-card__label--teal">Library</div>
+        <div class="ve-card__desc">
+          <code>~/.local/share/tome/skills/</code><br>
+          Central registry. One symlink per active skill, pointing to the original source.
+          The library is the single source of truth.
+        </div>
+      </div>
+      <div class="ve-card accent-border-green">
+        <div class="ve-card__label ve-card__label--green">Targets</div>
+        <div class="ve-card__desc">
+          Per-tool skills directories.<br>
+          Each enabled target receives symlinks from library entries, or an MCP config entry pointing to the tome server.
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ KEY TYPES ═══════════ -->
+    <div id="s-types" class="sec-head">Key Types</div>
+
+    <p>Core domain types that make invalid states unrepresentable. The type system enforces naming rules,
+    source-target relationships, and distribution method constraints.</p>
+
+    <div class="grid-2">
+      <div class="code-file">
+        <div class="code-file__header"><span>SkillName — Validated name newtype</span></div>
+        <pre class="code-file__body"><code>pub struct SkillName(String);
+
+impl SkillName {
+    pub fn new(name: &str) -> Result&lt;Self&gt; {
+        // Rejects: empty, path separators
+        // Warns: non-conventional names
+        // Stores: validated string
+    }
+}
+
+// Used as HashMap key throughout
+// Implements: Display, Hash, Eq, Ord</code></pre>
+      </div>
+      <div class="code-file">
+        <div class="code-file__header"><span>DiscoveredSkill — Discovery result</span></div>
+        <pre class="code-file__body"><code>pub struct DiscoveredSkill {
+    pub name: SkillName,
+    pub path: PathBuf,      // original location
+    pub source: String,     // which source found it
+}
+
+// Produced by discover stage
+// Consumed by consolidate stage
+// Path is always the original — never copied</code></pre>
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div class="code-file">
+        <div class="code-file__header"><span>TargetMethod — Distribution enum</span></div>
+        <pre class="code-file__body"><code>pub enum TargetMethod {
+    Symlink {
+        skills_dir: PathBuf,
+    },
+    Mcp {
+        mcp_config: PathBuf,
+    },
+}
+
+// Makes invalid method + config combos
+// impossible at the type level
+// skills_dir only with Symlink
+// mcp_config only with Mcp</code></pre>
+      </div>
+      <div class="code-file">
+        <div class="code-file__header"><span>TargetConfig — Per-target config</span></div>
+        <pre class="code-file__body"><code>pub struct TargetConfig {
+    pub enabled: bool,
+    pub method: TargetMethod,
+}
+
+impl TargetConfig {
+    pub fn skills_dir(&self) -> Option&lt;&Path&gt; {
+        match &self.method {
+            TargetMethod::Symlink { skills_dir }
+                => Some(skills_dir),
+            _ => None,
+        }
+    }
+}</code></pre>
+      </div>
+    </div>
+
+    <div class="code-file" style="margin-bottom: 20px;">
+      <div class="code-file__header"><span>Config — Top-level configuration</span></div>
+      <pre class="code-file__body"><code>pub struct Config {
+    pub sources: Vec&lt;Source&gt;,       // what to scan
+    pub targets: Targets,           // where to push (hardcoded struct, not Vec)
+    pub library_dir: PathBuf,       // central library path
+    pub exclude: BTreeSet&lt;SkillName&gt;, // skills to skip
+}
+
+pub struct Source {
+    pub name: String,
+    pub path: PathBuf,
+    pub source_type: SourceType,    // ClaudePlugins or Directory
+}
+
+pub struct Targets {
+    pub antigravity: Option&lt;TargetConfig&gt;,
+    pub claude: Option&lt;TargetConfig&gt;,
+    pub codex: Option&lt;TargetConfig&gt;,
+    pub openclaw: Option&lt;TargetConfig&gt;,
+}
+
+// Config::load_or_default handles missing files
+// All paths support ~ expansion via paths::expand_tilde</code></pre>
+    </div>
+
+    <div class="ve-card ve-card--recessed">
+      <div class="ve-card__label ve-card__label--gold">Design note</div>
+      <div class="ve-card__desc">
+        The <code>Targets</code> struct uses named fields rather than a generic <code>Vec&lt;Target&gt;</code>.
+        This keeps the current implementation simple — each target has known defaults and wizard behavior.
+        The v0.2 roadmap plans to replace this with a connector trait and <code>Vec&lt;Target&gt;</code>
+        for extensibility.
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+    <div class="spacer"></div>
+
+  </div><!-- /main -->
+</div><!-- /wrap -->
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+
+  const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    look: 'classic',
+    themeVariables: {
+      primaryColor: isDark ? '#162844' : '#e8f0fe',
+      primaryBorderColor: isDark ? '#2a5a8c' : '#3a7abd',
+      primaryTextColor: isDark ? '#c8d6e5' : '#1a2332',
+      secondaryColor: isDark ? '#1a3020' : '#e8f5e9',
+      secondaryBorderColor: isDark ? '#27ae60' : '#2e7d32',
+      secondaryTextColor: isDark ? '#c8d6e5' : '#1a2332',
+      tertiaryColor: isDark ? '#2a2010' : '#fff8e1',
+      tertiaryBorderColor: isDark ? '#d4a73a' : '#f57f17',
+      tertiaryTextColor: isDark ? '#c8d6e5' : '#1a2332',
+      lineColor: isDark ? '#3a5a7a' : '#90a4ae',
+      fontSize: '15px',
+      fontFamily: "'DM Sans', system-ui, sans-serif",
+      noteBkgColor: isDark ? '#1c2333' : '#f5f5f5',
+      noteTextColor: isDark ? '#c8d6e5' : '#1a2332',
+      noteBorderColor: isDark ? '#d4a73a' : '#b8860b',
+    }
+  });
+</script>
+
+<script>
+// ─── Zoom controls ───
+var INITIAL_ZOOM = 1.3;
+
+function zoomDiagram(btn, factor) {
+  var wrap = btn.closest('.mermaid-wrap');
+  var target = wrap.querySelector('.mermaid');
+  var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+  var next = Math.min(Math.max(current * factor, 0.5), 5);
+  target.dataset.zoom = next;
+  target.style.zoom = next;
+}
+
+function resetZoom(btn) {
+  var wrap = btn.closest('.mermaid-wrap');
+  var target = wrap.querySelector('.mermaid');
+  target.dataset.zoom = INITIAL_ZOOM;
+  target.style.zoom = INITIAL_ZOOM;
+}
+
+document.querySelectorAll('.mermaid-wrap').forEach(function(wrap) {
+  wrap.addEventListener('wheel', function(e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    var target = wrap.querySelector('.mermaid');
+    var current = parseFloat(target.dataset.zoom || INITIAL_ZOOM);
+    var factor = e.deltaY < 0 ? 1.1 : 0.9;
+    var next = Math.min(Math.max(current * factor, 0.5), 5);
+    target.dataset.zoom = next;
+    target.style.zoom = next;
+  }, { passive: false });
+
+  var startX, startY, scrollL, scrollT;
+  wrap.addEventListener('mousedown', function(e) {
+    if (e.target.closest('.zoom-controls')) return;
+    wrap.classList.add('is-panning');
+    startX = e.clientX;
+    startY = e.clientY;
+    scrollL = wrap.scrollLeft;
+    scrollT = wrap.scrollTop;
+  });
+  window.addEventListener('mousemove', function(e) {
+    if (!wrap.classList.contains('is-panning')) return;
+    wrap.scrollLeft = scrollL - (e.clientX - startX);
+    wrap.scrollTop = scrollT - (e.clientY - startY);
+  });
+  window.addEventListener('mouseup', function() {
+    wrap.classList.remove('is-panning');
+  });
+});
+
+// ─── Scroll spy ───
+(function() {
+  var toc = document.getElementById('toc');
+  var links = toc.querySelectorAll('a');
+  var sections = [];
+
+  links.forEach(function(link) {
+    var id = link.getAttribute('href').slice(1);
+    var el = document.getElementById(id);
+    if (el) sections.push({ id: id, el: el, link: link });
+  });
+
+  var observer = new IntersectionObserver(function(entries) {
+    entries.forEach(function(entry) {
+      if (entry.isIntersecting) {
+        links.forEach(function(l) { l.classList.remove('active'); });
+        var match = sections.find(function(s) { return s.el === entry.target; });
+        if (match) {
+          match.link.classList.add('active');
+          if (window.innerWidth <= 1000) {
+            match.link.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+          }
+        }
+      }
+    });
+  }, { rootMargin: '-10% 0px -80% 0px' });
+
+  sections.forEach(function(s) { observer.observe(s.el); });
+
+  links.forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      e.preventDefault();
+      var id = link.getAttribute('href').slice(1);
+      var el = document.getElementById(id);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.replaceState(null, '', '#' + id);
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
