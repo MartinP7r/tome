@@ -3,12 +3,13 @@
 | Version    | Theme                  | Key Features                                                            |
 | ---------- | ---------------------- | ----------------------------------------------------------------------- |
 | **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs |
-| **v0.2**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |
-| **v0.3**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |
-| **v0.3.x** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |
-| **v0.4**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |
-| **v0.5**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |
-| **v0.6**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |
+| **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          |
+| **v0.3**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |
+| **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |
+| **v0.4.x** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |
+| **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |
+| **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |
+| **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |
 
 ---
 
@@ -22,13 +23,24 @@
 - **Table-formatted output** (`tabled`): Replace manual `format!` column alignment in `tome list` and `tome status` with proper table rendering — handles terminal width, truncation, and alignment automatically
 - ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
 - **Optional git init for library**: Ask during `tome init` whether to initialize a git repo in the library directory for change tracking across syncs
-- **Expand wizard auto-discovery**: ~~Added `~/.gemini/antigravity/skills`.~~ `~/.copilot/skills/` and `~/.cursor/` don't exist as official home-dir paths — Copilot uses per-project `.github/skills/` and Cursor uses per-project `.cursor/rules/`. Per-project sources deferred to v0.2 connector architecture.
+- **Expand wizard auto-discovery**: ~~Added `~/.gemini/antigravity/skills`.~~ `~/.copilot/skills/` and `~/.cursor/` don't exist as official home-dir paths — Copilot uses per-project `.github/skills/` and Cursor uses per-project `.cursor/rules/`. Per-project sources deferred to v0.3 connector architecture.
 - ~~**Fix `installed_plugins.json` v2 parsing**: Current parser expects a flat JSON array (v1); v2 wraps plugins in `{ "version": 2, "plugins": { "name@registry": [...] } }` — discovery silently finds nothing. Support both formats going forward.~~
 - ~~**Finalize tool name**: Decided on **tome** — *"Cook once, serve everywhere."*~~
 - **Improve doc comments for `cargo doc`**: Add module-level `//!` docs, expand struct/function docs, add `# Examples` to key public APIs.
-- **GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.
+- ~~**GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.~~
 
-## v0.2 — Connector Architecture
+## v0.2 — Scoped SOT
+
+Make the library the source of truth for local skills. `tome sync` copies skill directories into the library instead of creating symlinks back to sources. Distribution to targets still uses symlinks (target → library).
+
+- **Library as canonical home** ([#37](https://github.com/MartinP7r/tome/issues/37)): Local skills live directly in the library (real directories, not symlinks). `tome sync` copies from sources into library, making the library the single source of truth.
+- **Git-friendly library directory** ([#42](https://github.com/MartinP7r/tome/issues/42)): Library directory works as a git repo — local skills tracked in git, distribution symlinks are separate.
+- **Two-tier symlink model**: Sources → (copy) → Library → (symlink) → Targets. Sources are read-only inputs; the library owns the canonical copies; targets get symlinks into the library.
+- **Idempotent copy semantics**: Only copy when source content has changed (compare timestamps or content hashes). Skip unchanged skills to keep syncs fast.
+
+**Not in scope** (deferred to v0.5): lockfile, `tome update`, per-machine preferences, managed source support, git-backed backup.
+
+## v0.3 — Connector Architecture
 
 The current model hardcodes targets as struct fields and keeps source/target logic separate. Both sides are really the same concept: an **endpoint with a connector type** that knows how to discover, read, write, and translate skills.
 
@@ -42,14 +54,14 @@ The current model hardcodes targets as struct fields and keeps source/target log
 - **Instruction file syncing**: Bidirectional sync of tool instruction files (CLAUDE.md ↔ AGENTS.md ↔ GEMINI.md ↔ copilot-instructions.md) — extract shared sections and distribute to each tool's native format
 - **npm-based skill sources** ([#97](https://github.com/MartinP7r/tome/issues/97)): Discover skills installed via `npx skills` (Vercel) and `npx openskills` — investigate install paths, manifest formats, and whether existing `Directory` source type suffices or a dedicated connector is needed
 
-## v0.3 — Format Transforms
+## v0.4 — Format Transforms
 
 - Pluggable transform pipeline driven by connector format declarations
 - Preserve original format — transforms are output-only
 - Connectors declare input/output formats; the pipeline resolves the translation chain
 - **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
 
-## v0.3.x — Skill Validation & Linting
+## v0.4.x — Skill Validation & Linting
 
 Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
 
@@ -90,31 +102,29 @@ Validation checks ordered by severity:
 
 ### Target-Aware Warnings (Future)
 
-Requires the v0.2 connector architecture. When distributing to specific targets, warn about:
+Requires the v0.3 connector architecture. When distributing to specific targets, warn about:
 - Fields unsupported by that target
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.4 — Portable Library
+## v0.5 — Portable Library
 
 Make the skill library reproducible across machines via a lockfile and per-machine preferences.
 
-- **Library as canonical home**: Local skills live directly in the library (real directories, not symlinks). Managed skills (Claude marketplace, future registries) are symlinked in from their package manager locations.
-- **`tome.lock`**: Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
-- **Per-machine preferences** (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
-- **`tome update` command**: Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
-- **Claude marketplace first**: First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
-- **Git-friendly library**: Library directory works as a git repo — local skills tracked in git, managed symlinks recreated by `tome update` (gitignored), lockfile tracked.
+- **`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38)): Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
+- **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
+- **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
+- **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
 - **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
 
-## v0.5 — Git Sources
+## v0.6 — Git Sources
 
 - Add `type = "git"` source for remote skill repositories
 - Clone/pull on sync with caching
 - Pin to branch, tag, or commit SHA
 - Support private repos via SSH keys or token auth
 
-## v0.6 — Watch Mode
+## v0.7 — Watch Mode
 
 - `tome watch` for auto-sync on filesystem changes
 - Debounced fsnotify-based watcher
@@ -138,7 +148,7 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
 - **Homebrew formula**: `brew install tome`
-- ~~**Backup snapshots**: Optional tarball backup of library state before destructive operations~~ → moved to v0.4 as git-backed backup (#94)
+- ~~**Backup snapshots**: Optional tarball backup of library state before destructive operations~~ → moved to v0.5 as git-backed backup (#94)
 - **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
 - **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
 - **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`tome suggest-skills`)
