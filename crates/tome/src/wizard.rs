@@ -35,9 +35,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
         match crate::discover::discover_all(&tmp, true) {
             Ok(skills) => skills,
             Err(e) => {
-                eprintln!(
-                    "warning: could not discover skills from selected sources: {e}"
-                );
+                eprintln!("warning: could not discover skills from selected sources: {e}");
                 eprintln!("  (exclusions can be added manually to config later)");
                 Vec::new()
             }
@@ -270,7 +268,7 @@ fn configure_targets() -> Result<Targets> {
         "Claude Code (symlink)",
         "Antigravity",
         "Codex (via MCP)",
-        "OpenClaw (via MCP)",
+        "OpenClaw",
     ];
     let selections = MultiSelect::new()
         .with_prompt("Which tools should receive skills?\n  (space to toggle, enter to confirm)")
@@ -321,15 +319,15 @@ fn configure_targets() -> Result<Targets> {
                 });
             }
             3 => {
-                let default_path = home.join(".openclaw/.mcp.json");
+                let default_path = home.join(".openclaw/skills");
                 let path: String = Input::new()
-                    .with_prompt("OpenClaw MCP config path")
+                    .with_prompt("OpenClaw skills directory")
                     .default(default_path.display().to_string())
                     .interact_text()?;
                 targets.openclaw = Some(TargetConfig {
                     enabled: true,
-                    method: TargetMethod::Mcp {
-                        mcp_config: expand_tilde(&PathBuf::from(path))?,
+                    method: TargetMethod::Symlink {
+                        skills_dir: expand_tilde(&PathBuf::from(path))?,
                     },
                 });
             }

@@ -78,7 +78,7 @@ graph LR
     subgraph Targets
         T1["Antigravity<br/>(symlinks)"]
         T2["Codex<br/>(MCP config)"]
-        T3["OpenClaw<br/>(MCP config)"]
+        T3["OpenClaw<br/>(symlinks)"]
     end
 
     S1 --> L

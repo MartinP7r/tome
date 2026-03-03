@@ -1,0 +1,34 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "book.toml"
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: latest
+      - run: mdbook build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+      - id: deploy
+        uses: actions/deploy-pages@v4

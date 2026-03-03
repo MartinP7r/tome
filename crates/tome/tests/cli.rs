@@ -2,6 +2,7 @@ use assert_cmd::{Command, cargo_bin_cmd};
 use assert_fs::TempDir;
 use predicates::prelude::*;
 use std::os::unix::fs as unix_fs;
+use std::process::Command as StdCommand;
 
 fn tome() -> Command {
     cargo_bin_cmd!("tome")
@@ -416,4 +417,173 @@ fn doctor_without_config_shows_init_prompt() {
         .success()
         .stdout(predicate::str::contains("Not configured yet"))
         .stdout(predicate::str::contains("tome init"));
+}
+
+// -- Git commit on sync --
+
+/// Helper: initialize a git repo with a dummy identity (for CI).
+fn git_init(dir: &std::path::Path) {
+    StdCommand::new("git")
+        .args(["init"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["config", "user.email", "test@test.com"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    StdCommand::new("git")
+        .args(["config", "user.name", "Test"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    // Initial commit so HEAD exists
+    StdCommand::new("git")
+        .args(["commit", "--allow-empty", "-m", "init"])
+        .current_dir(dir)
+        .output()
+        .unwrap();
+}
+
+#[test]
+fn sync_skips_git_commit_without_tty() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "new-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    git_init(&library_dir);
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    // Without a TTY, the git commit prompt should be silently skipped
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"));
+
+    // Only the initial "init" commit should exist (no auto-commit without TTY)
+    let log = StdCommand::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(&library_dir)
+        .output()
+        .unwrap();
+    let commits = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        !commits.contains("tome sync"),
+        "should not commit without a TTY"
+    );
+}
+
+#[test]
+fn sync_dry_run_skips_git_commit() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "new-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    git_init(&library_dir);
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    tome()
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "--dry-run",
+            "sync",
+        ])
+        .assert()
+        .success();
+
+    // Only the initial "init" commit should exist
+    let log = StdCommand::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(&library_dir)
+        .output()
+        .unwrap();
+    let commits = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        !commits.contains("tome sync"),
+        "dry-run should not create a commit"
+    );
+}
+
+#[test]
+fn sync_quiet_skips_git_commit() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "new-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    git_init(&library_dir);
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "--quiet", "sync"])
+        .assert()
+        .success();
+
+    // Only the initial "init" commit should exist
+    let log = StdCommand::new("git")
+        .args(["log", "--oneline"])
+        .current_dir(&library_dir)
+        .output()
+        .unwrap();
+    let commits = String::from_utf8_lossy(&log.stdout);
+    assert!(
+        !commits.contains("tome sync"),
+        "quiet mode should not prompt for commit"
+    );
 }

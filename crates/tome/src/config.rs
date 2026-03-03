@@ -236,11 +236,7 @@ impl Config {
             Some(p) => {
                 if !p.exists() {
                     let parent_exists = p.parent().is_some_and(|d| d.exists());
-                    anyhow::ensure!(
-                        parent_exists,
-                        "config file not found: {}",
-                        p.display()
-                    );
+                    anyhow::ensure!(parent_exists, "config file not found: {}", p.display());
                 }
                 p.to_path_buf()
             }
