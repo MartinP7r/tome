@@ -142,7 +142,7 @@ fn count_entries(dir: &Path) -> Result<usize> {
 
 /// Count health issues: manifest/disk mismatches.
 fn count_health_issues(dir: &Path) -> Result<usize> {
-    let m = manifest::load(dir).unwrap_or_default();
+    let m = manifest::load(dir)?;
     let mut issues = 0;
 
     // Check manifest entries exist on disk
