@@ -2,6 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current State
+
+**v0.2.0** — Scoped SOT milestone shipped (library copies instead of symlinks). Next up: **v0.3 Connector Architecture** (replacing hardcoded targets with a trait-based `Vec<Target>`).
+
+## Quick Reference
+
+| Document | Purpose |
+|----------|---------|
+| `ROADMAP.md` | Version-by-version feature roadmap (v0.1.x → v0.7) |
+| `CHANGELOG.md` | Release history and what changed per version |
+| `docs/src/architecture.md` | Detailed sync pipeline and module breakdown |
+| `docs/src/test-setup.md` | Test architecture, module coverage, CI pipeline |
+| `docs/src/configuration.md` | TOML config format and examples |
+| `docs/src/commands.md` | CLI command reference |
+| `docs/src/tool-landscape.md` | Research: AI tool config layers across 7+ tools |
+| `docs/src/frontmatter-compatibility.md` | SKILL.md frontmatter spec across platforms |
+| `docs/src/agent-skills-invocation-syntax-research.md` | Research: skill invocation syntax across tools |
+
+## Project & Task Workflow
+
+- Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.2, v0.3, v0.4, etc.)
+- Project board: **"tome Execution Board"** on GitHub Projects
+- Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
+- Workflow: check open issues → create feature branch linked to issue → draft PR → CI must pass → merge
+
+## Tech Stack
+
+Rust edition 2024. Key crates: `clap` (CLI), `rmcp` (MCP server), `dialoguer` (interactive prompts), `indicatif` (progress bars), `tabled` (table output), `walkdir` (dir traversal), `sha2` (hashing), `serde`/`toml` (config). Test crates: `assert_cmd`, `tempfile`, `assert_fs`.
+
 ## Build & Development Commands
 
 ```bash
@@ -24,6 +53,8 @@ cargo test -p tome --test cli                # integration tests only
 ```
 
 ## Architecture
+
+> For the full deep-dive, see `docs/src/architecture.md`.
 
 Rust workspace (edition 2024) with two crates producing two binaries:
 
@@ -55,6 +86,8 @@ Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consu
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
 ## Testing
+
+> For test architecture details, see `docs/src/test-setup.md`.
 
 Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integration tests in `crates/tome/tests/cli.rs` exercise the binary via `assert_cmd`. Tests use `tempfile::TempDir` for filesystem isolation — no cleanup needed.
 

@@ -1,5 +1,7 @@
 # Architecture
 
+> **[v0.2 System Diagram (Excalidraw)](https://excalidraw.com/#json=5-pjpDsna4Way3lfGW5km,p0bQwpcJEl6do68RrnKAgw)** — interactive diagram showing the two-tier source → library → target flow.
+
 Rust workspace (edition 2024) with two crates producing two binaries.
 
 ## `crates/tome` — CLI (`tome`)
