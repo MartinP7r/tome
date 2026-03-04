@@ -234,8 +234,14 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
 
     // Canonicalize library_dir so starts_with works when library_dir contains
     // a symlink component (e.g., /var -> /private/var on macOS).
-    let canonical_library =
-        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
 
     let entries = std::fs::read_dir(skills_dir)
         .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;

@@ -94,15 +94,23 @@ fn distribute_symlinks(
         // Skip skills whose original source is already inside this target dir.
         // This prevents circular symlinks when a directory is both a source and target
         // (e.g. ~/.claude/skills used as both).
-        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref())
-            && let (Ok(source), Ok(target)) = (
+        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref()) {
+            match (
                 manifest_entry.source_path.canonicalize(),
                 skills_dir.canonicalize(),
-            )
-            && source.starts_with(&target)
-        {
-            result.unchanged += 1;
-            continue;
+            ) {
+                (Ok(source), Ok(target)) if source.starts_with(&target) => {
+                    result.unchanged += 1;
+                    continue;
+                }
+                (Err(_), _) | (_, Err(_)) => {
+                    eprintln!(
+                        "warning: could not resolve paths for circular symlink check on '{}', proceeding",
+                        skill_name_str
+                    );
+                }
+                _ => {}
+            }
         }
 
         if target_link.is_symlink() {

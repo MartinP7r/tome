@@ -115,8 +115,14 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
     // Canonicalize library_dir so that starts_with works when library_dir itself
     // contains a symlink component (e.g., /var -> /private/var on macOS).
     // We keep both forms so we can match symlinks created with either path variant.
-    let canonical_library =
-        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
 
     let entries = std::fs::read_dir(target_dir)
         .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;

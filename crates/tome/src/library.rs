@@ -69,6 +69,10 @@ pub fn consolidate(
                     copy_dir_recursive(&abs_resolved, &dest)?;
                 } else {
                     // Symlink target is gone — copy from the discovered source instead
+                    eprintln!(
+                        "warning: v0.1 symlink target for '{}' is gone, copying from current source",
+                        skill.name
+                    );
                     copy_dir_recursive(&skill.path, &dest)?;
                 }
                 manifest.insert(
@@ -163,8 +167,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
                     target.display()
                 )
             })?;
+        } else if entry.file_type().is_symlink() {
+            // Skip symlinks inside skill dirs — we don't follow them
+            eprintln!(
+                "warning: skipping symlink inside skill dir: {}",
+                entry.path().display()
+            );
         }
-        // Skip symlinks inside skill dirs — we don't follow them
     }
 
     Ok(())
