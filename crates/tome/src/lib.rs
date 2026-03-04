@@ -129,13 +129,11 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
-    let consolidate_result = library::consolidate(&skills, &config.library_dir, dry_run, force)?;
+    let (consolidate_result, mut manifest) =
+        library::consolidate(&skills, &config.library_dir, dry_run, force)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
-
-    // Load manifest for distribute and cleanup
-    let mut manifest = library::load_manifest(&config.library_dir)?;
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
