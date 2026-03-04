@@ -20,7 +20,7 @@ pub struct CleanupResult {
 /// Remove library entries whose skills are no longer present in any discovered source.
 ///
 /// When `interactive` is true and stdin is a TTY, prompts the user before removing each
-/// stale entry. When non-interactive, warns to stderr but preserves the entry.
+/// stale entry. When non-interactive, warns to stderr and removes automatically.
 pub fn cleanup_library(
     library_dir: &Path,
     discovered_names: &HashSet<String>,
