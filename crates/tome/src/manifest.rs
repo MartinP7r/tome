@@ -259,6 +259,28 @@ mod tests {
     }
 
     #[test]
+    fn hash_directory_different_filenames_different_hashes() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+        // Same content, different filenames
+        std::fs::write(tmp1.path().join("file_a.txt"), "hello").unwrap();
+        std::fs::write(tmp2.path().join("file_b.txt"), "hello").unwrap();
+        let h1 = hash_directory(tmp1.path()).unwrap();
+        let h2 = hash_directory(tmp2.path()).unwrap();
+        assert_ne!(
+            h1, h2,
+            "different filenames should produce different hashes"
+        );
+    }
+
+    #[test]
+    fn load_corrupt_json_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".tome-manifest.json"), "not valid json{{{").unwrap();
+        assert!(load(tmp.path()).is_err());
+    }
+
+    #[test]
     fn now_iso8601_format() {
         let ts = now_iso8601();
         // Should match YYYY-MM-DDTHH:MM:SSZ

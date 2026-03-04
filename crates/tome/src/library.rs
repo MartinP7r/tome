@@ -373,4 +373,92 @@ mod tests {
         assert!(!entry.content_hash.is_empty());
         assert!(!entry.synced_at.is_empty());
     }
+
+    #[test]
+    fn consolidate_migrates_v01_symlink_with_broken_target() {
+        use std::os::unix::fs as unix_fs;
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        // Create a symlink pointing to a nonexistent target (simulating gone original)
+        unix_fs::symlink(
+            "/nonexistent/original/path",
+            library.path().join("my-skill"),
+        )
+        .unwrap();
+
+        let (result, _manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        assert_eq!(result.updated, 1);
+
+        let dest = library.path().join("my-skill");
+        assert!(dest.is_dir());
+        assert!(!dest.is_symlink());
+        assert!(dest.join("SKILL.md").is_file());
+    }
+
+    #[test]
+    fn consolidate_copies_nested_subdirectories() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        let skill_dir = source.path().join("deep-skill");
+        std::fs::create_dir_all(skill_dir.join("sub/nested")).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# test").unwrap();
+        std::fs::write(skill_dir.join("sub/file.txt"), "content").unwrap();
+        std::fs::write(skill_dir.join("sub/nested/deep.txt"), "deep").unwrap();
+
+        let skill = DiscoveredSkill {
+            name: crate::discover::SkillName::new("deep-skill").unwrap(),
+            path: skill_dir,
+            source_name: "test".into(),
+        };
+
+        let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();
+        assert_eq!(result.created, 1);
+        assert!(
+            library
+                .path()
+                .join("deep-skill/sub/nested/deep.txt")
+                .is_file()
+        );
+        let content =
+            std::fs::read_to_string(library.path().join("deep-skill/sub/nested/deep.txt")).unwrap();
+        assert_eq!(content, "deep");
+    }
+
+    #[test]
+    fn consolidate_dry_run_no_manifest_written() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        // Create the library dir so it exists
+        std::fs::create_dir_all(library.path()).unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        let (result, _) = consolidate(&[skill], library.path(), true, false).unwrap();
+        assert_eq!(result.created, 1);
+        assert!(
+            !library.path().join(".tome-manifest.json").exists(),
+            "dry-run should not write manifest"
+        );
+    }
+
+    #[test]
+    fn consolidate_migrates_v01_symlink_records_discovered_source() {
+        use std::os::unix::fs as unix_fs;
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        unix_fs::symlink(&skill.path, library.path().join("my-skill")).unwrap();
+
+        let (_, manifest) = consolidate(&[skill.clone()], library.path(), false, false).unwrap();
+        let entry = manifest
+            .get("my-skill")
+            .expect("manifest should have entry");
+        assert_eq!(
+            entry.source_path, skill.path,
+            "manifest source_path should point to discovered source"
+        );
+    }
 }
