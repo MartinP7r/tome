@@ -304,14 +304,19 @@ fn offer_git_commit(
         return Ok(());
     }
 
-    let has_changes = GitCommand::new("git")
+    let output = match GitCommand::new("git")
         .args(["status", "--porcelain"])
         .current_dir(library_dir)
         .output()
-        .ok()
-        .is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("warning: could not run git status: {e}");
+            return Ok(());
+        }
+    };
 
-    if !has_changes {
+    if !output.status.success() || output.stdout.is_empty() {
         return Ok(());
     }
 
@@ -326,15 +331,29 @@ fn offer_git_commit(
         return Ok(());
     }
 
-    GitCommand::new("git")
+    let add_status = GitCommand::new("git")
         .args(["add", "."])
         .current_dir(library_dir)
         .status()?;
+    if !add_status.success() {
+        eprintln!(
+            "warning: git add failed (exit code {:?})",
+            add_status.code()
+        );
+        return Ok(());
+    }
 
-    GitCommand::new("git")
+    let commit_status = GitCommand::new("git")
         .args(["commit", "-m", &msg])
         .current_dir(library_dir)
         .status()?;
+    if !commit_status.success() {
+        eprintln!(
+            "warning: git commit failed (exit code {:?})",
+            commit_status.code()
+        );
+        return Ok(());
+    }
 
     Ok(())
 }
