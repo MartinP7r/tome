@@ -8,9 +8,9 @@
 //! The `sync` function drives the main workflow:
 //!
 //! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — symlink discovered skills into the library
-//! 3. **Distribute** — push library skills to target tools
-//! 4. **Cleanup** — remove broken symlinks
+//! 2. **Consolidate** — copy discovered skills into the library (source of truth)
+//! 3. **Distribute** — push library skills to target tools via symlinks
+//! 4. **Cleanup** — remove stale entries no longer in any source
 //!
 //! # Public API
 //!
@@ -26,11 +26,13 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod library;
+pub(crate) mod manifest;
 pub mod mcp;
 pub(crate) mod paths;
 pub(crate) mod status;
 pub(crate) mod wizard;
 
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command as GitCommand;
@@ -122,15 +124,18 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         eprintln!("  Found {} skills", skills.len());
     }
 
-    // 2. Consolidate into library
+    // 2. Consolidate into library (copy)
     let sp = show_progress.then(|| spinner("Consolidating to library..."));
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
-    let consolidate_result = library::consolidate(&skills, &config.library_dir, dry_run, force)?;
+    let (consolidate_result, mut manifest) =
+        library::consolidate(&skills, &config.library_dir, dry_run, force)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
+    let discovered_names: HashSet<String> =
+        skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
@@ -139,20 +144,31 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
-        let result =
-            distribute::distribute_to_target(&config.library_dir, name, target, dry_run, force)?;
+        let result = distribute::distribute_to_target(
+            &config.library_dir,
+            name,
+            target,
+            &manifest,
+            dry_run,
+            force,
+        )?;
         distribute_results.push(result);
         if let Some(sp) = sp {
             sp.finish_and_clear();
         }
     }
 
-    // 4. Cleanup stale links
-    let sp = show_progress.then(|| spinner("Cleaning up stale links..."));
+    // 4. Cleanup stale entries
+    let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
     if verbose {
-        eprintln!("{}", style("Cleaning up stale links...").dim());
+        eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
-    let cleanup_result = cleanup::cleanup_library(&config.library_dir, dry_run)?;
+    let cleanup_result = cleanup::cleanup_library(
+        &config.library_dir,
+        &discovered_names,
+        &mut manifest,
+        dry_run,
+    )?;
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
@@ -161,6 +177,11 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
         }
     }
+    // Save manifest after cleanup (may have removed entries)
+    if !dry_run && config.library_dir.is_dir() {
+        manifest::save(&manifest, &config.library_dir)?;
+    }
+
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -191,7 +212,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
 
     if cleanup_result.removed_from_library > 0 {
         println!(
-            "  Cleaned {} stale link(s)",
+            "  Cleaned {} stale entry/entries",
             style(cleanup_result.removed_from_library).yellow()
         );
     }
@@ -281,14 +302,19 @@ fn offer_git_commit(
         return Ok(());
     }
 
-    let has_changes = GitCommand::new("git")
+    let output = match GitCommand::new("git")
         .args(["status", "--porcelain"])
         .current_dir(library_dir)
         .output()
-        .ok()
-        .is_some_and(|o| o.status.success() && !o.stdout.is_empty());
+    {
+        Ok(o) => o,
+        Err(e) => {
+            eprintln!("warning: could not run git status: {e}");
+            return Ok(());
+        }
+    };
 
-    if !has_changes {
+    if !output.status.success() || output.stdout.is_empty() {
         return Ok(());
     }
 
@@ -303,15 +329,29 @@ fn offer_git_commit(
         return Ok(());
     }
 
-    GitCommand::new("git")
+    let add_status = GitCommand::new("git")
         .args(["add", "."])
         .current_dir(library_dir)
         .status()?;
+    if !add_status.success() {
+        eprintln!(
+            "warning: git add failed (exit code {:?})",
+            add_status.code()
+        );
+        return Ok(());
+    }
 
-    GitCommand::new("git")
+    let commit_status = GitCommand::new("git")
         .args(["commit", "-m", &msg])
         .current_dir(library_dir)
         .status()?;
+    if !commit_status.success() {
+        eprintln!(
+            "warning: git commit failed (exit code {:?})",
+            commit_status.code()
+        );
+        return Ok(());
+    }
 
     Ok(())
 }

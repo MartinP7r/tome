@@ -1,7 +1,6 @@
 use assert_cmd::{Command, cargo_bin_cmd};
 use assert_fs::TempDir;
 use predicates::prelude::*;
-use std::os::unix::fs as unix_fs;
 use std::process::Command as StdCommand;
 
 fn tome() -> Command {
@@ -125,11 +124,11 @@ fn sync_dry_run_makes_no_changes() {
         .unwrap()
         .filter_map(|e| e.ok())
         .collect();
-    assert_eq!(entries.len(), 0, "dry run should not create symlinks");
+    assert_eq!(entries.len(), 0, "dry run should not create entries");
 }
 
 #[test]
-fn sync_creates_library_symlinks() {
+fn sync_copies_skills_to_library() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "alpha");
@@ -150,8 +149,15 @@ fn sync_creates_library_symlinks() {
         .stdout(predicate::str::contains("Sync complete"));
 
     let library = tmp.path().join("library");
-    assert!(library.join("alpha").is_symlink());
-    assert!(library.join("beta").is_symlink());
+    // v0.2: library entries are real directories, not symlinks
+    assert!(library.join("alpha").is_dir());
+    assert!(!library.join("alpha").is_symlink());
+    assert!(library.join("beta").is_dir());
+    assert!(!library.join("beta").is_symlink());
+    // Content should be copied
+    assert!(library.join("alpha/SKILL.md").is_file());
+    // Manifest should exist
+    assert!(library.join(".tome-manifest.json").is_file());
 }
 
 #[test]
@@ -256,9 +262,10 @@ skills_dir = "{}"
         .success()
         .stdout(predicate::str::contains("Sync complete"));
 
-    // Library has the skill
-    assert!(library_dir.join("my-skill").is_symlink());
-    // Target also has the skill
+    // Library has the skill as a real directory (v0.2)
+    assert!(library_dir.join("my-skill").is_dir());
+    assert!(!library_dir.join("my-skill").is_symlink());
+    // Target has a symlink pointing to the library entry
     assert!(target_dir.join("my-skill").is_symlink());
 }
 
@@ -295,26 +302,26 @@ type = "directory"
         .args(["--config", config_path.to_str().unwrap(), "sync"])
         .assert()
         .success();
-    assert!(library_dir.join("keep-me").is_symlink());
-    assert!(library_dir.join("remove-me").is_symlink());
+    assert!(library_dir.join("keep-me").is_dir());
+    assert!(library_dir.join("remove-me").is_dir());
 
     // Remove one skill from source
     std::fs::remove_dir_all(skills_dir.join("remove-me")).unwrap();
 
-    // Second sync — stale library link should be cleaned up
+    // Second sync — stale entry should be cleaned up (non-interactive mode in tests)
     tome()
         .args(["--config", config_path.to_str().unwrap(), "sync"])
         .assert()
         .success();
-    assert!(library_dir.join("keep-me").is_symlink());
+    assert!(library_dir.join("keep-me").is_dir());
     assert!(
         !library_dir.join("remove-me").exists(),
-        "stale symlink should have been cleaned up"
+        "stale skill should have been cleaned up"
     );
 }
 
 #[test]
-fn sync_force_recreates_all_links() {
+fn sync_force_recreates_all() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     std::fs::create_dir_all(&skills_dir).unwrap();
@@ -345,15 +352,115 @@ type = "directory"
         .args(["--config", config_path.to_str().unwrap(), "sync"])
         .assert()
         .success();
-    assert!(library_dir.join("my-skill").is_symlink());
+    assert!(library_dir.join("my-skill").is_dir());
 
-    // Force sync should report recreated links, not "unchanged"
+    // Force sync should report recreated, not "unchanged"
     tome()
         .args(["--config", config_path.to_str().unwrap(), "sync", "--force"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Sync complete"))
         .stdout(predicate::str::contains("updated").or(predicate::str::contains("created")));
+}
+
+#[test]
+fn sync_updates_changed_source() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    // First sync
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+
+    // Modify source SKILL.md
+    std::fs::write(
+        skills_dir.join("my-skill/SKILL.md"),
+        "# updated content\nNew body.",
+    )
+    .unwrap();
+
+    // Second sync — should detect the change
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 updated"));
+
+    // Library copy should have the new content
+    let content = std::fs::read_to_string(library_dir.join("my-skill/SKILL.md")).unwrap();
+    assert_eq!(content, "# updated content\nNew body.");
+}
+
+#[test]
+fn sync_migrates_v01_symlinks() {
+    use std::os::unix::fs as unix_fs;
+
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "legacy-skill");
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    // Simulate v0.1.x: library has a symlink
+    unix_fs::symlink(
+        skills_dir.join("legacy-skill"),
+        library_dir.join("legacy-skill"),
+    )
+    .unwrap();
+    assert!(library_dir.join("legacy-skill").is_symlink());
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[[sources]]
+name = "test"
+path = "{}"
+type = "directory"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+        ),
+    )
+    .unwrap();
+
+    // Sync should migrate the symlink to a real directory
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"));
+
+    // Should now be a real directory, not a symlink
+    assert!(library_dir.join("legacy-skill").is_dir());
+    assert!(!library_dir.join("legacy-skill").is_symlink());
+    assert!(library_dir.join("legacy-skill/SKILL.md").is_file());
 }
 
 // -- Doctor --
@@ -372,11 +479,13 @@ fn doctor_with_clean_state() {
 
 #[test]
 fn doctor_detects_broken_symlinks() {
+    use std::os::unix::fs as unix_fs;
+
     let tmp = TempDir::new().unwrap();
     let library = tmp.path().join("library");
     std::fs::create_dir_all(&library).unwrap();
 
-    // Create a broken symlink in the library
+    // Create a broken symlink in the library (legacy)
     unix_fs::symlink("/nonexistent/path", library.join("broken-skill")).unwrap();
 
     let config = write_config(tmp.path(), "");

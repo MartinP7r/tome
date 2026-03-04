@@ -1,4 +1,5 @@
-//! Diagnose and optionally repair issues such as broken symlinks and missing source paths.
+//! Diagnose and optionally repair issues such as missing entries, orphan directories,
+//! and stale target symlinks.
 
 use anyhow::{Context, Result};
 use console::style;
@@ -7,6 +8,7 @@ use std::path::Path;
 
 use crate::cleanup;
 use crate::config::Config;
+use crate::manifest;
 use crate::paths::resolve_symlink_target;
 
 /// Diagnose and optionally repair issues.
@@ -67,14 +69,7 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
             if confirmed {
                 println!();
                 println!("{}", style("Repairing...").bold());
-                let cleanup_result = cleanup::cleanup_library(&config.library_dir, false)?;
-                if cleanup_result.removed_from_library > 0 {
-                    println!(
-                        "  {} Removed {} broken symlink(s) from library",
-                        style("fixed").green(),
-                        cleanup_result.removed_from_library
-                    );
-                }
+                repair_library(&config.library_dir)?;
 
                 for (name, t) in config.targets.iter() {
                     if t.enabled
@@ -101,13 +96,39 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+/// Check the library for issues: missing manifest entries, orphan directories, broken symlinks.
 fn check_library(library_dir: &Path) -> Result<usize> {
     if !library_dir.is_dir() {
         println!("  {} library directory does not exist", style("!").yellow());
         return Ok(1);
     }
 
+    let m = match manifest::load(library_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            println!(
+                "  {} manifest is corrupted or unreadable: {}",
+                style("x").red(),
+                e
+            );
+            return Ok(1);
+        }
+    };
     let mut issues = 0;
+
+    // Check manifest entries exist on disk
+    for name in m.keys() {
+        if !library_dir.join(name.as_str()).is_dir() {
+            println!(
+                "  {} manifest entry '{}' has no directory on disk",
+                style("x").red(),
+                name
+            );
+            issues += 1;
+        }
+    }
+
+    // Check disk entries are in manifest (orphans)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
@@ -115,20 +136,28 @@ fn check_library(library_dir: &Path) -> Result<usize> {
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", library_dir.display()))?;
         let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
 
-        if path.is_symlink() {
+        if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
+            println!(
+                "  {} orphan directory: {} (not in manifest)",
+                style("!").yellow(),
+                path.display()
+            );
+            issues += 1;
+        }
+
+        // Check for broken legacy symlinks
+        if path.is_symlink() && !path.exists() {
             let raw_target = std::fs::read_link(&path)
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
-            let target = resolve_symlink_target(&path, &raw_target);
-            if !target.exists() {
-                println!(
-                    "  {} broken symlink: {} -> {}",
-                    style("x").red(),
-                    path.display(),
-                    raw_target.display()
-                );
-                issues += 1;
-            }
+            println!(
+                "  {} broken symlink: {} -> {}",
+                style("x").red(),
+                path.display(),
+                raw_target.display()
+            );
+            issues += 1;
         }
     }
 
@@ -137,6 +166,57 @@ fn check_library(library_dir: &Path) -> Result<usize> {
     }
 
     Ok(issues)
+}
+
+/// Repair library issues: remove orphan manifest entries and broken symlinks.
+fn repair_library(library_dir: &Path) -> Result<()> {
+    let mut m = manifest::load(library_dir).with_context(|| {
+        "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
+    })?;
+    let mut fixed = 0;
+
+    // Remove manifest entries missing from disk
+    let missing: Vec<String> = m
+        .keys()
+        .filter(|name| !library_dir.join(name.as_str()).is_dir())
+        .map(|name| name.as_str().to_string())
+        .collect();
+    for name in missing {
+        m.remove(&name);
+        println!(
+            "  {} Removed manifest entry '{}' (directory missing)",
+            style("fixed").green(),
+            name
+        );
+        fixed += 1;
+    }
+
+    // Remove broken legacy symlinks
+    let entries = std::fs::read_dir(library_dir)
+        .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
+
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", library_dir.display()))?;
+        let path = entry.path();
+
+        if path.is_symlink() && !path.exists() {
+            std::fs::remove_file(&path)
+                .with_context(|| format!("failed to remove broken symlink {}", path.display()))?;
+            println!(
+                "  {} Removed broken symlink {}",
+                style("fixed").green(),
+                path.display()
+            );
+            fixed += 1;
+        }
+    }
+
+    if fixed > 0 {
+        manifest::save(&m, library_dir)?;
+    }
+
+    Ok(())
 }
 
 fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result<usize> {
@@ -154,8 +234,14 @@ fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result
 
     // Canonicalize library_dir so starts_with works when library_dir contains
     // a symlink component (e.g., /var -> /private/var on macOS).
-    let canonical_library =
-        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
 
     let entries = std::fs::read_dir(skills_dir)
         .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
@@ -231,18 +317,61 @@ mod tests {
     #[test]
     fn check_library_no_issues() {
         let lib = TempDir::new().unwrap();
-        let target_dir = TempDir::new().unwrap();
-        let target = target_dir.path().join("real-skill");
-        std::fs::create_dir(&target).unwrap();
 
-        unix_fs::symlink(&target, lib.path().join("my-skill")).unwrap();
+        // Create a skill directory and matching manifest entry
+        let skill_dir = lib.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/my-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
 
         let result = check_library(lib.path()).unwrap();
         assert_eq!(result, 0);
     }
 
     #[test]
-    fn check_library_broken_symlink() {
+    fn check_library_missing_manifest_entry() {
+        let lib = TempDir::new().unwrap();
+
+        // Manifest entry with no directory
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("gone").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/gone"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        let result = check_library(lib.path()).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_library_orphan_directory() {
+        let lib = TempDir::new().unwrap();
+
+        // Directory not in manifest
+        std::fs::create_dir_all(lib.path().join("orphan")).unwrap();
+
+        let result = check_library(lib.path()).unwrap();
+        assert_eq!(result, 1);
+    }
+
+    #[test]
+    fn check_library_broken_legacy_symlink() {
         let lib = TempDir::new().unwrap();
         unix_fs::symlink("/nonexistent/target", lib.path().join("broken")).unwrap();
 
@@ -265,7 +394,6 @@ mod tests {
         let lib = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
 
-        // Symlink inside target_dir pointing into library at a path that doesn't exist
         let stale_target = lib.path().join("deleted-skill");
         unix_fs::symlink(&stale_target, target_dir.path().join("skill-link")).unwrap();
 
@@ -278,7 +406,6 @@ mod tests {
         let lib = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
 
-        // Symlink pointing outside the library — doctor should ignore it
         unix_fs::symlink("/some/other/place", target_dir.path().join("external")).unwrap();
 
         let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
@@ -327,7 +454,6 @@ mod tests {
             ..Config::default()
         };
 
-        // Pre-init guard triggers: no library dir + no sources → friendly message, no error
         let result = diagnose(&config, true);
         assert!(result.is_ok());
     }
