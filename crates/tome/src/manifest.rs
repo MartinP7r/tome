@@ -12,12 +12,53 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use crate::discover::SkillName;
+
 const MANIFEST_FILENAME: &str = ".tome-manifest.json";
 
 /// The library manifest, tracking all skills and their provenance.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
-    pub skills: BTreeMap<String, SkillEntry>,
+    skills: BTreeMap<SkillName, SkillEntry>,
+}
+
+impl Manifest {
+    /// Returns the entry for the given skill name, if present.
+    pub fn get(&self, name: &str) -> Option<&SkillEntry> {
+        self.skills.get(name)
+    }
+
+    /// Returns true if the manifest contains an entry for the given skill name.
+    pub fn contains_key(&self, name: &str) -> bool {
+        self.skills.contains_key(name)
+    }
+
+    /// Inserts a skill entry into the manifest, keyed by the given `SkillName`.
+    pub fn insert(&mut self, name: SkillName, entry: SkillEntry) {
+        self.skills.insert(name, entry);
+    }
+
+    /// Removes the entry for the given skill name.
+    pub fn remove(&mut self, name: &str) {
+        self.skills.remove(name);
+    }
+
+    /// Returns an iterator over the skill names in the manifest.
+    pub fn keys(&self) -> impl Iterator<Item = &SkillName> {
+        self.skills.keys()
+    }
+
+    /// Returns true if the manifest has no entries.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty()
+    }
+
+    /// Returns the number of entries in the manifest.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.skills.len()
+    }
 }
 
 /// A single skill entry in the manifest.
@@ -31,6 +72,18 @@ pub struct SkillEntry {
     pub content_hash: String,
     /// ISO 8601 timestamp of when this skill was last synced.
     pub synced_at: String,
+}
+
+impl SkillEntry {
+    /// Create a new `SkillEntry`, recording the current timestamp automatically.
+    pub fn new(source_path: PathBuf, source_name: String, content_hash: String) -> Self {
+        Self {
+            source_path,
+            source_name,
+            content_hash,
+            synced_at: now_iso8601(),
+        }
+    }
 }
 
 /// Load the manifest from the library directory, or return an empty one if missing.
@@ -182,8 +235,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let mut manifest = Manifest::default();
-        manifest.skills.insert(
-            "my-skill".to_string(),
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: "test".to_string(),
@@ -194,15 +247,15 @@ mod tests {
 
         save(&manifest, tmp.path()).unwrap();
         let loaded = load(tmp.path()).unwrap();
-        assert_eq!(loaded.skills.len(), 1);
-        assert_eq!(loaded.skills["my-skill"].content_hash, "abc123");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded.get("my-skill").unwrap().content_hash, "abc123");
     }
 
     #[test]
     fn load_missing_manifest_returns_empty() {
         let tmp = TempDir::new().unwrap();
         let manifest = load(tmp.path()).unwrap();
-        assert!(manifest.skills.is_empty());
+        assert!(manifest.is_empty());
     }
 
     #[test]

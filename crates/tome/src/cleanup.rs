@@ -8,6 +8,7 @@ use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::Path;
 
+use crate::discover::SkillName;
 use crate::manifest::Manifest;
 use crate::paths::resolve_symlink_target;
 
@@ -36,15 +37,14 @@ pub fn cleanup_library(
     let interactive = std::io::stdin().is_terminal();
 
     // Find manifest entries not in discovered_names
-    let stale: Vec<String> = manifest
-        .skills
+    let stale: Vec<SkillName> = manifest
         .keys()
         .filter(|name| !discovered_names.contains(name.as_str()))
         .cloned()
         .collect();
 
     for name in stale {
-        let entry_path = library_dir.join(&name);
+        let entry_path = library_dir.join(name.as_str());
 
         if interactive {
             let prompt = format!(
@@ -72,7 +72,7 @@ pub fn cleanup_library(
                     format!("failed to remove stale skill dir {}", entry_path.display())
                 })?;
             }
-            manifest.skills.remove(&name);
+            manifest.remove(name.as_str());
         }
         result.removed_from_library += 1;
     }
@@ -167,8 +167,8 @@ mod tests {
         std::fs::write(skill_dir.join("SKILL.md"), "# old").unwrap();
 
         let mut manifest = Manifest::default();
-        manifest.skills.insert(
-            "old-skill".to_string(),
+        manifest.insert(
+            crate::discover::SkillName::new("old-skill").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/old-skill"),
                 source_name: "test".to_string(),
@@ -183,7 +183,7 @@ mod tests {
 
         assert_eq!(result.removed_from_library, 1);
         assert!(!library.path().join("old-skill").exists());
-        assert!(!manifest.skills.contains_key("old-skill"));
+        assert!(!manifest.contains_key("old-skill"));
     }
 
     #[test]
@@ -194,8 +194,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
 
         let mut manifest = Manifest::default();
-        manifest.skills.insert(
-            "keep-me".to_string(),
+        manifest.insert(
+            crate::discover::SkillName::new("keep-me").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/keep-me"),
                 source_name: "test".to_string(),
@@ -219,8 +219,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
 
         let mut manifest = Manifest::default();
-        manifest.skills.insert(
-            "stale".to_string(),
+        manifest.insert(
+            crate::discover::SkillName::new("stale").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/stale"),
                 source_name: "test".to_string(),
@@ -236,7 +236,7 @@ mod tests {
         // Should still exist in dry run
         assert!(library.path().join("stale").exists());
         // Manifest should still have the entry in dry run
-        assert!(manifest.skills.contains_key("stale"));
+        assert!(manifest.contains_key("stale"));
     }
 
     #[test]

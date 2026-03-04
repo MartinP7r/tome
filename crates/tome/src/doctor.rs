@@ -107,8 +107,8 @@ fn check_library(library_dir: &Path) -> Result<usize> {
     let mut issues = 0;
 
     // Check manifest entries exist on disk
-    for name in m.skills.keys() {
-        if !library_dir.join(name).is_dir() {
+    for name in m.keys() {
+        if !library_dir.join(name.as_str()).is_dir() {
             println!(
                 "  {} manifest entry '{}' has no directory on disk",
                 style("x").red(),
@@ -128,7 +128,7 @@ fn check_library(library_dir: &Path) -> Result<usize> {
         let path = entry.path();
         let name = entry.file_name().to_string_lossy().to_string();
 
-        if path.is_dir() && !name.starts_with('.') && !m.skills.contains_key(&name) {
+        if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
             println!(
                 "  {} orphan directory: {} (not in manifest)",
                 style("!").yellow(),
@@ -165,13 +165,12 @@ fn repair_library(library_dir: &Path) -> Result<()> {
 
     // Remove manifest entries missing from disk
     let missing: Vec<String> = m
-        .skills
         .keys()
         .filter(|name| !library_dir.join(name.as_str()).is_dir())
-        .cloned()
+        .map(|name| name.as_str().to_string())
         .collect();
     for name in missing {
-        m.skills.remove(&name);
+        m.remove(&name);
         println!(
             "  {} Removed manifest entry '{}' (directory missing)",
             style("fixed").green(),
@@ -306,8 +305,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
 
         let mut m = manifest::Manifest::default();
-        m.skills.insert(
-            "my-skill".to_string(),
+        m.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: "test".to_string(),
@@ -327,8 +326,8 @@ mod tests {
 
         // Manifest entry with no directory
         let mut m = manifest::Manifest::default();
-        m.skills.insert(
-            "gone".to_string(),
+        m.insert(
+            crate::discover::SkillName::new("gone").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/gone"),
                 source_name: "test".to_string(),

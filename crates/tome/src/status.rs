@@ -146,8 +146,8 @@ fn count_health_issues(dir: &Path) -> Result<usize> {
     let mut issues = 0;
 
     // Check manifest entries exist on disk
-    for name in m.skills.keys() {
-        if !dir.join(name).is_dir() {
+    for name in m.keys() {
+        if !dir.join(name.as_str()).is_dir() {
             issues += 1;
         }
     }
@@ -158,7 +158,7 @@ fn count_health_issues(dir: &Path) -> Result<usize> {
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if entry.path().is_dir() && !name.starts_with('.') && !m.skills.contains_key(&name) {
+        if entry.path().is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
             issues += 1;
         }
     }
@@ -297,8 +297,8 @@ mod tests {
 
         // Create a manifest entry with no corresponding directory
         let mut m = manifest::Manifest::default();
-        m.skills.insert(
-            "missing".to_string(),
+        m.insert(
+            crate::discover::SkillName::new("missing").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: "test".to_string(),
