@@ -47,11 +47,23 @@ pub fn load(library_dir: &Path) -> Result<Manifest> {
 }
 
 /// Save the manifest to the library directory.
+///
+/// Uses a write-to-temp-then-rename pattern so the manifest file is never left in a partially
+/// written (corrupted) state if the process is killed mid-write. `rename` is atomic on POSIX
+/// filesystems when source and destination are on the same filesystem.
 pub fn save(manifest: &Manifest, library_dir: &Path) -> Result<()> {
     let path = library_dir.join(MANIFEST_FILENAME);
+    let tmp_path = library_dir.join(".tome-manifest.tmp");
     let content = serde_json::to_string_pretty(manifest).context("failed to serialize manifest")?;
-    std::fs::write(&path, content)
-        .with_context(|| format!("failed to write manifest {}", path.display()))
+    std::fs::write(&tmp_path, &content)
+        .with_context(|| format!("failed to write temporary manifest {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, &path).with_context(|| {
+        format!(
+            "failed to rename manifest {} -> {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })
 }
 
 /// Compute a deterministic SHA-256 hash of a directory's contents.
