@@ -565,6 +565,35 @@ mod tests {
     }
 
     #[test]
+    fn distribute_symlinks_skips_manifest_file() {
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+
+        // Create a skill dir AND a manifest file in library
+        setup_library(library.path(), &["skill-a"]);
+        std::fs::write(library.path().join(".tome-manifest.json"), "{}").unwrap();
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
+        };
+        let manifest = Manifest::default();
+        let result =
+            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+
+        assert_eq!(
+            result.changed, 1,
+            "only the skill dir should be distributed"
+        );
+        assert!(
+            !target_dir.path().join(".tome-manifest.json").exists(),
+            "manifest file should not be symlinked to target"
+        );
+    }
+
+    #[test]
     fn distribute_skips_skills_originating_from_target_dir() {
         // Simulate: ~/.claude/skills is both a source and a target.
         // The library has a real copy (v0.2), and the manifest records the source.
