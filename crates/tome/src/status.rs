@@ -7,6 +7,7 @@ use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::Config;
 use crate::discover;
+use crate::manifest;
 
 /// Display the current status of the tome system.
 pub fn show(config: &Config) -> Result<()> {
@@ -112,9 +113,9 @@ pub fn show(config: &Config) -> Result<()> {
     println!();
 
     // Health check
-    let health = match count_broken_symlinks(&config.library_dir) {
+    let health = match count_health_issues(&config.library_dir) {
         Ok(0) => format!("{}", style("All good").green()),
-        Ok(n) => format!("{}", style(format!("{} broken symlinks", n)).red()),
+        Ok(n) => format!("{}", style(format!("{} issue(s)", n)).red()),
         Err(e) => {
             eprintln!("warning: could not check library health: {}", e);
             format!("{}", style("unknown").yellow())
@@ -125,33 +126,55 @@ pub fn show(config: &Config) -> Result<()> {
     Ok(())
 }
 
+/// Count skill directories in the library.
 fn count_entries(dir: &Path) -> Result<usize> {
     let mut count = 0;
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        if entry.path().is_symlink() {
+        if entry.path().is_dir() {
             count += 1;
         }
     }
     Ok(count)
 }
 
-fn count_broken_symlinks(dir: &Path) -> Result<usize> {
-    let mut count = 0;
+/// Count health issues: manifest/disk mismatches.
+fn count_health_issues(dir: &Path) -> Result<usize> {
+    let m = manifest::load(dir).unwrap_or_default();
+    let mut issues = 0;
+
+    // Check manifest entries exist on disk
+    for name in m.skills.keys() {
+        if !dir.join(name).is_dir() {
+            issues += 1;
+        }
+    }
+
+    // Check disk entries are in manifest (orphans)
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if entry.path().is_dir() && !name.starts_with('.') && !m.skills.contains_key(&name) {
+            issues += 1;
+        }
+    }
+
+    // Also count any broken symlinks (leftover from v0.1.x)
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
         let path = entry.path();
-        // is_symlink() checks the link itself; exists() follows it —
-        // a symlink that exists but whose target doesn't yields true + false
         if path.is_symlink() && !path.exists() {
-            count += 1;
+            issues += 1;
         }
     }
-    Ok(count)
+
+    Ok(issues)
 }
 
 #[cfg(test)]
@@ -167,7 +190,6 @@ mod tests {
             ..Config::default()
         };
 
-        // Pre-init guard triggers: no library dir + no sources → friendly message, no error
         let result = show(&config);
         assert!(result.is_ok());
     }
@@ -186,8 +208,6 @@ mod tests {
             ..Config::default()
         };
 
-        // Guard does NOT trigger because sources is non-empty.
-        // show() still returns Ok (it warns on stderr but does not error).
         let result = show(&config);
         assert!(result.is_ok());
     }
@@ -195,7 +215,6 @@ mod tests {
     #[test]
     fn status_shows_tables_with_configured_sources_and_targets() {
         use crate::config::{Source, SourceType, TargetConfig, TargetMethod, Targets};
-        use std::os::unix::fs as unix_fs;
 
         let lib_dir = tempfile::TempDir::new().unwrap();
         let source_dir = tempfile::TempDir::new().unwrap();
@@ -206,8 +225,10 @@ mod tests {
         std::fs::create_dir_all(&skill).unwrap();
         std::fs::write(skill.join("SKILL.md"), "# My Skill").unwrap();
 
-        // Create a symlink in the library
-        unix_fs::symlink(&skill, lib_dir.path().join("my-skill")).unwrap();
+        // Create a real directory in the library (v0.2 style)
+        let lib_skill = lib_dir.path().join("my-skill");
+        std::fs::create_dir_all(&lib_skill).unwrap();
+        std::fs::write(lib_skill.join("SKILL.md"), "# My Skill").unwrap();
 
         let config = Config {
             library_dir: lib_dir.path().to_path_buf(),
@@ -228,7 +249,6 @@ mod tests {
             ..Config::default()
         };
 
-        // Should not error
         let result = show(&config);
         assert!(result.is_ok());
     }
@@ -251,43 +271,63 @@ mod tests {
     }
 
     #[test]
-    fn count_entries_counts_only_symlinks() {
-        use std::os::unix::fs as unix_fs;
-
+    fn count_entries_counts_directories() {
         let dir = tempfile::TempDir::new().unwrap();
-        let target = tempfile::TempDir::new().unwrap();
 
-        // Two symlinks — should be counted
-        unix_fs::symlink(target.path(), dir.path().join("link_a")).unwrap();
-        unix_fs::symlink(target.path(), dir.path().join("link_b")).unwrap();
+        // Two directories — should be counted
+        std::fs::create_dir_all(dir.path().join("skill-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("skill-b")).unwrap();
         // One regular file — should be ignored
-        std::fs::write(dir.path().join("regular"), "data").unwrap();
+        std::fs::write(dir.path().join(".tome-manifest.json"), "{}").unwrap();
 
         assert_eq!(count_entries(dir.path()).unwrap(), 2);
     }
 
-    // -- count_broken_symlinks --
+    // -- count_health_issues --
 
     #[test]
-    fn count_broken_symlinks_empty_dir() {
+    fn count_health_issues_empty_dir() {
         let dir = tempfile::TempDir::new().unwrap();
-        assert_eq!(count_broken_symlinks(dir.path()).unwrap(), 0);
+        assert_eq!(count_health_issues(dir.path()).unwrap(), 0);
     }
 
     #[test]
-    fn count_broken_symlinks_detects_broken() {
-        use std::os::unix::fs as unix_fs;
-
+    fn count_health_issues_detects_manifest_disk_mismatch() {
         let dir = tempfile::TempDir::new().unwrap();
-        let real_target = tempfile::TempDir::new().unwrap();
 
-        // Valid symlink
-        unix_fs::symlink(real_target.path(), dir.path().join("valid")).unwrap();
-        // Broken symlink
-        unix_fs::symlink("/nonexistent/target", dir.path().join("broken")).unwrap();
-        // Regular file (not a symlink — should not be counted)
-        std::fs::write(dir.path().join("regular"), "data").unwrap();
+        // Create a manifest entry with no corresponding directory
+        let mut m = manifest::Manifest::default();
+        m.skills.insert(
+            "missing".to_string(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
+        manifest::save(&m, dir.path()).unwrap();
 
-        assert_eq!(count_broken_symlinks(dir.path()).unwrap(), 1);
+        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_health_issues_detects_orphan_directory() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Create a directory not tracked by manifest
+        std::fs::create_dir_all(dir.path().join("orphan-skill")).unwrap();
+
+        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_health_issues_ignores_hidden_dirs() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // .git dir should not be counted as an orphan
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+
+        assert_eq!(count_health_issues(dir.path()).unwrap(), 0);
     }
 }

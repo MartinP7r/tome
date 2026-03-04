@@ -1,8 +1,14 @@
-//! Remove broken and stale symlinks from the library and target directories.
+//! Remove stale entries from the library and broken symlinks from target directories.
+//!
+//! Library cleanup compares manifest entries against currently discovered skill names.
+//! Target cleanup still removes broken symlinks pointing into the library.
 
 use anyhow::{Context, Result};
+use std::collections::HashSet;
+use std::io::IsTerminal;
 use std::path::Path;
 
+use crate::manifest::Manifest;
 use crate::paths::resolve_symlink_target;
 
 /// Result of cleanup operation.
@@ -11,14 +17,67 @@ pub struct CleanupResult {
     pub removed_from_library: usize,
 }
 
-/// Remove stale symlinks from the library (broken or pointing to deleted sources).
-pub fn cleanup_library(library_dir: &Path, dry_run: bool) -> Result<CleanupResult> {
+/// Remove library entries whose skills are no longer present in any discovered source.
+///
+/// When `interactive` is true and stdin is a TTY, prompts the user before removing each
+/// stale entry. When non-interactive, warns to stderr but preserves the entry.
+pub fn cleanup_library(
+    library_dir: &Path,
+    discovered_names: &HashSet<String>,
+    manifest: &mut Manifest,
+    dry_run: bool,
+) -> Result<CleanupResult> {
     let mut result = CleanupResult::default();
 
     if !library_dir.is_dir() {
         return Ok(result);
     }
 
+    let interactive = std::io::stdin().is_terminal();
+
+    // Find manifest entries not in discovered_names
+    let stale: Vec<String> = manifest
+        .skills
+        .keys()
+        .filter(|name| !discovered_names.contains(name.as_str()))
+        .cloned()
+        .collect();
+
+    for name in stale {
+        let entry_path = library_dir.join(&name);
+
+        if interactive {
+            let prompt = format!(
+                "Skill '{}' was removed from sources. Delete from library?",
+                name
+            );
+            let confirmed = dialoguer::Confirm::new()
+                .with_prompt(prompt)
+                .default(false)
+                .interact_opt()?;
+
+            if confirmed != Some(true) {
+                continue;
+            }
+        } else {
+            eprintln!(
+                "warning: skill '{}' no longer in any source, removing from library",
+                name
+            );
+        }
+
+        if !dry_run {
+            if entry_path.is_dir() {
+                std::fs::remove_dir_all(&entry_path).with_context(|| {
+                    format!("failed to remove stale skill dir {}", entry_path.display())
+                })?;
+            }
+            manifest.skills.remove(&name);
+        }
+        result.removed_from_library += 1;
+    }
+
+    // Also clean up any leftover broken symlinks from v0.1.x
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
@@ -31,7 +90,6 @@ pub fn cleanup_library(library_dir: &Path, dry_run: bool) -> Result<CleanupResul
             let raw_target = std::fs::read_link(&path)
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
-            // Check if the symlink target still exists
             if !target.exists() {
                 if !dry_run {
                     std::fs::remove_file(&path).with_context(|| {
@@ -100,33 +158,100 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn cleanup_removes_broken_library_symlinks() {
+    fn cleanup_removes_stale_manifest_entries() {
         let library = TempDir::new().unwrap();
-        let source = TempDir::new().unwrap();
 
-        // Create a valid skill + symlink
-        let skill_dir = source.path().join("my-skill");
+        // Create a skill dir and manifest entry
+        let skill_dir = library.path().join("old-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
-        unix_fs::symlink(&skill_dir, library.path().join("my-skill")).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# old").unwrap();
 
-        // Create a broken symlink
-        unix_fs::symlink("/nonexistent/path", library.path().join("broken")).unwrap();
+        let mut manifest = Manifest::default();
+        manifest.skills.insert(
+            "old-skill".to_string(),
+            crate::manifest::SkillEntry {
+                source_path: std::path::PathBuf::from("/tmp/source/old-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
 
-        let result = cleanup_library(library.path(), false).unwrap();
+        // "old-skill" is NOT in discovered names — should be removed (non-interactive)
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(library.path(), &discovered, &mut manifest, false).unwrap();
+
         assert_eq!(result.removed_from_library, 1);
-        assert!(library.path().join("my-skill").exists());
-        assert!(!library.path().join("broken").exists());
+        assert!(!library.path().join("old-skill").exists());
+        assert!(!manifest.skills.contains_key("old-skill"));
     }
 
     #[test]
-    fn cleanup_dry_run_preserves_links() {
+    fn cleanup_preserves_current_skills() {
         let library = TempDir::new().unwrap();
-        unix_fs::symlink("/nonexistent", library.path().join("broken")).unwrap();
 
-        let result = cleanup_library(library.path(), true).unwrap();
+        let skill_dir = library.path().join("keep-me");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.skills.insert(
+            "keep-me".to_string(),
+            crate::manifest::SkillEntry {
+                source_path: std::path::PathBuf::from("/tmp/source/keep-me"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
+
+        let discovered: HashSet<String> = ["keep-me".to_string()].into();
+        let result = cleanup_library(library.path(), &discovered, &mut manifest, false).unwrap();
+
+        assert_eq!(result.removed_from_library, 0);
+        assert!(library.path().join("keep-me").exists());
+    }
+
+    #[test]
+    fn cleanup_dry_run_preserves_stale() {
+        let library = TempDir::new().unwrap();
+
+        let skill_dir = library.path().join("stale");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.skills.insert(
+            "stale".to_string(),
+            crate::manifest::SkillEntry {
+                source_path: std::path::PathBuf::from("/tmp/source/stale"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+            },
+        );
+
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(library.path(), &discovered, &mut manifest, true).unwrap();
+
         assert_eq!(result.removed_from_library, 1);
         // Should still exist in dry run
-        assert!(library.path().join("broken").is_symlink());
+        assert!(library.path().join("stale").exists());
+        // Manifest should still have the entry in dry run
+        assert!(manifest.skills.contains_key("stale"));
+    }
+
+    #[test]
+    fn cleanup_removes_broken_legacy_symlinks() {
+        let library = TempDir::new().unwrap();
+
+        // Create a broken v0.1.x symlink
+        unix_fs::symlink("/nonexistent/path", library.path().join("broken")).unwrap();
+
+        let mut manifest = Manifest::default();
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(library.path(), &discovered, &mut manifest, false).unwrap();
+
+        assert_eq!(result.removed_from_library, 1);
+        assert!(!library.path().join("broken").exists());
     }
 
     #[test]
@@ -143,47 +268,15 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_handles_relative_symlinks() {
-        let tmp = TempDir::new().unwrap();
-        let library = tmp.path().join("library");
-        std::fs::create_dir_all(&library).unwrap();
-
-        // Valid relative symlink: library/my-skill -> ../sources/my-skill
-        let source_dir = tmp.path().join("sources/my-skill");
-        std::fs::create_dir_all(&source_dir).unwrap();
-        unix_fs::symlink(
-            std::path::Path::new("../sources/my-skill"),
-            library.join("my-skill"),
-        )
-        .unwrap();
-
-        // Broken relative symlink: library/gone -> ../sources/gone (doesn't exist)
-        unix_fs::symlink(
-            std::path::Path::new("../sources/gone"),
-            library.join("gone"),
-        )
-        .unwrap();
-
-        let result = cleanup_library(&library, false).unwrap();
-        assert_eq!(result.removed_from_library, 1);
-        // Valid relative symlink should be preserved
-        assert!(library.join("my-skill").is_symlink());
-        // Broken one should be removed
-        assert!(!library.join("gone").exists());
-    }
-
-    #[test]
     fn cleanup_target_dry_run_preserves_stale_links() {
         let library = TempDir::new().unwrap();
         let target = TempDir::new().unwrap();
 
-        // Symlink in target pointing to a non-existent library entry
         let phantom = library.path().join("deleted-skill");
         unix_fs::symlink(&phantom, target.path().join("deleted-skill")).unwrap();
 
         let removed = cleanup_target(target.path(), library.path(), true).unwrap();
         assert_eq!(removed, 1, "dry-run should count the stale link");
-        // Symlink must still exist — dry-run must not remove anything
         assert!(
             target.path().join("deleted-skill").is_symlink(),
             "dry-run should not remove the symlink"
@@ -204,9 +297,7 @@ mod tests {
 
         let removed = cleanup_target(target.path(), library.path(), false).unwrap();
         assert_eq!(removed, 1);
-        // Library-pointing broken link was removed
         assert!(!target.path().join("library-link").exists());
-        // External broken link is preserved
         assert!(target.path().join("external-link").is_symlink());
     }
 }

@@ -8,9 +8,9 @@
 //! The `sync` function drives the main workflow:
 //!
 //! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — symlink discovered skills into the library
-//! 3. **Distribute** — push library skills to target tools
-//! 4. **Cleanup** — remove broken symlinks
+//! 2. **Consolidate** — copy discovered skills into the library (source of truth)
+//! 3. **Distribute** — push library skills to target tools via symlinks
+//! 4. **Cleanup** — remove stale entries no longer in any source
 //!
 //! # Public API
 //!
@@ -26,11 +26,13 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod library;
+pub(crate) mod manifest;
 pub mod mcp;
 pub(crate) mod paths;
 pub(crate) mod status;
 pub(crate) mod wizard;
 
+use std::collections::HashSet;
 use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command as GitCommand;
@@ -122,7 +124,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         eprintln!("  Found {} skills", skills.len());
     }
 
-    // 2. Consolidate into library
+    // 2. Consolidate into library (copy)
     let sp = show_progress.then(|| spinner("Consolidating to library..."));
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
@@ -132,6 +134,11 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         sp.finish_and_clear();
     }
 
+    // Load manifest for distribute and cleanup
+    let mut manifest = library::load_manifest(&config.library_dir)?;
+    let discovered_names: HashSet<String> =
+        skills.iter().map(|s| s.name.as_str().to_string()).collect();
+
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
@@ -139,20 +146,31 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
-        let result =
-            distribute::distribute_to_target(&config.library_dir, name, target, dry_run, force)?;
+        let result = distribute::distribute_to_target(
+            &config.library_dir,
+            name,
+            target,
+            &manifest,
+            dry_run,
+            force,
+        )?;
         distribute_results.push(result);
         if let Some(sp) = sp {
             sp.finish_and_clear();
         }
     }
 
-    // 4. Cleanup stale links
-    let sp = show_progress.then(|| spinner("Cleaning up stale links..."));
+    // 4. Cleanup stale entries
+    let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
     if verbose {
-        eprintln!("{}", style("Cleaning up stale links...").dim());
+        eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
-    let cleanup_result = cleanup::cleanup_library(&config.library_dir, dry_run)?;
+    let cleanup_result = cleanup::cleanup_library(
+        &config.library_dir,
+        &discovered_names,
+        &mut manifest,
+        dry_run,
+    )?;
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
@@ -161,6 +179,11 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
         }
     }
+    // Save manifest after cleanup (may have removed entries)
+    if !dry_run && config.library_dir.is_dir() {
+        manifest::save(&manifest, &config.library_dir)?;
+    }
+
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -191,7 +214,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
 
     if cleanup_result.removed_from_library > 0 {
         println!(
-            "  Cleaned {} stale link(s)",
+            "  Cleaned {} stale entry/entries",
             style(cleanup_result.removed_from_library).yellow()
         );
     }
