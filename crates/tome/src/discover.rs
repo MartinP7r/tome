@@ -85,6 +85,12 @@ impl PartialEq<&str> for SkillName {
     }
 }
 
+impl std::borrow::Borrow<str> for SkillName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
 impl TryFrom<String> for SkillName {
     type Error = anyhow::Error;
 

@@ -94,7 +94,7 @@ fn distribute_symlinks(
         // Skip skills whose original source is already inside this target dir.
         // This prevents circular symlinks when a directory is both a source and target
         // (e.g. ~/.claude/skills used as both).
-        if let Some(manifest_entry) = manifest.skills.get(skill_name_str.as_ref())
+        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref())
             && let (Ok(source), Ok(target)) = (
                 manifest_entry.source_path.canonicalize(),
                 skills_dir.canonicalize(),
@@ -575,8 +575,8 @@ mod tests {
 
         // Manifest records the source origin
         let mut manifest = Manifest::default();
-        manifest.skills.insert(
-            "my-skill".to_string(),
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: skill_dir.clone(),
                 source_name: "test".to_string(),

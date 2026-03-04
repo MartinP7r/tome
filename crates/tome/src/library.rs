@@ -66,14 +66,13 @@ pub fn consolidate(
                     // Symlink target is gone — copy from the discovered source instead
                     copy_dir_recursive(&skill.path, &dest)?;
                 }
-                manifest.skills.insert(
-                    skill.name.as_str().to_string(),
-                    SkillEntry {
-                        source_path: skill.path.clone(),
-                        source_name: skill.source_name.clone(),
-                        content_hash: content_hash.clone(),
-                        synced_at: manifest::now_iso8601(),
-                    },
+                manifest.insert(
+                    skill.name.clone(),
+                    SkillEntry::new(
+                        skill.path.clone(),
+                        skill.source_name.clone(),
+                        content_hash.clone(),
+                    ),
                 );
             }
             result.updated += 1;
@@ -81,7 +80,7 @@ pub fn consolidate(
         }
 
         // Check manifest for existing entry
-        if let Some(entry) = manifest.skills.get(skill.name.as_str()) {
+        if let Some(entry) = manifest.get(skill.name.as_str()) {
             if entry.content_hash == content_hash && !force {
                 result.unchanged += 1;
                 continue;
@@ -94,18 +93,17 @@ pub fn consolidate(
                     })?;
                 }
                 copy_dir_recursive(&skill.path, &dest)?;
-                manifest.skills.insert(
-                    skill.name.as_str().to_string(),
-                    SkillEntry {
-                        source_path: skill.path.clone(),
-                        source_name: skill.source_name.clone(),
-                        content_hash: content_hash.clone(),
-                        synced_at: manifest::now_iso8601(),
-                    },
+                manifest.insert(
+                    skill.name.clone(),
+                    SkillEntry::new(
+                        skill.path.clone(),
+                        skill.source_name.clone(),
+                        content_hash.clone(),
+                    ),
                 );
             }
             result.updated += 1;
-        } else if dest.exists() && !manifest.skills.contains_key(skill.name.as_str()) {
+        } else if dest.exists() && !manifest.contains_key(skill.name.as_str()) {
             // Something exists that's NOT in the manifest — skip with warning
             eprintln!(
                 "warning: {} exists but is not in the manifest, skipping",
@@ -116,14 +114,13 @@ pub fn consolidate(
             // New skill — copy
             if !dry_run {
                 copy_dir_recursive(&skill.path, &dest)?;
-                manifest.skills.insert(
-                    skill.name.as_str().to_string(),
-                    SkillEntry {
-                        source_path: skill.path.clone(),
-                        source_name: skill.source_name.clone(),
-                        content_hash: content_hash.clone(),
-                        synced_at: manifest::now_iso8601(),
-                    },
+                manifest.insert(
+                    skill.name.clone(),
+                    SkillEntry::new(
+                        skill.path.clone(),
+                        skill.source_name.clone(),
+                        content_hash.clone(),
+                    ),
                 );
             }
             result.created += 1;
@@ -323,7 +320,7 @@ mod tests {
 
         // Manifest should have the entry
         let manifest = manifest::load(library.path()).unwrap();
-        assert!(manifest.skills.contains_key("my-skill"));
+        assert!(manifest.contains_key("my-skill"));
     }
 
     #[test]
@@ -362,9 +359,9 @@ mod tests {
         consolidate(&[skill], library.path(), false, false).unwrap();
 
         let manifest = manifest::load(library.path()).unwrap();
-        assert_eq!(manifest.skills.len(), 1);
-        assert!(manifest.skills.contains_key("my-skill"));
-        let entry = &manifest.skills["my-skill"];
+        assert_eq!(manifest.len(), 1);
+        assert!(manifest.contains_key("my-skill"));
+        let entry = manifest.get("my-skill").unwrap();
         assert!(!entry.content_hash.is_empty());
         assert!(!entry.synced_at.is_empty());
     }
