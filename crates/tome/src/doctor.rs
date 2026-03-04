@@ -103,7 +103,17 @@ fn check_library(library_dir: &Path) -> Result<usize> {
         return Ok(1);
     }
 
-    let m = manifest::load(library_dir).unwrap_or_default();
+    let m = match manifest::load(library_dir) {
+        Ok(m) => m,
+        Err(e) => {
+            println!(
+                "  {} manifest is corrupted or unreadable: {}",
+                style("x").red(),
+                e
+            );
+            return Ok(1);
+        }
+    };
     let mut issues = 0;
 
     // Check manifest entries exist on disk
@@ -160,7 +170,9 @@ fn check_library(library_dir: &Path) -> Result<usize> {
 
 /// Repair library issues: remove orphan manifest entries and broken symlinks.
 fn repair_library(library_dir: &Path) -> Result<()> {
-    let mut m = manifest::load(library_dir).unwrap_or_default();
+    let mut m = manifest::load(library_dir).with_context(|| {
+        "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
+    })?;
     let mut fixed = 0;
 
     // Remove manifest entries missing from disk
