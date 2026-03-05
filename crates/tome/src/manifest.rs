@@ -48,6 +48,11 @@ impl Manifest {
         self.skills.keys()
     }
 
+    /// Returns an iterator over (name, entry) pairs in the manifest.
+    pub fn iter(&self) -> impl Iterator<Item = (&SkillName, &SkillEntry)> {
+        self.skills.iter()
+    }
+
     /// Returns true if the manifest has no entries.
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
