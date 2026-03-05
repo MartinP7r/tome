@@ -25,6 +25,19 @@ pub struct ConsolidateResult {
     pub skipped: usize,
 }
 
+/// Record a skill in the manifest after consolidation.
+fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_hash: &str) {
+    manifest.insert(
+        skill.name.clone(),
+        SkillEntry::new(
+            skill.path.clone(),
+            skill.source_name.clone(),
+            content_hash.to_string(),
+            skill.managed,
+        ),
+    );
+}
+
 /// Consolidate discovered skills into the library directory.
 ///
 /// Managed skills are symlinked; local skills are copied.
@@ -116,15 +129,7 @@ fn consolidate_managed(
                         )
                     })?;
                 }
-                manifest.insert(
-                    skill.name.clone(),
-                    SkillEntry::new(
-                        skill.path.clone(),
-                        skill.source_name.clone(),
-                        content_hash,
-                        true,
-                    ),
-                );
+                record_in_manifest(manifest, skill, &content_hash);
                 result.updated += 1;
                 return Ok(());
             }
@@ -146,15 +151,7 @@ fn consolidate_managed(
             if let Some(entry) = manifest.get(skill.name.as_str())
                 && !entry.managed
             {
-                manifest.insert(
-                    skill.name.clone(),
-                    SkillEntry::new(
-                        skill.path.clone(),
-                        skill.source_name.clone(),
-                        content_hash,
-                        true,
-                    ),
-                );
+                record_in_manifest(manifest, skill, &content_hash);
             }
             result.unchanged += 1;
             return Ok(());
@@ -171,15 +168,7 @@ fn consolidate_managed(
                 )
             })?;
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                true,
-            ),
-        );
+        record_in_manifest(manifest, skill, &content_hash);
         result.updated += 1;
         return Ok(());
     }
@@ -195,15 +184,7 @@ fn consolidate_managed(
                 )
             })?;
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                true,
-            ),
-        );
+        record_in_manifest(manifest, skill, &content_hash);
         result.created += 1;
         return Ok(());
     }
@@ -241,15 +222,7 @@ fn consolidate_local(
                 })?;
                 copy_dir_recursive(&skill.path, dest)?;
             }
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    false,
-                ),
-            );
+            record_in_manifest(manifest, skill, &content_hash);
             result.updated += 1;
             return Ok(());
         }
@@ -274,15 +247,7 @@ fn consolidate_local(
                 copy_dir_recursive(&skill.path, dest)?;
             }
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
+        record_in_manifest(manifest, skill, &content_hash);
         result.updated += 1;
         return Ok(());
     }
@@ -302,15 +267,7 @@ fn consolidate_local(
             }
             copy_dir_recursive(&skill.path, dest)?;
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
+        record_in_manifest(manifest, skill, &content_hash);
         result.updated += 1;
     } else if dest.exists() {
         // Something exists that's NOT in the manifest — skip with warning
@@ -324,15 +281,7 @@ fn consolidate_local(
         if !dry_run {
             copy_dir_recursive(&skill.path, dest)?;
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
+        record_in_manifest(manifest, skill, &content_hash);
         result.created += 1;
     }
     Ok(())
