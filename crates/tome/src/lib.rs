@@ -134,6 +134,12 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
+
+    // Generate .gitignore in the library (managed skills are ignored, local skills tracked)
+    if !dry_run && config.library_dir.is_dir() {
+        library::generate_gitignore(&config.library_dir, &manifest)?;
+    }
+
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
