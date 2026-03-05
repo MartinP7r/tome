@@ -118,6 +118,9 @@ pub struct DiscoveredSkill {
     pub path: PathBuf,
     /// Which source this skill came from
     pub source_name: String,
+    /// Whether this skill is managed by a package manager (symlinked, not copied).
+    /// `true` for `ClaudePlugins` sources, `false` for `Directory` sources.
+    pub managed: bool,
 }
 
 /// Discover all skills from configured sources.
@@ -270,7 +273,7 @@ fn scan_install_records(
         if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
             let skills_dir = PathBuf::from(install_path).join("skills");
             if skills_dir.is_dir() {
-                skills.append(&mut scan_for_skills(&skills_dir, source_name)?);
+                skills.append(&mut scan_for_skills(&skills_dir, source_name, true)?);
             }
         }
     }
@@ -297,11 +300,11 @@ fn discover_directory(source: &Source) -> Result<Vec<DiscoveredSkill>> {
         return Ok(Vec::new());
     }
 
-    scan_for_skills(&source.path, &source.name)
+    scan_for_skills(&source.path, &source.name, false)
 }
 
 /// Scan a directory for skill subdirectories containing SKILL.md.
-fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>> {
+fn scan_for_skills(dir: &Path, source_name: &str, managed: bool) -> Result<Vec<DiscoveredSkill>> {
     let mut skills = Vec::new();
 
     for entry in WalkDir::new(dir)
@@ -341,6 +344,7 @@ fn scan_for_skills(dir: &Path, source_name: &str) -> Result<Vec<DiscoveredSkill>
                         name,
                         path: skill_dir.to_path_buf(),
                         source_name: source_name.to_string(),
+                        managed,
                     });
                 }
                 Err(e) => {
