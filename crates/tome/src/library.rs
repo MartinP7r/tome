@@ -252,9 +252,8 @@ fn consolidate_local(
                 } else {
                     resolved
                 };
-                std::fs::remove_file(dest).with_context(|| {
-                    format!("failed to remove v0.1 symlink {}", dest.display())
-                })?;
+                std::fs::remove_file(dest)
+                    .with_context(|| format!("failed to remove v0.1 symlink {}", dest.display()))?;
                 if abs_resolved.is_dir() {
                     copy_dir_recursive(&abs_resolved, dest)?;
                 } else {
@@ -951,7 +950,10 @@ mod tests {
 
         let entry = manifest2.get("my-skill").expect("should have entry");
         assert_ne!(entry.content_hash, hash1, "hash should change after update");
-        assert_eq!(entry.source_path, skill.path, "source_path should be preserved");
+        assert_eq!(
+            entry.source_path, skill.path,
+            "source_path should be preserved"
+        );
         assert!(!entry.managed, "local skill should not be managed");
     }
 
