@@ -115,20 +115,20 @@ fn consolidate_managed(
                             skill.path.display()
                         )
                     })?;
-                    manifest.insert(
-                        skill.name.clone(),
-                        SkillEntry::new(
-                            skill.path.clone(),
-                            skill.source_name.clone(),
-                            content_hash,
-                            true,
-                        ),
-                    );
                 }
+                manifest.insert(
+                    skill.name.clone(),
+                    SkillEntry::new(
+                        skill.path.clone(),
+                        skill.source_name.clone(),
+                        content_hash,
+                        true,
+                    ),
+                );
                 result.updated += 1;
                 return Ok(());
             }
-        } else if !manifest.contains_key(skill.name.as_str()) {
+        } else {
             // Dir exists but not in manifest — skip with warning
             eprintln!(
                 "warning: {} exists but is not in the manifest, skipping",
@@ -145,7 +145,6 @@ fn consolidate_managed(
             // Check if managed flag needs updating in manifest (v0.1 migration)
             if let Some(entry) = manifest.get(skill.name.as_str())
                 && !entry.managed
-                && !dry_run
             {
                 manifest.insert(
                     skill.name.clone(),
@@ -171,16 +170,16 @@ fn consolidate_managed(
                     skill.path.display()
                 )
             })?;
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    true,
-                ),
-            );
         }
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                content_hash,
+                true,
+            ),
+        );
         result.updated += 1;
         return Ok(());
     }
@@ -195,16 +194,16 @@ fn consolidate_managed(
                     skill.path.display()
                 )
             })?;
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    true,
-                ),
-            );
         }
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                content_hash,
+                true,
+            ),
+        );
         result.created += 1;
         return Ok(());
     }
@@ -241,16 +240,16 @@ fn consolidate_local(
                     format!("failed to remove managed symlink {}", dest.display())
                 })?;
                 copy_dir_recursive(&skill.path, dest)?;
-                manifest.insert(
-                    skill.name.clone(),
-                    SkillEntry::new(
-                        skill.path.clone(),
-                        skill.source_name.clone(),
-                        content_hash,
-                        false,
-                    ),
-                );
             }
+            manifest.insert(
+                skill.name.clone(),
+                SkillEntry::new(
+                    skill.path.clone(),
+                    skill.source_name.clone(),
+                    content_hash,
+                    false,
+                ),
+            );
             result.updated += 1;
             return Ok(());
         }
@@ -274,16 +273,16 @@ fn consolidate_local(
                 );
                 copy_dir_recursive(&skill.path, dest)?;
             }
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    false,
-                ),
-            );
         }
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                content_hash,
+                false,
+            ),
+        );
         result.updated += 1;
         return Ok(());
     }
@@ -302,18 +301,18 @@ fn consolidate_local(
                 })?;
             }
             copy_dir_recursive(&skill.path, dest)?;
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    false,
-                ),
-            );
         }
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                content_hash,
+                false,
+            ),
+        );
         result.updated += 1;
-    } else if dest.exists() && !manifest.contains_key(skill.name.as_str()) {
+    } else if dest.exists() {
         // Something exists that's NOT in the manifest — skip with warning
         eprintln!(
             "warning: {} exists but is not in the manifest, skipping",
@@ -324,16 +323,16 @@ fn consolidate_local(
         // New skill — copy
         if !dry_run {
             copy_dir_recursive(&skill.path, dest)?;
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    false,
-                ),
-            );
         }
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                content_hash,
+                false,
+            ),
+        );
         result.created += 1;
     }
     Ok(())
@@ -651,6 +650,35 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_dry_run_manifest_reflects_would_be_state() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        std::fs::create_dir_all(library.path()).unwrap();
+
+        // First: consolidate as local (creates real copy + manifest entry)
+        let local_skill = make_skill(source.path(), "my-skill");
+        consolidate(&[local_skill], library.path(), false, false).unwrap();
+
+        // Now: dry-run consolidate the same skill as managed
+        let managed_skill = make_managed_skill(source.path(), "my-skill");
+        let (result, manifest) =
+            consolidate(&[managed_skill], library.path(), true, false).unwrap();
+        assert_eq!(result.updated, 1);
+
+        // In-memory manifest should reflect managed=true even though no disk changes
+        let entry = manifest.get("my-skill").expect("should have entry");
+        assert!(
+            entry.managed,
+            "dry-run manifest should reflect the would-be-updated managed flag"
+        );
+
+        // But disk should be unchanged (still a real dir, not a symlink)
+        let dest = library.path().join("my-skill");
+        assert!(dest.is_dir());
+        assert!(!dest.is_symlink(), "dry-run should not change disk state");
+    }
+
+    #[test]
     fn consolidate_migrates_v01_symlink_records_discovered_source() {
         use std::os::unix::fs as unix_fs;
         let source = TempDir::new().unwrap();
@@ -695,7 +723,7 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        consolidate(&[skill.clone()], library.path(), false, false).unwrap();
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
         let (result, _) =
             consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
         assert_eq!(result.unchanged, 1);
@@ -705,7 +733,6 @@ mod tests {
 
     #[test]
     fn consolidate_managed_path_changed() {
-        use std::os::unix::fs as unix_fs;
         let source1 = TempDir::new().unwrap();
         let source2 = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
@@ -715,7 +742,8 @@ mod tests {
 
         // Same skill name from different path
         let skill2 = make_managed_skill(source2.path(), "plugin-skill");
-        let (result, _) = consolidate(&[skill2.clone()], library.path(), false, false).unwrap();
+        let (result, _) =
+            consolidate(std::slice::from_ref(&skill2), library.path(), false, false).unwrap();
         assert_eq!(result.updated, 1);
 
         // Should point to the new path
