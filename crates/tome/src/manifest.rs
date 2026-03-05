@@ -72,16 +72,26 @@ pub struct SkillEntry {
     pub content_hash: String,
     /// ISO 8601 timestamp of when this skill was last synced.
     pub synced_at: String,
+    /// Whether this skill is managed by a package manager (symlinked, not copied).
+    /// Defaults to `false` for backwards compatibility with pre-v0.2.1 manifests.
+    #[serde(default)]
+    pub managed: bool,
 }
 
 impl SkillEntry {
     /// Create a new `SkillEntry`, recording the current timestamp automatically.
-    pub fn new(source_path: PathBuf, source_name: String, content_hash: String) -> Self {
+    pub fn new(
+        source_path: PathBuf,
+        source_name: String,
+        content_hash: String,
+        managed: bool,
+    ) -> Self {
         Self {
             source_path,
             source_name,
             content_hash,
             synced_at: now_iso8601(),
+            managed,
         }
     }
 }
@@ -242,6 +252,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc123".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
 
