@@ -45,14 +45,20 @@ pub struct ConsolidateResult {
     pub skipped: usize,
 }
 
+/// Create a symlink from `dest` pointing to `src`.
+fn create_symlink(src: &Path, dest: &Path) -> Result<()> {
+    unix_fs::symlink(src, dest)
+        .with_context(|| format!("failed to symlink {} -> {}", dest.display(), src.display()))
+}
+
 /// Record a skill in the manifest after consolidation.
-fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_hash: &str) {
+fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_hash: String) {
     manifest.insert(
         skill.name.clone(),
         SkillEntry::new(
             skill.path.clone(),
             skill.source_name.clone(),
-            content_hash.to_string(),
+            content_hash,
             skill.managed,
         ),
     );
@@ -91,15 +97,7 @@ pub fn consolidate(
         let dest = library_dir.join(skill.name.as_str());
 
         if skill.managed {
-            consolidate_managed(
-                skill,
-                &dest,
-                library_dir,
-                &mut manifest,
-                &mut result,
-                dry_run,
-                force,
-            )?;
+            consolidate_managed(skill, &dest, &mut manifest, &mut result, dry_run, force)?;
         } else {
             consolidate_local(
                 skill,
@@ -124,7 +122,6 @@ pub fn consolidate(
 fn consolidate_managed(
     skill: &DiscoveredSkill,
     dest: &Path,
-    _library_dir: &Path,
     manifest: &mut Manifest,
     result: &mut ConsolidateResult,
     dry_run: bool,
@@ -142,18 +139,13 @@ fn consolidate_managed(
                         std::fs::remove_dir_all(dest).with_context(|| {
                             format!("failed to remove local skill dir {}", dest.display())
                         })?;
-                        unix_fs::symlink(&skill.path, dest).with_context(|| {
-                            format!(
-                                "failed to symlink {} -> {}",
-                                dest.display(),
-                                skill.path.display()
-                            )
-                        })?;
+                        create_symlink(&skill.path, dest)?;
                     }
-                    record_in_manifest(manifest, skill, &content_hash);
+                    record_in_manifest(manifest, skill, content_hash.clone());
                     result.updated += 1;
+                } else {
+                    result.unchanged += 1;
                 }
-                // else: already managed dir (shouldn't happen normally) — no-op
             } else {
                 // Dir exists but not in manifest — skip with warning
                 eprintln!(
@@ -169,7 +161,7 @@ fn consolidate_managed(
                 if let Some(entry) = manifest.get(skill.name.as_str())
                     && !entry.managed
                 {
-                    record_in_manifest(manifest, skill, &content_hash);
+                    record_in_manifest(manifest, skill, content_hash.clone());
                 }
                 result.unchanged += 1;
             } else {
@@ -177,29 +169,17 @@ fn consolidate_managed(
                 if !dry_run {
                     std::fs::remove_file(dest)
                         .with_context(|| format!("failed to remove symlink {}", dest.display()))?;
-                    unix_fs::symlink(&skill.path, dest).with_context(|| {
-                        format!(
-                            "failed to symlink {} -> {}",
-                            dest.display(),
-                            skill.path.display()
-                        )
-                    })?;
+                    create_symlink(&skill.path, dest)?;
                 }
-                record_in_manifest(manifest, skill, &content_hash);
+                record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
             }
         }
         DestinationState::Empty => {
             if !dry_run {
-                unix_fs::symlink(&skill.path, dest).with_context(|| {
-                    format!(
-                        "failed to symlink {} -> {}",
-                        dest.display(),
-                        skill.path.display()
-                    )
-                })?;
+                create_symlink(&skill.path, dest)?;
             }
-            record_in_manifest(manifest, skill, &content_hash);
+            record_in_manifest(manifest, skill, content_hash.clone());
             result.created += 1;
         }
         DestinationState::Other => {
@@ -239,7 +219,7 @@ fn consolidate_local(
                     })?;
                     copy_dir_recursive(&skill.path, dest)?;
                 }
-                record_in_manifest(manifest, skill, &content_hash);
+                record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
                 return Ok(());
             }
@@ -264,7 +244,7 @@ fn consolidate_local(
                     copy_dir_recursive(&skill.path, dest)?;
                 }
             }
-            record_in_manifest(manifest, skill, &content_hash);
+            record_in_manifest(manifest, skill, content_hash.clone());
             result.updated += 1;
         }
         DestinationState::Directory | DestinationState::Empty | DestinationState::Other => {
@@ -282,7 +262,7 @@ fn consolidate_local(
                     }
                     copy_dir_recursive(&skill.path, dest)?;
                 }
-                record_in_manifest(manifest, skill, &content_hash);
+                record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
             } else if dest.exists() {
                 // Something exists that's NOT in the manifest — skip with warning
@@ -296,7 +276,7 @@ fn consolidate_local(
                 if !dry_run {
                     copy_dir_recursive(&skill.path, dest)?;
                 }
-                record_in_manifest(manifest, skill, &content_hash);
+                record_in_manifest(manifest, skill, content_hash.clone());
                 result.created += 1;
             }
         }
