@@ -118,12 +118,24 @@ fn check_library(library_dir: &Path) -> Result<usize> {
 
     // Check manifest entries exist on disk
     for name in m.keys() {
-        if !library_dir.join(name.as_str()).is_dir() {
-            println!(
-                "  {} manifest entry '{}' has no directory on disk",
-                style("x").red(),
-                name
-            );
+        let entry_path = library_dir.join(name.as_str());
+        if !entry_path.is_dir() {
+            let entry = m.get(name.as_str());
+            let is_managed = entry.is_some_and(|e| e.managed);
+            if is_managed && entry_path.is_symlink() {
+                // Managed skill with broken symlink — source may have been uninstalled
+                println!(
+                    "  {} managed skill '{}' has a broken symlink (source may have been uninstalled)",
+                    style("x").red(),
+                    name
+                );
+            } else {
+                println!(
+                    "  {} manifest entry '{}' has no directory on disk",
+                    style("x").red(),
+                    name
+                );
+            }
             issues += 1;
         }
     }
@@ -147,17 +159,21 @@ fn check_library(library_dir: &Path) -> Result<usize> {
             issues += 1;
         }
 
-        // Check for broken legacy symlinks
+        // Check for broken symlinks — either managed skills or legacy v0.1.x
         if path.is_symlink() && !path.exists() {
-            let raw_target = std::fs::read_link(&path)
-                .with_context(|| format!("failed to read symlink {}", path.display()))?;
-            println!(
-                "  {} broken symlink: {} -> {}",
-                style("x").red(),
-                path.display(),
-                raw_target.display()
-            );
-            issues += 1;
+            let is_managed = m.get(&name).is_some_and(|e| e.managed);
+            if !is_managed {
+                let raw_target = std::fs::read_link(&path)
+                    .with_context(|| format!("failed to read symlink {}", path.display()))?;
+                println!(
+                    "  {} broken legacy symlink: {} -> {}",
+                    style("x").red(),
+                    path.display(),
+                    raw_target.display()
+                );
+                issues += 1;
+            }
+            // Managed broken symlinks are already reported in the manifest entry check above
         }
     }
 
@@ -175,14 +191,21 @@ fn repair_library(library_dir: &Path) -> Result<()> {
     })?;
     let mut fixed = 0;
 
-    // Remove manifest entries missing from disk
+    // Remove manifest entries missing from disk (includes managed broken symlinks)
     let missing: Vec<String> = m
         .keys()
         .filter(|name| !library_dir.join(name.as_str()).is_dir())
         .map(|name| name.as_str().to_string())
         .collect();
-    for name in missing {
-        m.remove(&name);
+    for name in &missing {
+        let entry_path = library_dir.join(name.as_str());
+        // Clean up broken managed symlinks
+        if entry_path.is_symlink() {
+            std::fs::remove_file(&entry_path).with_context(|| {
+                format!("failed to remove broken symlink {}", entry_path.display())
+            })?;
+        }
+        m.remove(name);
         println!(
             "  {} Removed manifest entry '{}' (directory missing)",
             style("fixed").green(),
@@ -191,7 +214,7 @@ fn repair_library(library_dir: &Path) -> Result<()> {
         fixed += 1;
     }
 
-    // Remove broken legacy symlinks
+    // Remove broken legacy symlinks (not in manifest)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
@@ -330,6 +353,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -351,6 +375,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
         manifest::save(&m, lib.path()).unwrap();

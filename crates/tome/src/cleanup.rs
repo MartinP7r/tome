@@ -67,7 +67,13 @@ pub fn cleanup_library(
         }
 
         if !dry_run {
-            if entry_path.is_dir() {
+            if entry_path.is_symlink() {
+                // Managed skill — remove the symlink
+                std::fs::remove_file(&entry_path).with_context(|| {
+                    format!("failed to remove managed symlink {}", entry_path.display())
+                })?;
+            } else if entry_path.is_dir() {
+                // Local skill — remove the directory
                 std::fs::remove_dir_all(&entry_path).with_context(|| {
                     format!("failed to remove stale skill dir {}", entry_path.display())
                 })?;
@@ -180,6 +186,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
 
@@ -207,6 +214,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
 
@@ -232,6 +240,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
 
@@ -305,5 +314,40 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(!target.path().join("library-link").exists());
         assert!(target.path().join("external-link").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_removes_managed_symlink() {
+        let library = TempDir::new().unwrap();
+        let source = tempfile::TempDir::new().unwrap();
+
+        // Create a managed skill symlink in the library
+        let skill_source = source.path().join("plugin-skill");
+        std::fs::create_dir_all(&skill_source).unwrap();
+        std::fs::write(skill_source.join("SKILL.md"), "# test").unwrap();
+        unix_fs::symlink(&skill_source, library.path().join("plugin-skill")).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("plugin-skill").unwrap(),
+            crate::manifest::SkillEntry {
+                source_path: skill_source,
+                source_name: "plugins".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+
+        // Skill not in discovered names — should be removed
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(library.path(), &discovered, &mut manifest, false).unwrap();
+
+        assert_eq!(result.removed_from_library, 1);
+        assert!(
+            !library.path().join("plugin-skill").exists(),
+            "managed symlink should be removed"
+        );
+        assert!(!manifest.contains_key("plugin-skill"));
     }
 }

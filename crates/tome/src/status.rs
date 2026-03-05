@@ -126,7 +126,7 @@ pub fn show(config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Count skill directories in the library, excluding hidden directories.
+/// Count skill entries in the library (directories or symlinks-to-dirs), excluding hidden entries.
 fn count_entries(dir: &Path) -> Result<usize> {
     let mut count = 0;
     for entry in std::fs::read_dir(dir)
@@ -134,7 +134,12 @@ fn count_entries(dir: &Path) -> Result<usize> {
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        if entry.path().is_dir() && !name.starts_with('.') {
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        // Count real directories (local skills) and symlinks-to-dirs (managed skills)
+        if path.is_dir() {
             count += 1;
         }
     }
@@ -318,6 +323,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
         manifest::save(&m, dir.path()).unwrap();

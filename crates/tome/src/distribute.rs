@@ -619,6 +619,7 @@ mod tests {
                 source_name: "test".to_string(),
                 content_hash: "abc".to_string(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
             },
         );
 
