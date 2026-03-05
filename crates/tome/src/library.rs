@@ -381,7 +381,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 /// Only writes the file if the content would change, to avoid unnecessary git noise.
 pub fn generate_gitignore(library_dir: &Path, manifest: &Manifest) -> Result<()> {
     let mut managed: Vec<&str> = manifest
-        .entries()
+        .iter()
         .filter(|(_, entry)| entry.managed)
         .map(|(name, _)| name.as_str())
         .collect();

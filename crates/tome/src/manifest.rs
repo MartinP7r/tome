@@ -49,7 +49,7 @@ impl Manifest {
     }
 
     /// Returns an iterator over (name, entry) pairs in the manifest.
-    pub fn entries(&self) -> impl Iterator<Item = (&SkillName, &SkillEntry)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&SkillName, &SkillEntry)> {
         self.skills.iter()
     }
 
