@@ -908,6 +908,86 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_managed_dry_run_no_symlink_created() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        let (result, manifest) = consolidate(&[skill], library.path(), true, false).unwrap();
+        assert_eq!(result.created, 1);
+
+        // Symlink should NOT exist on disk
+        let dest = library.path().join("plugin-skill");
+        assert!(!dest.exists(), "dry-run should not create symlink");
+        assert!(!dest.is_symlink(), "dry-run should not create symlink");
+
+        // But manifest should reflect the would-be state
+        let entry = manifest.get("plugin-skill").expect("should have entry");
+        assert!(entry.managed);
+    }
+
+    #[test]
+    fn consolidate_managed_force_recreates_symlink() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (result, _) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, true).unwrap();
+        assert_eq!(result.updated, 1, "force should recreate managed symlink");
+        assert_eq!(result.unchanged, 0);
+
+        let dest = library.path().join("plugin-skill");
+        assert!(dest.is_symlink(), "should still be a symlink after force");
+    }
+
+    #[test]
+    fn consolidate_managed_skips_non_manifest_dir_collision() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        // Pre-create a real directory at the library path (not in manifest)
+        let collision = library.path().join("plugin-skill");
+        std::fs::create_dir_all(&collision).unwrap();
+        std::fs::write(collision.join("README.md"), "user-created").unwrap();
+
+        let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.created, 0);
+
+        // User-created content should be untouched
+        let content =
+            std::fs::read_to_string(library.path().join("plugin-skill/README.md")).unwrap();
+        assert_eq!(content, "user-created");
+    }
+
+    #[test]
+    fn consolidate_local_manifest_reflects_update() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        let (_, manifest1) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let hash1 = manifest1.get("my-skill").unwrap().content_hash.clone();
+
+        // Modify source content
+        std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
+
+        let (result, manifest2) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        assert_eq!(result.updated, 1);
+
+        let entry = manifest2.get("my-skill").expect("should have entry");
+        assert_ne!(entry.content_hash, hash1, "hash should change after update");
+        assert_eq!(entry.source_path, skill.path, "source_path should be preserved");
+        assert!(!entry.managed, "local skill should not be managed");
+    }
+
+    #[test]
     fn gitignore_always_ignores_manifest_tmp() {
         let library = TempDir::new().unwrap();
         std::fs::create_dir_all(library.path()).unwrap();
