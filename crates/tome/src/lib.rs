@@ -135,11 +135,6 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         sp.finish_and_clear();
     }
 
-    // Generate .gitignore in the library (managed skills are ignored, local skills tracked)
-    if !dry_run && config.library_dir.is_dir() {
-        library::generate_gitignore(&config.library_dir, &manifest)?;
-    }
-
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
@@ -186,6 +181,11 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     // Save manifest after cleanup (may have removed entries)
     if !dry_run && config.library_dir.is_dir() {
         manifest::save(&manifest, &config.library_dir)?;
+    }
+
+    // Generate .gitignore after cleanup so stale entries are excluded
+    if !dry_run && config.library_dir.is_dir() {
+        library::generate_gitignore(&config.library_dir, &manifest)?;
     }
 
     if let Some(sp) = sp {
