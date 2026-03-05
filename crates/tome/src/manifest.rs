@@ -54,13 +54,13 @@ impl Manifest {
     }
 
     /// Returns true if the manifest has no entries.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
     }
 
     /// Returns the number of entries in the manifest.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.skills.len()
     }

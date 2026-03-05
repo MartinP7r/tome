@@ -15,6 +15,26 @@ use crate::discover::DiscoveredSkill;
 use crate::manifest::{self, Manifest, SkillEntry};
 use crate::paths::symlink_points_to;
 
+/// What already exists at the library destination path.
+enum DestinationState {
+    Symlink,
+    Directory,
+    Empty,
+    Other,
+}
+
+fn classify_destination(dest: &Path) -> DestinationState {
+    if dest.is_symlink() {
+        DestinationState::Symlink
+    } else if dest.is_dir() {
+        DestinationState::Directory
+    } else if !dest.exists() {
+        DestinationState::Empty
+    } else {
+        DestinationState::Other
+    }
+}
+
 /// Result of a consolidation operation.
 #[derive(Debug, Default)]
 pub struct ConsolidateResult {
@@ -23,6 +43,25 @@ pub struct ConsolidateResult {
     pub updated: usize,
     /// Skills skipped because a non-managed entry already exists at the library path.
     pub skipped: usize,
+}
+
+/// Create a symlink from `dest` pointing to `src`.
+fn create_symlink(src: &Path, dest: &Path) -> Result<()> {
+    unix_fs::symlink(src, dest)
+        .with_context(|| format!("failed to symlink {} -> {}", dest.display(), src.display()))
+}
+
+/// Record a skill in the manifest after consolidation.
+fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_hash: String) {
+    manifest.insert(
+        skill.name.clone(),
+        SkillEntry::new(
+            skill.path.clone(),
+            skill.source_name.clone(),
+            content_hash,
+            skill.managed,
+        ),
+    );
 }
 
 /// Consolidate discovered skills into the library directory.
@@ -58,15 +97,7 @@ pub fn consolidate(
         let dest = library_dir.join(skill.name.as_str());
 
         if skill.managed {
-            consolidate_managed(
-                skill,
-                &dest,
-                library_dir,
-                &mut manifest,
-                &mut result,
-                dry_run,
-                force,
-            )?;
+            consolidate_managed(skill, &dest, &mut manifest, &mut result, dry_run, force)?;
         } else {
             consolidate_local(
                 skill,
@@ -91,7 +122,6 @@ pub fn consolidate(
 fn consolidate_managed(
     skill: &DiscoveredSkill,
     dest: &Path,
-    _library_dir: &Path,
     manifest: &mut Manifest,
     result: &mut ConsolidateResult,
     dry_run: bool,
@@ -99,121 +129,68 @@ fn consolidate_managed(
 ) -> Result<()> {
     let content_hash = manifest::hash_directory(&skill.path)?;
 
-    // Strategy transition: local (dir) → managed (symlink)
-    if dest.is_dir() && !dest.is_symlink() {
-        if let Some(entry) = manifest.get(skill.name.as_str()) {
-            if !entry.managed {
-                // Was local, now managed — remove the directory, create symlink
-                if !dry_run {
-                    std::fs::remove_dir_all(dest).with_context(|| {
-                        format!("failed to remove local skill dir {}", dest.display())
-                    })?;
-                    unix_fs::symlink(&skill.path, dest).with_context(|| {
-                        format!(
-                            "failed to symlink {} -> {}",
-                            dest.display(),
-                            skill.path.display()
-                        )
-                    })?;
+    match classify_destination(dest) {
+        DestinationState::Directory => {
+            // Strategy transition: local (dir) → managed (symlink)
+            if let Some(entry) = manifest.get(skill.name.as_str()) {
+                if !entry.managed {
+                    // Was local, now managed — remove the directory, create symlink
+                    if !dry_run {
+                        std::fs::remove_dir_all(dest).with_context(|| {
+                            format!("failed to remove local skill dir {}", dest.display())
+                        })?;
+                        create_symlink(&skill.path, dest)?;
+                    }
+                    record_in_manifest(manifest, skill, content_hash.clone());
+                    result.updated += 1;
+                } else {
+                    result.unchanged += 1;
                 }
-                manifest.insert(
-                    skill.name.clone(),
-                    SkillEntry::new(
-                        skill.path.clone(),
-                        skill.source_name.clone(),
-                        content_hash,
-                        true,
-                    ),
+            } else {
+                // Dir exists but not in manifest — skip with warning
+                eprintln!(
+                    "warning: {} exists but is not in the manifest, skipping",
+                    dest.display()
                 );
-                result.updated += 1;
-                return Ok(());
+                result.skipped += 1;
             }
-        } else {
-            // Dir exists but not in manifest — skip with warning
+        }
+        DestinationState::Symlink => {
+            if symlink_points_to(dest, &skill.path) && !force {
+                // Check if managed flag needs updating in manifest (v0.1 migration)
+                if let Some(entry) = manifest.get(skill.name.as_str())
+                    && !entry.managed
+                {
+                    record_in_manifest(manifest, skill, content_hash.clone());
+                }
+                result.unchanged += 1;
+            } else {
+                // Wrong target or force — remove and recreate
+                if !dry_run {
+                    std::fs::remove_file(dest)
+                        .with_context(|| format!("failed to remove symlink {}", dest.display()))?;
+                    create_symlink(&skill.path, dest)?;
+                }
+                record_in_manifest(manifest, skill, content_hash.clone());
+                result.updated += 1;
+            }
+        }
+        DestinationState::Empty => {
+            if !dry_run {
+                create_symlink(&skill.path, dest)?;
+            }
+            record_in_manifest(manifest, skill, content_hash.clone());
+            result.created += 1;
+        }
+        DestinationState::Other => {
             eprintln!(
                 "warning: {} exists but is not in the manifest, skipping",
                 dest.display()
             );
             result.skipped += 1;
-            return Ok(());
         }
     }
 
-    // Existing symlink — check if it points to the right place
-    if dest.is_symlink() {
-        if symlink_points_to(dest, &skill.path) && !force {
-            // Check if managed flag needs updating in manifest (v0.1 migration)
-            if let Some(entry) = manifest.get(skill.name.as_str())
-                && !entry.managed
-            {
-                manifest.insert(
-                    skill.name.clone(),
-                    SkillEntry::new(
-                        skill.path.clone(),
-                        skill.source_name.clone(),
-                        content_hash,
-                        true,
-                    ),
-                );
-            }
-            result.unchanged += 1;
-            return Ok(());
-        }
-        // Wrong target or force — remove and recreate
-        if !dry_run {
-            std::fs::remove_file(dest)
-                .with_context(|| format!("failed to remove symlink {}", dest.display()))?;
-            unix_fs::symlink(&skill.path, dest).with_context(|| {
-                format!(
-                    "failed to symlink {} -> {}",
-                    dest.display(),
-                    skill.path.display()
-                )
-            })?;
-        }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                true,
-            ),
-        );
-        result.updated += 1;
-        return Ok(());
-    }
-
-    // Nothing at dest — create new symlink
-    if !dest.exists() {
-        if !dry_run {
-            unix_fs::symlink(&skill.path, dest).with_context(|| {
-                format!(
-                    "failed to symlink {} -> {}",
-                    dest.display(),
-                    skill.path.display()
-                )
-            })?;
-        }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                true,
-            ),
-        );
-        result.created += 1;
-        return Ok(());
-    }
-
-    // Something else exists — skip
-    eprintln!(
-        "warning: {} exists but is not in the manifest, skipping",
-        dest.display()
-    );
-    result.skipped += 1;
     Ok(())
 }
 
@@ -229,112 +206,82 @@ fn consolidate_local(
 ) -> Result<()> {
     let content_hash = manifest::hash_directory(&skill.path)?;
 
-    // Strategy transition: managed (symlink) → local (dir)
-    if dest.is_symlink() {
-        if let Some(entry) = manifest.get(skill.name.as_str())
-            && entry.managed
-        {
-            // Was managed, now local — remove symlink, copy
+    match classify_destination(dest) {
+        DestinationState::Symlink => {
+            // Strategy transition: managed (symlink) → local (dir)
+            if let Some(entry) = manifest.get(skill.name.as_str())
+                && entry.managed
+            {
+                // Was managed, now local — remove symlink, copy
+                if !dry_run {
+                    std::fs::remove_file(dest).with_context(|| {
+                        format!("failed to remove managed symlink {}", dest.display())
+                    })?;
+                    copy_dir_recursive(&skill.path, dest)?;
+                }
+                record_in_manifest(manifest, skill, content_hash.clone());
+                result.updated += 1;
+                return Ok(());
+            }
+            // Legacy v0.1.x symlink — migrate to local copy
             if !dry_run {
-                std::fs::remove_file(dest).with_context(|| {
-                    format!("failed to remove managed symlink {}", dest.display())
-                })?;
-                copy_dir_recursive(&skill.path, dest)?;
+                let resolved = std::fs::read_link(dest)
+                    .with_context(|| format!("failed to read symlink {}", dest.display()))?;
+                let abs_resolved = if resolved.is_relative() {
+                    library_dir.join(&resolved)
+                } else {
+                    resolved
+                };
+                std::fs::remove_file(dest)
+                    .with_context(|| format!("failed to remove v0.1 symlink {}", dest.display()))?;
+                if abs_resolved.is_dir() {
+                    copy_dir_recursive(&abs_resolved, dest)?;
+                } else {
+                    eprintln!(
+                        "warning: v0.1 symlink target for '{}' is gone, copying from current source",
+                        skill.name
+                    );
+                    copy_dir_recursive(&skill.path, dest)?;
+                }
             }
-            manifest.insert(
-                skill.name.clone(),
-                SkillEntry::new(
-                    skill.path.clone(),
-                    skill.source_name.clone(),
-                    content_hash,
-                    false,
-                ),
-            );
+            record_in_manifest(manifest, skill, content_hash.clone());
             result.updated += 1;
-            return Ok(());
         }
-        // Legacy v0.1.x symlink — migrate to local copy
-        if !dry_run {
-            let resolved = std::fs::read_link(dest)
-                .with_context(|| format!("failed to read symlink {}", dest.display()))?;
-            let abs_resolved = if resolved.is_relative() {
-                library_dir.join(&resolved)
-            } else {
-                resolved
-            };
-            std::fs::remove_file(dest)
-                .with_context(|| format!("failed to remove v0.1 symlink {}", dest.display()))?;
-            if abs_resolved.is_dir() {
-                copy_dir_recursive(&abs_resolved, dest)?;
-            } else {
+        DestinationState::Directory | DestinationState::Empty | DestinationState::Other => {
+            if let Some(entry) = manifest.get(skill.name.as_str()) {
+                if entry.content_hash == content_hash && !force {
+                    result.unchanged += 1;
+                    return Ok(());
+                }
+                // Content changed or force — re-copy
+                if !dry_run {
+                    if dest.is_dir() {
+                        std::fs::remove_dir_all(dest).with_context(|| {
+                            format!("failed to remove old skill dir {}", dest.display())
+                        })?;
+                    }
+                    copy_dir_recursive(&skill.path, dest)?;
+                }
+                record_in_manifest(manifest, skill, content_hash.clone());
+                result.updated += 1;
+            } else if dest.exists() {
+                // Something exists that's NOT in the manifest — skip with warning
                 eprintln!(
-                    "warning: v0.1 symlink target for '{}' is gone, copying from current source",
-                    skill.name
+                    "warning: {} exists but is not in the manifest, skipping",
+                    dest.display()
                 );
-                copy_dir_recursive(&skill.path, dest)?;
+                result.skipped += 1;
+            } else {
+                // New skill — copy
+                if !dry_run {
+                    copy_dir_recursive(&skill.path, dest)?;
+                }
+                record_in_manifest(manifest, skill, content_hash.clone());
+                result.created += 1;
             }
         }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
-        result.updated += 1;
-        return Ok(());
     }
 
-    // Check manifest for existing entry
-    if let Some(entry) = manifest.get(skill.name.as_str()) {
-        if entry.content_hash == content_hash && !force {
-            result.unchanged += 1;
-            return Ok(());
-        }
-        // Content changed or force — re-copy
-        if !dry_run {
-            if dest.is_dir() {
-                std::fs::remove_dir_all(dest).with_context(|| {
-                    format!("failed to remove old skill dir {}", dest.display())
-                })?;
-            }
-            copy_dir_recursive(&skill.path, dest)?;
-        }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
-        result.updated += 1;
-    } else if dest.exists() {
-        // Something exists that's NOT in the manifest — skip with warning
-        eprintln!(
-            "warning: {} exists but is not in the manifest, skipping",
-            dest.display()
-        );
-        result.skipped += 1;
-    } else {
-        // New skill — copy
-        if !dry_run {
-            copy_dir_recursive(&skill.path, dest)?;
-        }
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                content_hash,
-                false,
-            ),
-        );
-        result.created += 1;
-    }
     Ok(())
 }
 
@@ -905,6 +852,89 @@ mod tests {
             first, second,
             "running twice should produce identical output"
         );
+    }
+
+    #[test]
+    fn consolidate_managed_dry_run_no_symlink_created() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        let (result, manifest) = consolidate(&[skill], library.path(), true, false).unwrap();
+        assert_eq!(result.created, 1);
+
+        // Symlink should NOT exist on disk
+        let dest = library.path().join("plugin-skill");
+        assert!(!dest.exists(), "dry-run should not create symlink");
+        assert!(!dest.is_symlink(), "dry-run should not create symlink");
+
+        // But manifest should reflect the would-be state
+        let entry = manifest.get("plugin-skill").expect("should have entry");
+        assert!(entry.managed);
+    }
+
+    #[test]
+    fn consolidate_managed_force_recreates_symlink() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (result, _) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, true).unwrap();
+        assert_eq!(result.updated, 1, "force should recreate managed symlink");
+        assert_eq!(result.unchanged, 0);
+
+        let dest = library.path().join("plugin-skill");
+        assert!(dest.is_symlink(), "should still be a symlink after force");
+    }
+
+    #[test]
+    fn consolidate_managed_skips_non_manifest_dir_collision() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        // Pre-create a real directory at the library path (not in manifest)
+        let collision = library.path().join("plugin-skill");
+        std::fs::create_dir_all(&collision).unwrap();
+        std::fs::write(collision.join("README.md"), "user-created").unwrap();
+
+        let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.created, 0);
+
+        // User-created content should be untouched
+        let content =
+            std::fs::read_to_string(library.path().join("plugin-skill/README.md")).unwrap();
+        assert_eq!(content, "user-created");
+    }
+
+    #[test]
+    fn consolidate_local_manifest_reflects_update() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        let (_, manifest1) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let hash1 = manifest1.get("my-skill").unwrap().content_hash.clone();
+
+        // Modify source content
+        std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
+
+        let (result, manifest2) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        assert_eq!(result.updated, 1);
+
+        let entry = manifest2.get("my-skill").expect("should have entry");
+        assert_ne!(entry.content_hash, hash1, "hash should change after update");
+        assert_eq!(
+            entry.source_path, skill.path,
+            "source_path should be preserved"
+        );
+        assert!(!entry.managed, "local skill should not be managed");
     }
 
     #[test]
