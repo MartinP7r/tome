@@ -220,7 +220,8 @@ mod tests {
 
     #[test]
     fn status_shows_tables_with_configured_sources_and_targets() {
-        use crate::config::{Source, SourceType, TargetConfig, TargetMethod, Targets};
+        use crate::config::{Source, SourceType, TargetConfig, TargetMethod};
+        use std::collections::BTreeMap;
 
         let lib_dir = tempfile::TempDir::new().unwrap();
         let source_dir = tempfile::TempDir::new().unwrap();
@@ -243,15 +244,15 @@ mod tests {
                 path: source_dir.path().to_path_buf(),
                 source_type: SourceType::Directory,
             }],
-            targets: Targets {
-                antigravity: Some(TargetConfig {
+            targets: BTreeMap::from([(
+                "antigravity".to_string(),
+                TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
                         skills_dir: target_skill.path().to_path_buf(),
                     },
-                }),
-                ..Default::default()
-            },
+                },
+            )]),
             ..Config::default()
         };
 
