@@ -452,7 +452,8 @@ mod tests {
 
         unix_fs::symlink(&skill.path, library.path().join("my-skill")).unwrap();
 
-        let (_, manifest) = consolidate(&[skill.clone()], library.path(), false, false).unwrap();
+        let (_, manifest) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
         let entry = manifest
             .get("my-skill")
             .expect("manifest should have entry");

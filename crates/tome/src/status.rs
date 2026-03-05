@@ -126,14 +126,15 @@ pub fn show(config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Count skill directories in the library.
+/// Count skill directories in the library, excluding hidden directories.
 fn count_entries(dir: &Path) -> Result<usize> {
     let mut count = 0;
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        if entry.path().is_dir() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if entry.path().is_dir() && !name.starts_with('.') {
             count += 1;
         }
     }
@@ -268,6 +269,19 @@ mod tests {
             std::fs::write(dir.path().join(name), "").unwrap();
         }
         assert_eq!(count_entries(dir.path()).unwrap(), 0);
+    }
+
+    #[test]
+    fn count_entries_ignores_hidden_directories() {
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Visible skill dir — should be counted
+        std::fs::create_dir_all(dir.path().join("my-skill")).unwrap();
+        // Hidden dirs — should NOT be counted
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        std::fs::create_dir_all(dir.path().join(".hidden")).unwrap();
+
+        assert_eq!(count_entries(dir.path()).unwrap(), 1);
     }
 
     #[test]
