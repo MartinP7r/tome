@@ -46,13 +46,14 @@ The current model hardcodes targets as struct fields and keeps source/target log
 
 - **Generic `[[targets]]` array**: Replace the hardcoded `Targets` struct with a `Vec<Target>` — same shape as sources. Each target has a `name`, `path`, `type`, and connector-specific options
 - **Connector trait**: Unified interface for both source and target behavior — discovery format, distribution method (symlink, MCP config, copy), and format translation needs
-- **Built-in connectors**: Claude (plugins + standalone), Codex, Antigravity, Cursor, Windsurf, OpenCode, Nanobot, PicoClaw, OpenClaw, VS Code Copilot, Amp, Goose
+- **Built-in connectors**: Claude (plugins + standalone), Codex, Antigravity, Cursor, Windsurf, OpenCode, Nanobot, PicoClaw, OpenClaw, VS Code Copilot, Amp, Goose, Cline, Augment, CodeBuddy, Command Code, Continue, Cortex, Kimi Code CLI, Kiro CLI, Roo, Replit, Qwen Code, Windsurf — see `npx skills` for the full 41-agent landscape
 - **Gemini CLI connector**: Investigate sandbox mode — Gemini CLI may use a different skills/context folder depending on whether it runs in sandbox or not; connector may need to detect or allow configuring which path to target
 - **Bidirectional by design**: Any connector can act as both source and target — discover skills *from* Cursor rules and distribute *to* Cursor rules
 - **Format awareness per connector**: Each connector declares its native format — the pipeline handles translation between them (e.g., SKILL.md ↔ Cursor rules ↔ Windsurf conventions)
 - Support syncing `.claude/rules/` and agent definitions alongside skills
 - **Instruction file syncing**: Bidirectional sync of tool instruction files (CLAUDE.md ↔ AGENTS.md ↔ GEMINI.md ↔ copilot-instructions.md) — extract shared sections and distribute to each tool's native format
-- **npm-based skill sources** ([#97](https://github.com/MartinP7r/tome/issues/97)): Discover skills installed via `npx skills` (Vercel) and `npx openskills` — investigate install paths, manifest formats, and whether existing `Directory` source type suffices or a dedicated connector is needed
+- **`.agents/skills/` as emerging universal path**: 9 agents (Amp, Cline, Codex, Cursor, Gemini CLI, GitHub Copilot, Kimi Code CLI, OpenCode, Replit) converge on `.agents/skills/` as the project-scoped canonical skills directory. Tome connectors should support this path natively
+- **npm-based skill sources** ([#97](https://github.com/MartinP7r/tome/issues/97)): Discover skills installed via `npx skills` (Vercel Labs). Confirmed: canonical copies in `.agents/skills/<name>/`, lockfile at `.agents/.skill-lock.json` (v3) with content hashes and provenance. A `Directory` source pointed at `~/.agents/skills/` works for basic discovery; a dedicated source type would preserve provenance metadata from the lockfile
 
 ## v0.4 — Format Transforms
 

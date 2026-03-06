@@ -2,7 +2,7 @@
 
 Research into agent file formats (skills, rules, memory, hooks, agents, plugins), invocation methods, context loading strategies, and format differences across AI coding tools — informing tome's connector architecture.
 
-*Last updated: February 2026*
+*Last updated: March 2026*
 
 ---
 
@@ -1417,6 +1417,129 @@ Everything else (hooks, agents, plugins, memory) remains fragmented with no sign
 
 ---
 
+## 20. Skill Installers: `npx skills` (Vercel Labs)
+
+[`npx skills`](https://github.com/vercel-labs/skills) is a JavaScript-based skill installer with a polished interactive CLI. It supports **41 agent targets** and uses a two-tier architecture remarkably similar to tome's library model.
+
+**Registry:** [skills.sh](https://skills.sh) — browsable skill registry with per-skill detail pages.
+
+### Architecture
+
+Canonical copies are stored in `.agents/skills/<name>/` (the emerging universal path) or tool-specific directories. Distribution to individual tools uses symlinks from their native skill dirs back to the canonical location.
+
+**Install flow:** clone repo → select skills → select targets → choose scope (project/global) → choose method (symlink/copy) → security assessment → install.
+
+### `.skill-lock.json` (v3)
+
+Lockfile at `.agents/.skill-lock.json` tracks installed skills with provenance and content hashes:
+
+```json
+{
+  "version": 3,
+  "skills": {
+    "skill-name": {
+      "source": "owner/repo",
+      "sourceType": "github",
+      "sourceUrl": "https://github.com/owner/repo.git",
+      "skillPath": "skills/skill-name/SKILL.md",
+      "skillFolderHash": "c2f31172b6f256272305a5e6e7228b258446899f",
+      "installedAt": "2026-03-06T12:49:32.629Z",
+      "updatedAt": "2026-03-06T12:49:32.629Z"
+    }
+  },
+  "dismissed": { ... },
+  "lastSelectedAgents": ["amp", "cline", "codex", "cursor", "..."]
+}
+```
+
+Key fields: `sourceType` + `sourceUrl` for provenance, `skillFolderHash` for content-based idempotency (similar to tome's SHA-256 manifest hashes), `installedAt`/`updatedAt` timestamps.
+
+### Agent Targets (41 total)
+
+**Universal agents** (share `.agents/skills/` as project-scoped path):
+
+| Agent | Global Path |
+|-------|------------|
+| Amp | `$XDG_CONFIG_HOME/agents/skills` |
+| Cline | `~/.agents/skills` |
+| Codex | `$CODEX_HOME/skills` |
+| Cursor | `~/.cursor/skills` |
+| Gemini CLI | `~/.gemini/skills` |
+| GitHub Copilot | `~/.copilot/skills` |
+| Kimi Code CLI | `$XDG_CONFIG_HOME/agents/skills` |
+| OpenCode | `$XDG_CONFIG_HOME/opencode/skills` |
+| Replit | `$XDG_CONFIG_HOME/agents/skills` |
+
+**Additional agents** (tool-specific paths):
+
+| Agent | Project Path | Global Path |
+|-------|-------------|------------|
+| Adal | `.adal/skills` | `~/.adal/skills` |
+| Antigravity | `.agent/skills` | `~/.gemini/antigravity/skills` |
+| Augment | `.augment/skills` | `~/.augment/skills` |
+| Claude Code | `.claude/skills` | `$CLAUDE_HOME/skills` |
+| CodeBuddy | `.codebuddy/skills` | `~/.codebuddy/skills` |
+| Command Code | `.commandcode/skills` | `~/.commandcode/skills` |
+| Continue | `.continue/skills` | `~/.continue/skills` |
+| Cortex | `.cortex/skills` | `~/.snowflake/cortex/skills` |
+| Crush | `.crush/skills` | `$XDG_CONFIG_HOME/crush/skills` |
+| Droid | `.factory/skills` | `~/.factory/skills` |
+| Goose | `.goose/skills` | `$XDG_CONFIG_HOME/goose/skills` |
+| iFlow CLI | `.iflow/skills` | `~/.iflow/skills` |
+| Junie | `.junie/skills` | `~/.junie/skills` |
+| Kilo | `.kilocode/skills` | `~/.kilocode/skills` |
+| Kiro CLI | `.kiro/skills` | `~/.kiro/skills` |
+| Kode | `.kode/skills` | `~/.kode/skills` |
+| MCPJam | `.mcpjam/skills` | `~/.mcpjam/skills` |
+| Mistral Vibe | `.vibe/skills` | `~/.vibe/skills` |
+| Mux | `.mux/skills` | `~/.mux/skills` |
+| Neovate | `.neovate/skills` | `~/.neovate/skills` |
+| OpenClaw | `skills` | (custom) |
+| OpenHands | `.openhands/skills` | `~/.openhands/skills` |
+| Pi | `.pi/skills` | `~/.pi/agent/skills` |
+| Pochi | `.pochi/skills` | `~/.pochi/skills` |
+| Qoder | `.qoder/skills` | `~/.qoder/skills` |
+| Qwen Code | `.qwen/skills` | `~/.qwen/skills` |
+| Roo | `.roo/skills` | `~/.roo/skills` |
+| Trae | `.trae/skills` | `~/.trae/skills` |
+| Trae CN | `.trae/skills` | `~/.trae-cn/skills` |
+| Windsurf | `.windsurf/skills` | `~/.codeium/windsurf/skills` |
+| Zencoder | `.zencoder/skills` | `~/.zencoder/skills` |
+
+### CLI Commands
+
+| Command | Purpose |
+|---------|---------|
+| `npx skills add <url>` | Install skills from a git repo |
+| `npx skills find <query>` | Search the skills.sh registry |
+| `npx skills list` | List installed skills |
+| `npx skills check` | Verify skill integrity |
+| `npx skills update` | Update installed skills |
+| `npx skills remove` | Remove installed skills |
+| `npx skills init` | Initialize skills in a project |
+
+### Security Assessment
+
+The installer integrates security risk assessment with three providers:
+
+| Provider | Assessment |
+|----------|-----------|
+| Gen | Safe / Unsafe |
+| Socket | Alert count |
+| Snyk | Risk level |
+
+Each skill gets a security rating before installation, with a link to details on skills.sh.
+
+### Implications for tome
+
+1. **`.agents/skills/` is the emerging universal path** — 9 agents converge on it. Tome's `Directory` source type can discover skills there today.
+2. **Lockfile as prior art for `tome.lock`** — `.skill-lock.json` v3 tracks the same concepts tome needs: content hashes for idempotency, source provenance, install timestamps.
+3. **Symlink vs copy choice** — `npx skills` offers both, recommending symlink. Tome already uses this model (library copies + symlink distribution).
+4. **Security assessment** — interesting prior art for a future `tome audit` command.
+5. **41-agent coverage** — significantly expands the known agent landscape beyond tome's current connector list.
+
+---
+
 ## Sources
 
 ### Standards & Specifications
@@ -1467,6 +1590,10 @@ Everything else (hooks, agents, plugins, memory) remains fragmented with no sign
 - [Aider Configuration](https://aider.chat/docs/config/aider_conf.html) — YAML config
 - [Nanobot (HKUDS)](https://github.com/HKUDS/nanobot) — OpenClaw-compatible agent
 - [PicoClaw](https://picoclaw.ai/docs) — ultra-lightweight agent
+
+### Skill Installers
+- [npx skills (Vercel Labs)](https://github.com/vercel-labs/skills) — 41-agent skill installer with lockfile and security assessment
+- [skills.sh](https://skills.sh) — skill registry with per-skill detail pages and security ratings
 
 ### Analysis & Security
 - [Skills Are More Context-Efficient Than MCP](https://www.mlad.ai/articles/skills-are-more-context-efficient-than-mcp) — token comparison
