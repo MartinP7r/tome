@@ -141,7 +141,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, Source, SourceType, Targets};
+    use crate::config::{Config, Source, SourceType};
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -154,7 +155,7 @@ mod tests {
                 path: source_path,
                 source_type: SourceType::Directory,
             }],
-            targets: Targets::default(),
+            targets: BTreeMap::new(),
         }
     }
 
@@ -172,7 +173,7 @@ mod tests {
             library_dir: PathBuf::from("/tmp/unused"),
             exclude: std::collections::BTreeSet::new(),
             sources: Vec::new(),
-            targets: Targets::default(),
+            targets: BTreeMap::new(),
         };
         let server = TomeServer::new(config).unwrap();
         let result = server.list_skills().unwrap();

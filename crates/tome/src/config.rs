@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::discover::SkillName;
@@ -22,9 +22,9 @@ pub struct Config {
     #[serde(default)]
     pub sources: Vec<Source>,
 
-    /// Distribution targets
+    /// Distribution targets — keyed by tool name (e.g. "claude", "antigravity")
     #[serde(default)]
-    pub targets: Targets,
+    pub targets: BTreeMap<String, TargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,47 +55,6 @@ impl std::fmt::Display for SourceType {
             SourceType::ClaudePlugins => write!(f, "claude-plugins"),
             SourceType::Directory => write!(f, "directory"),
         }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Targets {
-    #[serde(default)]
-    pub antigravity: Option<TargetConfig>,
-    #[serde(default)]
-    pub claude: Option<TargetConfig>,
-    #[serde(default)]
-    pub codex: Option<TargetConfig>,
-    #[serde(default)]
-    pub openclaw: Option<TargetConfig>,
-}
-
-impl Targets {
-    /// Iterate over all configured targets as `(name, config)` pairs.
-    ///
-    /// Only includes targets that are present in the config (i.e. `Some`).
-    /// The name is one of `"antigravity"`, `"claude"`, `"codex"`, `"openclaw"`.
-    pub fn iter(&self) -> impl Iterator<Item = (&str, &TargetConfig)> {
-        [
-            ("antigravity", self.antigravity.as_ref()),
-            ("claude", self.claude.as_ref()),
-            ("codex", self.codex.as_ref()),
-            ("openclaw", self.openclaw.as_ref()),
-        ]
-        .into_iter()
-        .filter_map(|(name, config)| config.map(|c| (name, c)))
-    }
-
-    /// Iterate mutably over all configured targets.
-    fn iter_mut(&mut self) -> impl Iterator<Item = &mut TargetConfig> {
-        [
-            self.antigravity.as_mut(),
-            self.claude.as_mut(),
-            self.codex.as_mut(),
-            self.openclaw.as_mut(),
-        ]
-        .into_iter()
-        .flatten()
     }
 }
 
@@ -135,7 +94,7 @@ impl TargetConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-enum DistributionMethod {
+pub enum DistributionMethod {
     Symlink,
     Mcp,
 }
@@ -294,6 +253,11 @@ impl Config {
             );
         }
 
+        // Empty target names
+        for name in self.targets.keys() {
+            anyhow::ensure!(!name.is_empty(), "target name cannot be empty");
+        }
+
         Ok(())
     }
 
@@ -303,7 +267,7 @@ impl Config {
         for source in &mut self.sources {
             source.path = expand_tilde(&source.path)?;
         }
-        for t in self.targets.iter_mut() {
+        for t in self.targets.values_mut() {
             expand_target_tildes(t)?;
         }
         Ok(())
@@ -328,7 +292,7 @@ impl Default for Config {
             library_dir: defaults::library_dir(),
             exclude: BTreeSet::new(),
             sources: Vec::new(),
-            targets: Targets::default(),
+            targets: BTreeMap::new(),
         }
     }
 }
@@ -431,7 +395,7 @@ mod tests {
                 path: PathBuf::from("/tmp/source"),
                 source_type: SourceType::Directory,
             }],
-            targets: Targets::default(),
+            targets: BTreeMap::new(),
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
@@ -459,15 +423,15 @@ mod tests {
                 path: PathBuf::from("/tmp/source"),
                 source_type: SourceType::Directory,
             }],
-            targets: Targets {
-                antigravity: Some(TargetConfig {
+            targets: BTreeMap::from([(
+                "antigravity".to_string(),
+                TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
                         skills_dir: PathBuf::from("/tmp/target"),
                     },
-                }),
-                ..Default::default()
-            },
+                },
+            )]),
         };
         config.validate().unwrap();
     }
@@ -618,25 +582,23 @@ mcp_config = "~/.codex/.mcp.json"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.sources.len(), 2);
-        assert!(config.targets.antigravity.is_some());
-        assert!(config.targets.codex.is_some());
-        assert!(config.targets.openclaw.is_none());
+        assert!(config.targets.contains_key("antigravity"));
+        assert!(config.targets.contains_key("codex"));
+        assert!(!config.targets.contains_key("openclaw"));
     }
 
     #[test]
     fn targets_iter_includes_claude() {
-        let targets = Targets {
-            antigravity: None,
-            claude: Some(TargetConfig {
+        let targets: BTreeMap<String, TargetConfig> = BTreeMap::from([(
+            "claude".to_string(),
+            TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
                     skills_dir: PathBuf::from("/tmp/claude-skills"),
                 },
-            }),
-            codex: None,
-            openclaw: None,
-        };
-        let names: Vec<&str> = targets.iter().map(|(name, _)| name).collect();
+            },
+        )]);
+        let names: Vec<&str> = targets.keys().map(|name| name.as_str()).collect();
         assert_eq!(names, vec!["claude"]);
     }
 
@@ -646,22 +608,19 @@ mcp_config = "~/.codex/.mcp.json"
             library_dir: PathBuf::from("/tmp/skills"),
             exclude: BTreeSet::new(),
             sources: Vec::new(),
-            targets: Targets {
-                antigravity: None,
-                claude: Some(TargetConfig {
+            targets: BTreeMap::from([(
+                "claude".to_string(),
+                TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
                         skills_dir: PathBuf::from("/tmp/claude-skills"),
                     },
-                }),
-                codex: None,
-                openclaw: None,
-            },
+                },
+            )]),
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert!(parsed.targets.claude.is_some());
-        let claude = parsed.targets.claude.unwrap();
+        let claude = parsed.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
         assert_eq!(claude.skills_dir(), Some(Path::new("/tmp/claude-skills")));
     }
@@ -675,9 +634,43 @@ method = "symlink"
 skills_dir = "~/.claude/skills"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert!(config.targets.claude.is_some());
-        let claude = config.targets.claude.unwrap();
+        let claude = config.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
         assert!(claude.skills_dir().is_some());
+    }
+
+    #[test]
+    fn config_parses_arbitrary_target_name() {
+        let toml_str = r#"
+[targets.amp]
+enabled = true
+method = "symlink"
+skills_dir = "~/.amp/skills"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let amp = config.targets.get("amp").expect("amp target missing");
+        assert!(amp.enabled);
+        assert_eq!(amp.skills_dir(), Some(Path::new("~/.amp/skills")));
+    }
+
+    #[test]
+    fn validate_rejects_empty_target_name() {
+        let config = Config {
+            targets: BTreeMap::from([(
+                "".to_string(),
+                TargetConfig {
+                    enabled: true,
+                    method: TargetMethod::Symlink {
+                        skills_dir: PathBuf::from("/tmp/target"),
+                    },
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("target name cannot be empty"),
+            "unexpected error: {err}"
+        );
     }
 }

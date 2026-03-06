@@ -5,9 +5,11 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use std::path::{Path, PathBuf};
 
+use std::collections::BTreeMap;
+
 use crate::config::{
-    Config, Source, SourceType, TargetConfig, TargetMethod, Targets, default_config_path,
-    expand_tilde,
+    Config, DistributionMethod, Source, SourceType, TargetConfig, TargetMethod,
+    default_config_path, expand_tilde,
 };
 
 /// Run the interactive setup wizard.
@@ -86,7 +88,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
         "  Library:    {}",
         style(config.library_dir.display()).cyan()
     );
-    let target_count = config.targets.iter().count();
+    let target_count = config.targets.len();
     println!(
         "  Targets:    {}",
         if target_count == 0 {
@@ -259,83 +261,130 @@ fn configure_library() -> Result<PathBuf> {
     Ok(path)
 }
 
-fn configure_targets() -> Result<Targets> {
+/// Well-known distribution targets with sensible defaults.
+struct KnownTarget {
+    name: &'static str,
+    display: &'static str,
+    method: DistributionMethod,
+    /// Path relative to $HOME
+    default_path: &'static str,
+    path_prompt: &'static str,
+}
+
+const KNOWN_TARGETS: &[KnownTarget] = &[
+    KnownTarget {
+        name: "claude",
+        display: "Claude Code",
+        method: DistributionMethod::Symlink,
+        default_path: ".claude/skills",
+        path_prompt: "Claude Code skills directory",
+    },
+    KnownTarget {
+        name: "antigravity",
+        display: "Antigravity",
+        method: DistributionMethod::Symlink,
+        default_path: ".gemini/antigravity/skills",
+        path_prompt: "Antigravity skills directory",
+    },
+    KnownTarget {
+        name: "codex",
+        display: "Codex (MCP)",
+        method: DistributionMethod::Mcp,
+        default_path: ".codex/.mcp.json",
+        path_prompt: "Codex MCP config path",
+    },
+    KnownTarget {
+        name: "openclaw",
+        display: "OpenClaw",
+        method: DistributionMethod::Symlink,
+        default_path: ".openclaw/skills",
+        path_prompt: "OpenClaw skills directory",
+    },
+];
+
+fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
     step_divider("Step 3: Distribution targets");
 
     let home = dirs::home_dir().context("could not determine home directory")?;
 
-    let tools = &[
-        "Claude Code (symlink)",
-        "Antigravity",
-        "Codex (via MCP)",
-        "OpenClaw",
-    ];
+    let labels: Vec<&str> = KNOWN_TARGETS.iter().map(|t| t.display).collect();
     let selections = MultiSelect::new()
         .with_prompt("Which tools should receive skills?\n  (space to toggle, enter to confirm)")
-        .items(tools)
+        .items(&labels)
         .interact()?;
 
-    let mut targets = Targets::default();
+    let mut targets = BTreeMap::new();
 
     for idx in selections {
-        match idx {
-            0 => {
-                let default_path = home.join(".claude/skills");
-                let path: String = Input::new()
-                    .with_prompt("Claude Code skills directory")
-                    .default(default_path.display().to_string())
-                    .interact_text()?;
-                targets.claude = Some(TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: expand_tilde(&PathBuf::from(path))?,
-                    },
-                });
-            }
-            1 => {
-                let default_path = home.join(".gemini/antigravity/skills");
-                let path: String = Input::new()
-                    .with_prompt("Antigravity skills directory")
-                    .default(default_path.display().to_string())
-                    .interact_text()?;
-                targets.antigravity = Some(TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: expand_tilde(&PathBuf::from(path))?,
-                    },
-                });
-            }
-            2 => {
-                let default_path = home.join(".codex/.mcp.json");
-                let path: String = Input::new()
-                    .with_prompt("Codex MCP config path")
-                    .default(default_path.display().to_string())
-                    .interact_text()?;
-                targets.codex = Some(TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Mcp {
-                        mcp_config: expand_tilde(&PathBuf::from(path))?,
-                    },
-                });
-            }
-            3 => {
-                let default_path = home.join(".openclaw/skills");
-                let path: String = Input::new()
-                    .with_prompt("OpenClaw skills directory")
-                    .default(default_path.display().to_string())
-                    .interact_text()?;
-                targets.openclaw = Some(TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: expand_tilde(&PathBuf::from(path))?,
-                    },
-                });
-            }
-            _ => unreachable!(
-                "MultiSelect returned index {idx} but tools array only has {} entries",
-                tools.len()
-            ),
+        let known = &KNOWN_TARGETS[idx];
+        let default_path = home.join(known.default_path);
+        let path: String = Input::new()
+            .with_prompt(known.path_prompt)
+            .default(default_path.display().to_string())
+            .interact_text()?;
+
+        let method = match known.method {
+            DistributionMethod::Symlink => TargetMethod::Symlink {
+                skills_dir: expand_tilde(&PathBuf::from(path))?,
+            },
+            DistributionMethod::Mcp => TargetMethod::Mcp {
+                mcp_config: expand_tilde(&PathBuf::from(path))?,
+            },
+        };
+
+        targets.insert(
+            known.name.to_string(),
+            TargetConfig {
+                enabled: true,
+                method,
+            },
+        );
+    }
+
+    // Offer custom targets
+    loop {
+        let name: String = Input::new()
+            .with_prompt("Add a custom target? (name or Enter to skip)")
+            .default(String::new())
+            .allow_empty(true)
+            .interact_text()?;
+
+        if name.is_empty() {
+            break;
         }
+
+        let method_options = &["symlink", "mcp"];
+        let method_idx = Select::new()
+            .with_prompt("Distribution method")
+            .items(method_options)
+            .default(0)
+            .interact()?;
+
+        let path: String = Input::new()
+            .with_prompt(if method_idx == 0 {
+                "Skills directory"
+            } else {
+                "MCP config path"
+            })
+            .interact_text()?;
+
+        let method = if method_idx == 0 {
+            TargetMethod::Symlink {
+                skills_dir: expand_tilde(&PathBuf::from(path))?,
+            }
+        } else {
+            TargetMethod::Mcp {
+                mcp_config: expand_tilde(&PathBuf::from(path))?,
+            }
+        };
+
+        targets.insert(
+            name,
+            TargetConfig {
+                enabled: true,
+                method,
+            },
+        );
     }
 
     println!();
@@ -392,10 +441,13 @@ const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
 /// Returns `(source_name, overlapping_path)` pairs for each conflict.
 /// Only compares against `Symlink` targets (not `Mcp`), since MCP config
 /// files are JSON configs, not skills directories.
-fn find_source_target_overlaps(sources: &[Source], targets: &Targets) -> Vec<(String, PathBuf)> {
+fn find_source_target_overlaps(
+    sources: &[Source],
+    targets: &BTreeMap<String, TargetConfig>,
+) -> Vec<(String, PathBuf)> {
     let target_paths: Vec<PathBuf> = targets
-        .iter()
-        .filter_map(|(_, config)| config.skills_dir().map(|p| p.to_path_buf()))
+        .values()
+        .filter_map(|config| config.skills_dir().map(|p| p.to_path_buf()))
         .collect();
 
     sources
@@ -500,17 +552,15 @@ mod tests {
             source_type: SourceType::Directory,
         }];
 
-        let targets = Targets {
-            antigravity: Some(TargetConfig {
+        let targets = BTreeMap::from([(
+            "antigravity".to_string(),
+            TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
                     skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
                 },
-            }),
-            claude: None,
-            codex: None,
-            openclaw: None,
-        };
+            },
+        )]);
 
         let overlaps = find_source_target_overlaps(&sources, &targets);
         assert_eq!(overlaps.len(), 1);
@@ -529,17 +579,15 @@ mod tests {
             source_type: SourceType::Directory,
         }];
 
-        let targets = Targets {
-            antigravity: Some(TargetConfig {
+        let targets = BTreeMap::from([(
+            "antigravity".to_string(),
+            TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
                     skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
                 },
-            }),
-            claude: None,
-            codex: None,
-            openclaw: None,
-        };
+            },
+        )]);
 
         let overlaps = find_source_target_overlaps(&sources, &targets);
         assert!(overlaps.is_empty());
@@ -553,17 +601,15 @@ mod tests {
             source_type: SourceType::Directory,
         }];
 
-        let targets = Targets {
-            antigravity: None,
-            claude: Some(TargetConfig {
+        let targets = BTreeMap::from([(
+            "claude".to_string(),
+            TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
                     skills_dir: PathBuf::from("/home/user/.claude/skills"),
                 },
-            }),
-            codex: None,
-            openclaw: None,
-        };
+            },
+        )]);
 
         let overlaps = find_source_target_overlaps(&sources, &targets);
         assert_eq!(overlaps.len(), 1);
@@ -578,17 +624,15 @@ mod tests {
             source_type: SourceType::Directory,
         }];
 
-        let targets = Targets {
-            antigravity: None,
-            claude: None,
-            codex: Some(TargetConfig {
+        let targets = BTreeMap::from([(
+            "codex".to_string(),
+            TargetConfig {
                 enabled: true,
                 method: TargetMethod::Mcp {
                     mcp_config: PathBuf::from("/home/user/.codex/.mcp.json"),
                 },
-            }),
-            openclaw: None,
-        };
+            },
+        )]);
 
         // MCP targets should not be compared — mcp_config is a JSON file, not a skills dir
         let overlaps = find_source_target_overlaps(&sources, &targets);
