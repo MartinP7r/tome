@@ -598,7 +598,7 @@ mcp_config = "~/.codex/.mcp.json"
                 },
             },
         )]);
-        let names: Vec<&str> = targets.iter().map(|(name, _)| name.as_str()).collect();
+        let names: Vec<&str> = targets.keys().map(|name| name.as_str()).collect();
         assert_eq!(names, vec!["claude"]);
     }
 
