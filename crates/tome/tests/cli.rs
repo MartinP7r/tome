@@ -497,14 +497,23 @@ fn doctor_detects_broken_symlinks() {
         .stdout(predicate::str::contains("1 issue(s)"));
 }
 
-// -- Pre-init state (no config file) --
+// -- Pre-init state (unconfigured) --
 
 #[test]
 fn status_without_config_shows_init_prompt() {
     let tmp = TempDir::new().unwrap();
-    let missing_config = tmp.path().join("config.toml");
+    // Point library_dir at a nonexistent dir (no sources) to simulate unconfigured state.
+    // Using write_config would create library_dir, defeating the purpose.
+    let config_path = tmp.path().join("config.toml");
+    let nonexistent_library = tmp.path().join("nonexistent-library");
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"", nonexistent_library.display()),
+    )
+    .unwrap();
+
     tome()
-        .args(["--config", missing_config.to_str().unwrap(), "status"])
+        .args(["--config", config_path.to_str().unwrap(), "status"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Not configured yet"))
@@ -514,11 +523,18 @@ fn status_without_config_shows_init_prompt() {
 #[test]
 fn doctor_without_config_shows_init_prompt() {
     let tmp = TempDir::new().unwrap();
-    let missing_config = tmp.path().join("config.toml");
+    let config_path = tmp.path().join("config.toml");
+    let nonexistent_library = tmp.path().join("nonexistent-library");
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"", nonexistent_library.display()),
+    )
+    .unwrap();
+
     tome()
         .args([
             "--config",
-            missing_config.to_str().unwrap(),
+            config_path.to_str().unwrap(),
             "--dry-run",
             "doctor",
         ])
