@@ -108,9 +108,16 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
-    let skills = discover::discover_all(config, quiet)?;
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &mut warnings)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
+    }
+
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
     }
 
     if skills.is_empty() {
@@ -245,7 +252,13 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
 
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool) -> Result<()> {
-    let skills = discover::discover_all(config, quiet)?;
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &mut warnings)?;
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
 
     if quiet {
         return Ok(());
