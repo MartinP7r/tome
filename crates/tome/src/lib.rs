@@ -97,7 +97,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Serve => {
             tokio::runtime::Runtime::new()?.block_on(mcp::serve(config))?;
         }
-        Command::List => list(&config, cli.quiet)?,
+        Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
     }
 
@@ -272,13 +272,28 @@ fn render_sync_report(report: &SyncReport) {
 }
 
 /// List all discovered skills.
-fn list(config: &Config, quiet: bool) -> Result<()> {
+fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
     let mut warnings = Vec::new();
     let skills = discover::discover_all(config, &mut warnings)?;
     if !quiet {
         for w in &warnings {
             eprintln!("warning: {}", w);
         }
+    }
+
+    if json {
+        let rows: Vec<serde_json::Value> = skills
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "source": s.source_name,
+                    "path": s.path,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
     }
 
     if quiet {

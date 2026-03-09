@@ -41,7 +41,11 @@ pub struct DoctorReport {
 impl DoctorReport {
     pub fn total_issues(&self) -> usize {
         self.library_issues.len()
-            + self.target_issues.iter().map(|(_, v)| v.len()).sum::<usize>()
+            + self
+                .target_issues
+                .iter()
+                .map(|(_, v)| v.len())
+                .sum::<usize>()
             + self.config_issues.len()
     }
 }

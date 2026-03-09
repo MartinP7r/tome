@@ -653,6 +653,96 @@ type = "directory"
 }
 
 #[test]
+fn list_json_outputs_valid_json() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "alpha-skill");
+    create_skill(&skills_dir, "beta-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test-src\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 2);
+
+    // Each entry should have name, source, and path fields
+    for entry in arr {
+        assert!(entry.get("name").is_some(), "missing 'name' field");
+        assert!(entry.get("source").is_some(), "missing 'source' field");
+        assert!(entry.get("path").is_some(), "missing 'path' field");
+    }
+
+    // Check that our source name appears
+    assert!(arr.iter().any(|e| e["source"] == "test-src"));
+    // Check both skill names are present
+    let names: Vec<&str> = arr.iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"alpha-skill"));
+    assert!(names.contains(&"beta-skill"));
+}
+
+#[test]
+fn list_json_with_quiet_still_outputs_json() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    let output = tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--quiet",
+            "list",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("--json should override --quiet");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 1);
+}
+
+#[test]
+fn list_json_with_no_skills_outputs_empty_array() {
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 0);
+}
+
+#[test]
 fn sync_quiet_skips_git_commit() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");

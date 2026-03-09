@@ -128,10 +128,7 @@ pub struct DiscoveredSkill {
 /// Returns deduplicated skills — first source wins on name conflicts.
 /// Applies exclusion list from config.
 /// Warnings about naming conventions and deduplication are collected in `warnings`.
-pub fn discover_all(
-    config: &Config,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<DiscoveredSkill>> {
+pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<DiscoveredSkill>> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
     let mut conflicts: Vec<(String, String, String)> = Vec::new();
