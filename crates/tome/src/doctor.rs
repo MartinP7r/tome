@@ -11,10 +11,85 @@ use crate::config::Config;
 use crate::manifest;
 use crate::paths::resolve_symlink_target;
 
+// -- Data structs --
+
+/// Severity of a diagnostic issue.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssueSeverity {
+    /// Critical problem (e.g., missing directory, broken symlink).
+    Error,
+    /// Non-critical problem (e.g., orphan directory, missing source path).
+    Warning,
+}
+
+/// A single diagnostic issue found during a health check.
+#[derive(Debug, Clone)]
+pub struct DiagnosticIssue {
+    pub severity: IssueSeverity,
+    pub message: String,
+}
+
+/// Complete diagnostic report for the tome system.
+#[derive(Debug)]
+pub struct DoctorReport {
+    pub configured: bool,
+    pub library_issues: Vec<DiagnosticIssue>,
+    pub target_issues: Vec<(String, Vec<DiagnosticIssue>)>,
+    pub config_issues: Vec<DiagnosticIssue>,
+}
+
+impl DoctorReport {
+    pub fn total_issues(&self) -> usize {
+        self.library_issues.len()
+            + self.target_issues.iter().map(|(_, v)| v.len()).sum::<usize>()
+            + self.config_issues.len()
+    }
+}
+
+// -- Data gathering (pure computation, no I/O) --
+
+/// Run all diagnostic checks and return a structured report.
+pub fn check(config: &Config) -> Result<DoctorReport> {
+    let configured = config.library_dir.is_dir() || !config.sources.is_empty();
+
+    if !configured {
+        return Ok(DoctorReport {
+            configured: false,
+            library_issues: Vec::new(),
+            target_issues: Vec::new(),
+            config_issues: Vec::new(),
+        });
+    }
+
+    let library_issues = check_library(&config.library_dir)?;
+
+    let mut target_issues = Vec::new();
+    for (name, t) in config.targets.iter() {
+        if t.enabled
+            && let Some(skills_dir) = t.skills_dir()
+        {
+            let issues = check_target_dir(name, skills_dir, &config.library_dir)?;
+            target_issues.push((name.to_string(), issues));
+        }
+    }
+
+    let config_issues = check_config(config)?;
+
+    Ok(DoctorReport {
+        configured: true,
+        library_issues,
+        target_issues,
+        config_issues,
+    })
+}
+
+// -- Rendering + control flow --
+
 /// Diagnose and optionally repair issues.
 pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
-    // Not yet initialised — no config file, no library directory
-    if !config.library_dir.is_dir() && config.sources.is_empty() {
+    let report = check(config)?;
+
+    if !report.configured {
         println!("Not configured yet. Run `tome init` to get started.");
         return Ok(());
     }
@@ -26,38 +101,27 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
         );
     }
 
-    let mut total_issues = 0;
-
-    // Check library
+    // Render results
     println!("{}", style("Checking library...").bold());
-    let library_issues = check_library(&config.library_dir)?;
-    total_issues += library_issues;
+    render_issues(&report.library_issues, "library");
 
-    // Check targets
     println!("{}", style("Checking targets...").bold());
-    for (name, t) in config.targets.iter() {
-        if t.enabled
-            && let Some(skills_dir) = t.skills_dir()
-        {
-            let target_issues = check_target_dir(name, skills_dir, &config.library_dir)?;
-            total_issues += target_issues;
-        }
+    for (name, issues) in &report.target_issues {
+        render_issues_for_target(name, issues);
     }
 
-    // Check config
     println!("{}", style("Checking config...").bold());
-    let config_issues = check_config(config)?;
-    total_issues += config_issues;
+    render_issues(&report.config_issues, "config");
+
+    let total = report.total_issues();
 
     println!();
-    if total_issues == 0 {
+    if total == 0 {
         println!("{}", style("No issues found.").green().bold());
     } else {
         println!(
             "{}",
-            style(format!("Found {} issue(s).", total_issues))
-                .yellow()
-                .bold()
+            style(format!("Found {} issue(s).", total)).yellow().bold()
         );
 
         if !dry_run {
@@ -96,25 +160,57 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-/// Check the library for issues: missing manifest entries, orphan directories, broken symlinks.
-fn check_library(library_dir: &Path) -> Result<usize> {
+fn render_issues(issues: &[DiagnosticIssue], section: &str) {
+    if issues.is_empty() {
+        println!("  {} {} OK", style("ok").green(), section);
+    } else {
+        for issue in issues {
+            let marker = match issue.severity {
+                IssueSeverity::Error => style("x").red(),
+                IssueSeverity::Warning => style("!").yellow(),
+            };
+            println!("  {} {}", marker, issue.message);
+        }
+    }
+}
+
+fn render_issues_for_target(name: &str, issues: &[DiagnosticIssue]) {
+    if issues.is_empty() {
+        println!("  {} {}: OK", style("ok").green(), name);
+    } else {
+        for issue in issues {
+            let marker = match issue.severity {
+                IssueSeverity::Error => style("x").red(),
+                IssueSeverity::Warning => style("!").yellow(),
+            };
+            println!("  {} {}: {}", marker, name, issue.message);
+        }
+    }
+}
+
+// -- Check functions (return structured data) --
+
+fn check_library(library_dir: &Path) -> Result<Vec<DiagnosticIssue>> {
+    let mut issues = Vec::new();
+
     if !library_dir.is_dir() {
-        println!("  {} library directory does not exist", style("!").yellow());
-        return Ok(1);
+        issues.push(DiagnosticIssue {
+            severity: IssueSeverity::Warning,
+            message: "library directory does not exist".to_string(),
+        });
+        return Ok(issues);
     }
 
     let m = match manifest::load(library_dir) {
         Ok(m) => m,
         Err(e) => {
-            println!(
-                "  {} manifest is corrupted or unreadable: {}",
-                style("x").red(),
-                e
-            );
-            return Ok(1);
+            issues.push(DiagnosticIssue {
+                severity: IssueSeverity::Error,
+                message: format!("manifest is corrupted or unreadable: {}", e),
+            });
+            return Ok(issues);
         }
     };
-    let mut issues = 0;
 
     // Check manifest entries exist on disk
     for name in m.keys() {
@@ -123,20 +219,19 @@ fn check_library(library_dir: &Path) -> Result<usize> {
             let entry = m.get(name.as_str());
             let is_managed = entry.is_some_and(|e| e.managed);
             if is_managed && entry_path.is_symlink() {
-                // Managed skill with broken symlink — source may have been uninstalled
-                println!(
-                    "  {} managed skill '{}' has a broken symlink (source may have been uninstalled)",
-                    style("x").red(),
-                    name
-                );
+                issues.push(DiagnosticIssue {
+                    severity: IssueSeverity::Error,
+                    message: format!(
+                        "managed skill '{}' has a broken symlink (source may have been uninstalled)",
+                        name
+                    ),
+                });
             } else {
-                println!(
-                    "  {} manifest entry '{}' has no directory on disk",
-                    style("x").red(),
-                    name
-                );
+                issues.push(DiagnosticIssue {
+                    severity: IssueSeverity::Error,
+                    message: format!("manifest entry '{}' has no directory on disk", name),
+                });
             }
-            issues += 1;
         }
     }
 
@@ -151,12 +246,10 @@ fn check_library(library_dir: &Path) -> Result<usize> {
         let name = entry.file_name().to_string_lossy().to_string();
 
         if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
-            println!(
-                "  {} orphan directory: {} (not in manifest)",
-                style("!").yellow(),
-                path.display()
-            );
-            issues += 1;
+            issues.push(DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: format!("orphan directory: {} (not in manifest)", path.display()),
+            });
         }
 
         // Check for broken symlinks — either managed skills or legacy v0.1.x
@@ -165,20 +258,87 @@ fn check_library(library_dir: &Path) -> Result<usize> {
             if !is_managed {
                 let raw_target = std::fs::read_link(&path)
                     .with_context(|| format!("failed to read symlink {}", path.display()))?;
-                println!(
-                    "  {} broken legacy symlink: {} -> {}",
-                    style("x").red(),
-                    path.display(),
-                    raw_target.display()
-                );
-                issues += 1;
+                issues.push(DiagnosticIssue {
+                    severity: IssueSeverity::Error,
+                    message: format!(
+                        "broken legacy symlink: {} -> {}",
+                        path.display(),
+                        raw_target.display()
+                    ),
+                });
             }
-            // Managed broken symlinks are already reported in the manifest entry check above
         }
     }
 
-    if issues == 0 {
-        println!("  {} library OK", style("ok").green());
+    Ok(issues)
+}
+
+fn check_target_dir(
+    _name: &str,
+    skills_dir: &Path,
+    library_dir: &Path,
+) -> Result<Vec<DiagnosticIssue>> {
+    let mut issues = Vec::new();
+
+    if !skills_dir.is_dir() {
+        issues.push(DiagnosticIssue {
+            severity: IssueSeverity::Warning,
+            message: format!("target directory does not exist ({})", skills_dir.display()),
+        });
+        return Ok(issues);
+    }
+
+    // Canonicalize library_dir so starts_with works when library_dir contains
+    // a symlink component (e.g., /var -> /private/var on macOS).
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
+
+    let entries = std::fs::read_dir(skills_dir)
+        .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
+
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", skills_dir.display()))?;
+        let path = entry.path();
+
+        if path.is_symlink() {
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
+            let target = resolve_symlink_target(&path, &raw_target);
+            let points_into_library =
+                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+            if points_into_library && !target.exists() {
+                issues.push(DiagnosticIssue {
+                    severity: IssueSeverity::Error,
+                    message: format!("stale symlink {}", path.display()),
+                });
+            }
+        }
+    }
+
+    Ok(issues)
+}
+
+fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
+    let mut issues = Vec::new();
+
+    for source in &config.sources {
+        if !source.path.exists() {
+            issues.push(DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: format!(
+                    "source '{}' path does not exist: {}",
+                    source.name,
+                    source.path.display()
+                ),
+            });
+        }
     }
 
     Ok(issues)
@@ -242,106 +402,104 @@ fn repair_library(library_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn check_target_dir(name: &str, skills_dir: &Path, library_dir: &Path) -> Result<usize> {
-    if !skills_dir.is_dir() {
-        println!(
-            "  {} {}: target directory does not exist ({})",
-            style("!").yellow(),
-            name,
-            skills_dir.display()
-        );
-        return Ok(1);
-    }
-
-    let mut issues = 0;
-
-    // Canonicalize library_dir so starts_with works when library_dir contains
-    // a symlink component (e.g., /var -> /private/var on macOS).
-    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        eprintln!(
-            "warning: could not canonicalize library path {}: {}",
-            library_dir.display(),
-            e
-        );
-        library_dir.to_path_buf()
-    });
-
-    let entries = std::fs::read_dir(skills_dir)
-        .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
-
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("failed to read entry in {}", skills_dir.display()))?;
-        let path = entry.path();
-
-        if path.is_symlink() {
-            let raw_target = std::fs::read_link(&path)
-                .with_context(|| format!("failed to read symlink {}", path.display()))?;
-            let target = resolve_symlink_target(&path, &raw_target);
-            let points_into_library =
-                target.starts_with(library_dir) || target.starts_with(&canonical_library);
-            if points_into_library && !target.exists() {
-                println!(
-                    "  {} {}: stale symlink {}",
-                    style("x").red(),
-                    name,
-                    path.display()
-                );
-                issues += 1;
-            }
-        }
-    }
-
-    if issues == 0 {
-        println!("  {} {}: OK", style("ok").green(), name);
-    }
-
-    Ok(issues)
-}
-
-fn check_config(config: &Config) -> Result<usize> {
-    let mut issues = 0;
-
-    for source in &config.sources {
-        if !source.path.exists() {
-            println!(
-                "  {} source '{}' path does not exist: {}",
-                style("!").yellow(),
-                source.name,
-                source.path.display()
-            );
-            issues += 1;
-        }
-    }
-
-    if issues == 0 {
-        println!("  {} config OK", style("ok").green());
-    }
-
-    Ok(issues)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Source, SourceType};
+    use crate::config::{Config, Source, SourceType};
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    // -- check() tests --
+
+    #[test]
+    fn check_unconfigured_returns_not_configured() {
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/library"),
+            ..Config::default()
+        };
+
+        let report = check(&config).unwrap();
+        assert!(!report.configured);
+        assert_eq!(report.total_issues(), 0);
+    }
+
+    #[test]
+    fn check_healthy_library_returns_no_issues() {
+        let lib = TempDir::new().unwrap();
+        let skill_dir = lib.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/my-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            ..Config::default()
+        };
+
+        let report = check(&config).unwrap();
+        assert!(report.configured);
+        assert_eq!(report.total_issues(), 0);
+    }
+
+    #[test]
+    fn check_detects_orphan_directory() {
+        let lib = TempDir::new().unwrap();
+        std::fs::create_dir_all(lib.path().join("orphan")).unwrap();
+
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            ..Config::default()
+        };
+
+        let report = check(&config).unwrap();
+        assert_eq!(report.library_issues.len(), 1);
+        assert_eq!(report.library_issues[0].severity, IssueSeverity::Warning);
+        assert!(report.library_issues[0].message.contains("orphan"));
+    }
+
+    #[test]
+    fn check_detects_missing_source_path() {
+        let lib = TempDir::new().unwrap();
+
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            sources: vec![Source {
+                name: "gone".to_string(),
+                path: PathBuf::from("/nonexistent/source"),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let report = check(&config).unwrap();
+        assert_eq!(report.config_issues.len(), 1);
+        assert!(report.config_issues[0].message.contains("gone"));
+    }
 
     // -- check_library --
 
     #[test]
     fn check_library_missing_dir() {
         let result = check_library(Path::new("/nonexistent/library")).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, IssueSeverity::Warning);
     }
 
     #[test]
     fn check_library_no_issues() {
         let lib = TempDir::new().unwrap();
-
-        // Create a skill directory and matching manifest entry
         let skill_dir = lib.path().join("my-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
 
@@ -359,14 +517,13 @@ mod tests {
         manifest::save(&m, lib.path()).unwrap();
 
         let result = check_library(lib.path()).unwrap();
-        assert_eq!(result, 0);
+        assert!(result.is_empty());
     }
 
     #[test]
     fn check_library_missing_manifest_entry() {
         let lib = TempDir::new().unwrap();
 
-        // Manifest entry with no directory
         let mut m = manifest::Manifest::default();
         m.insert(
             crate::discover::SkillName::new("gone").unwrap(),
@@ -381,18 +538,18 @@ mod tests {
         manifest::save(&m, lib.path()).unwrap();
 
         let result = check_library(lib.path()).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, IssueSeverity::Error);
     }
 
     #[test]
     fn check_library_orphan_directory() {
         let lib = TempDir::new().unwrap();
-
-        // Directory not in manifest
         std::fs::create_dir_all(lib.path().join("orphan")).unwrap();
 
         let result = check_library(lib.path()).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, IssueSeverity::Warning);
     }
 
     #[test]
@@ -401,7 +558,8 @@ mod tests {
         unix_fs::symlink("/nonexistent/target", lib.path().join("broken")).unwrap();
 
         let result = check_library(lib.path()).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].severity, IssueSeverity::Error);
     }
 
     // -- check_target_dir --
@@ -411,7 +569,7 @@ mod tests {
         let lib = TempDir::new().unwrap();
         let result =
             check_target_dir("test-target", Path::new("/nonexistent/target"), lib.path()).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -423,7 +581,7 @@ mod tests {
         unix_fs::symlink(&stale_target, target_dir.path().join("skill-link")).unwrap();
 
         let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -434,7 +592,7 @@ mod tests {
         unix_fs::symlink("/some/other/place", target_dir.path().join("external")).unwrap();
 
         let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
-        assert_eq!(result, 0);
+        assert!(result.is_empty());
     }
 
     // -- check_config --
@@ -451,7 +609,7 @@ mod tests {
         };
 
         let result = check_config(&config).unwrap();
-        assert_eq!(result, 1);
+        assert_eq!(result.len(), 1);
     }
 
     #[test]
@@ -467,7 +625,7 @@ mod tests {
         };
 
         let result = check_config(&config).unwrap();
-        assert_eq!(result, 0);
+        assert!(result.is_empty());
     }
 
     // -- diagnose (pre-init guard) --
