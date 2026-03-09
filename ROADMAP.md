@@ -4,9 +4,10 @@
 | ---------- | ---------------------- | ----------------------------------------------------------------------- |
 | **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs |
 | **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          |
+| **v0.2.1** | Output Layer           | Renderer trait, data struct extraction, `--json` for list               |
 | **v0.3**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |
 | **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |
-| **v0.4.x** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |
+| **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |
 | **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |
@@ -18,7 +19,7 @@
 - **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — `dialoguer` doesn't surface these by default
 - **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
 - **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
-- **Modern TUI with welcome ASCII art**: Replace plain text output with a polished TUI; open `tome init` with ASCII art of a tome/spellbook as the welcome screen. Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.
+- ~~**Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.~~ → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.x.
 - **Progress spinners for sync** (`indicatif`): Show spinners/progress during discover → consolidate → distribute steps instead of silent waits or verbose text dumps
 - **Table-formatted output** (`tabled`): Replace manual `format!` column alignment in `tome list` and `tome status` with proper table rendering — handles terminal width, truncation, and alignment automatically
 - ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
@@ -39,6 +40,19 @@ Make the library the source of truth for local skills. `tome sync` copies skill 
 - **Idempotent copy semantics**: Only copy when source content has changed (compare timestamps or content hashes). Skip unchanged skills to keep syncs fast.
 
 **Not in scope** (deferred to v0.5): lockfile, `tome update`, per-machine preferences, managed source support, git-backed backup.
+
+## v0.2.1 — Output Layer
+
+Decouple output rendering from business logic. This is a prerequisite for `tome browse` (v0.4.x) and `--json` output (#167), and ensures new connectors in v0.3 get clean rendering separation from day one.
+
+- **Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations
+- **Data struct extraction**: `status::gather() -> StatusReport`, `doctor::diagnose() -> DoctorReport`, sync pipeline returns `SyncReport` — pure computation separated from rendering
+- **Warning collection**: Replace scattered `eprintln!` in discover/library/distribute with `Vec<Warning>` returned alongside results
+- **TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait
+- **QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output
+- **`--json` for `tome list`** ([#167](https://github.com/MartinP7r/tome/issues/167)): Trivially enabled once data structs exist — serialize `Vec<SkillRow>` directly
+
+**Not in scope:** ratatui dependency, `tome browse`, format transforms.
 
 ## v0.3 — Connector Architecture
 
@@ -62,7 +76,20 @@ The current model hardcodes targets as struct fields and keeps source/target log
 - Connectors declare input/output formats; the pipeline resolves the translation chain
 - **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
 
-## v0.4.x — Skill Validation & Linting
+## v0.4.x — Browse + Skill Validation
+
+Interactive skill browser and YAML frontmatter linting. Depends on v0.2.1 output layer for clean data access.
+
+### `tome browse` — Interactive TUI ([#162](https://github.com/MartinP7r/tome/issues/162))
+
+Full-screen interactive skill browser using **ratatui** for rendering and **nucleo** (Helix editor's fuzzy engine) for matching. skim was ruled out because it owns the terminal and can't be embedded in a ratatui layout.
+
+- **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
+- **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
+- **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
+- **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
+
+### Skill Validation & Linting
 
 Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
 
