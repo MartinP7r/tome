@@ -2,29 +2,125 @@
 
 use anyhow::{Context, Result};
 use console::style;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::Config;
 use crate::discover;
 use crate::manifest;
 
+// -- Data structs --
+
+/// Status of a single configured source.
+pub struct SourceStatus {
+    pub name: String,
+    pub source_type: String,
+    pub path: String,
+    /// Number of skills discovered, or an error message if discovery failed.
+    pub skill_count: Result<usize, String>,
+}
+
+/// Status of a single configured target.
+pub struct TargetStatus {
+    pub name: String,
+    pub enabled: bool,
+    pub method: String,
+}
+
+/// Complete status report for the tome system.
+pub struct StatusReport {
+    pub configured: bool,
+    pub library_dir: PathBuf,
+    /// Number of skills consolidated in the library, or an error message.
+    pub library_count: Result<usize, String>,
+    pub sources: Vec<SourceStatus>,
+    pub targets: Vec<TargetStatus>,
+    /// Number of health issues, or an error message.
+    pub health: Result<usize, String>,
+}
+
+// -- Data gathering (pure computation, no I/O) --
+
+/// Gather status data without producing any output.
+pub fn gather(config: &Config) -> Result<StatusReport> {
+    let configured = config.library_dir.is_dir() || !config.sources.is_empty();
+
+    let library_count = if config.library_dir.is_dir() {
+        count_entries(&config.library_dir).map_err(|e| e.to_string())
+    } else {
+        Ok(0)
+    };
+
+    let sources: Vec<SourceStatus> = config
+        .sources
+        .iter()
+        .map(|source| {
+            let skill_count = discover::discover_source(source)
+                .map(|s| s.len())
+                .map_err(|e| e.to_string());
+            SourceStatus {
+                name: source.name.clone(),
+                source_type: source.source_type.to_string(),
+                path: source.path.display().to_string(),
+                skill_count,
+            }
+        })
+        .collect();
+
+    let targets: Vec<TargetStatus> = config
+        .targets
+        .iter()
+        .map(|(name, t)| {
+            let method = match &t.method {
+                crate::config::TargetMethod::Symlink { .. } => "symlink",
+                crate::config::TargetMethod::Mcp { .. } => "mcp",
+            };
+            TargetStatus {
+                name: name.to_string(),
+                enabled: t.enabled,
+                method: method.to_string(),
+            }
+        })
+        .collect();
+
+    let health = if config.library_dir.is_dir() {
+        count_health_issues(&config.library_dir).map_err(|e| e.to_string())
+    } else {
+        Ok(0)
+    };
+
+    Ok(StatusReport {
+        configured,
+        library_dir: config.library_dir.clone(),
+        library_count,
+        sources,
+        targets,
+        health,
+    })
+}
+
+// -- Rendering --
+
 /// Display the current status of the tome system.
 pub fn show(config: &Config) -> Result<()> {
-    // Not yet initialised — no config file, no library directory
-    if !config.library_dir.is_dir() && config.sources.is_empty() {
+    let report = gather(config)?;
+    render_status(&report);
+    Ok(())
+}
+
+fn render_status(report: &StatusReport) {
+    if !report.configured {
         println!("Not configured yet. Run `tome init` to get started.");
-        return Ok(());
+        return;
     }
 
+    // Library
     println!(
         "{} {}",
         style("Library:").bold(),
-        config.library_dir.display()
+        report.library_dir.display()
     );
-
-    // Count skills in library
-    let lib_count = match count_entries(&config.library_dir) {
+    let lib_count = match &report.library_count {
         Ok(n) => format!("{}", n),
         Err(e) => {
             eprintln!("warning: could not read library: {}", e);
@@ -36,19 +132,19 @@ pub fn show(config: &Config) -> Result<()> {
 
     // Sources
     println!("{}", style("Sources:").bold());
-    if config.sources.is_empty() {
+    if report.sources.is_empty() {
         println!("  (none configured)");
     } else {
-        let mut rows: Vec<[String; 4]> = Vec::with_capacity(config.sources.len() + 1);
+        let mut rows: Vec<[String; 4]> = Vec::with_capacity(report.sources.len() + 1);
         rows.push([
             "SOURCE".to_string(),
             "TYPE".to_string(),
             "PATH".to_string(),
             "SKILLS".to_string(),
         ]);
-        for source in &config.sources {
-            let count = match discover::discover_source(source) {
-                Ok(s) => format!("{}", s.len()),
+        for source in &report.sources {
+            let count = match &source.skill_count {
+                Ok(n) => format!("{}", n),
                 Err(e) => {
                     eprintln!(
                         "warning: could not discover skills from '{}': {}",
@@ -59,8 +155,8 @@ pub fn show(config: &Config) -> Result<()> {
             };
             rows.push([
                 source.name.clone(),
-                source.source_type.to_string(),
-                source.path.display().to_string(),
+                source.source_type.clone(),
+                source.path.clone(),
                 count,
             ]);
         }
@@ -78,27 +174,22 @@ pub fn show(config: &Config) -> Result<()> {
 
     // Targets
     println!("{}", style("Targets:").bold());
-    let target_entries: Vec<_> = config.targets.iter().collect();
-    if target_entries.is_empty() {
+    if report.targets.is_empty() {
         println!("  (none configured)");
     } else {
-        let mut rows: Vec<[String; 3]> = Vec::with_capacity(target_entries.len() + 1);
+        let mut rows: Vec<[String; 3]> = Vec::with_capacity(report.targets.len() + 1);
         rows.push([
             "TARGET".to_string(),
             "STATUS".to_string(),
             "METHOD".to_string(),
         ]);
-        for (name, t) in &target_entries {
-            let status = if t.enabled {
+        for target in &report.targets {
+            let status = if target.enabled {
                 style("enabled").green().to_string()
             } else {
                 style("disabled").dim().to_string()
             };
-            let method = match &t.method {
-                crate::config::TargetMethod::Symlink { .. } => "symlink",
-                crate::config::TargetMethod::Mcp { .. } => "mcp",
-            };
-            rows.push([name.to_string(), status, method.to_string()]);
+            rows.push([target.name.clone(), status, target.method.clone()]);
         }
         let table = tabled::Table::from_iter(rows)
             .with(Style::blank())
@@ -112,8 +203,8 @@ pub fn show(config: &Config) -> Result<()> {
     }
     println!();
 
-    // Health check
-    let health = match count_health_issues(&config.library_dir) {
+    // Health
+    let health = match &report.health {
         Ok(0) => format!("{}", style("All good").green()),
         Ok(n) => format!("{}", style(format!("{} issue(s)", n)).red()),
         Err(e) => {
@@ -122,8 +213,6 @@ pub fn show(config: &Config) -> Result<()> {
         }
     };
     println!("{} {}", style("Health:").bold(), health);
-
-    Ok(())
 }
 
 /// Count skill entries in the library (directories or symlinks-to-dirs), excluding hidden entries.
@@ -188,6 +277,104 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use std::path::PathBuf;
+
+    // -- gather() tests --
+
+    #[test]
+    fn gather_unconfigured_returns_not_configured() {
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/tome/library"),
+            ..Config::default()
+        };
+
+        let report = gather(&config).unwrap();
+        assert!(!report.configured);
+        assert!(report.sources.is_empty());
+        assert!(report.targets.is_empty());
+    }
+
+    #[test]
+    fn gather_with_sources_marks_configured() {
+        use crate::config::{Source, SourceType};
+
+        let config = Config {
+            library_dir: PathBuf::from("/nonexistent/tome/library"),
+            sources: vec![Source {
+                name: "test".to_string(),
+                path: PathBuf::from("/nonexistent/source"),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let report = gather(&config).unwrap();
+        assert!(report.configured);
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.sources[0].name, "test");
+        // Source path doesn't exist — discover_source returns Ok(empty) with a warning
+        assert_eq!(report.sources[0].skill_count.as_ref().copied().unwrap(), 0);
+    }
+
+    #[test]
+    fn gather_with_library_dir_counts_skills() {
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("skill-a")).unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("skill-b")).unwrap();
+
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            ..Config::default()
+        };
+
+        let report = gather(&config).unwrap();
+        assert!(report.configured);
+        assert_eq!(report.library_count.unwrap(), 2);
+    }
+
+    #[test]
+    fn gather_with_targets_populates_target_status() {
+        use crate::config::{TargetConfig, TargetMethod};
+        use std::collections::BTreeMap;
+
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        let target_dir = tempfile::TempDir::new().unwrap();
+
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            targets: BTreeMap::from([(
+                "claude".to_string(),
+                TargetConfig {
+                    enabled: true,
+                    method: TargetMethod::Symlink {
+                        skills_dir: target_dir.path().to_path_buf(),
+                    },
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let report = gather(&config).unwrap();
+        assert_eq!(report.targets.len(), 1);
+        assert_eq!(report.targets[0].name, "claude");
+        assert!(report.targets[0].enabled);
+        assert_eq!(report.targets[0].method, "symlink");
+    }
+
+    #[test]
+    fn gather_health_detects_orphan() {
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(lib_dir.path().join("orphan-skill")).unwrap();
+
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            ..Config::default()
+        };
+
+        let report = gather(&config).unwrap();
+        assert_eq!(report.health.unwrap(), 1);
+    }
+
+    // -- Legacy tests (now calling show(), which delegates to gather() + render) --
 
     #[test]
     fn status_shows_init_prompt_when_unconfigured() {

@@ -127,8 +127,8 @@ pub struct DiscoveredSkill {
 ///
 /// Returns deduplicated skills — first source wins on name conflicts.
 /// Applies exclusion list from config.
-/// When `quiet` is true, naming-convention and deduplication warnings are suppressed.
-pub fn discover_all(config: &Config, quiet: bool) -> Result<Vec<DiscoveredSkill>> {
+/// Warnings about naming conventions and deduplication are collected in `warnings`.
+pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<DiscoveredSkill>> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
     let mut conflicts: Vec<(String, String, String)> = Vec::new();
@@ -141,11 +141,11 @@ pub fn discover_all(config: &Config, quiet: bool) -> Result<Vec<DiscoveredSkill>
                 continue;
             }
 
-            if !quiet && !skill.name.is_conventional() {
-                eprintln!(
-                    "warning: skill name '{}' should be lowercase letters, digits, or hyphens",
+            if !skill.name.is_conventional() {
+                warnings.push(format!(
+                    "skill name '{}' should be lowercase letters, digits, or hyphens",
                     skill.name
-                );
+                ));
             }
 
             let name_str = skill.name.as_str().to_string();
@@ -163,13 +163,11 @@ pub fn discover_all(config: &Config, quiet: bool) -> Result<Vec<DiscoveredSkill>
         }
     }
 
-    if !quiet {
-        for (name, winner, loser) in &conflicts {
-            eprintln!(
-                "warning: skill '{}' found in both '{}' and '{}', using '{}'",
-                name, winner, loser, winner
-            );
-        }
+    for (name, winner, loser) in &conflicts {
+        warnings.push(format!(
+            "skill '{}' found in both '{}' and '{}', using '{}'",
+            name, winner, loser, winner
+        ));
     }
 
     Ok(skills)
@@ -448,7 +446,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config, false).unwrap();
+        let skills = discover_all(&config, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
 
         let shared = skills.iter().find(|s| s.name == "shared-skill").unwrap();
@@ -471,7 +469,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config, false).unwrap();
+        let skills = discover_all(&config, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "keep-me");
     }
@@ -620,7 +618,7 @@ mod tests {
             ..Config::default()
         };
 
-        let skills = discover_all(&config, false).unwrap();
+        let skills = discover_all(&config, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"skill-alpha"));
@@ -651,5 +649,57 @@ mod tests {
         assert!(SkillName::new("my-skill-123").unwrap().is_conventional());
         assert!(!SkillName::new("My_Skill").unwrap().is_conventional());
         assert!(!SkillName::new("UPPER").unwrap().is_conventional());
+    }
+
+    #[test]
+    fn discover_all_collects_naming_warnings() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "My_Unconventional");
+
+        let config = Config {
+            sources: vec![Source {
+                name: "test".into(),
+                path: tmp.path().to_path_buf(),
+                source_type: SourceType::Directory,
+            }],
+            ..Config::default()
+        };
+
+        let mut warnings = Vec::new();
+        let skills = discover_all(&config, &mut warnings).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("lowercase"));
+    }
+
+    #[test]
+    fn discover_all_collects_dedup_warnings() {
+        let tmp1 = TempDir::new().unwrap();
+        let tmp2 = TempDir::new().unwrap();
+        create_skill(tmp1.path(), "shared");
+        create_skill(tmp2.path(), "shared");
+
+        let config = Config {
+            sources: vec![
+                Source {
+                    name: "first".into(),
+                    path: tmp1.path().to_path_buf(),
+                    source_type: SourceType::Directory,
+                },
+                Source {
+                    name: "second".into(),
+                    path: tmp2.path().to_path_buf(),
+                    source_type: SourceType::Directory,
+                },
+            ],
+            ..Config::default()
+        };
+
+        let mut warnings = Vec::new();
+        let skills = discover_all(&config, &mut warnings).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("first"));
+        assert!(warnings[0].contains("second"));
     }
 }

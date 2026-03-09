@@ -41,8 +41,20 @@ use anyhow::Result;
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
+use cleanup::CleanupResult;
 use cli::{Cli, Command};
 use config::Config;
+use distribute::DistributeResult;
+use library::ConsolidateResult;
+
+/// Summary of a complete sync operation.
+pub struct SyncReport {
+    pub consolidate: ConsolidateResult,
+    pub distributions: Vec<DistributeResult>,
+    pub cleanup: CleanupResult,
+    pub removed_from_targets: usize,
+    pub warnings: Vec<String>,
+}
 
 /// Create a spinner with a consistent style.
 fn spinner(msg: &str) -> ProgressBar {
@@ -85,7 +97,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Serve => {
             tokio::runtime::Runtime::new()?.block_on(mcp::serve(config))?;
         }
-        Command::List => list(&config, cli.quiet)?,
+        Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
     }
 
@@ -108,9 +120,16 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
-    let skills = discover::discover_all(config, quiet)?;
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &mut warnings)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
+    }
+
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
     }
 
     if skills.is_empty() {
@@ -192,21 +211,42 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         sp.finish_and_clear();
     }
 
-    if quiet {
-        return Ok(());
+    let report = SyncReport {
+        consolidate: consolidate_result,
+        distributions: distribute_results,
+        cleanup: cleanup_result,
+        removed_from_targets,
+        warnings,
+    };
+
+    if !quiet {
+        render_sync_report(&report);
     }
 
-    // Report
+    // Offer git commit if the library dir is a git repo with changes
+    if !dry_run && !quiet {
+        offer_git_commit(
+            &config.library_dir,
+            report.consolidate.created,
+            report.consolidate.updated,
+            report.cleanup.removed_from_library,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn render_sync_report(report: &SyncReport) {
     println!("{}", style("Sync complete").green().bold());
     println!(
         "  Library: {} created, {} unchanged, {} updated{}",
-        style(consolidate_result.created).cyan(),
-        consolidate_result.unchanged,
-        consolidate_result.updated,
-        skipped_note(consolidate_result.skipped)
+        style(report.consolidate.created).cyan(),
+        report.consolidate.unchanged,
+        report.consolidate.updated,
+        skipped_note(report.consolidate.skipped)
     );
 
-    for dr in &distribute_results {
+    for dr in &report.distributions {
         println!(
             "  {}: {} linked, {} unchanged{}",
             style(&dr.target_name).bold(),
@@ -216,36 +256,45 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         );
     }
 
-    if cleanup_result.removed_from_library > 0 {
+    if report.cleanup.removed_from_library > 0 {
         println!(
             "  Cleaned {} stale entry/entries",
-            style(cleanup_result.removed_from_library).yellow()
+            style(report.cleanup.removed_from_library).yellow()
         );
     }
 
-    if removed_from_targets > 0 {
+    if report.removed_from_targets > 0 {
         println!(
             "  Cleaned {} stale target link(s)",
-            style(removed_from_targets).yellow()
+            style(report.removed_from_targets).yellow()
         );
     }
-
-    // Offer git commit if the library dir is a git repo with changes
-    if !dry_run && !quiet {
-        offer_git_commit(
-            &config.library_dir,
-            consolidate_result.created,
-            consolidate_result.updated,
-            cleanup_result.removed_from_library,
-        )?;
-    }
-
-    Ok(())
 }
 
 /// List all discovered skills.
-fn list(config: &Config, quiet: bool) -> Result<()> {
-    let skills = discover::discover_all(config, quiet)?;
+fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &mut warnings)?;
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+
+    if json {
+        let rows: Vec<serde_json::Value> = skills
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "name": s.name,
+                    "source": s.source_name,
+                    "path": s.path,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
 
     if quiet {
         return Ok(());
