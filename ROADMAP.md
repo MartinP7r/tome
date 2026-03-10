@@ -1,16 +1,16 @@
 # Roadmap
 
-| Version    | Theme                  | Key Features                                                            |
-| ---------- | ---------------------- | ----------------------------------------------------------------------- |
-| **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs |
-| **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          |
-| **v0.2.1** | Output Layer           | Renderer trait, data struct extraction, `--json` for list               |
-| **v0.3**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |
-| **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |
-| **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |
-| **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |
-| **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |
-| **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |
+| Version    | Theme                  | Key Features                                                            | Status |
+| ---------- | ---------------------- | ----------------------------------------------------------------------- | ------ |
+| **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs | ✓ |
+| **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          | ✓ |
+| **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
+| **v0.3**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |        |
+| **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
+| **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
+| **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |        |
+| **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
+| **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
 
 ---
 
@@ -41,18 +41,16 @@ Make the library the source of truth for local skills. `tome sync` copies skill 
 
 **Not in scope** (deferred to v0.5): lockfile, `tome update`, per-machine preferences, managed source support, git-backed backup.
 
-## v0.2.1 — Output Layer
+## v0.2.1 — Output Layer ✓
 
-Decouple output rendering from business logic. This is a prerequisite for `tome browse` (v0.4.x) and `--json` output (#167), and ensures new connectors in v0.3 get clean rendering separation from day one.
+Decouple output rendering from business logic. Prerequisite for `tome browse` (v0.4.x) and `--json` output (#167), ensuring new connectors in v0.3 get clean data separation from day one.
 
-- **Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations
+- ~~**Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations~~ — Closed as superseded (#183). Data struct extraction was the real prerequisite; ratatui (v0.4.x) will consume data structs directly rather than going through a trait.
 - **Data struct extraction**: `status::gather() -> StatusReport`, `doctor::diagnose() -> DoctorReport`, sync pipeline returns `SyncReport` — pure computation separated from rendering
 - **Warning collection**: Replace scattered `eprintln!` in discover/library/distribute with `Vec<Warning>` returned alongside results
-- **TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait
-- **QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output
+- ~~**TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait~~ — Superseded along with Renderer trait.
+- ~~**QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output~~ — Closed as superseded (#188). Not needed without the Renderer trait; `quiet` parameter threading is sufficient.
 - **`--json` for `tome list`** ([#167](https://github.com/MartinP7r/tome/issues/167)): Trivially enabled once data structs exist — serialize `Vec<SkillRow>` directly
-
-**Not in scope:** ratatui dependency, `tome browse`, format transforms.
 
 ## v0.3 — Connector Architecture
 
