@@ -38,7 +38,7 @@ test:
 	cargo test
 
 lint:
-	cargo clippy -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 
 fmt:
 	cargo fmt
