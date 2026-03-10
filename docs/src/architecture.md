@@ -13,7 +13,7 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 
 1. **Discover** (`discover.rs`) — Scan configured sources for `*/SKILL.md` dirs. Two source types: `ClaudePlugins` (reads `installed_plugins.json`) and `Directory` (flat walkdir scan). First source wins on name conflicts; exclusion list applied.
-2. **Consolidate** (`library.rs`) — Symlink each discovered skill into `~/.local/share/tome/skills/{name}` → original path. Idempotent: unchanged links are skipped, stale links updated.
+2. **Consolidate** (`library.rs`) — Two strategies based on source type: **managed** skills (ClaudePlugins) are symlinked from library → source dir (package manager owns the files); **local** skills (Directory) are copied into the library (library is the canonical home). A manifest (`.tome-manifest.json`) tracks SHA-256 content hashes for idempotent updates: unchanged skills are skipped, changed skills are re-copied or re-linked.
 3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir) and `Mcp` (writes a `tome` entry into the target's `.mcp.json`).
 4. **Cleanup** (`cleanup.rs`) — Remove broken symlinks from library and targets.
 
@@ -21,9 +21,11 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 
 - `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
 - `config.rs` — TOML config at `~/.config/tome/config.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
-- `doctor.rs` — Diagnoses broken symlinks and missing source paths; optionally repairs via cleanup.
+- `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing source paths; optionally repairs.
 - `status.rs` — Read-only summary of library, sources, targets, and health.
 - `mcp.rs` — MCP server implementation using `rmcp`. Exposes `list_skills` and `read_skill` tools over stdio.
+- `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
+- `paths.rs` — Filesystem utility functions including `expand_tilde()` for path expansion and `symlink_points_to()` for symlink target validation.
 
 ## `crates/tome-mcp` — Standalone MCP binary (`tome-mcp`)
 
@@ -31,8 +33,8 @@ Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consu
 
 ## Key Patterns
 
-- **Symlinks everywhere**: Library and target distribution both use Unix symlinks (`std::os::unix::fs::symlink`). Originals are never moved or copied. This means the project is Unix-only.
-- **Targets struct is hardcoded**: `config::Targets` has named fields (antigravity, codex, openclaw) — not a generic vec. The v0.2 roadmap plans to replace this with a connector trait and `Vec<Target>`.
+- **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers like Claude plugins) are symlinked into the library; local skills (from directory sources) are copied. Distribution to targets always uses symlinks pointing into the library. This means the project is Unix-only (`std::os::unix::fs::symlink`).
+- **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
