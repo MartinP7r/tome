@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.2.1** — Output Layer shipped (data struct extraction, warning collection, `--json list`). Next up: **v0.3 Connector Architecture** (replacing hardcoded targets with a trait-based `Vec<Target>`).
+**v0.3** — Connector Architecture shipped (`BTreeMap<String, TargetConfig>` targets, `KnownTarget` registry, npm skill source research). Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
 
 ## Quick Reference
 
@@ -81,7 +81,7 @@ Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consu
 ## Key Patterns
 
 - **Two-tier model**: Sources →(copy)→ Library →(symlink)→ Targets. The library is the source of truth, containing real copies of each skill directory. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. This means the project is Unix-only.
-- **Targets struct is hardcoded**: `config::Targets` has named fields (antigravity, codex, openclaw) — not a generic vec. The v0.3 roadmap plans to replace this with a connector trait and `Vec<Target>`.
+- **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools. Future: connector trait (#192) for unified source/target abstraction.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
