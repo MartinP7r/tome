@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.2.0** — Scoped SOT milestone shipped (library copies instead of symlinks). Next up: **v0.2.1 Output Layer** (Renderer trait decoupling output from business logic), then **v0.3 Connector Architecture** (replacing hardcoded targets with a trait-based `Vec<Target>`).
+**v0.2.1** — Output Layer shipped (data struct extraction, warning collection, `--json list`). Next up: **v0.3 Connector Architecture** (replacing hardcoded targets with a trait-based `Vec<Target>`).
 
 ## Quick Reference
 
