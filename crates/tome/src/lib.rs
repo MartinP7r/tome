@@ -8,7 +8,7 @@
 //! The `sync` function drives the main workflow:
 //!
 //! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — copy discovered skills into the library (source of truth)
+//! 2. **Consolidate** — copy or symlink discovered skills into the library (managed skills are symlinked; local skills are copied)
 //! 3. **Distribute** — push library skills to target tools via symlinks
 //! 4. **Cleanup** — remove stale entries no longer in any source
 //!
