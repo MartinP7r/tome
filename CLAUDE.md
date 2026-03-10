@@ -36,7 +36,7 @@ Rust edition 2024. Key crates: `clap` (CLI), `rmcp` (MCP server), `dialoguer` (i
 ```bash
 make build          # cargo build
 make test           # cargo test (unit + integration)
-make lint           # cargo clippy -- -D warnings
+make lint           # cargo clippy --all-targets -- -D warnings
 make fmt            # cargo fmt
 make fmt-check      # cargo fmt -- --check
 make ci             # fmt-check + lint + test (matches CI pipeline)
