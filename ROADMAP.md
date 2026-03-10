@@ -5,7 +5,7 @@
 | **v0.1.x** | Polish & UX            | Wizard improvements, progress spinners, table output, GitHub Pages docs | ✓ |
 | **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          | ✓ |
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
-| **v0.3**   | Connector Architecture | Generic targets, connector trait, bidirectional sync, npm skill sources |        |
+| **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
 | **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
 | **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |        |
@@ -52,20 +52,23 @@ Decouple output rendering from business logic. Prerequisite for `tome browse` (v
 - ~~**QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output~~ — Closed as superseded (#188). Not needed without the Renderer trait; `quiet` parameter threading is sufficient.
 - **`--json` for `tome list`** ([#167](https://github.com/MartinP7r/tome/issues/167)): Trivially enabled once data structs exist — serialize `Vec<SkillRow>` directly
 
-## v0.3 — Connector Architecture
+## v0.3 — Connector Architecture ✓
 
-The current model hardcodes targets as struct fields and keeps source/target logic separate. Both sides are really the same concept: an **endpoint with a connector type** that knows how to discover, read, write, and translate skills.
+Replaced the hardcoded `Targets` struct with a flexible, data-driven target configuration. Originally scoped as a full connector trait architecture, but the pragmatic first step — config flexibility — shipped as the milestone deliverable.
 
-- **Generic `[[targets]]` array**: Replace the hardcoded `Targets` struct with a `Vec<Target>` — same shape as sources. Each target has a `name`, `path`, `type`, and connector-specific options
-- **Connector trait**: Unified interface for both source and target behavior — discovery format, distribution method (symlink, MCP config, copy), and format translation needs
-- **Built-in connectors**: Claude (plugins + standalone), Codex, Antigravity, Cursor, Windsurf, OpenCode, Nanobot, PicoClaw, OpenClaw, VS Code Copilot, Amp, Goose, Cline, Augment, CodeBuddy, Command Code, Continue, Cortex, Kimi Code CLI, Kiro CLI, Roo, Replit, Qwen Code, Windsurf — see `npx skills` for the full 41-agent landscape
-- **Gemini CLI connector**: Investigate sandbox mode — Gemini CLI may use a different skills/context folder depending on whether it runs in sandbox or not; connector may need to detect or allow configuring which path to target
-- **Bidirectional by design**: Any connector can act as both source and target — discover skills *from* Cursor rules and distribute *to* Cursor rules
-- **Format awareness per connector**: Each connector declares its native format — the pipeline handles translation between them (e.g., SKILL.md ↔ Cursor rules ↔ Windsurf conventions)
-- Support syncing `.claude/rules/` and agent definitions alongside skills
-- **Instruction file syncing**: Bidirectional sync of tool instruction files (CLAUDE.md ↔ AGENTS.md ↔ GEMINI.md ↔ copilot-instructions.md) — extract shared sections and distribute to each tool's native format
-- **`.agents/skills/` as emerging universal path**: 9 agents (Amp, Cline, Codex, Cursor, Gemini CLI, GitHub Copilot, Kimi Code CLI, OpenCode, Replit) converge on `.agents/skills/` as the project-scoped canonical skills directory. Tome connectors should support this path natively
-- **npm-based skill sources** ([#97](https://github.com/MartinP7r/tome/issues/97)): Discover skills installed via `npx skills` (Vercel Labs). Confirmed: canonical copies in `.agents/skills/<name>/`, lockfile at `.agents/.skill-lock.json` (v3) with content hashes and provenance. A `Directory` source pointed at `~/.agents/skills/` works for basic discovery; a dedicated source type would preserve provenance metadata from the lockfile
+### Delivered
+
+- ~~**Generic `[[targets]]` array**~~: Replaced the hardcoded `Targets` struct with `BTreeMap<String, TargetConfig>` ([#175](https://github.com/MartinP7r/tome/pull/175)). Each target has a `name`, `path`, `method` (symlink/mcp), and connector-specific options. Data-driven `KnownTarget` registry in the wizard enables custom target support without code changes.
+- **npm-based skill source research** ([#97](https://github.com/MartinP7r/tome/issues/97)): Investigated `npx skills` (Vercel Labs). Confirmed: canonical copies in `.agents/skills/<name>/`, lockfile at `.agents/.skill-lock.json` (v3) with content hashes and provenance. A `Directory` source pointed at `~/.agents/skills/` works for basic discovery; a dedicated source type would preserve provenance metadata from the lockfile.
+- **`.agents/skills/` as emerging universal path**: 9 agents converge on `.agents/skills/` as the project-scoped canonical skills directory. Documented in tool-landscape research.
+
+### Moved forward
+
+- **Connector trait** → [#192](https://github.com/MartinP7r/tome/issues/192). Unified source/target interface. The BTreeMap solved config flexibility; the trait solves architectural abstraction.
+- **Built-in connectors** → Part of [#192](https://github.com/MartinP7r/tome/issues/192). Claude, Codex, Antigravity, Cursor, Windsurf, Amp, Goose, etc.
+- **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4 Format Transforms).
+- **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Separate concern from skills.
+- **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). High complexity, needs design.
 
 ## v0.4 — Format Transforms
 
