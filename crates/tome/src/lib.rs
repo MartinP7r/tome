@@ -1,7 +1,7 @@
 //! Tome — sync AI coding skills across tools.
 //!
 //! This crate provides both a CLI binary (`tome`) and a library for managing
-//! AI coding skills across multiple tools (Claude, Codex, Antigravity, OpenClaw).
+//! AI coding skills across multiple tools.
 //!
 //! # Core pipeline
 //!

@@ -63,7 +63,7 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 
 **Sync pipeline** (`lib.rs::sync`) — the core flow that `tome sync` and `tome init` both invoke:
 1. **Discover** (`discover.rs`) — Scan configured sources for `*/SKILL.md` dirs. Two source types: `ClaudePlugins` (reads `installed_plugins.json`) and `Directory` (flat walkdir scan). First source wins on name conflicts; exclusion list applied.
-2. **Consolidate** (`library.rs`) — Copy each discovered skill directory into `~/.local/share/tome/skills/{name}`. A manifest (`.tome-manifest.json`) tracks SHA-256 content hashes for idempotent updates: unchanged skills are skipped, changed skills are re-copied.
+2. **Consolidate** (`library.rs`) — Two strategies based on source type: managed skills (ClaudePlugins) are symlinked from library → source dir (package manager owns the files); local skills (Directory) are copied into the library (library is the canonical home). A manifest (`.tome-manifest.json`) tracks SHA-256 content hashes for idempotent updates: unchanged skills are skipped, changed skills are re-copied or re-linked.
 3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir pointing to library copies) and `Mcp` (writes a `tome` entry into the target's `.mcp.json`).
 4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source) and broken symlinks from targets. Interactive in TTY mode; auto-removes with warning otherwise.
 
