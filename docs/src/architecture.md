@@ -25,7 +25,7 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 - `status.rs` — Read-only summary of library, sources, targets, and health.
 - `mcp.rs` — MCP server implementation using `rmcp`. Exposes `list_skills` and `read_skill` tools over stdio.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
-- `paths.rs` — Filesystem utility functions including `expand_tilde()` for path expansion and `symlink_points_to()` for symlink target validation.
+- `paths.rs` — Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination.
 
 ## `crates/tome-mcp` — Standalone MCP binary (`tome-mcp`)
 
