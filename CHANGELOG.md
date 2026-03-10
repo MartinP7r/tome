@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Connector architecture** (v0.3): `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be a target without code changes
+- **KnownTarget registry**: wizard auto-discovers common tool locations for target configuration
+- **Output layer** (v0.2.1): `--json` flag for `tome list`, structured warning collection, data struct extraction (SyncReport, ConsolidateResult, etc.)
+- **Library copies** (v0.2.0): two-tier consolidation model — managed skills (ClaudePlugins) are symlinked, local skills (Directory) are copied into the library
+- **Content hashing**: SHA-256 manifest (`.tome-manifest.json`) for idempotent sync — unchanged skills are skipped
+- **`.gitignore` generation** for library directory to support git-friendly skill tracking
+- **Git init** offered during wizard for library directory
+- Tool-landscape and frontmatter compatibility research docs
+
+### Changed
+- `Config::exclude` changed from `Vec<String>` to `BTreeSet<SkillName>` for type safety
+- Consolidation strategies: managed skills symlinked (package manager owns files), local skills copied (library is canonical home)
+- `count_entries` now skips hidden directories
+
+### Fixed
+- Various security and correctness fixes (MCP path validation, doctor repair, config validation)
+- Sync lifecycle and `--force` integration test coverage
+
 ## [0.1.4] - 2026-02-25
 
 ### Added
