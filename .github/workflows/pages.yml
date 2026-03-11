@@ -31,6 +31,7 @@ jobs:
       - run: mdbook build
       - run: cargo doc --no-deps
       - run: cp -r target/doc docs/book/api
+      - run: cp -r docs/visuals docs/book/visuals
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/book
