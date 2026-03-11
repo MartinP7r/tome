@@ -386,6 +386,7 @@ mod tests {
             path: skill_dir,
             source_name: "test".into(),
             managed,
+            provenance: None,
         }
     }
 
@@ -544,6 +545,7 @@ mod tests {
             path: skill2_dir,
             source_name: "test2".into(),
             managed: false,
+            provenance: None,
         };
 
         let (result, _manifest) =
@@ -608,6 +610,7 @@ mod tests {
             path: skill_dir,
             source_name: "test".into(),
             managed: false,
+            provenance: None,
         };
 
         let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();

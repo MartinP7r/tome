@@ -190,6 +190,65 @@ fn sync_idempotent() {
         .stdout(predicate::str::contains("0 created").and(predicate::str::contains("1 unchanged")));
 }
 
+#[test]
+fn sync_creates_lockfile() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "alpha-skill");
+    create_skill(&skills_dir, "beta-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    tome()
+        .args(["--config", config.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+
+    let lockfile_path = tmp.path().join("library/tome.lock");
+    assert!(
+        lockfile_path.exists(),
+        "tome.lock should be created by sync"
+    );
+
+    let content = std::fs::read_to_string(&lockfile_path).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+    assert_eq!(parsed["version"], 1);
+    assert!(parsed["skills"]["alpha-skill"].is_object());
+    assert!(parsed["skills"]["beta-skill"].is_object());
+    assert_eq!(parsed["skills"]["alpha-skill"]["source_name"], "test");
+}
+
+#[test]
+fn sync_dry_run_does_not_create_lockfile() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    tome()
+        .args(["--config", config.to_str().unwrap(), "--dry-run", "sync"])
+        .assert()
+        .success();
+
+    assert!(
+        !tmp.path().join("library/tome.lock").exists(),
+        "dry-run should not create tome.lock"
+    );
+}
+
 // -- Status --
 
 #[test]

@@ -109,6 +109,15 @@ impl<'de> serde::Deserialize<'de> for SkillName {
     }
 }
 
+/// Provenance metadata from package manager sources.
+#[derive(Debug, Clone)]
+pub struct SkillProvenance {
+    /// Registry identifier (e.g. "my-plugin@npm")
+    pub registry_id: String,
+    /// Version string (e.g. "1.2.0")
+    pub version: String,
+}
+
 /// A discovered skill with its metadata.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
@@ -121,6 +130,8 @@ pub struct DiscoveredSkill {
     /// Whether this skill is managed by a package manager (symlinked, not copied).
     /// `true` for `ClaudePlugins` sources, `false` for `Directory` sources.
     pub managed: bool,
+    /// Provenance from package manager (v2 `installed_plugins.json`). `None` for local skills.
+    pub provenance: Option<SkillProvenance>,
 }
 
 /// Discover all skills from configured sources.
@@ -229,12 +240,12 @@ fn discover_claude_plugins_from_json(
 
     if let Some(arr) = plugins.as_array() {
         // v1 format: flat array of plugin objects with "installPath"
-        scan_install_records(arr, source_name, &mut raw_skills)?;
+        scan_install_records(arr, source_name, None, &mut raw_skills)?;
     } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
         // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
         for (plugin_name, records) in obj {
             if let Some(arr) = records.as_array() {
-                scan_install_records(arr, source_name, &mut raw_skills)?;
+                scan_install_records(arr, source_name, Some(plugin_name), &mut raw_skills)?;
             } else {
                 eprintln!(
                     "warning: unexpected format for plugin '{}' in {} — expected array, skipping",
@@ -262,16 +273,35 @@ fn discover_claude_plugins_from_json(
 }
 
 /// Scan an array of plugin install records for skills at each `installPath`.
+///
+/// When `registry_id` is provided (v2 format), provenance metadata (registry ID + version)
+/// is attached to each discovered skill for lockfile generation.
 fn scan_install_records(
     records: &[serde_json::Value],
     source_name: &str,
+    registry_id: Option<&str>,
     skills: &mut Vec<DiscoveredSkill>,
 ) -> Result<()> {
     for record in records {
         if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
             let skills_dir = PathBuf::from(install_path).join("skills");
             if skills_dir.is_dir() {
-                skills.append(&mut scan_for_skills(&skills_dir, source_name, true)?);
+                let mut found = scan_for_skills(&skills_dir, source_name, true)?;
+                if let Some(reg_id) = registry_id {
+                    let version = record
+                        .get("version")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let prov = SkillProvenance {
+                        registry_id: reg_id.to_string(),
+                        version,
+                    };
+                    for skill in &mut found {
+                        skill.provenance = Some(prov.clone());
+                    }
+                }
+                skills.append(&mut found);
             }
         }
     }
@@ -343,6 +373,7 @@ fn scan_for_skills(dir: &Path, source_name: &str, managed: bool) -> Result<Vec<D
                         path: skill_dir.to_path_buf(),
                         source_name: source_name.to_string(),
                         managed,
+                        provenance: None,
                     });
                 }
                 Err(e) => {
@@ -549,6 +580,51 @@ mod tests {
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"swift-skill"));
         assert!(names.contains(&"rust-skill"));
+
+        // v2 format should capture provenance metadata
+        let swift = skills.iter().find(|s| s.name == "swift-skill").unwrap();
+        let prov = swift
+            .provenance
+            .as_ref()
+            .expect("v2 should have provenance");
+        assert_eq!(prov.registry_id, "swift-skill@swift-registry");
+        assert_eq!(prov.version, "1.0.0");
+
+        let rust_s = skills.iter().find(|s| s.name == "rust-skill").unwrap();
+        let prov = rust_s
+            .provenance
+            .as_ref()
+            .expect("v2 should have provenance");
+        assert_eq!(prov.registry_id, "rust-skill@rust-registry");
+        assert_eq!(prov.version, "2.0.0");
+    }
+
+    #[test]
+    fn discover_claude_plugins_v1_no_provenance() {
+        let tmp = TempDir::new().unwrap();
+        let plugin_dir = tmp.path().join("my-plugin");
+        create_skill(&plugin_dir.join("skills"), "v1-skill");
+
+        let json = serde_json::json!([
+            { "installPath": plugin_dir.to_str().unwrap() }
+        ]);
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        let source = Source {
+            name: "plugins".into(),
+            path: tmp.path().to_path_buf(),
+            source_type: SourceType::ClaudePlugins,
+        };
+        let skills = discover_claude_plugins(&source).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert!(
+            skills[0].provenance.is_none(),
+            "v1 format should not have provenance"
+        );
     }
 
     #[test]
