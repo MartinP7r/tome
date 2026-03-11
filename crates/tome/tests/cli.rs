@@ -222,6 +222,13 @@ fn sync_creates_lockfile() {
     assert!(parsed["skills"]["alpha-skill"].is_object());
     assert!(parsed["skills"]["beta-skill"].is_object());
     assert_eq!(parsed["skills"]["alpha-skill"]["source_name"], "test");
+    assert!(
+        !parsed["skills"]["alpha-skill"]["content_hash"]
+            .as_str()
+            .unwrap()
+            .is_empty(),
+        "content_hash should be present and non-empty"
+    );
 }
 
 #[test]
