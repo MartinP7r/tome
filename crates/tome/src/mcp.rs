@@ -116,18 +116,9 @@ impl TomeServer {
 #[tool_handler]
 impl ServerHandler for TomeServer {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
-                "Tome MCP server — exposes discovered AI coding skills for reading".into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            server_info: Implementation {
-                name: "tome-mcp".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
+        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+            .with_instructions("Tome MCP server — exposes discovered AI coding skills for reading")
+            .with_server_info(Implementation::new("tome-mcp", env!("CARGO_PKG_VERSION")))
     }
 }
 
