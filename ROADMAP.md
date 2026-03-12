@@ -6,9 +6,10 @@
 | **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          | ✓ |
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
+| **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update` (notification-only). Lockfile ✓  |        |
 | **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
 | **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
-| **v0.5**   | Portable Library       | Lockfile, per-machine preferences, `tome update`, git-backed backup     |        |
+| **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
 
@@ -69,6 +70,13 @@ Replaced the hardcoded `Targets` struct with a flexible, data-driven target conf
 - **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4 Format Transforms).
 - **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Separate concern from skills.
 - **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). High complexity, needs design.
+
+## v0.3.x — Portable Library (MVP)
+
+Complete the multi-machine skill management story. The lockfile (#38, shipped early) provides the diff mechanism; this milestone adds the interactive UX and per-machine control.
+
+- **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3.
+- **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, surfaces new/changed skills interactively. For local skills: notifies and offers to disable. For npx-managed skills: suggests migrating to tome-native tracking (double symlinks don't work well with npx). Notification-only for managed plugins — auto-install deferred to v0.5.
 
 ## v0.4 — Format Transforms
 
@@ -136,13 +144,14 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.5 — Portable Library
+## v0.5 — Managed Sources
 
-Make the skill library reproducible across machines via a lockfile and per-machine preferences.
+Auto-install managed plugins and backup the library. Builds on the portable library foundation from v0.3.x.
 
-- **`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38)): Tracked lockfile in the library recording every skill's type (local/managed), source, and install metadata. For managed plugins: `plugin-name@registry` identifier + version (from `installed_plugins.json` v2 key format). Enough info to reproduce the library on a fresh machine.
-- **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for managed plugins — machine A installs plugins 1,2,3 while machine B only wants 1 and 3.
-- **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, prompts user about new/missing managed plugins, actively runs `claude plugin install <name@registry>` for approved plugins, then syncs.
+- ~~**`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38))~~ ✓ Shipped early (PR #220)
+- ~~**Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39))~~ → Moved to v0.3.x
+- ~~**`tome update` (notification-only)** ([#40](https://github.com/MartinP7r/tome/issues/40))~~ → Moved to v0.3.x
+- **`tome update` auto-install**: Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
 - **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
 - **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
 
