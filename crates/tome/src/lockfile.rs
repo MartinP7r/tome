@@ -239,6 +239,55 @@ mod tests {
     }
 
     #[test]
+    fn generate_manifest_entry_without_discovered_skill() {
+        let manifest = make_manifest(&[
+            ("a-skill", "src", "hash_a", false),
+            ("b-skill", "src", "hash_b", false),
+        ]);
+        let skills = vec![make_discovered("a-skill", "src", None)];
+
+        let lockfile = generate(&manifest, &skills);
+        assert_eq!(lockfile.skills.len(), 2);
+
+        let a = &lockfile.skills["a-skill"];
+        assert_eq!(a.source_name, "src");
+        assert_eq!(a.content_hash, "hash_a");
+
+        let b = &lockfile.skills["b-skill"];
+        assert_eq!(b.source_name, "src");
+        assert_eq!(b.content_hash, "hash_b");
+        assert!(b.registry_id.is_none());
+        assert!(b.version.is_none());
+    }
+
+    #[test]
+    fn generate_empty_manifest() {
+        let manifest = Manifest::default();
+        let skills: Vec<DiscoveredSkill> = vec![];
+
+        let lockfile = generate(&manifest, &skills);
+        assert_eq!(lockfile.version, 1);
+        assert!(lockfile.skills.is_empty());
+    }
+
+    #[test]
+    fn generate_discovered_skill_not_in_manifest() {
+        let manifest = make_manifest(&[("a-skill", "src", "hash_a", false)]);
+        let skills = vec![
+            make_discovered("a-skill", "src", None),
+            make_discovered("extra-skill", "src", None),
+        ];
+
+        let lockfile = generate(&manifest, &skills);
+        assert_eq!(lockfile.skills.len(), 1);
+        assert!(lockfile.skills.contains_key("a-skill"));
+        assert!(
+            !lockfile.skills.contains_key("extra-skill"),
+            "skills not in manifest should not appear in lockfile"
+        );
+    }
+
+    #[test]
     fn empty_version_string_becomes_none() {
         let manifest = make_manifest(&[("my-plugin", "claude-plugins", "abc123", true)]);
         let skills = vec![make_discovered(
