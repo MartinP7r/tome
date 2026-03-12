@@ -54,7 +54,11 @@ pub enum Command {
 
     /// List all discovered skills with their sources
     #[command(alias = "ls")]
-    List,
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Show or edit configuration
     Config {

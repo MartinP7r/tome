@@ -497,14 +497,23 @@ fn doctor_detects_broken_symlinks() {
         .stdout(predicate::str::contains("1 issue(s)"));
 }
 
-// -- Pre-init state (no config file) --
+// -- Pre-init state (unconfigured) --
 
 #[test]
 fn status_without_config_shows_init_prompt() {
     let tmp = TempDir::new().unwrap();
-    let missing_config = tmp.path().join("config.toml");
+    // Point library_dir at a nonexistent dir (no sources) to simulate unconfigured state.
+    // Using write_config would create library_dir, defeating the purpose.
+    let config_path = tmp.path().join("config.toml");
+    let nonexistent_library = tmp.path().join("nonexistent-library");
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"", nonexistent_library.display()),
+    )
+    .unwrap();
+
     tome()
-        .args(["--config", missing_config.to_str().unwrap(), "status"])
+        .args(["--config", config_path.to_str().unwrap(), "status"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Not configured yet"))
@@ -514,11 +523,18 @@ fn status_without_config_shows_init_prompt() {
 #[test]
 fn doctor_without_config_shows_init_prompt() {
     let tmp = TempDir::new().unwrap();
-    let missing_config = tmp.path().join("config.toml");
+    let config_path = tmp.path().join("config.toml");
+    let nonexistent_library = tmp.path().join("nonexistent-library");
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"", nonexistent_library.display()),
+    )
+    .unwrap();
+
     tome()
         .args([
             "--config",
-            missing_config.to_str().unwrap(),
+            config_path.to_str().unwrap(),
             "--dry-run",
             "doctor",
         ])
@@ -650,6 +666,96 @@ type = "directory"
         !commits.contains("tome sync"),
         "dry-run should not create a commit"
     );
+}
+
+#[test]
+fn list_json_outputs_valid_json() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "alpha-skill");
+    create_skill(&skills_dir, "beta-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test-src\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 2);
+
+    // Each entry should have name, source, and path fields
+    for entry in arr {
+        assert!(entry.get("name").is_some(), "missing 'name' field");
+        assert!(entry.get("source").is_some(), "missing 'source' field");
+        assert!(entry.get("path").is_some(), "missing 'path' field");
+    }
+
+    // Check that our source name appears
+    assert!(arr.iter().any(|e| e["source"] == "test-src"));
+    // Check both skill names are present
+    let names: Vec<&str> = arr.iter().map(|e| e["name"].as_str().unwrap()).collect();
+    assert!(names.contains(&"alpha-skill"));
+    assert!(names.contains(&"beta-skill"));
+}
+
+#[test]
+fn list_json_with_quiet_still_outputs_json() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    let output = tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--quiet",
+            "list",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("--json should override --quiet");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 1);
+}
+
+#[test]
+fn list_json_with_no_skills_outputs_empty_array() {
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let parsed: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
+    let arr = parsed.as_array().expect("should be a JSON array");
+    assert_eq!(arr.len(), 0);
 }
 
 #[test]

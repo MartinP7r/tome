@@ -1,4 +1,4 @@
-.PHONY: build build-release check test lint fmt clean install docs docs-rust docs-serve release
+.PHONY: build build-release check test lint fmt clean install docs docs-rust docs-serve release deny
 
 build:
 	cargo build
@@ -38,7 +38,7 @@ test:
 	cargo test
 
 lint:
-	cargo clippy -- -D warnings
+	cargo clippy --all-targets -- -D warnings
 
 fmt:
 	cargo fmt
@@ -55,6 +55,9 @@ install:
 
 ci: fmt-check lint test
 	@echo "All checks passed"
+
+deny:
+	cargo deny check
 
 docs: docs-rust
 	mdbook build
