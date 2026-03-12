@@ -12,7 +12,7 @@ use crate::config::{Config, Source, SourceType};
 ///
 /// Lenient validation: rejects empty names and path separators.
 /// Warns on names that don't match the strict `[a-z0-9-]+` pattern
-/// (which will become a hard requirement in v0.3).
+/// (which may become a hard requirement in a future version).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 #[serde(transparent)]
 pub struct SkillName(String);
@@ -43,7 +43,7 @@ impl SkillName {
     }
 
     /// Whether this name follows the strict `[a-z0-9-]+` convention
-    /// (which will become a hard requirement in v0.3).
+    /// (which may become a hard requirement in a future version).
     pub fn is_conventional(&self) -> bool {
         self.0
             .chars()
