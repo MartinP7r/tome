@@ -26,6 +26,7 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod library;
+pub(crate) mod lockfile;
 pub(crate) mod manifest;
 pub mod mcp;
 pub(crate) mod paths;
@@ -205,6 +206,12 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     // Generate .gitignore after cleanup so stale entries are excluded
     if !dry_run && config.library_dir.is_dir() {
         library::generate_gitignore(&config.library_dir, &manifest)?;
+    }
+
+    // Generate lockfile for reproducibility
+    if !dry_run && config.library_dir.is_dir() {
+        let lf = lockfile::generate(&manifest, &skills);
+        lockfile::save(&lf, &config.library_dir)?;
     }
 
     if let Some(sp) = sp {
