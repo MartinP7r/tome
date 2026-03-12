@@ -53,7 +53,14 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
         let (registry_id, version) = skill_map
             .get(name.as_str())
             .and_then(|s| s.provenance.as_ref())
-            .map(|p| (Some(p.registry_id.clone()), Some(p.version.clone())))
+            .map(|p| {
+                let version = if p.version.is_empty() {
+                    None
+                } else {
+                    Some(p.version.clone())
+                };
+                (Some(p.registry_id.clone()), version)
+            })
             .unwrap_or((None, None));
 
         entries.insert(
@@ -277,6 +284,34 @@ mod tests {
         assert!(
             !lockfile.skills.contains_key("extra-skill"),
             "skills not in manifest should not appear in lockfile"
+        );
+    }
+
+    #[test]
+    fn empty_version_string_becomes_none() {
+        let manifest = make_manifest(&[("my-plugin", "claude-plugins", "abc123", true)]);
+        let skills = vec![make_discovered(
+            "my-plugin",
+            "claude-plugins",
+            Some(("my-plugin@npm", "")),
+        )];
+
+        let lockfile = generate(&manifest, &skills);
+        let entry = &lockfile.skills["my-plugin"];
+        assert_eq!(entry.registry_id.as_deref(), Some("my-plugin@npm"));
+        assert!(
+            entry.version.is_none(),
+            "empty version string should become None, got: {:?}",
+            entry.version
+        );
+
+        // Verify the version field is omitted from serialized JSON
+        let json = serde_json::to_string_pretty(&lockfile).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let skill = &parsed["skills"]["my-plugin"];
+        assert!(
+            skill.get("version").is_none(),
+            "empty version should be omitted from JSON"
         );
     }
 
