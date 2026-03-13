@@ -5,6 +5,7 @@ use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
 use crate::config::{TargetConfig, TargetMethod};
+use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
 use crate::paths::symlink_points_to;
 
@@ -15,6 +16,8 @@ pub struct DistributeResult {
     pub unchanged: usize,
     /// Skills skipped because a non-symlink file already exists at the destination.
     pub skipped: usize,
+    /// Skills skipped because they are disabled in machine preferences.
+    pub disabled: usize,
     pub target_name: String,
 }
 
@@ -27,6 +30,7 @@ pub fn distribute_to_target(
     target_name: &str,
     target: &TargetConfig,
     manifest: &Manifest,
+    machine_prefs: &MachinePrefs,
     dry_run: bool,
     force: bool,
 ) -> Result<DistributeResult> {
@@ -43,6 +47,7 @@ pub fn distribute_to_target(
             target_name,
             skills_dir,
             manifest,
+            machine_prefs,
             dry_run,
             force,
         ),
@@ -56,6 +61,7 @@ fn distribute_symlinks(
     target_name: &str,
     skills_dir: &Path,
     manifest: &Manifest,
+    machine_prefs: &MachinePrefs,
     dry_run: bool,
     force: bool,
 ) -> Result<DistributeResult> {
@@ -88,6 +94,12 @@ fn distribute_symlinks(
 
         // Skip non-directory entries (e.g. .tome-manifest.json)
         if !library_skill_path.is_dir() {
+            continue;
+        }
+
+        // Skip skills disabled in machine preferences
+        if machine_prefs.is_disabled(&skill_name_str) {
+            result.disabled += 1;
             continue;
         }
 
@@ -213,6 +225,7 @@ fn distribute_mcp(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::machine::MachinePrefs;
     use crate::manifest::SkillEntry;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -243,8 +256,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 2);
         assert!(target_dir.path().join("skill-a").is_symlink());
         assert!(target_dir.path().join("skill-b").is_symlink());
@@ -264,9 +285,26 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 1);
     }
@@ -285,9 +323,26 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, true).unwrap();
+        distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            true,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1, "force should recreate unchanged link");
         assert_eq!(result.unchanged, 0);
     }
@@ -320,8 +375,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(&lib_dir, "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            &lib_dir,
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(
             result.unchanged, 1,
             "relative symlink should be recognized as matching"
@@ -344,7 +407,16 @@ mod tests {
 
         let manifest = empty_manifest();
         // First distribute: creates the link
-        distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
 
         // Simulate the target link now pointing somewhere else (stale)
         let stale_path = target_dir.path().join("skill-a");
@@ -353,8 +425,16 @@ mod tests {
         unix_fs::symlink(other.path(), &stale_path).unwrap();
 
         // Second distribute: should update the stale link
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1, "stale link should be updated");
         assert_eq!(result.unchanged, 0);
 
@@ -377,8 +457,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "codex", &target, &manifest, true, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            true,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1, "dry-run should count the change");
         assert!(
             !mcp_path.exists(),
@@ -397,8 +485,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 0);
     }
 
@@ -416,9 +512,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "codex", &target, &manifest, false, false)
-                .unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1);
 
         let content = std::fs::read_to_string(&mcp_path).unwrap();
@@ -450,9 +553,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "codex", &target, &manifest, false, false)
-                .unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1);
 
         let content = std::fs::read_to_string(&mcp_path).unwrap();
@@ -460,9 +570,16 @@ mod tests {
         assert!(parsed["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
         assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
 
-        let result2 =
-            distribute_to_target(library.path(), "codex", &target, &manifest, false, false)
-                .unwrap();
+        let result2 = distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result2.unchanged, 1);
     }
 
@@ -482,7 +599,15 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result = distribute_to_target(library.path(), "test", &target, &manifest, false, false);
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        );
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
@@ -510,6 +635,7 @@ mod tests {
             "test",
             &target,
             &manifest,
+            &MachinePrefs::default(),
             true,
             false,
         )
@@ -533,8 +659,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, true, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            true,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 1);
         assert!(!nonexistent_target.exists());
     }
@@ -555,8 +689,16 @@ mod tests {
         };
 
         let manifest = empty_manifest();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.changed, 0);
         assert_eq!(result.unchanged, 0);
 
@@ -580,8 +722,16 @@ mod tests {
             },
         };
         let manifest = Manifest::default();
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
 
         assert_eq!(
             result.changed, 1,
@@ -630,10 +780,51 @@ mod tests {
             },
         };
 
-        let result =
-            distribute_to_target(library.path(), "test", &target, &manifest, false, false).unwrap();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.skipped, 0);
         assert_eq!(result.changed, 0);
+    }
+
+    #[test]
+    fn distribute_skips_disabled_skills() {
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        setup_library(library.path(), &["enabled-skill", "disabled-skill"]);
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.path().to_path_buf(),
+            },
+        };
+
+        let mut prefs = MachinePrefs::default();
+        prefs.disable(crate::discover::SkillName::new("disabled-skill").unwrap());
+
+        let manifest = empty_manifest();
+        let result = distribute_to_target(
+            library.path(),
+            "test",
+            &target,
+            &manifest,
+            &prefs,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result.changed, 1);
+        assert_eq!(result.disabled, 1);
+        assert!(target_dir.path().join("enabled-skill").is_symlink());
+        assert!(!target_dir.path().join("disabled-skill").exists());
     }
 }

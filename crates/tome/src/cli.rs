@@ -43,6 +43,9 @@ pub enum Command {
         force: bool,
     },
 
+    /// Review library changes and sync with interactive triage
+    Update,
+
     /// Show current state of skills, symlinks, and targets
     Status,
 

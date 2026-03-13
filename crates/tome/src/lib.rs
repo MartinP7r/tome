@@ -27,10 +27,12 @@ pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod library;
 pub(crate) mod lockfile;
+pub(crate) mod machine;
 pub(crate) mod manifest;
 pub mod mcp;
 pub(crate) mod paths;
 pub(crate) mod status;
+pub(crate) mod update;
 pub(crate) mod wizard;
 
 use std::collections::HashSet;
@@ -93,6 +95,7 @@ pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
         Command::Init => unreachable!(),
         Command::Sync { force } => sync(&config, cli.dry_run, force, cli.verbose, cli.quiet)?,
+        Command::Update => update_cmd(&config, cli.dry_run, cli.verbose, cli.quiet)?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
         Command::Serve => {
@@ -158,6 +161,10 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
+    // Load per-machine preferences (disabled skills)
+    let machine_path = machine::default_machine_path()?;
+    let machine_prefs = machine::load(&machine_path)?;
+
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
@@ -170,6 +177,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
             name,
             target,
             &manifest,
+            &machine_prefs,
             dry_run,
             force,
         )?;
@@ -243,6 +251,201 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     Ok(())
 }
 
+/// The update command: diff-then-distribute with interactive triage.
+fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
+    if dry_run && !quiet {
+        eprintln!(
+            "{}",
+            style("[dry-run] No changes will be made").yellow().bold()
+        );
+    }
+
+    let show_progress = !quiet && !verbose;
+
+    // Load per-machine preferences
+    let machine_path = machine::default_machine_path()?;
+    let mut machine_prefs = machine::load(&machine_path)?;
+
+    // 1. Load existing lockfile (may be committed by another machine)
+    let old_lockfile = lockfile::load(&config.library_dir)?;
+
+    // 2. Discover
+    let sp = show_progress.then(|| spinner("Discovering skills..."));
+    if verbose {
+        eprintln!("{}", style("Discovering skills...").dim());
+    }
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &mut warnings)?;
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+
+    if skills.is_empty() {
+        if !quiet {
+            println!("No skills found. Run `tome init` to configure sources.");
+        }
+        return Ok(());
+    }
+
+    // 3. Consolidate into library
+    let sp = show_progress.then(|| spinner("Consolidating to library..."));
+    if verbose {
+        eprintln!("{}", style("Consolidating to library...").dim());
+    }
+    let (consolidate_result, mut manifest) =
+        library::consolidate(&skills, &config.library_dir, dry_run, false)?;
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
+
+    // 4. Generate new lockfile and diff against old
+    let new_lockfile = lockfile::generate(&manifest, &skills);
+    if let Some(ref old) = old_lockfile {
+        let d = update::diff(old, &new_lockfile);
+        if !d.is_empty() {
+            if !quiet {
+                println!("{}", style("Library changes detected:").bold());
+            }
+            let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
+            if !newly_disabled.is_empty() && !dry_run {
+                machine::save(&machine_prefs, &machine_path)?;
+                if !quiet {
+                    println!(
+                        "  {} skill(s) disabled in {}",
+                        newly_disabled.len(),
+                        machine_path.display()
+                    );
+                }
+            }
+        } else if !quiet {
+            println!("{}", style("No library changes since last sync.").dim());
+        }
+    } else if !quiet {
+        println!(
+            "{}",
+            style("No previous lockfile found — performing initial sync.").dim()
+        );
+    }
+
+    let discovered_names: HashSet<String> =
+        skills.iter().map(|s| s.name.as_str().to_string()).collect();
+
+    // 5. Distribute (respects machine_prefs including just-disabled skills)
+    let mut distribute_results = Vec::new();
+    for (name, target) in config.targets.iter() {
+        let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
+        if verbose {
+            eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
+        }
+        let result = distribute::distribute_to_target(
+            &config.library_dir,
+            name,
+            target,
+            &manifest,
+            &machine_prefs,
+            dry_run,
+            false,
+        )?;
+        distribute_results.push(result);
+        if let Some(sp) = sp {
+            sp.finish_and_clear();
+        }
+    }
+
+    // 6. Cleanup stale entries + disabled skill symlinks
+    let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
+    if verbose {
+        eprintln!("{}", style("Cleaning up stale entries...").dim());
+    }
+    let cleanup_result = cleanup::cleanup_library(
+        &config.library_dir,
+        &discovered_names,
+        &mut manifest,
+        dry_run,
+    )?;
+
+    let mut removed_from_targets = 0usize;
+    for (_name, target) in config.targets.iter() {
+        if let Some(skills_dir) = target.skills_dir() {
+            removed_from_targets +=
+                cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+            // Also clean up symlinks for disabled skills
+            removed_from_targets +=
+                cleanup_disabled_from_target(skills_dir, &machine_prefs, dry_run)?;
+        }
+    }
+
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
+
+    // 7. Save lockfile + manifest
+    if !dry_run && config.library_dir.is_dir() {
+        manifest::save(&manifest, &config.library_dir)?;
+        library::generate_gitignore(&config.library_dir, &manifest)?;
+        lockfile::save(&new_lockfile, &config.library_dir)?;
+    }
+
+    let report = SyncReport {
+        consolidate: consolidate_result,
+        distributions: distribute_results,
+        cleanup: cleanup_result,
+        removed_from_targets,
+        warnings,
+    };
+
+    if !quiet {
+        render_sync_report(&report);
+    }
+
+    // Offer git commit if the library dir is a git repo with changes
+    if !dry_run && !quiet {
+        offer_git_commit(
+            &config.library_dir,
+            report.consolidate.created,
+            report.consolidate.updated,
+            report.cleanup.removed_from_library,
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Remove symlinks from a target directory that point to disabled skills.
+fn cleanup_disabled_from_target(
+    target_dir: &Path,
+    machine_prefs: &machine::MachinePrefs,
+    dry_run: bool,
+) -> Result<usize> {
+    if !target_dir.is_dir() {
+        return Ok(0);
+    }
+
+    let mut removed = 0;
+    let entries = std::fs::read_dir(target_dir)?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_symlink() {
+            let name = entry.file_name();
+            if machine_prefs.is_disabled(&name.to_string_lossy()) {
+                if !dry_run {
+                    std::fs::remove_file(&path)?;
+                }
+                removed += 1;
+            }
+        }
+    }
+
+    Ok(removed)
+}
+
 fn render_sync_report(report: &SyncReport) {
     println!("{}", style("Sync complete").green().bold());
     println!(
@@ -255,11 +458,12 @@ fn render_sync_report(report: &SyncReport) {
 
     for dr in &report.distributions {
         println!(
-            "  {}: {} linked, {} unchanged{}",
+            "  {}: {} linked, {} unchanged{}{}",
             style(&dr.target_name).bold(),
             style(dr.changed).cyan(),
             dr.unchanged,
-            skipped_note(dr.skipped)
+            skipped_note(dr.skipped),
+            disabled_note(dr.disabled)
         );
     }
 
@@ -350,6 +554,14 @@ fn skipped_note(count: usize) -> String {
         format!(", {} skipped (path conflict)", style(count).yellow())
     } else {
         String::new()
+    }
+}
+
+fn disabled_note(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(", {} disabled (machine prefs)", style(count).dim())
     }
 }
 
