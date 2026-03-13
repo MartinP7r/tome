@@ -1,5 +1,7 @@
 # Configuration
 
+## Main Config
+
 TOML at `~/.config/tome/config.toml`:
 
 ```toml
@@ -26,3 +28,48 @@ enabled = true
 method = "mcp"
 mcp_config = "~/.codex/.mcp.json"
 ```
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| `library_dir` | Path to the consolidated skill library. Supports `~` expansion. |
+| `exclude` | List of skill names to skip during discovery. |
+
+### Source Types
+
+| Type | Description |
+|------|-------------|
+| `claude-plugins` | Reads `installed_plugins.json` from the Claude Code plugin cache. Supports v1 (flat array) and v2 (namespaced object) formats. |
+| `directory` | Flat scan for `*/SKILL.md` directories. |
+
+### Target Methods
+
+| Method | Fields | Description |
+|--------|--------|-------------|
+| `symlink` | `skills_dir` | Creates symlinks in the target's skills directory pointing into the library. |
+| `mcp` | `mcp_config` | Writes a `tome` server entry into the target's `.mcp.json` file. |
+
+Targets are data-driven — any tool can be added without code changes. The `tome init` wizard auto-discovers common tool locations via a built-in `KnownTarget` registry.
+
+## Machine Preferences
+
+Per-machine opt-in/opt-out at `~/.config/tome/machine.toml`:
+
+```toml
+disabled = ["noisy-skill", "work-only-skill"]
+```
+
+Disabled skills remain in the library but are:
+- Skipped during distribution (no symlinks created in targets)
+- Hidden from the MCP server (`list_skills` and `read_skill`)
+
+This allows sharing a single library (e.g., via git) across machines while customizing which skills are active on each one.
+
+Use `tome update` to interactively review new or changed skills and disable unwanted ones. The `--machine <path>` global flag overrides the default machine preferences path.
+
+## Lockfile
+
+`tome sync` generates a `tome.lock` file in the library directory. This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. It is used by `tome update` to diff against the current state and surface changes.
+
+The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome update` on a new machine can detect what changed since the last sync.

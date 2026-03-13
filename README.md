@@ -50,17 +50,18 @@ tome status
 
 ## Commands
 
-| Command       | Description                                         |
-| ------------- | --------------------------------------------------- |
-| `tome init`   | Interactive wizard to configure sources and targets |
-| `tome sync`   | Discover, consolidate, and distribute skills        |
-| `tome status` | Show library, sources, targets, and health          |
-| `tome list`   | List all discovered skills with sources             |
-| `tome doctor` | Diagnose and repair broken symlinks                 |
-| `tome serve`  | Start the MCP server (stdio)                        |
-| `tome config` | Show current configuration                          |
+| Command       | Description                                              |
+| ------------- | -------------------------------------------------------- |
+| `tome init`   | Interactive wizard to configure sources and targets      |
+| `tome sync`   | Discover, consolidate, and distribute skills             |
+| `tome update` | Review library changes and sync with interactive triage  |
+| `tome status` | Show library, sources, targets, and health               |
+| `tome list`   | List all discovered skills with sources                  |
+| `tome doctor` | Diagnose and repair broken symlinks or config issues     |
+| `tome serve`  | Start the MCP server (stdio)                             |
+| `tome config` | Show current configuration                               |
 
-All commands support `--dry-run`, `--verbose`, and `--config <path>`.
+All commands support `--dry-run`, `--verbose`, `--quiet`, `--config <path>`, and `--machine <path>`.
 
 ## How It Works
 
@@ -73,7 +74,7 @@ graph LR
     end
 
     subgraph Library
-        L["Consolidated<br/>skill library<br/>(symlinks)"]
+        L["Consolidated<br/>skill library<br/>(copies + symlinks)"]
     end
 
     subgraph Targets
@@ -91,9 +92,9 @@ graph LR
 ```
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
-2. **Consolidate** — Symlink discovered skills into a central library (deduplicates, first source wins)
-3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory
-4. **Cleanup** — Remove stale symlinks for skills that no longer exist
+2. **Consolidate** — Copy or symlink skills into a central library (local skills are copied, managed skills are symlinked; deduplicates, first source wins)
+3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory (respects per-machine disabled list)
+4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
 
 ## Configuration
 
@@ -124,6 +125,16 @@ method = "mcp"
 mcp_config = "~/.codex/.mcp.json"
 ```
 
+## Per-Machine Preferences
+
+Control which skills are active on each machine via `~/.config/tome/machine.toml`:
+
+```toml
+disabled = ["noisy-skill", "work-only-skill"]
+```
+
+Disabled skills stay in the library but are skipped during distribution and hidden from the MCP server. Use `tome update` to interactively review new or changed skills and disable unwanted ones.
+
 ## MCP Server
 
 tome includes a built-in MCP server for tools that support the Model Context Protocol:
@@ -137,7 +148,7 @@ tome serve
 ```
 
 The server exposes two tools:
-- `list_skills` — List all discovered skills
+- `list_skills` — List all discovered skills (respects machine preferences)
 - `read_skill` — Read a skill's SKILL.md content by name
 
 ## License

@@ -7,14 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Atomic lockfile and machine prefs saves (temp+rename) to prevent corruption on crash
+- `sync` now cleans up disabled skill symlinks from targets (previously only `update` did this)
+- MCP server now filters out disabled skills from machine preferences
+- `offer_git_commit` stages specific file paths instead of `git add .`
+- `cleanup_disabled_from_target` now verifies symlinks point into the library before removing
+- `count_health_issues` merged triple directory read into a single pass
+- Managed skill consolidation repairs stale directory state instead of silently skipping
+
 ### Added
-- **Per-machine preferences** (v0.3.x): `~/.config/tome/machine.toml` with `disabled` list — skills stay in library but are skipped during distribution
-- **`tome update` command** (v0.3.x): loads lockfile, diffs against current state, presents added/changed/removed skills interactively, offers to disable unwanted new skills
-- **Lockfile loading** (`lockfile::load()`): read existing `tome.lock` for diffing in `tome update`
-- **Connector architecture** (v0.3): `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be a target without code changes
+- `--machine` global CLI flag to override machine preferences path
+
+## [0.2.0] - 2026-03-13
+
+### Added
+- **Per-machine preferences**: `~/.config/tome/machine.toml` with `disabled` list — skills stay in library but are skipped during distribution
+- **`tome update` command**: loads lockfile, diffs against current state, presents added/changed/removed skills interactively, offers to disable unwanted new skills
+- **`tome.lock` lockfile**: reproducible library snapshots with provenance metadata
+- **Connector architecture**: `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be a target without code changes
 - **KnownTarget registry**: wizard auto-discovers common tool locations for target configuration
-- **Output layer** (v0.2.1): `--json` flag for `tome list`, structured warning collection, data struct extraction (SyncReport, ConsolidateResult, etc.)
-- **Library copies** (v0.2.0): two-tier consolidation model — managed skills (ClaudePlugins) are symlinked, local skills (Directory) are copied into the library
+- `--json` flag for `tome list`, structured warning collection, data struct extraction
+- **Library copies**: two-tier consolidation model — managed skills (ClaudePlugins) are symlinked, local skills (Directory) are copied into the library
 - **Content hashing**: SHA-256 manifest (`.tome-manifest.json`) for idempotent sync — unchanged skills are skipped
 - **`.gitignore` generation** for library directory to support git-friendly skill tracking
 - **Git init** offered during wizard for library directory
@@ -85,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MartinP7r/tome/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/MartinP7r/tome/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/MartinP7r/tome/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/MartinP7r/tome/compare/v0.1.1...v0.1.2

@@ -214,8 +214,12 @@ fn distribute_mcp(
                 .with_context(|| format!("failed to create dir {}", parent.display()))?;
         }
         let content = serde_json::to_string_pretty(&mcp_doc)?;
-        std::fs::write(mcp_config_path, content)
-            .with_context(|| format!("failed to write {}", mcp_config_path.display()))?;
+        // Atomic write: temp file + rename to avoid corrupting existing MCP config
+        let tmp_path = mcp_config_path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, content)
+            .with_context(|| format!("failed to write temp {}", tmp_path.display()))?;
+        std::fs::rename(&tmp_path, mcp_config_path)
+            .with_context(|| format!("failed to rename to {}", mcp_config_path.display()))?;
     }
 
     result.changed = 1;
@@ -793,6 +797,38 @@ mod tests {
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.skipped, 0);
         assert_eq!(result.changed, 0);
+    }
+
+    #[test]
+    fn distribute_mcp_does_not_leave_tmp_file() {
+        let library = TempDir::new().unwrap();
+        let mcp_dir = TempDir::new().unwrap();
+        let mcp_path = mcp_dir.path().join(".mcp.json");
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path.clone(),
+            },
+        };
+
+        let manifest = empty_manifest();
+        distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert!(mcp_path.exists());
+        assert!(
+            !mcp_dir.path().join(".mcp.json.tmp").exists(),
+            "atomic save should not leave tmp file behind"
+        );
     }
 
     #[test]

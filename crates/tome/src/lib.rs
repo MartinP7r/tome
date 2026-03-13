@@ -40,7 +40,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command as GitCommand;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -72,6 +72,15 @@ fn spinner(msg: &str) -> ProgressBar {
     sp
 }
 
+/// Resolve the machine preferences path from an optional override,
+/// falling back to the default `~/.config/tome/machine.toml`.
+fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::PathBuf> {
+    match machine_override {
+        Some(p) => Ok(p.to_path_buf()),
+        None => machine::default_machine_path(),
+    }
+}
+
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
     if matches!(cli.command, Command::Init) {
@@ -84,7 +93,14 @@ pub fn run(cli: Cli) -> Result<()> {
         let config = wizard::run(cli.dry_run)?;
         config.validate()?;
         if !cli.dry_run {
-            sync(&config, cli.dry_run, false, cli.verbose, cli.quiet)?;
+            sync(
+                &config,
+                cli.dry_run,
+                false,
+                cli.verbose,
+                cli.quiet,
+                cli.machine.as_deref(),
+            )?;
         }
         return Ok(());
     }
@@ -94,12 +110,26 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
-        Command::Sync { force } => sync(&config, cli.dry_run, force, cli.verbose, cli.quiet)?,
-        Command::Update => update_cmd(&config, cli.dry_run, cli.verbose, cli.quiet)?,
+        Command::Sync { force } => sync(
+            &config,
+            cli.dry_run,
+            force,
+            cli.verbose,
+            cli.quiet,
+            cli.machine.as_deref(),
+        )?,
+        Command::Update => update_cmd(
+            &config,
+            cli.dry_run,
+            cli.verbose,
+            cli.quiet,
+            cli.machine.as_deref(),
+        )?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
         Command::Serve => {
-            tokio::runtime::Runtime::new()?.block_on(mcp::serve(config))?;
+            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+            tokio::runtime::Runtime::new()?.block_on(mcp::serve(config, Some(&machine_path)))?;
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
@@ -109,7 +139,14 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool) -> Result<()> {
+fn sync(
+    config: &Config,
+    dry_run: bool,
+    force: bool,
+    verbose: bool,
+    quiet: bool,
+    machine_override: Option<&Path>,
+) -> Result<()> {
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -162,7 +199,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
     // Load per-machine preferences (disabled skills)
-    let machine_path = machine::default_machine_path()?;
+    let machine_path = resolve_machine_path(machine_override)?;
     let machine_prefs = machine::load(&machine_path)?;
 
     // 3. Distribute to targets
@@ -197,6 +234,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         &discovered_names,
         &mut manifest,
         dry_run,
+        quiet,
     )?;
 
     let mut removed_from_targets = 0usize;
@@ -204,6 +242,13 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         if let Some(skills_dir) = target.skills_dir() {
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+            // Also clean up symlinks for disabled skills
+            removed_from_targets += cleanup_disabled_from_target(
+                skills_dir,
+                &config.library_dir,
+                &machine_prefs,
+                dry_run,
+            )?;
         }
     }
     // Save manifest after cleanup (may have removed entries)
@@ -242,6 +287,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if !dry_run && !quiet {
         offer_git_commit(
             &config.library_dir,
+            &manifest,
             report.consolidate.created,
             report.consolidate.updated,
             report.cleanup.removed_from_library,
@@ -252,7 +298,13 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
 }
 
 /// The update command: diff-then-distribute with interactive triage.
-fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
+fn update_cmd(
+    config: &Config,
+    dry_run: bool,
+    verbose: bool,
+    quiet: bool,
+    machine_override: Option<&Path>,
+) -> Result<()> {
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -263,7 +315,7 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
     let show_progress = !quiet && !verbose;
 
     // Load per-machine preferences
-    let machine_path = machine::default_machine_path()?;
+    let machine_path = resolve_machine_path(machine_override)?;
     let mut machine_prefs = machine::load(&machine_path)?;
 
     // 1. Load existing lockfile (may be committed by another machine)
@@ -367,6 +419,7 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
         &discovered_names,
         &mut manifest,
         dry_run,
+        quiet,
     )?;
 
     let mut removed_from_targets = 0usize;
@@ -375,8 +428,12 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
             // Also clean up symlinks for disabled skills
-            removed_from_targets +=
-                cleanup_disabled_from_target(skills_dir, &machine_prefs, dry_run)?;
+            removed_from_targets += cleanup_disabled_from_target(
+                skills_dir,
+                &config.library_dir,
+                &machine_prefs,
+                dry_run,
+            )?;
         }
     }
 
@@ -407,6 +464,7 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
     if !dry_run && !quiet {
         offer_git_commit(
             &config.library_dir,
+            &manifest,
             report.consolidate.created,
             report.consolidate.updated,
             report.cleanup.removed_from_library,
@@ -417,8 +475,16 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
 }
 
 /// Remove symlinks from a target directory that point to disabled skills.
+///
+/// Unlike `cleanup::cleanup_target` (which only removes *broken* symlinks),
+/// this removes symlinks even if their target still exists on disk — because
+/// the skill has been disabled in machine preferences.
+///
+/// Only removes symlinks that point into the library directory, matching the
+/// origin check in `cleanup::cleanup_target`.
 fn cleanup_disabled_from_target(
     target_dir: &Path,
+    library_dir: &Path,
     machine_prefs: &machine::MachinePrefs,
     dry_run: bool,
 ) -> Result<usize> {
@@ -426,19 +492,40 @@ fn cleanup_disabled_from_target(
         return Ok(0);
     }
 
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
+
     let mut removed = 0;
-    let entries = std::fs::read_dir(target_dir)?;
+    let entries = std::fs::read_dir(target_dir)
+        .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
         let path = entry.path();
         if path.is_symlink() {
             let name = entry.file_name();
             if machine_prefs.is_disabled(&name.to_string_lossy()) {
-                if !dry_run {
-                    std::fs::remove_file(&path)?;
+                // Only remove if symlink points into the tome library
+                let raw_target = std::fs::read_link(&path)
+                    .with_context(|| format!("failed to read symlink {}", path.display()))?;
+                let target = paths::resolve_symlink_target(&path, &raw_target);
+                let points_into_library =
+                    target.starts_with(library_dir) || target.starts_with(&canonical_library);
+                if points_into_library {
+                    if !dry_run {
+                        std::fs::remove_file(&path).with_context(|| {
+                            format!("failed to remove disabled symlink {}", path.display())
+                        })?;
+                    }
+                    removed += 1;
                 }
-                removed += 1;
             }
         }
     }
@@ -568,6 +655,7 @@ fn disabled_note(count: usize) -> String {
 /// If the library directory is a git repo with uncommitted changes, prompt the user to commit.
 fn offer_git_commit(
     library_dir: &Path,
+    manifest: &manifest::Manifest,
     created: usize,
     updated: usize,
     removed: usize,
@@ -588,7 +676,14 @@ fn offer_git_commit(
         }
     };
 
-    if !output.status.success() || output.stdout.is_empty() {
+    if !output.status.success() {
+        eprintln!(
+            "warning: git status returned non-zero exit code {:?}",
+            output.status.code()
+        );
+        return Ok(());
+    }
+    if output.stdout.is_empty() {
         return Ok(());
     }
 
@@ -603,14 +698,43 @@ fn offer_git_commit(
         return Ok(());
     }
 
+    // Stage specific paths instead of `git add .` to avoid accidentally
+    // committing unrelated files.
+    let mut paths: Vec<String> = vec![
+        ".gitignore".into(),
+        ".tome-manifest.json".into(),
+        "tome.lock".into(),
+    ];
+    for (name, entry) in manifest.iter() {
+        if !entry.managed {
+            paths.push(name.as_str().to_string());
+        }
+    }
+
     let add_status = GitCommand::new("git")
-        .args(["add", "."])
+        .arg("add")
+        .arg("--")
+        .args(&paths)
         .current_dir(library_dir)
         .status()?;
     if !add_status.success() {
         eprintln!(
             "warning: git add failed (exit code {:?})",
             add_status.code()
+        );
+        return Ok(());
+    }
+
+    // Also stage deletions for the same set of paths
+    let stage_deleted = GitCommand::new("git")
+        .args(["add", "--update", "--"])
+        .args(&paths)
+        .current_dir(library_dir)
+        .status()?;
+    if !stage_deleted.success() {
+        eprintln!(
+            "warning: git add --update failed (exit code {:?})",
+            stage_deleted.code()
         );
         return Ok(());
     }
@@ -662,6 +786,9 @@ fn show_config(config: &Config, path_only: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discover::SkillName;
+    use std::os::unix::fs as unix_fs;
+    use tempfile::TempDir;
 
     #[test]
     fn commit_message_all_changes() {
@@ -679,5 +806,100 @@ mod tests {
     #[test]
     fn commit_message_no_changes() {
         assert_eq!(sync_commit_message(0, 0, 0), "tome sync");
+    }
+
+    // -- cleanup_disabled_from_target tests --
+
+    #[test]
+    fn cleanup_disabled_removes_library_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Create a skill dir in the library and symlink it in the target
+        let skill_dir = library.path().join("disabled-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!target.path().join("disabled-skill").exists());
+    }
+
+    #[test]
+    fn cleanup_disabled_preserves_external_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+
+        // Symlink in target with a disabled name but pointing outside the library
+        let ext_dir = external.path().join("disabled-skill");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        unix_fs::symlink(&ext_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(
+            removed, 0,
+            "should not remove symlink pointing outside library"
+        );
+        assert!(target.path().join("disabled-skill").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_disabled_skips_non_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Regular directory (not a symlink) with a disabled skill name
+        std::fs::create_dir_all(target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(removed, 0);
+        assert!(target.path().join("disabled-skill").is_dir());
+    }
+
+    #[test]
+    fn cleanup_disabled_nonexistent_dir_returns_zero() {
+        let prefs = machine::MachinePrefs::default();
+        let removed = cleanup_disabled_from_target(
+            std::path::Path::new("/nonexistent/target"),
+            std::path::Path::new("/nonexistent/library"),
+            &prefs,
+            false,
+        )
+        .unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn cleanup_disabled_dry_run_preserves_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        let skill_dir = library.path().join("disabled-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, true).unwrap();
+        assert_eq!(removed, 1, "should count the would-be removal");
+        assert!(
+            target.path().join("disabled-skill").is_symlink(),
+            "dry-run should not actually remove"
+        );
     }
 }

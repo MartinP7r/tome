@@ -131,21 +131,21 @@ fn consolidate_managed(
 
     match classify_destination(dest) {
         DestinationState::Directory => {
-            // Strategy transition: local (dir) → managed (symlink)
-            if let Some(entry) = manifest.get(skill.name.as_str()) {
-                if !entry.managed {
-                    // Was local, now managed — remove the directory, create symlink
-                    if !dry_run {
-                        std::fs::remove_dir_all(dest).with_context(|| {
-                            format!("failed to remove local skill dir {}", dest.display())
-                        })?;
-                        create_symlink(&skill.path, dest)?;
-                    }
-                    record_in_manifest(manifest, skill, content_hash.clone());
-                    result.updated += 1;
-                } else {
-                    result.unchanged += 1;
+            // A managed skill should always be a symlink. If a real directory exists
+            // instead (e.g., from a prior local-to-managed transition or manual
+            // intervention), replace it with a symlink.
+            if manifest.contains_key(skill.name.as_str()) {
+                if !dry_run {
+                    std::fs::remove_dir_all(dest).with_context(|| {
+                        format!(
+                            "failed to remove stale dir for managed skill {}",
+                            dest.display()
+                        )
+                    })?;
+                    create_symlink(&skill.path, dest)?;
                 }
+                record_in_manifest(manifest, skill, content_hash.clone());
+                result.updated += 1;
             } else {
                 // Dir exists but not in manifest — skip with warning
                 eprintln!(
@@ -346,6 +346,7 @@ pub fn generate_gitignore(library_dir: &Path, manifest: &Manifest) -> Result<()>
 
     content.push_str("# Internal\n");
     content.push_str(".tome-manifest.tmp\n");
+    content.push_str("tome.lock.tmp\n");
 
     let gitignore_path = library_dir.join(".gitignore");
 
@@ -893,6 +894,34 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_managed_repairs_stale_directory() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        // First: consolidate normally (creates symlink)
+        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let dest = library.path().join("plugin-skill");
+        assert!(dest.is_symlink(), "should be a symlink initially");
+
+        // Replace symlink with a real directory (simulating stale state)
+        std::fs::remove_file(&dest).unwrap();
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("SKILL.md"), "# stale").unwrap();
+        assert!(
+            dest.is_dir() && !dest.is_symlink(),
+            "should be a real dir now"
+        );
+
+        // Re-consolidate — should repair by replacing dir with symlink
+        let (result, _) =
+            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        assert_eq!(result.updated, 1, "should repair stale directory");
+        assert_eq!(result.unchanged, 0);
+        assert!(dest.is_symlink(), "should be a symlink again after repair");
+    }
+
+    #[test]
     fn consolidate_managed_skips_non_manifest_dir_collision() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
@@ -941,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_always_ignores_manifest_tmp() {
+    fn gitignore_always_ignores_tmp_files() {
         let library = TempDir::new().unwrap();
         std::fs::create_dir_all(library.path()).unwrap();
 
@@ -951,5 +980,9 @@ mod tests {
 
         let content = std::fs::read_to_string(library.path().join(".gitignore")).unwrap();
         assert!(content.contains(".tome-manifest.tmp"));
+        assert!(
+            content.contains("tome.lock.tmp"),
+            "gitignore should include lockfile tmp"
+        );
     }
 }

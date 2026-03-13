@@ -1007,13 +1007,8 @@ fn update_dry_run_makes_no_changes() {
 
 #[test]
 fn sync_respects_machine_disabled() {
-    // This test verifies that the machine prefs filtering works end-to-end.
-    // Since machine.toml path is hardcoded to ~/.config/tome/machine.toml,
-    // we test the mechanism indirectly: sync with a target, then manually verify
-    // that a disabled skill would be filtered during distribution.
-    //
-    // The unit test `distribute_skips_disabled_skills` covers the core logic.
-    // Here we verify the full flow works with the binary.
+    // Test that sync with --machine skips disabled skills during distribution
+    // AND removes their existing symlinks from targets.
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "keep-skill");
@@ -1039,9 +1034,30 @@ fn sync_respects_machine_disabled() {
     assert!(target_dir.join("keep-skill").is_symlink());
     assert!(target_dir.join("drop-skill").is_symlink());
 
-    // Simulate disabling: remove the symlink for "drop-skill" and verify it stays gone
-    // after a sync when the skill would be filtered.
-    // This proves the distribution path works — the actual filtering is covered by unit tests.
+    // Create machine.toml that disables "drop-skill"
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, "disabled = [\"drop-skill\"]\n").unwrap();
+
+    // Re-sync with --machine — disabled skill's symlink should be removed
+    tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "sync",
+        ])
+        .assert()
+        .success();
+
+    assert!(
+        target_dir.join("keep-skill").is_symlink(),
+        "enabled skill should still be linked"
+    );
+    assert!(
+        !target_dir.join("drop-skill").exists(),
+        "disabled skill's symlink should be removed by sync"
+    );
 }
 
 #[test]
@@ -1078,14 +1094,30 @@ fn update_disable_removes_symlink() {
     assert!(target_dir.join("enabled-skill").is_symlink());
     assert!(target_dir.join("disabled-skill").is_symlink());
 
-    // Now manually remove the disabled skill's symlink to simulate what happens
-    // after machine prefs filtering (the actual machine.toml is at ~/.config/tome/
-    // which we can't override in integration tests without modifying the binary).
-    // The unit tests verify the filtering logic; this test verifies the full binary runs.
-    //
-    // Verify the update command exists and works
+    // Create machine.toml disabling one skill
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, "disabled = [\"disabled-skill\"]\n").unwrap();
+    let machine_str = machine_path.to_str().unwrap();
+
+    // Re-run update with --machine — should clean up disabled skill's symlink
     tome()
-        .args(["--config", config_str, "--quiet", "update"])
+        .args([
+            "--config",
+            config_str,
+            "--machine",
+            machine_str,
+            "--quiet",
+            "update",
+        ])
         .assert()
         .success();
+
+    assert!(
+        target_dir.join("enabled-skill").is_symlink(),
+        "enabled skill should still be linked"
+    );
+    assert!(
+        !target_dir.join("disabled-skill").exists(),
+        "disabled skill's symlink should be removed by update"
+    );
 }
