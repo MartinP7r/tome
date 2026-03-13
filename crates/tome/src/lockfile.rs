@@ -95,14 +95,17 @@ pub fn load(library_dir: &Path) -> Result<Option<Lockfile>> {
     Ok(Some(lockfile))
 }
 
-/// Write the lockfile to the library directory.
+/// Write the lockfile to the library directory using atomic temp+rename.
 pub fn save(lockfile: &Lockfile, library_dir: &Path) -> Result<()> {
     let path = library_dir.join(LOCKFILE_NAME);
+    let tmp_path = library_dir.join("tome.lock.tmp");
     let content = serde_json::to_string_pretty(lockfile).context("failed to serialize lockfile")?;
     // Add trailing newline for POSIX compliance
     let content = format!("{content}\n");
-    std::fs::write(&path, &content)
-        .with_context(|| format!("failed to write lockfile {}", path.display()))
+    std::fs::write(&tmp_path, &content)
+        .with_context(|| format!("failed to write temp lockfile {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, &path)
+        .with_context(|| format!("failed to rename lockfile {}", path.display()))
 }
 
 #[cfg(test)]
@@ -228,6 +231,22 @@ mod tests {
         let content = std::fs::read_to_string(tmp.path().join("tome.lock")).unwrap();
         assert!(content.contains("\"version\": 1"));
         assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn save_does_not_leave_tmp_file() {
+        let tmp = TempDir::new().unwrap();
+        let lockfile = Lockfile {
+            version: 1,
+            skills: BTreeMap::new(),
+        };
+
+        save(&lockfile, tmp.path()).unwrap();
+        assert!(tmp.path().join("tome.lock").exists());
+        assert!(
+            !tmp.path().join("tome.lock.tmp").exists(),
+            "atomic save should not leave tmp file behind"
+        );
     }
 
     #[test]

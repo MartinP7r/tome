@@ -72,6 +72,14 @@ fn spinner(msg: &str) -> ProgressBar {
     sp
 }
 
+/// Resolve the machine preferences path from an optional override.
+fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::PathBuf> {
+    match machine_override {
+        Some(p) => Ok(p.to_path_buf()),
+        None => machine::default_machine_path(),
+    }
+}
+
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
     if matches!(cli.command, Command::Init) {
@@ -84,7 +92,14 @@ pub fn run(cli: Cli) -> Result<()> {
         let config = wizard::run(cli.dry_run)?;
         config.validate()?;
         if !cli.dry_run {
-            sync(&config, cli.dry_run, false, cli.verbose, cli.quiet)?;
+            sync(
+                &config,
+                cli.dry_run,
+                false,
+                cli.verbose,
+                cli.quiet,
+                cli.machine.as_deref(),
+            )?;
         }
         return Ok(());
     }
@@ -94,12 +109,26 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
-        Command::Sync { force } => sync(&config, cli.dry_run, force, cli.verbose, cli.quiet)?,
-        Command::Update => update_cmd(&config, cli.dry_run, cli.verbose, cli.quiet)?,
+        Command::Sync { force } => sync(
+            &config,
+            cli.dry_run,
+            force,
+            cli.verbose,
+            cli.quiet,
+            cli.machine.as_deref(),
+        )?,
+        Command::Update => update_cmd(
+            &config,
+            cli.dry_run,
+            cli.verbose,
+            cli.quiet,
+            cli.machine.as_deref(),
+        )?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
         Command::Serve => {
-            tokio::runtime::Runtime::new()?.block_on(mcp::serve(config))?;
+            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+            tokio::runtime::Runtime::new()?.block_on(mcp::serve(config, Some(&machine_path)))?;
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
@@ -109,7 +138,14 @@ pub fn run(cli: Cli) -> Result<()> {
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool) -> Result<()> {
+fn sync(
+    config: &Config,
+    dry_run: bool,
+    force: bool,
+    verbose: bool,
+    quiet: bool,
+    machine_override: Option<&Path>,
+) -> Result<()> {
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -162,7 +198,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
     // Load per-machine preferences (disabled skills)
-    let machine_path = machine::default_machine_path()?;
+    let machine_path = resolve_machine_path(machine_override)?;
     let machine_prefs = machine::load(&machine_path)?;
 
     // 3. Distribute to targets
@@ -204,6 +240,9 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
         if let Some(skills_dir) = target.skills_dir() {
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+            // Also clean up symlinks for disabled skills
+            removed_from_targets +=
+                cleanup_disabled_from_target(skills_dir, &machine_prefs, dry_run)?;
         }
     }
     // Save manifest after cleanup (may have removed entries)
@@ -242,6 +281,7 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
     if !dry_run && !quiet {
         offer_git_commit(
             &config.library_dir,
+            &manifest,
             report.consolidate.created,
             report.consolidate.updated,
             report.cleanup.removed_from_library,
@@ -252,7 +292,13 @@ fn sync(config: &Config, dry_run: bool, force: bool, verbose: bool, quiet: bool)
 }
 
 /// The update command: diff-then-distribute with interactive triage.
-fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Result<()> {
+fn update_cmd(
+    config: &Config,
+    dry_run: bool,
+    verbose: bool,
+    quiet: bool,
+    machine_override: Option<&Path>,
+) -> Result<()> {
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -263,7 +309,7 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
     let show_progress = !quiet && !verbose;
 
     // Load per-machine preferences
-    let machine_path = machine::default_machine_path()?;
+    let machine_path = resolve_machine_path(machine_override)?;
     let mut machine_prefs = machine::load(&machine_path)?;
 
     // 1. Load existing lockfile (may be committed by another machine)
@@ -407,6 +453,7 @@ fn update_cmd(config: &Config, dry_run: bool, verbose: bool, quiet: bool) -> Res
     if !dry_run && !quiet {
         offer_git_commit(
             &config.library_dir,
+            &manifest,
             report.consolidate.created,
             report.consolidate.updated,
             report.cleanup.removed_from_library,
@@ -568,6 +615,7 @@ fn disabled_note(count: usize) -> String {
 /// If the library directory is a git repo with uncommitted changes, prompt the user to commit.
 fn offer_git_commit(
     library_dir: &Path,
+    manifest: &manifest::Manifest,
     created: usize,
     updated: usize,
     removed: usize,
@@ -603,8 +651,23 @@ fn offer_git_commit(
         return Ok(());
     }
 
+    // Stage specific paths instead of `git add .` to avoid accidentally
+    // committing unrelated files.
+    let mut paths: Vec<String> = vec![
+        ".gitignore".into(),
+        ".tome-manifest.json".into(),
+        "tome.lock".into(),
+    ];
+    for (name, entry) in manifest.iter() {
+        if !entry.managed {
+            paths.push(name.as_str().to_string());
+        }
+    }
+
     let add_status = GitCommand::new("git")
-        .args(["add", "."])
+        .arg("add")
+        .arg("--")
+        .args(&paths)
         .current_dir(library_dir)
         .status()?;
     if !add_status.success() {
@@ -613,6 +676,18 @@ fn offer_git_commit(
             add_status.code()
         );
         return Ok(());
+    }
+
+    // Also stage deletions (files that were removed from the library)
+    let stage_deleted = GitCommand::new("git")
+        .args(["add", "--update", "--"])
+        .current_dir(library_dir)
+        .status()?;
+    if !stage_deleted.success() {
+        eprintln!(
+            "warning: git add --update failed (exit code {:?})",
+            stage_deleted.code()
+        );
     }
 
     let commit_status = GitCommand::new("git")

@@ -247,25 +247,19 @@ fn count_health_issues(dir: &Path) -> Result<usize> {
         }
     }
 
-    // Check disk entries are in manifest (orphans)
-    for entry in std::fs::read_dir(dir)
-        .with_context(|| format!("failed to read directory {}", dir.display()))?
-    {
-        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if entry.path().is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
-            issues += 1;
-        }
-    }
-
-    // Also count any broken symlinks (leftover from v0.1.x)
+    // Single pass: orphans + broken symlinks
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {
         let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
         let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
+            issues += 1; // orphan
+        }
         if path.is_symlink() && !path.exists() {
-            issues += 1;
+            issues += 1; // broken symlink
         }
     }
 

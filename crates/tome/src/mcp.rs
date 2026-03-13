@@ -6,8 +6,11 @@ use rmcp::{
     transport::stdio,
 };
 
+use std::path::Path;
+
 use crate::config::Config;
 use crate::discover;
+use crate::machine;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TomeServer {
@@ -16,9 +19,17 @@ pub(crate) struct TomeServer {
 }
 
 impl TomeServer {
-    pub fn new(config: Config) -> anyhow::Result<Self> {
+    pub fn new(config: Config, machine_path: Option<&Path>) -> anyhow::Result<Self> {
         let mut _warnings = Vec::new();
         let skills = discover::discover_all(&config, &mut _warnings)?;
+        let machine_prefs = match machine_path {
+            Some(p) => machine::load(p)?,
+            None => machine::load(&machine::default_machine_path()?)?,
+        };
+        let skills = skills
+            .into_iter()
+            .filter(|s| !machine_prefs.is_disabled(s.name.as_str()))
+            .collect();
         Ok(Self {
             skills,
             tool_router: Self::tool_router(),
@@ -123,8 +134,8 @@ impl ServerHandler for TomeServer {
 }
 
 /// Start the MCP server on stdio.
-pub async fn serve(config: Config) -> anyhow::Result<()> {
-    let server = TomeServer::new(config)?;
+pub async fn serve(config: Config, machine_path: Option<&Path>) -> anyhow::Result<()> {
+    let server = TomeServer::new(config, machine_path)?;
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())
@@ -134,6 +145,8 @@ pub async fn serve(config: Config) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use crate::config::{Config, Source, SourceType};
+    use crate::discover::SkillName;
+    use crate::machine::MachinePrefs;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -149,6 +162,17 @@ mod tests {
             }],
             targets: BTreeMap::new(),
         }
+    }
+
+    /// Create a machine.toml that disables the given skill names.
+    fn write_machine_prefs(dir: &std::path::Path, disabled: &[&str]) -> PathBuf {
+        let path = dir.join("machine.toml");
+        let mut prefs = MachinePrefs::default();
+        for name in disabled {
+            prefs.disable(SkillName::new(*name).unwrap());
+        }
+        crate::machine::save(&prefs, &path).unwrap();
+        path
     }
 
     fn extract_text(result: &CallToolResult) -> String {
@@ -167,7 +191,7 @@ mod tests {
             sources: Vec::new(),
             targets: BTreeMap::new(),
         };
-        let server = TomeServer::new(config).unwrap();
+        let server = TomeServer::new(config, None).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("No skills found"), "unexpected: {text}");
@@ -180,7 +204,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("my-skill"), "unexpected: {text}");
@@ -194,7 +218,7 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nSome content.").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "my-skill".into(),
@@ -214,7 +238,7 @@ mod tests {
 
         // Create a real SKILL.md so the skill is discovered at server startup.
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
 
         // After discovery, replace SKILL.md with a symlink pointing to a file outside the
         // skill directory — simulating an attacker replacing the file post-startup.
@@ -238,7 +262,7 @@ mod tests {
     #[test]
     fn read_skill_not_found() {
         let tmp = TempDir::new().unwrap();
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf())).unwrap();
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "nonexistent".into(),
@@ -247,5 +271,57 @@ mod tests {
         assert_eq!(result.is_error, Some(true));
         let text = extract_text(&result);
         assert!(text.contains("not found"), "unexpected: {text}");
+    }
+
+    #[test]
+    fn list_skills_excludes_disabled() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create two skills
+        for name in &["enabled-skill", "disabled-skill"] {
+            let skill_dir = tmp.path().join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            std::fs::write(skill_dir.join("SKILL.md"), format!("# {name}")).unwrap();
+        }
+
+        let machine_path = write_machine_prefs(tmp.path(), &["disabled-skill"]);
+        let server =
+            TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&machine_path)).unwrap();
+        let result = server.list_skills().unwrap();
+        let text = extract_text(&result);
+
+        assert!(
+            text.contains("enabled-skill"),
+            "enabled skill should appear: {text}"
+        );
+        assert!(
+            !text.contains("disabled-skill"),
+            "disabled skill should be excluded: {text}"
+        );
+        assert!(text.contains("1 skill(s) found"), "unexpected: {text}");
+    }
+
+    #[test]
+    fn read_skill_returns_not_found_for_disabled() {
+        let tmp = TempDir::new().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
+
+        let machine_path = write_machine_prefs(tmp.path(), &["my-skill"]);
+        let server =
+            TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&machine_path)).unwrap();
+        let result = server
+            .read_skill(Parameters(ReadSkillRequest {
+                name: "my-skill".into(),
+            }))
+            .unwrap();
+
+        assert_eq!(result.is_error, Some(true));
+        let text = extract_text(&result);
+        assert!(
+            text.contains("not found"),
+            "disabled skill should appear as not found: {text}"
+        );
     }
 }

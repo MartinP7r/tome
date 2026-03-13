@@ -29,6 +29,10 @@ pub struct Cli {
     /// Suppress non-error output
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     pub quiet: bool,
+
+    /// Path to machine preferences file (default: ~/.config/tome/machine.toml)
+    #[arg(long, global = true)]
+    pub machine: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
