@@ -55,14 +55,19 @@ pub fn load(path: &Path) -> Result<MachinePrefs> {
     Ok(prefs)
 }
 
-/// Save machine preferences to a TOML file, creating parent directories as needed.
+/// Save machine preferences to a TOML file using atomic temp+rename,
+/// creating parent directories as needed.
 pub fn save(prefs: &MachinePrefs, path: &Path) -> Result<()> {
     let content = toml::to_string_pretty(prefs).context("failed to serialize machine prefs")?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    std::fs::write(path, &content).with_context(|| format!("failed to write {}", path.display()))
+    let tmp_path = path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, &content)
+        .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
+    std::fs::rename(&tmp_path, path)
+        .with_context(|| format!("failed to rename to {}", path.display()))
 }
 
 #[cfg(test)]
@@ -128,6 +133,22 @@ mod tests {
         let path = tmp.path().join("machine.toml");
         std::fs::write(&path, "disabled = not-a-list").unwrap();
         assert!(load(&path).is_err());
+    }
+
+    #[test]
+    fn save_does_not_leave_tmp_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let mut prefs = MachinePrefs::default();
+        prefs.disable(SkillName::new("test-skill").unwrap());
+        save(&prefs, &path).unwrap();
+
+        assert!(path.exists());
+        assert!(
+            !tmp.path().join("machine.toml.tmp").exists(),
+            "atomic save should not leave tmp file behind"
+        );
     }
 
     #[test]

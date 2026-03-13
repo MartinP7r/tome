@@ -644,4 +644,103 @@ mod tests {
         let result = diagnose(&config, true);
         assert!(result.is_ok());
     }
+
+    // -- repair_library --
+
+    #[test]
+    fn repair_library_removes_orphan_manifest_entry() {
+        let lib = TempDir::new().unwrap();
+
+        // Create a manifest entry with no corresponding directory
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("ghost").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/ghost"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        repair_library(lib.path()).unwrap();
+
+        let after = manifest::load(lib.path()).unwrap();
+        assert!(
+            !after.contains_key("ghost"),
+            "repair should remove manifest entry without directory"
+        );
+    }
+
+    #[test]
+    fn repair_library_removes_broken_managed_symlink() {
+        let lib = TempDir::new().unwrap();
+
+        // Create a broken managed symlink + manifest entry
+        unix_fs::symlink("/nonexistent/source", lib.path().join("broken-plugin")).unwrap();
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("broken-plugin").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/nonexistent/source"),
+                source_name: "plugins".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        repair_library(lib.path()).unwrap();
+
+        assert!(
+            !lib.path().join("broken-plugin").exists(),
+            "broken managed symlink should be removed"
+        );
+        let after = manifest::load(lib.path()).unwrap();
+        assert!(!after.contains_key("broken-plugin"));
+    }
+
+    #[test]
+    fn repair_library_removes_broken_legacy_symlink() {
+        let lib = TempDir::new().unwrap();
+
+        // Broken legacy symlink (not in manifest)
+        unix_fs::symlink("/nonexistent/v01/skill", lib.path().join("legacy")).unwrap();
+
+        repair_library(lib.path()).unwrap();
+
+        assert!(
+            !lib.path().join("legacy").exists(),
+            "broken legacy symlink should be removed"
+        );
+    }
+
+    #[test]
+    fn repair_library_healthy_is_noop() {
+        let lib = TempDir::new().unwrap();
+        let skill_dir = lib.path().join("healthy-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("healthy-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/healthy-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        repair_library(lib.path()).unwrap();
+
+        let after = manifest::load(lib.path()).unwrap();
+        assert!(after.contains_key("healthy-skill"));
+        assert!(skill_dir.exists());
+    }
 }

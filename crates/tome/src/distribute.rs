@@ -214,8 +214,12 @@ fn distribute_mcp(
                 .with_context(|| format!("failed to create dir {}", parent.display()))?;
         }
         let content = serde_json::to_string_pretty(&mcp_doc)?;
-        std::fs::write(mcp_config_path, content)
-            .with_context(|| format!("failed to write {}", mcp_config_path.display()))?;
+        // Atomic write: temp file + rename to avoid corrupting existing MCP config
+        let tmp_path = mcp_config_path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, content)
+            .with_context(|| format!("failed to write temp {}", tmp_path.display()))?;
+        std::fs::rename(&tmp_path, mcp_config_path)
+            .with_context(|| format!("failed to rename to {}", mcp_config_path.display()))?;
     }
 
     result.changed = 1;

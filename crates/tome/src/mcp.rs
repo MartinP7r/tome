@@ -183,15 +183,24 @@ mod tests {
             .clone()
     }
 
+    /// Return a path to a nonexistent machine.toml in the given dir.
+    /// This gives tests an isolated machine prefs path instead of reading
+    /// the real ~/.config/tome/machine.toml.
+    fn empty_machine_path(dir: &std::path::Path) -> PathBuf {
+        dir.join("machine.toml")
+    }
+
     #[test]
     fn list_skills_with_no_sources() {
+        let tmp = TempDir::new().unwrap();
         let config = Config {
             library_dir: PathBuf::from("/tmp/unused"),
             exclude: std::collections::BTreeSet::new(),
             sources: Vec::new(),
             targets: BTreeMap::new(),
         };
-        let server = TomeServer::new(config, None).unwrap();
+        let mp = empty_machine_path(tmp.path());
+        let server = TomeServer::new(config, Some(&mp)).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("No skills found"), "unexpected: {text}");
@@ -204,7 +213,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
+        let mp = empty_machine_path(tmp.path());
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&mp)).unwrap();
         let result = server.list_skills().unwrap();
         let text = extract_text(&result);
         assert!(text.contains("my-skill"), "unexpected: {text}");
@@ -218,7 +228,8 @@ mod tests {
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill\nSome content.").unwrap();
 
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
+        let mp = empty_machine_path(tmp.path());
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&mp)).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "my-skill".into(),
@@ -238,7 +249,8 @@ mod tests {
 
         // Create a real SKILL.md so the skill is discovered at server startup.
         std::fs::write(skill_dir.join("SKILL.md"), "# My Skill").unwrap();
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
+        let mp = empty_machine_path(tmp.path());
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&mp)).unwrap();
 
         // After discovery, replace SKILL.md with a symlink pointing to a file outside the
         // skill directory — simulating an attacker replacing the file post-startup.
@@ -262,7 +274,8 @@ mod tests {
     #[test]
     fn read_skill_not_found() {
         let tmp = TempDir::new().unwrap();
-        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), None).unwrap();
+        let mp = empty_machine_path(tmp.path());
+        let server = TomeServer::new(test_config(tmp.path().to_path_buf()), Some(&mp)).unwrap();
         let result = server
             .read_skill(Parameters(ReadSkillRequest {
                 name: "nonexistent".into(),

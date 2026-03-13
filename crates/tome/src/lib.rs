@@ -233,6 +233,7 @@ fn sync(
         &discovered_names,
         &mut manifest,
         dry_run,
+        quiet,
     )?;
 
     let mut removed_from_targets = 0usize;
@@ -241,8 +242,12 @@ fn sync(
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
             // Also clean up symlinks for disabled skills
-            removed_from_targets +=
-                cleanup_disabled_from_target(skills_dir, &machine_prefs, dry_run)?;
+            removed_from_targets += cleanup_disabled_from_target(
+                skills_dir,
+                &config.library_dir,
+                &machine_prefs,
+                dry_run,
+            )?;
         }
     }
     // Save manifest after cleanup (may have removed entries)
@@ -413,6 +418,7 @@ fn update_cmd(
         &discovered_names,
         &mut manifest,
         dry_run,
+        quiet,
     )?;
 
     let mut removed_from_targets = 0usize;
@@ -421,8 +427,12 @@ fn update_cmd(
             removed_from_targets +=
                 cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
             // Also clean up symlinks for disabled skills
-            removed_from_targets +=
-                cleanup_disabled_from_target(skills_dir, &machine_prefs, dry_run)?;
+            removed_from_targets += cleanup_disabled_from_target(
+                skills_dir,
+                &config.library_dir,
+                &machine_prefs,
+                dry_run,
+            )?;
         }
     }
 
@@ -464,14 +474,21 @@ fn update_cmd(
 }
 
 /// Remove symlinks from a target directory that point to disabled skills.
+///
+/// Only removes symlinks that point into the library directory, matching the
+/// origin check in `cleanup::cleanup_target`.
 fn cleanup_disabled_from_target(
     target_dir: &Path,
+    library_dir: &Path,
     machine_prefs: &machine::MachinePrefs,
     dry_run: bool,
 ) -> Result<usize> {
     if !target_dir.is_dir() {
         return Ok(0);
     }
+
+    let canonical_library =
+        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
 
     let mut removed = 0;
     let entries = std::fs::read_dir(target_dir)?;
@@ -482,10 +499,17 @@ fn cleanup_disabled_from_target(
         if path.is_symlink() {
             let name = entry.file_name();
             if machine_prefs.is_disabled(&name.to_string_lossy()) {
-                if !dry_run {
-                    std::fs::remove_file(&path)?;
+                // Only remove if symlink points into the tome library
+                let raw_target = std::fs::read_link(&path)?;
+                let target = paths::resolve_symlink_target(&path, &raw_target);
+                let points_into_library =
+                    target.starts_with(library_dir) || target.starts_with(&canonical_library);
+                if points_into_library {
+                    if !dry_run {
+                        std::fs::remove_file(&path)?;
+                    }
+                    removed += 1;
                 }
-                removed += 1;
             }
         }
     }
@@ -737,6 +761,9 @@ fn show_config(config: &Config, path_only: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::discover::SkillName;
+    use std::os::unix::fs as unix_fs;
+    use tempfile::TempDir;
 
     #[test]
     fn commit_message_all_changes() {
@@ -754,5 +781,100 @@ mod tests {
     #[test]
     fn commit_message_no_changes() {
         assert_eq!(sync_commit_message(0, 0, 0), "tome sync");
+    }
+
+    // -- cleanup_disabled_from_target tests --
+
+    #[test]
+    fn cleanup_disabled_removes_library_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Create a skill dir in the library and symlink it in the target
+        let skill_dir = library.path().join("disabled-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(removed, 1);
+        assert!(!target.path().join("disabled-skill").exists());
+    }
+
+    #[test]
+    fn cleanup_disabled_preserves_external_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+
+        // Symlink in target with a disabled name but pointing outside the library
+        let ext_dir = external.path().join("disabled-skill");
+        std::fs::create_dir_all(&ext_dir).unwrap();
+        unix_fs::symlink(&ext_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(
+            removed, 0,
+            "should not remove symlink pointing outside library"
+        );
+        assert!(target.path().join("disabled-skill").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_disabled_skips_non_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Regular directory (not a symlink) with a disabled skill name
+        std::fs::create_dir_all(target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        assert_eq!(removed, 0);
+        assert!(target.path().join("disabled-skill").is_dir());
+    }
+
+    #[test]
+    fn cleanup_disabled_nonexistent_dir_returns_zero() {
+        let prefs = machine::MachinePrefs::default();
+        let removed = cleanup_disabled_from_target(
+            std::path::Path::new("/nonexistent/target"),
+            std::path::Path::new("/nonexistent/library"),
+            &prefs,
+            false,
+        )
+        .unwrap();
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
+    fn cleanup_disabled_dry_run_preserves_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        let skill_dir = library.path().join("disabled-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("disabled-skill")).unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let removed =
+            cleanup_disabled_from_target(target.path(), library.path(), &prefs, true).unwrap();
+        assert_eq!(removed, 1, "should count the would-be removal");
+        assert!(
+            target.path().join("disabled-skill").is_symlink(),
+            "dry-run should not actually remove"
+        );
     }
 }
