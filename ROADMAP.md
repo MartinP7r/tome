@@ -6,7 +6,7 @@
 | **v0.2**   | Scoped SOT             | Library copies skills (not symlinks), git-friendly library dir          | ✓ |
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
-| **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update` (notification-only). Lockfile ✓  |        |
+| **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
 | **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
 | **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
@@ -71,12 +71,12 @@ Replaced the hardcoded `Targets` struct with a flexible, data-driven target conf
 - **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Separate concern from skills.
 - **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). High complexity, needs design.
 
-## v0.3.x — Portable Library (MVP)
+## v0.3.x — Portable Library (MVP) ✓
 
 Complete the multi-machine skill management story. The lockfile (#38, shipped early) provides the diff mechanism; this milestone adds the interactive UX and per-machine control.
 
-- **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3.
-- **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, surfaces new/changed skills interactively. For local skills: notifies and offers to disable. For npx-managed skills: suggests migrating to tome-native tracking (double symlinks don't work well with npx). Notification-only for managed plugins — auto-install deferred to v0.5.
+- ~~**Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`)~~: Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3. Disabled skills stay in the library but are skipped during distribution.
+- ~~**`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40))~~: Reads lockfile, diffs against local state, surfaces new/changed/removed skills interactively. Offers to disable unwanted new skills. Notification-only for managed plugins — auto-install deferred to v0.5.
 
 ## v0.4 — Format Transforms
 

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-machine preferences** (v0.3.x): `~/.config/tome/machine.toml` with `disabled` list — skills stay in library but are skipped during distribution
+- **`tome update` command** (v0.3.x): loads lockfile, diffs against current state, presents added/changed/removed skills interactively, offers to disable unwanted new skills
+- **Lockfile loading** (`lockfile::load()`): read existing `tome.lock` for diffing in `tome update`
 - **Connector architecture** (v0.3): `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be a target without code changes
 - **KnownTarget registry**: wizard auto-discovers common tool locations for target configuration
 - **Output layer** (v0.2.1): `--json` flag for `tome list`, structured warning collection, data struct extraction (SyncReport, ConsolidateResult, etc.)

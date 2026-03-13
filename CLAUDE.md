@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.3** — Connector Architecture shipped (`BTreeMap<String, TargetConfig>` targets, `KnownTarget` registry, npm skill source research). `tome.lock` lockfile shipped early from v0.5 (PR #220). Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
+**v0.3.x MVP complete** — Portable Library milestone shipped: `tome.lock` lockfile (PR #220), per-machine preferences via `machine.toml` (#39), `tome update` command with lockfile diffing and interactive triage (#40). Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
 
 ## Quick Reference
 
