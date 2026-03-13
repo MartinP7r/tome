@@ -1,6 +1,6 @@
 # Architecture
 
-> **[v0.2 System Diagram (Excalidraw)](https://excalidraw.com/#json=5-pjpDsna4Way3lfGW5km,p0bQwpcJEl6do68RrnKAgw)** — interactive diagram showing the two-tier source → library → target flow.
+> **[System Diagram (Excalidraw)](https://excalidraw.com/#json=5-pjpDsna4Way3lfGW5km,p0bQwpcJEl6do68RrnKAgw)** — interactive diagram showing the two-tier source → library → target flow.
 
 Rust workspace (edition 2024) with two crates producing two binaries.
 
@@ -37,7 +37,7 @@ Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consu
 
 ## Key Patterns
 
-- **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers like Claude plugins) are symlinked into the library; local skills (from directory sources) are copied. Distribution to targets always uses symlinks pointing into the library. This means the project is Unix-only (`std::os::unix::fs::symlink`).
+- **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers like Claude plugins) are symlinked from library → source dir (the package manager owns the files); local skills (from directory sources) are copied into the library (the library is canonical home). Distribution to targets always uses symlinks pointing into the library. This means the project is Unix-only (`std::os::unix::fs::symlink`).
 - **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.3.x MVP complete** — Portable Library milestone shipped: `tome.lock` lockfile (PR #220), per-machine preferences via `machine.toml` (#39), `tome update` command with lockfile diffing and interactive triage (#40). Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
+**v0.3.0 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
 
 ## Quick Reference
 
@@ -64,24 +64,28 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 **Sync pipeline** (`lib.rs::sync`) — the core flow that `tome sync` and `tome init` both invoke:
 1. **Discover** (`discover.rs`) — Scan configured sources for `*/SKILL.md` dirs. Two source types: `ClaudePlugins` (reads `installed_plugins.json`) and `Directory` (flat walkdir scan). First source wins on name conflicts; exclusion list applied.
 2. **Consolidate** (`library.rs`) — Two strategies based on source type: managed skills (ClaudePlugins) are symlinked from library → source dir (package manager owns the files); local skills (Directory) are copied into the library (library is the canonical home). A manifest (`.tome-manifest.json`) tracks SHA-256 content hashes for idempotent updates: unchanged skills are skipped, changed skills are re-copied or re-linked.
-3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir pointing to library copies) and `Mcp` (writes a `tome` entry into the target's `.mcp.json`).
-4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source) and broken symlinks from targets. Interactive in TTY mode; auto-removes with warning otherwise.
+3. **Distribute** (`distribute.rs`) — Push library skills to target tools. Two methods: `Symlink` (creates links in target's skills dir pointing to library copies) and `Mcp` (writes a `tome` entry into the target's `.mcp.json`). Skills disabled in machine preferences are skipped.
+4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source), broken symlinks from targets, and disabled skill symlinks from target directories. Interactive in TTY mode; auto-removes with warning otherwise.
 
 **Other modules:**
 - `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
 - `config.rs` — TOML config at `~/.config/tome/config.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
 - `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing source paths; optionally repairs.
-- `status.rs` — Read-only summary of library, sources, targets, and health.
-- `mcp.rs` — MCP server implementation using `rmcp`. Exposes `list_skills` and `read_skill` tools over stdio.
+- `status.rs` — Read-only summary of library, sources, targets, and health. Single-pass directory scan for efficiency.
+- `mcp.rs` — MCP server implementation using `rmcp`. Exposes `list_skills` and `read_skill` tools over stdio. Filters out disabled skills based on machine preferences.
+- `lockfile.rs` — Generates and loads `tome.lock` files. Each entry records skill name, content hash, source, and provenance metadata. Uses atomic temp+rename writes.
+- `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks a `disabled` set of skill names. Uses atomic temp+rename writes.
+- `update.rs` — Implements `tome update`: loads the previous lockfile, diffs against current state, presents changes interactively, and offers to disable unwanted new skills.
+- `paths.rs` — Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination.
 
 ### `crates/tome-mcp` — Standalone MCP binary (`tome-mcp`)
 Thin wrapper: loads config, calls `tome::mcp::serve()`. Exists so MCP-only consumers don't need the full CLI. The same server is also reachable via `tome serve`.
 
 ## Key Patterns
 
-- **Two-tier model**: Sources →(copy)→ Library →(symlink)→ Targets. The library is the source of truth, containing real copies of each skill directory. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. This means the project is Unix-only.
-- **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools. Future: connector trait (#192) for unified source/target abstraction.
+- **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers) are symlinked from library → source dir; local skills are copied into the library. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. This means the project is Unix-only.
+- **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 

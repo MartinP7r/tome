@@ -11,8 +11,8 @@ tome serve
 ```
 
 The server exposes two tools:
-- `list_skills` — List all discovered skills with name and description
-- `read_skill` — Read a skill's SKILL.md content by name
+- `list_skills` — List all discovered skills with name and description (excludes disabled skills per machine preferences)
+- `read_skill` — Read a skill's SKILL.md content by name (returns "not found" for disabled skills)
 
 ## Machine Preferences
 
