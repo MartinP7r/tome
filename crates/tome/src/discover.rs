@@ -197,33 +197,29 @@ pub fn discover_source(source: &Source) -> Result<Vec<DiscoveredSkill>> {
 /// Reads `installed_plugins.json` from the parent of `source.path`,
 /// then scans each plugin's `skills/*/SKILL.md`.
 fn discover_claude_plugins(source: &Source) -> Result<Vec<DiscoveredSkill>> {
-    let plugins_json_path = source.path.join("installed_plugins.json");
-
-    if !plugins_json_path.exists() {
-        // Try parent directory (path might point to cache dir)
-        let parent_json = source
+    // Look for installed_plugins.json in multiple locations:
+    // 1. Directly in source.path (e.g. ~/.claude/plugins/)
+    // 2. Parent directory (when source.path points to cache subdir, e.g. ~/.claude/plugins/cache/)
+    let candidates = [
+        source.path.join("installed_plugins.json"),
+        source
             .path
             .parent()
-            .map(|p| p.join("installed_plugins.json"));
+            .map(|p| p.join("installed_plugins.json"))
+            .unwrap_or_default(),
+    ];
 
-        if let Some(ref path) = parent_json
-            && path.exists()
-        {
-            eprintln!(
-                "warning: installed_plugins.json not found at '{}', trying parent directory",
-                plugins_json_path.display()
-            );
-            return discover_claude_plugins_from_json(path, &source.name);
+    for candidate in &candidates {
+        if candidate.exists() {
+            return discover_claude_plugins_from_json(candidate, &source.name);
         }
-
-        eprintln!(
-            "warning: no installed_plugins.json found for source '{}'",
-            source.name
-        );
-        return Ok(Vec::new());
     }
 
-    discover_claude_plugins_from_json(&plugins_json_path, &source.name)
+    eprintln!(
+        "warning: no installed_plugins.json found for source '{}'",
+        source.name
+    );
+    Ok(Vec::new())
 }
 
 fn discover_claude_plugins_from_json(
