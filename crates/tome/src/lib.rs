@@ -40,7 +40,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command as GitCommand;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 
@@ -72,7 +72,8 @@ fn spinner(msg: &str) -> ProgressBar {
     sp
 }
 
-/// Resolve the machine preferences path from an optional override.
+/// Resolve the machine preferences path from an optional override,
+/// falling back to the default `~/.config/tome/machine.toml`.
 fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::PathBuf> {
     match machine_override {
         Some(p) => Ok(p.to_path_buf()),
@@ -475,6 +476,10 @@ fn update_cmd(
 
 /// Remove symlinks from a target directory that point to disabled skills.
 ///
+/// Unlike `cleanup::cleanup_target` (which only removes *broken* symlinks),
+/// this removes symlinks even if their target still exists on disk — because
+/// the skill has been disabled in machine preferences.
+///
 /// Only removes symlinks that point into the library directory, matching the
 /// origin check in `cleanup::cleanup_target`.
 fn cleanup_disabled_from_target(
@@ -487,26 +492,37 @@ fn cleanup_disabled_from_target(
         return Ok(0);
     }
 
-    let canonical_library =
-        std::fs::canonicalize(library_dir).unwrap_or_else(|_| library_dir.to_path_buf());
+    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
+        eprintln!(
+            "warning: could not canonicalize library path {}: {}",
+            library_dir.display(),
+            e
+        );
+        library_dir.to_path_buf()
+    });
 
     let mut removed = 0;
-    let entries = std::fs::read_dir(target_dir)?;
+    let entries = std::fs::read_dir(target_dir)
+        .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
     for entry in entries {
-        let entry = entry?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
         let path = entry.path();
         if path.is_symlink() {
             let name = entry.file_name();
             if machine_prefs.is_disabled(&name.to_string_lossy()) {
                 // Only remove if symlink points into the tome library
-                let raw_target = std::fs::read_link(&path)?;
+                let raw_target = std::fs::read_link(&path)
+                    .with_context(|| format!("failed to read symlink {}", path.display()))?;
                 let target = paths::resolve_symlink_target(&path, &raw_target);
                 let points_into_library =
                     target.starts_with(library_dir) || target.starts_with(&canonical_library);
                 if points_into_library {
                     if !dry_run {
-                        std::fs::remove_file(&path)?;
+                        std::fs::remove_file(&path).with_context(|| {
+                            format!("failed to remove disabled symlink {}", path.display())
+                        })?;
                     }
                     removed += 1;
                 }
@@ -660,7 +676,14 @@ fn offer_git_commit(
         }
     };
 
-    if !output.status.success() || output.stdout.is_empty() {
+    if !output.status.success() {
+        eprintln!(
+            "warning: git status returned non-zero exit code {:?}",
+            output.status.code()
+        );
+        return Ok(());
+    }
+    if output.stdout.is_empty() {
         return Ok(());
     }
 
@@ -702,9 +725,10 @@ fn offer_git_commit(
         return Ok(());
     }
 
-    // Also stage deletions (files that were removed from the library)
+    // Also stage deletions for the same set of paths
     let stage_deleted = GitCommand::new("git")
         .args(["add", "--update", "--"])
+        .args(&paths)
         .current_dir(library_dir)
         .status()?;
     if !stage_deleted.success() {
@@ -712,6 +736,7 @@ fn offer_git_commit(
             "warning: git add --update failed (exit code {:?})",
             stage_deleted.code()
         );
+        return Ok(());
     }
 
     let commit_status = GitCommand::new("git")

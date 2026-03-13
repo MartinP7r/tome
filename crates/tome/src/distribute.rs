@@ -800,6 +800,38 @@ mod tests {
     }
 
     #[test]
+    fn distribute_mcp_does_not_leave_tmp_file() {
+        let library = TempDir::new().unwrap();
+        let mcp_dir = TempDir::new().unwrap();
+        let mcp_path = mcp_dir.path().join(".mcp.json");
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Mcp {
+                mcp_config: mcp_path.clone(),
+            },
+        };
+
+        let manifest = empty_manifest();
+        distribute_to_target(
+            library.path(),
+            "codex",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert!(mcp_path.exists());
+        assert!(
+            !mcp_dir.path().join(".mcp.json.tmp").exists(),
+            "atomic save should not leave tmp file behind"
+        );
+    }
+
+    #[test]
     fn distribute_skips_disabled_skills() {
         let library = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();

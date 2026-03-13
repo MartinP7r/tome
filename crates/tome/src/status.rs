@@ -258,8 +258,8 @@ fn count_health_issues(dir: &Path) -> Result<usize> {
         if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
             issues += 1; // orphan
         }
-        if path.is_symlink() && !path.exists() {
-            issues += 1; // broken symlink
+        if path.is_symlink() && !path.exists() && !m.contains_key(&name) {
+            issues += 1; // broken symlink (not already counted via manifest check)
         }
     }
 
@@ -520,6 +520,33 @@ mod tests {
         // Create a directory not tracked by manifest
         std::fs::create_dir_all(dir.path().join("orphan-skill")).unwrap();
 
+        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+    }
+
+    #[test]
+    fn count_health_issues_no_double_count_broken_managed_symlink() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+
+        // Create a managed skill manifest entry pointing to a non-existent source
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("managed-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source"),
+                source_name: "plugins".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+        manifest::save(&m, dir.path()).unwrap();
+
+        // Create a broken symlink (managed skill whose source is gone)
+        unix_fs::symlink("/nonexistent/source", dir.path().join("managed-skill")).unwrap();
+
+        // Should count exactly 1 issue (manifest-vs-disk), not 2
         assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
     }
 

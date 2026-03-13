@@ -131,9 +131,10 @@ fn consolidate_managed(
 
     match classify_destination(dest) {
         DestinationState::Directory => {
-            // A managed skill should always be a symlink. If a directory exists instead,
-            // repair it regardless of whether the manifest says managed or local.
-            if let Some(_entry) = manifest.get(skill.name.as_str()) {
+            // A managed skill should always be a symlink. If a real directory exists
+            // instead (e.g., from a prior local-to-managed transition or manual
+            // intervention), replace it with a symlink.
+            if manifest.contains_key(skill.name.as_str()) {
                 if !dry_run {
                     std::fs::remove_dir_all(dest).with_context(|| {
                         format!(
