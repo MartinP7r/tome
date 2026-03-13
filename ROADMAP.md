@@ -84,6 +84,7 @@ Complete the multi-machine skill management story. The lockfile (#38, shipped ea
 - Preserve original format — transforms are output-only
 - Connectors declare input/output formats; the pipeline resolves the translation chain
 - **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
+- **Deprecate `DistributionMethod::Mcp`**: No known targets use MCP distribution as of March 2026 — all major AI coding tools now support SKILL.md directory scanning natively. Emit a deprecation warning when MCP targets are configured; remove the variant in a future major version.
 
 ## v0.4.x — Browse + Skill Validation
 

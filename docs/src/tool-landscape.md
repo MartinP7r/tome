@@ -12,7 +12,7 @@ AI coding tools have up to **seven layers** of configuration. Most discussions f
 
 | Layer | Purpose | Portable? | Who Has It |
 |-------|---------|-----------|-----------|
-| **Skills** | Reusable instructions activated on demand | Yes (SKILL.md standard, 20+ tools) | Claude, Codex, Copilot, Antigravity, Cursor, OpenCode, Amp, Goose |
+| **Skills** | Reusable instructions activated on demand | Yes (SKILL.md standard, 30+ tools) | Claude, Codex, Copilot, Antigravity, Gemini CLI, Cursor, OpenCode, Amp, Goose |
 | **Rules** | Always-on project/global conventions | Partially (markdown, but different filenames/formats) | All tools |
 | **Memory** | Learned context persisted across sessions | No (completely tool-specific) | Claude, Codex, Cursor, Windsurf, Copilot, OpenClaw |
 | **Hooks** | Lifecycle event handlers | No (tool-specific JSON/config) | Claude (12 events), Codex, Windsurf, Amp |
@@ -237,7 +237,7 @@ PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP tar
 
 ### Gemini CLI
 
-**Vendor:** Google | **Type:** CLI agent | **SKILL.md:** Not documented
+**Vendor:** Google | **Type:** CLI agent | **SKILL.md:** Standard
 
 | Aspect | Details |
 |--------|---------|
@@ -253,6 +253,8 @@ PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP tar
 **Shell execution:** `!{command}` syntax for shell injection with auto-escaping of `{{args}}`. Argument substitution via `{{args}}` (not `$ARGUMENTS`).
 
 Gemini CLI is the simplest format for instructions — plain markdown files concatenated into context. No frontmatter, no structured fields. The `@file.md` import syntax and `!{command}` execution are unique.
+
+**Skills (2026):** Gemini CLI now supports SKILL.md directory scanning. Personal skills at `~/.gemini/skills/` and the portable `~/.agents/skills/` path. For tome, Gemini CLI is a Symlink target via `~/.gemini/skills/`.
 
 ---
 
@@ -294,15 +296,16 @@ Amp is a useful case study — their migration from custom commands to Agent Ski
 
 ### Goose
 
-**Vendor:** Block (Square) | **Type:** Autonomous agent | **SKILL.md:** Not documented
+**Vendor:** Block (Square) | **Type:** Autonomous agent | **SKILL.md:** Standard
 
 | Aspect | Details |
 |--------|---------|
+| **Skills** | SKILL.md standard. Scans 6 directories: `~/.config/goose/skills/`, `~/.config/agents/skills/`, `~/.claude/skills/`, and project-level equivalents. |
 | **Extensions** | Six types: Stdio (MCP via pipes), HTTP (MCP via SSE), Builtin (Rust). |
 | **MCP** | Core mechanism — 100+ servers in toolkit catalog. Auto-OAuth on HTTP 401. |
 | **Config** | TOML at `~/.config/goose/` |
 
-Goose is built entirely around MCP — extensions are MCP servers, not skill directories. For tome, Goose is exclusively an MCP target.
+Goose now supports SKILL.md directory scanning alongside its MCP-centric extension model. For tome, Goose is a Symlink target via `~/.config/goose/skills/`.
 
 ---
 
@@ -347,6 +350,10 @@ A "rule" that should apply everywhere needs to exist as up to 5 different files:
 
 Symlinks can unify the markdown-based ones, but Cursor/Windsurf require format transforms.
 
+### AGENTS.md as open standard
+
+**AGENTS.md** has emerged as an open instruction-file standard under the Linux Foundation / Agentic AI Foundation. It is adopted by Codex, OpenCode, OpenClaw, and configurable in Gemini CLI — the instruction-file equivalent of the SKILL.md skills standard. The portable path `~/.agents/` (and its `skills/` subdirectory) is scanned by Codex, Goose, Gemini CLI, OpenCode, Amp, and Cursor.
+
 ---
 
 ## 4. SKILL.md Standard (agentskills.io)
@@ -364,7 +371,9 @@ The [Agent Skills](https://agentskills.io) format originated at Anthropic in lat
 | Cursor | Adopted (2026) | — |
 | OpenCode | Standard | — |
 | OpenClaw | Compatible | — |
-| Gemini CLI | Not documented | Uses `@file` imports instead |
+| Gemini CLI | Standard | Scans `~/.gemini/skills/` and `~/.agents/skills/` |
+| Goose | Standard | Scans 6 dirs including `~/.config/goose/skills/`, `~/.config/agents/skills/`, `~/.claude/skills/` |
+| Amp | Standard (migrating to) | Scans `~/.config/amp/skills/`, `~/.config/agents/skills/`, `.claude/skills/` |
 | Windsurf | Not documented | Uses native rules format |
 
 ### Invocation methods
@@ -417,8 +426,11 @@ skill-name/
 | Claude Code | `~/.claude/skills/` | `.claude/skills/` + nested subdirs |
 | Codex CLI | `$HOME/.agents/skills/` | `.agents/skills/` → parent → repo root |
 | VS Code Copilot | `~/.copilot/skills/` | `.github/skills/` + `.claude/skills/` |
-| Antigravity | — | Skills directory (semantic matching) |
-| OpenCode | — | Via `opencode.json` `instructions` array |
+| Antigravity | `~/.gemini/antigravity/skills/` | `.gemini/skills/`, `.agents/skills/` |
+| Gemini CLI | `~/.gemini/skills/` | `~/.agents/skills/` |
+| Goose | `~/.config/goose/skills/` | `~/.config/agents/skills/`, `~/.claude/skills/` |
+| Amp | `~/.config/amp/skills/` | `~/.config/agents/skills/`, `.claude/skills/` |
+| OpenCode | `~/.config/opencode/skills/` | `~/.claude/skills/`, `~/.agents/skills/` |
 
 ---
 
