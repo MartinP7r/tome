@@ -73,3 +73,13 @@ Use `tome update` to interactively review new or changed skills and disable unwa
 `tome sync` generates a `tome.lock` file in the library directory. This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. It is used by `tome update` to diff against the current state and surface changes.
 
 The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome update` on a new machine can detect what changed since the last sync.
+
+## Library `.gitignore`
+
+`tome sync` automatically generates a `.gitignore` in the library directory:
+
+- **Managed skills** (symlinked from package managers) are gitignored — they are recreated by `tome sync`
+- **Local skills** (copied into the library) are tracked in version control
+- **Temporary files** (`.tome-manifest.tmp`, `tome.lock.tmp`) are always ignored
+
+This allows the library directory to serve as a git repository for portable skill management while keeping transient entries out of version control.

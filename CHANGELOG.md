@@ -7,41 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-- Atomic lockfile and machine prefs saves (temp+rename) to prevent corruption on crash
-- `sync` now cleans up disabled skill symlinks from targets (previously only `update` did this)
-- MCP server now filters out disabled skills from machine preferences
-- `offer_git_commit` stages specific file paths instead of `git add .`
-- `cleanup_disabled_from_target` now verifies symlinks point into the library before removing
-- `count_health_issues` merged triple directory read into a single pass
-- Managed skill consolidation repairs stale directory state instead of silently skipping
-
-### Added
-- `--machine` global CLI flag to override machine preferences path
-
-## [0.2.0] - 2026-03-13
+## [0.3.0] - 2026-03-13
 
 ### Added
 - **Per-machine preferences**: `~/.config/tome/machine.toml` with `disabled` list — skills stay in library but are skipped during distribution
 - **`tome update` command**: loads lockfile, diffs against current state, presents added/changed/removed skills interactively, offers to disable unwanted new skills
 - **`tome.lock` lockfile**: reproducible library snapshots with provenance metadata
-- **Connector architecture**: `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be a target without code changes
+- **Connector architecture**: `BTreeMap<String, TargetConfig>` replaces hardcoded Targets struct — any tool can be added as a target without code changes
 - **KnownTarget registry**: wizard auto-discovers common tool locations for target configuration
 - `--json` flag for `tome list`, structured warning collection, data struct extraction
-- **Library copies**: two-tier consolidation model — managed skills (ClaudePlugins) are symlinked, local skills (Directory) are copied into the library
+- **Two-tier consolidation**: managed skills (ClaudePlugins) are symlinked, local skills (Directory) are copied into the library
 - **Content hashing**: SHA-256 manifest (`.tome-manifest.json`) for idempotent sync — unchanged skills are skipped
 - **`.gitignore` generation** for library directory to support git-friendly skill tracking
-- **Git init** offered during wizard for library directory
-- Tool-landscape and frontmatter compatibility research docs
+- `--machine` global CLI flag to override machine preferences path
 
 ### Changed
 - `Config::exclude` changed from `Vec<String>` to `BTreeSet<SkillName>` for type safety
-- Consolidation strategies: managed skills symlinked (package manager owns files), local skills copied (library is canonical home)
 - `count_entries` now skips hidden directories
 
 ### Fixed
+- Atomic lockfile and machine prefs saves (temp+rename) to prevent corruption on crash
+- `sync` now cleans up disabled skill symlinks from targets (previously only `update` did this)
+- MCP server now filters out disabled skills from machine preferences
+- `offer_git_commit` scopes `git add` to tome-managed paths instead of `git add .`
+- `cleanup_disabled_from_target` verifies symlinks point into the library before removing
+- `count_health_issues` no longer double-counts broken managed symlinks
+- Managed skill consolidation repairs stale directory state instead of silently skipping
 - Various security and correctness fixes (MCP path validation, doctor repair, config validation)
 - Sync lifecycle and `--force` integration test coverage
+
+## [0.2.0] - 2026-02-25
+
+### Added
+- **Library copies**: library is the source of truth for local skills — `tome sync` copies from sources into the library instead of symlinking
+- **Git init** offered during wizard for library directory
+- **Git commit** offered after sync when library is a git repo with changes
+
+### Changed
+- Consolidation model: sources → (copy) → library → (symlink) → targets (previously sources → (symlink) → library → (symlink) → targets)
+
+### Fixed
+- Skip distribution to targets where skills already originate (prevents circular symlinks)
+- MCP `read_skill` path validation (symlink escape vulnerability)
+- Doctor repair checks `target.enabled` before operating
+- Config validation errors on nonexistent parent directory
+- Wizard surfaces discovery errors instead of silently swallowing
+- Various hardening (canonicalization, error propagation, `expect()` removal)
 
 ## [0.1.4] - 2026-02-25
 
@@ -99,7 +110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/MartinP7r/tome/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/MartinP7r/tome/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/MartinP7r/tome/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/MartinP7r/tome/compare/v0.1.2...v0.1.3

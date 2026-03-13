@@ -5,11 +5,11 @@
 | `tome init` | Interactive wizard to configure sources and targets |
 | `tome sync` | Discover, consolidate, and distribute skills |
 | `tome update` | Review library changes and sync with interactive triage |
-| `tome status` | Show current state of skills, symlinks, and targets |
-| `tome list` (alias: `ls`) | List all discovered skills with sources |
+| `tome status` | Show library, sources, targets, and health summary |
+| `tome list` (alias: `ls`) | List all discovered skills with sources (supports `--json`) |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues |
 | `tome serve` | Start the MCP server (stdio) |
-| `tome config` | Show or edit configuration |
+| `tome config` | Show current configuration |
 
 ## Global Flags
 
@@ -33,7 +33,7 @@ Runs the full pipeline: discover skills from sources, consolidate into the libra
 
 ### `tome update`
 
-Loads the existing `tome.lock` lockfile, diffs against the current state, and presents added/changed/removed skills interactively. Offers to disable unwanted new skills via machine preferences.
+Loads the existing `tome.lock` lockfile, diffs against the current state, and presents added/changed/removed skills interactively. Offers to disable unwanted new skills via machine preferences. If no lockfile exists yet, performs an initial sync.
 
 ### `tome list`
 

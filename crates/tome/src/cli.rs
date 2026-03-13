@@ -50,7 +50,7 @@ pub enum Command {
     /// Review library changes and sync with interactive triage
     Update,
 
-    /// Show current state of skills, symlinks, and targets
+    /// Show library, sources, targets, and health summary
     Status,
 
     /// Diagnose and repair broken symlinks or config issues

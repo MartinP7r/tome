@@ -64,7 +64,7 @@ graph LR
 ```
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
-2. **Consolidate** — Copy or symlink skills into a central library (local skills are copied, managed skills are symlinked; deduplicates, first source wins)
+2. **Consolidate** — Gather skills into a central library: local skills are copied, managed (plugin) skills are symlinked; deduplicates with first source winning
 3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory (respects per-machine disabled list)
 4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
 
