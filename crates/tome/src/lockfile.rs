@@ -25,7 +25,7 @@ pub struct Lockfile {
 }
 
 /// A single skill entry in the lockfile.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockEntry {
     /// Config source name (maps to a `[[sources]]` entry in `config.toml`).
     pub source_name: String,
@@ -78,6 +78,21 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
         version: 1,
         skills: entries,
     }
+}
+
+/// Load an existing lockfile from the library directory.
+///
+/// Returns `None` if the file doesn't exist (first run). Errors on corrupt JSON.
+pub fn load(library_dir: &Path) -> Result<Option<Lockfile>> {
+    let path = library_dir.join(LOCKFILE_NAME);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read lockfile {}", path.display()))?;
+    let lockfile: Lockfile = serde_json::from_str(&content)
+        .with_context(|| format!("failed to parse lockfile {}", path.display()))?;
+    Ok(Some(lockfile))
 }
 
 /// Write the lockfile to the library directory.
@@ -213,6 +228,42 @@ mod tests {
         let content = std::fs::read_to_string(tmp.path().join("tome.lock")).unwrap();
         assert!(content.contains("\"version\": 1"));
         assert!(content.ends_with('\n'));
+    }
+
+    #[test]
+    fn load_missing_file_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        let result = load(tmp.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_valid_file_returns_some() {
+        let tmp = TempDir::new().unwrap();
+        let lockfile = Lockfile {
+            version: 1,
+            skills: BTreeMap::from([(
+                "my-skill".to_string(),
+                LockEntry {
+                    source_name: "test".to_string(),
+                    content_hash: "abc123".to_string(),
+                    registry_id: None,
+                    version: None,
+                },
+            )]),
+        };
+        save(&lockfile, tmp.path()).unwrap();
+
+        let loaded = load(tmp.path()).unwrap().expect("should be Some");
+        assert_eq!(loaded, lockfile);
+    }
+
+    #[test]
+    fn load_corrupt_file_returns_error() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("tome.lock"), "not valid json {{{").unwrap();
+        let result = load(tmp.path());
+        assert!(result.is_err());
     }
 
     #[test]
