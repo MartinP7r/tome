@@ -14,8 +14,9 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 
 ## Install
 
+**Homebrew** (macOS/Linux):
 ```bash
-cargo install tome
+brew install MartinP7r/tap/tome
 ```
 
 ## Quick Start
@@ -26,6 +27,9 @@ tome init
 
 # Sync skills to all configured targets
 tome sync
+
+# Review new/changed skills interactively
+tome update
 
 # Check what's configured
 tome status
@@ -42,7 +46,7 @@ graph LR
     end
 
     subgraph Library
-        L["Consolidated<br/>skill library<br/>(symlinks)"]
+        L["Consolidated<br/>skill library<br/>(copies + symlinks)"]
     end
 
     subgraph Targets
@@ -60,9 +64,9 @@ graph LR
 ```
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
-2. **Consolidate** — Symlink discovered skills into a central library (deduplicates, first source wins)
-3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory
-4. **Cleanup** — Remove stale symlinks for skills that no longer exist
+2. **Consolidate** — Copy or symlink skills into a central library (local skills are copied, managed skills are symlinked; deduplicates, first source wins)
+3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory (respects per-machine disabled list)
+4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
 
 ## License
 
