@@ -22,6 +22,7 @@ allow = [
     "Unicode-3.0",
     "Unicode-DFS-2016",
     "Unlicense",
+    "Zlib",
 ]
 confidence-threshold = 0.8
 exceptions = []
