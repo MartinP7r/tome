@@ -19,6 +19,7 @@
 //! - [`mcp`] — MCP server for exposing skills to AI tools
 //! - [`run()`] — entry point that dispatches CLI commands
 
+pub(crate) mod browse;
 pub(crate) mod cleanup;
 pub mod cli;
 pub mod config;
@@ -130,6 +131,20 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Serve => {
             let machine_path = resolve_machine_path(cli.machine.as_deref())?;
             tokio::runtime::Runtime::new()?.block_on(mcp::serve(config, Some(&machine_path)))?;
+        }
+        Command::Browse => {
+            let mut warnings = Vec::new();
+            let skills = discover::discover_all(&config, &mut warnings)?;
+            if !cli.quiet {
+                for w in &warnings {
+                    eprintln!("warning: {}", w);
+                }
+            }
+            if skills.is_empty() {
+                println!("No skills found. Run `tome init` to configure sources.");
+                return Ok(());
+            }
+            browse::browse(skills)?;
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
