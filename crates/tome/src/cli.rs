@@ -8,7 +8,7 @@ use std::path::PathBuf;
     name = "tome",
     version,
     about = "Sync AI coding skills across tools",
-    after_help = "Examples:\n  tome init\n  tome sync --dry-run\n  tome status\n  tome list\n  tome doctor"
+    after_help = "Examples:\n  tome init\n  tome sync --dry-run\n  tome status\n  tome list\n  tome browse\n  tome doctor"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -66,6 +66,9 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+
+    /// Interactively browse discovered skills
+    Browse,
 
     /// Show or edit configuration
     Config {

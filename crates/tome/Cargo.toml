@@ -25,6 +25,11 @@ tabled.workspace = true
 toml.workspace = true
 walkdir.workspace = true
 
+# TUI (browse command)
+ratatui.workspace = true
+crossterm.workspace = true
+nucleo-matcher.workspace = true
+
 # Only needed for `serve` subcommand
 rmcp.workspace = true
 tokio.workspace = true
