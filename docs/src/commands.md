@@ -8,7 +8,6 @@
 | `tome status` | Show library, sources, targets, and health summary |
 | `tome list` (alias: `ls`) | List all discovered skills with sources (supports `--json`) |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues |
-| `tome serve` | Start the MCP server (stdio) |
 | `tome config` | Show current configuration |
 
 ## Global Flags

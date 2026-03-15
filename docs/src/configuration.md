@@ -22,11 +22,6 @@ type = "directory"
 enabled = true
 method = "symlink"
 skills_dir = "~/.gemini/antigravity/skills"
-
-[targets.codex]
-enabled = true
-method = "mcp"
-mcp_config = "~/.codex/.mcp.json"
 ```
 
 ### Fields
@@ -48,7 +43,6 @@ mcp_config = "~/.codex/.mcp.json"
 | Method | Fields | Description |
 |--------|--------|-------------|
 | `symlink` | `skills_dir` | Creates symlinks in the target's skills directory pointing into the library. |
-| `mcp` | `mcp_config` | Writes a `tome` server entry into the target's `.mcp.json` file. |
 
 Targets are data-driven — any tool can be added without code changes. The `tome init` wizard auto-discovers common tool locations via a built-in `KnownTarget` registry.
 
@@ -60,9 +54,7 @@ Per-machine opt-in/opt-out at `~/.config/tome/machine.toml`:
 disabled = ["noisy-skill", "work-only-skill"]
 ```
 
-Disabled skills remain in the library but are:
-- Skipped during distribution (no symlinks created in targets)
-- Hidden from the MCP server (`list_skills` and `read_skill`)
+Disabled skills remain in the library but are skipped during distribution (no symlinks created in targets).
 
 This allows sharing a single library (e.g., via git) across machines while customizing which skills are active on each one.
 

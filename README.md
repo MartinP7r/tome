@@ -58,7 +58,6 @@ tome status
 | `tome status` | Show library, sources, targets, and health               |
 | `tome list`   | List all discovered skills with sources                  |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues     |
-| `tome serve`  | Start the MCP server (stdio)                             |
 | `tome config` | Show current configuration                               |
 
 All commands support `--dry-run`, `--verbose`, `--quiet`, `--config <path>`, and `--machine <path>`.
@@ -79,7 +78,7 @@ graph LR
 
     subgraph Targets
         T1["Antigravity<br/>(symlinks)"]
-        T2["Codex<br/>(MCP config)"]
+        T2["Codex<br/>(symlinks)"]
         T3["OpenClaw<br/>(symlinks)"]
     end
 
@@ -93,7 +92,7 @@ graph LR
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
 2. **Consolidate** — Gather skills into a central library: local skills are copied, managed (plugin) skills are symlinked; deduplicates with first source winning
-3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory (respects per-machine disabled list)
+3. **Distribute** — Create symlinks in each target tool's skills directory (respects per-machine disabled list)
 4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
 
 ## Configuration
@@ -118,11 +117,6 @@ type = "directory"
 enabled = true
 method = "symlink"
 skills_dir = "~/.gemini/antigravity/skills"
-
-[targets.codex]
-enabled = true
-method = "mcp"
-mcp_config = "~/.codex/.mcp.json"
 ```
 
 ## Per-Machine Preferences
@@ -133,23 +127,7 @@ Control which skills are active on each machine via `~/.config/tome/machine.toml
 disabled = ["noisy-skill", "work-only-skill"]
 ```
 
-Disabled skills stay in the library but are skipped during distribution and hidden from the MCP server. Use `tome update` to interactively review new or changed skills and disable unwanted ones.
-
-## MCP Server
-
-tome includes a built-in MCP server for tools that support the Model Context Protocol:
-
-```bash
-# Standalone binary
-tome-mcp
-
-# Or via the CLI
-tome serve
-```
-
-The server exposes two tools:
-- `list_skills` — List all discovered skills (excludes disabled skills per machine preferences)
-- `read_skill` — Read a skill's SKILL.md content by name (returns "not found" for disabled skills)
+Disabled skills stay in the library but are skipped during distribution. Use `tome update` to interactively review new or changed skills and disable unwanted ones.
 
 ## License
 
