@@ -12,6 +12,7 @@
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
+| **v0.8**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
 
 ---
 
@@ -169,6 +170,17 @@ Auto-install managed plugins and backup the library. Builds on the portable libr
 - Debounced fsnotify-based watcher
 - Optional desktop notification on sync
 
+## v0.8 — Skill Composition ("Wolpertinger")
+
+Highly experimental. Generate custom skills by combining or synthesizing content from multiple skill authors/sources.
+
+- **Multi-source skill synthesis**: Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
+- **ACP-based authentication**: LLM calls go through an Agent Communication Protocol (ACP) flow — authenticate via existing CLIs the user already has (codex-cli, claude-code, gemini CLI) rather than requiring a separate OAuth/API-key setup
+- **Skill evaluation/creation skill** (SKILL.md): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
+- **`tome lint` standard validation** (extension): Extend `tome lint` (v0.4.1) to validate against the emerging agent skills standard, not just cross-tool frontmatter compat
+
+Dependencies: v0.5 (managed sources for marketplace access), v0.6 (git sources for GitHub repos), v0.4.1 (lint infrastructure)
+
 ## Future — Companion macOS App
 
 Native macOS skill manager app (inspired by [CodexSkillManager](https://github.com/Dimillian/CodexSkillManager)):
@@ -183,7 +195,7 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 
 ## Future Ideas
 
-- **Plugin registry**: Browse and install community skill packs
+- **Plugin registry**: Browse and install community skill packs (precursor to v0.8 Wolpertinger)
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
 - **Homebrew formula**: `brew install tome`
