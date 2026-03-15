@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.3.0 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Next up: **v0.4 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
+**v0.3.0 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Next up: **v0.4.1 Browse + Validation** (`tome browse`, `tome lint`, frontmatter parsing) and **v0.4.2 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
 
 ## Quick Reference
 
@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project & Task Workflow
 
-- Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.2, v0.3, v0.4, etc.)
+- Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.4.1, v0.4.2, v0.5, etc.)
 - Project board: **"tome Execution Board"** on GitHub Projects
 - Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
 - Workflow: check open issues → create feature branch linked to issue → draft PR → CI must pass → merge
