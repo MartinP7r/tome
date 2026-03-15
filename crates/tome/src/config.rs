@@ -578,7 +578,7 @@ skills_dir = "~/.claude/skills"
         let config: Config = toml::from_str(toml_str).unwrap();
         let claude = config.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
-        assert!(!claude.skills_dir().as_os_str().is_empty());
+        assert_eq!(claude.skills_dir(), Path::new("~/.claude/skills"));
     }
 
     #[test]
