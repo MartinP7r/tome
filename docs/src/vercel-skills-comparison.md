@@ -31,7 +31,7 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **Well-known HTTP providers** | ❌                | ✅                       | RFC 8615 `/.well-known/skills/index.json` endpoints                                 |
 | **npm/node_modules sync**     | ❌                | ✅ (experimental)        | Crawls node_modules for skills                                                      |
 | **Symlink distribution**      | ✅                | ✅                       | Both use symlinks as primary distribution method                                    |
-| **MCP distribution**          | ✅ (deprecated)   | ❌                       | Tome writes `.mcp.json` entries; Vercel doesn't                                     |
+| **MCP distribution**          | ❌ (removed)      | ❌                       | Was removed — all tools now scan SKILL.md dirs natively                              |
 | **Copy fallback**             | ❌                | ✅                       | Vercel falls back to copy when symlinks fail                                        |
 | **Lockfile**                  | ✅ `tome.lock`    | ✅ `.skill-lock.json` v3 | Both track content hashes and provenance                                            |
 | **Per-machine preferences**   | ✅ `machine.toml` | ❌                       | Tome can disable skills per machine                                                 |
@@ -45,7 +45,7 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **Format transforms**         | 🔜 v0.4           | ❌                       | Planned: SKILL.md ↔ .mdc ↔ .instructions.md                                         |
 | **Frontmatter validation**    | 🔜 v0.4           | Partial                 | Vercel parses name/description/metadata.internal                                    |
 | **Doctor/diagnostics**        | ✅ `tome doctor`  | ❌                       | Orphan detection, manifest repair, symlink health                                   |
-| **MCP server**                | ✅ `tome serve`   | ❌                       | Exposes skills to MCP-capable tools                                                 |
+| **MCP server**                | ❌ (removed)      | ❌                       | Was removed — no known consumers                                                    |
 | **Dry-run mode**              | ✅                | ❌                       | Preview changes without filesystem writes                                           |
 | **Git commit integration**    | ✅                | ❌                       | Auto-offers commit after sync when library is a git repo                            |
 | **Telemetry**                 | ❌                | ✅                       | Anonymous usage tracking (disabled in CI)                                           |

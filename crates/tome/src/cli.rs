@@ -56,9 +56,6 @@ pub enum Command {
     /// Diagnose and repair broken symlinks or config issues
     Doctor,
 
-    /// Start the MCP server
-    Serve,
-
     /// List all discovered skills with their sources
     #[command(alias = "ls")]
     List {

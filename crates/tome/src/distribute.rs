@@ -1,4 +1,4 @@
-//! Distribute library skills to target tools via symlinks or MCP config entries.
+//! Distribute library skills to target tools via symlinks.
 
 use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
@@ -51,7 +51,6 @@ pub fn distribute_to_target(
             dry_run,
             force,
         ),
-        TargetMethod::Mcp { mcp_config } => distribute_mcp(target_name, mcp_config, dry_run),
     }
 }
 
@@ -157,72 +156,6 @@ fn distribute_symlinks(
         result.changed += 1;
     }
 
-    Ok(result)
-}
-
-/// Distribute via MCP config (write server entry into .mcp.json).
-fn distribute_mcp(
-    target_name: &str,
-    mcp_config_path: &Path,
-    dry_run: bool,
-) -> Result<DistributeResult> {
-    let mut result = DistributeResult {
-        target_name: target_name.to_string(),
-        ..Default::default()
-    };
-
-    // Read or create .mcp.json
-    let mut mcp_doc: serde_json::Value = if mcp_config_path.exists() {
-        let content = std::fs::read_to_string(mcp_config_path)
-            .with_context(|| format!("failed to read {}", mcp_config_path.display()))?;
-        serde_json::from_str(&content)
-            .with_context(|| format!("failed to parse {}", mcp_config_path.display()))?
-    } else {
-        serde_json::json!({})
-    };
-
-    let servers = mcp_doc
-        .as_object_mut()
-        .context("mcp config is not an object")?
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
-
-    // Check if tome entry already exists and is correct
-    if let Some(existing) = servers.get("tome")
-        && existing.get("command").and_then(|v| v.as_str()) == Some("tome-mcp")
-    {
-        result.unchanged = 1;
-        return Ok(result);
-    }
-
-    // Add/update the tome MCP server entry
-    servers
-        .as_object_mut()
-        .context("mcpServers is not a JSON object")?
-        .insert(
-            "tome".into(),
-            serde_json::json!({
-                "command": "tome-mcp",
-                "args": [],
-                "env": {}
-            }),
-        );
-
-    if !dry_run {
-        if let Some(parent) = mcp_config_path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create dir {}", parent.display()))?;
-        }
-        let content = serde_json::to_string_pretty(&mcp_doc)?;
-        // Atomic write: temp file + rename to avoid corrupting existing MCP config
-        let tmp_path = mcp_config_path.with_extension("json.tmp");
-        std::fs::write(&tmp_path, content)
-            .with_context(|| format!("failed to write temp {}", tmp_path.display()))?;
-        std::fs::rename(&tmp_path, mcp_config_path)
-            .with_context(|| format!("failed to rename to {}", mcp_config_path.display()))?;
-    }
-
-    result.changed = 1;
     Ok(result)
 }
 
@@ -448,37 +381,6 @@ mod tests {
     }
 
     #[test]
-    fn distribute_mcp_dry_run_does_not_write_file() {
-        let library = TempDir::new().unwrap();
-        let mcp_dir = TempDir::new().unwrap();
-        let mcp_path = mcp_dir.path().join(".mcp.json");
-
-        let target = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: mcp_path.clone(),
-            },
-        };
-
-        let manifest = empty_manifest();
-        let result = distribute_to_target(
-            library.path(),
-            "codex",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            true,
-            false,
-        )
-        .unwrap();
-        assert_eq!(result.changed, 1, "dry-run should count the change");
-        assert!(
-            !mcp_path.exists(),
-            "dry-run must not write the .mcp.json file"
-        );
-    }
-
-    #[test]
     fn distribute_disabled_target_is_noop() {
         let library = TempDir::new().unwrap();
         let target = TargetConfig {
@@ -500,124 +402,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.changed, 0);
-    }
-
-    #[test]
-    fn distribute_mcp_creates_config() {
-        let library = TempDir::new().unwrap();
-        let mcp_dir = TempDir::new().unwrap();
-        let mcp_path = mcp_dir.path().join(".mcp.json");
-
-        let target = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: mcp_path.clone(),
-            },
-        };
-
-        let manifest = empty_manifest();
-        let result = distribute_to_target(
-            library.path(),
-            "codex",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        )
-        .unwrap();
-        assert_eq!(result.changed, 1);
-
-        let content = std::fs::read_to_string(&mcp_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
-    }
-
-    #[test]
-    fn distribute_mcp_preserves_existing_servers() {
-        let library = TempDir::new().unwrap();
-        let mcp_dir = TempDir::new().unwrap();
-        let mcp_path = mcp_dir.path().join(".mcp.json");
-
-        let existing = serde_json::json!({
-            "mcpServers": {
-                "other-server": {
-                    "command": "other-cmd",
-                    "args": ["--flag"]
-                }
-            }
-        });
-        std::fs::write(&mcp_path, serde_json::to_string_pretty(&existing).unwrap()).unwrap();
-
-        let target = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: mcp_path.clone(),
-            },
-        };
-
-        let manifest = empty_manifest();
-        let result = distribute_to_target(
-            library.path(),
-            "codex",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        )
-        .unwrap();
-        assert_eq!(result.changed, 1);
-
-        let content = std::fs::read_to_string(&mcp_path).unwrap();
-        let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-        assert!(parsed["mcpServers"]["other-server"]["command"].as_str() == Some("other-cmd"));
-        assert!(parsed["mcpServers"]["tome"]["command"].as_str() == Some("tome-mcp"));
-
-        let result2 = distribute_to_target(
-            library.path(),
-            "codex",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        )
-        .unwrap();
-        assert_eq!(result2.unchanged, 1);
-    }
-
-    #[test]
-    fn distribute_mcp_rejects_non_object_mcp_servers() {
-        let library = TempDir::new().unwrap();
-        let mcp_dir = TempDir::new().unwrap();
-        let mcp_path = mcp_dir.path().join(".mcp.json");
-
-        std::fs::write(&mcp_path, r#"{ "mcpServers": "not-an-object" }"#).unwrap();
-
-        let target = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: mcp_path,
-            },
-        };
-
-        let manifest = empty_manifest();
-        let result = distribute_to_target(
-            library.path(),
-            "test",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        );
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(
-            err_msg.contains("not a JSON object"),
-            "unexpected error: {err_msg}"
-        );
     }
 
     #[test]
@@ -797,38 +581,6 @@ mod tests {
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.skipped, 0);
         assert_eq!(result.changed, 0);
-    }
-
-    #[test]
-    fn distribute_mcp_does_not_leave_tmp_file() {
-        let library = TempDir::new().unwrap();
-        let mcp_dir = TempDir::new().unwrap();
-        let mcp_path = mcp_dir.path().join(".mcp.json");
-
-        let target = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: mcp_path.clone(),
-            },
-        };
-
-        let manifest = empty_manifest();
-        distribute_to_target(
-            library.path(),
-            "codex",
-            &target,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        )
-        .unwrap();
-
-        assert!(mcp_path.exists());
-        assert!(
-            !mcp_dir.path().join(".mcp.json.tmp").exists(),
-            "atomic save should not leave tmp file behind"
-        );
     }
 
     #[test]

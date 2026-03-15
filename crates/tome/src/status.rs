@@ -73,7 +73,6 @@ pub fn gather(config: &Config) -> Result<StatusReport> {
         .map(|(name, t)| {
             let method = match &t.method {
                 crate::config::TargetMethod::Symlink { .. } => "symlink",
-                crate::config::TargetMethod::Mcp { .. } => "mcp",
             };
             TargetStatus {
                 name: name.to_string(),

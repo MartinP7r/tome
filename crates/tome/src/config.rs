@@ -62,7 +62,6 @@ impl std::fmt::Display for SourceType {
 #[derive(Debug, Clone)]
 pub enum TargetMethod {
     Symlink { skills_dir: PathBuf },
-    Mcp { mcp_config: PathBuf },
 }
 
 /// Configuration for a single distribution target.
@@ -73,19 +72,10 @@ pub struct TargetConfig {
 }
 
 impl TargetConfig {
-    /// Returns the skills directory if this is a symlink target.
-    pub fn skills_dir(&self) -> Option<&Path> {
+    /// Returns the skills directory for this target.
+    pub fn skills_dir(&self) -> &Path {
         match &self.method {
-            TargetMethod::Symlink { skills_dir } => Some(skills_dir),
-            TargetMethod::Mcp { .. } => None,
-        }
-    }
-
-    /// Returns the MCP config path if this is an MCP target.
-    pub fn mcp_config(&self) -> Option<&Path> {
-        match &self.method {
-            TargetMethod::Mcp { mcp_config } => Some(mcp_config),
-            TargetMethod::Symlink { .. } => None,
+            TargetMethod::Symlink { skills_dir } => skills_dir,
         }
     }
 }
@@ -93,39 +83,25 @@ impl TargetConfig {
 // --- Serde layer: flat TOML format ↔ TargetConfig ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum DistributionMethod {
-    Symlink,
-    Mcp,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RawTargetConfig {
     enabled: bool,
-    method: DistributionMethod,
+    method: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     skills_dir: Option<PathBuf>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    mcp_config: Option<PathBuf>,
 }
 
 impl TryFrom<RawTargetConfig> for TargetConfig {
     type Error = anyhow::Error;
 
     fn try_from(raw: RawTargetConfig) -> Result<Self> {
-        let method = match raw.method {
-            DistributionMethod::Symlink => {
+        let method = match raw.method.as_str() {
+            "symlink" => {
                 let skills_dir = raw
                     .skills_dir
                     .ok_or_else(|| anyhow::anyhow!("symlink target requires skills_dir"))?;
                 TargetMethod::Symlink { skills_dir }
             }
-            DistributionMethod::Mcp => {
-                let mcp_config = raw
-                    .mcp_config
-                    .ok_or_else(|| anyhow::anyhow!("mcp target requires mcp_config"))?;
-                TargetMethod::Mcp { mcp_config }
-            }
+            other => anyhow::bail!("unknown target method: '{}'", other),
         };
         Ok(TargetConfig {
             enabled: raw.enabled,
@@ -139,15 +115,8 @@ impl From<&TargetConfig> for RawTargetConfig {
         match &tc.method {
             TargetMethod::Symlink { skills_dir } => RawTargetConfig {
                 enabled: tc.enabled,
-                method: DistributionMethod::Symlink,
+                method: "symlink".to_string(),
                 skills_dir: Some(skills_dir.clone()),
-                mcp_config: None,
-            },
-            TargetMethod::Mcp { mcp_config } => RawTargetConfig {
-                enabled: tc.enabled,
-                method: DistributionMethod::Mcp,
-                skills_dir: None,
-                mcp_config: Some(mcp_config.clone()),
             },
         }
     }
@@ -278,9 +247,6 @@ fn expand_target_tildes(t: &mut TargetConfig) -> Result<()> {
     match &mut t.method {
         TargetMethod::Symlink { skills_dir } => {
             *skills_dir = expand_tilde(skills_dir)?;
-        }
-        TargetMethod::Mcp { mcp_config } => {
-            *mcp_config = expand_tilde(mcp_config)?;
         }
     }
     Ok(())
@@ -481,9 +447,8 @@ mod tests {
     fn try_from_raw_rejects_symlink_without_skills_dir() {
         let raw = RawTargetConfig {
             enabled: true,
-            method: DistributionMethod::Symlink,
+            method: "symlink".to_string(),
             skills_dir: None,
-            mcp_config: None,
         };
         let err = TargetConfig::try_from(raw).unwrap_err();
         assert!(
@@ -493,16 +458,15 @@ mod tests {
     }
 
     #[test]
-    fn try_from_raw_rejects_mcp_without_mcp_config() {
+    fn try_from_raw_rejects_unknown_method() {
         let raw = RawTargetConfig {
             enabled: true,
-            method: DistributionMethod::Mcp,
+            method: "mcp".to_string(),
             skills_dir: None,
-            mcp_config: None,
         };
         let err = TargetConfig::try_from(raw).unwrap_err();
         assert!(
-            err.to_string().contains("requires mcp_config"),
+            err.to_string().contains("unknown target method"),
             "unexpected error: {err}"
         );
     }
@@ -518,23 +482,7 @@ mod tests {
         let toml_str = toml::to_string_pretty(&tc).unwrap();
         let parsed: TargetConfig = toml::from_str(&toml_str).unwrap();
         assert!(parsed.enabled);
-        assert_eq!(parsed.skills_dir(), Some(Path::new("/tmp/skills")));
-        assert!(parsed.mcp_config().is_none());
-    }
-
-    #[test]
-    fn target_config_roundtrip_mcp() {
-        let tc = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Mcp {
-                mcp_config: PathBuf::from("/tmp/.mcp.json"),
-            },
-        };
-        let toml_str = toml::to_string_pretty(&tc).unwrap();
-        let parsed: TargetConfig = toml::from_str(&toml_str).unwrap();
-        assert!(parsed.enabled);
-        assert_eq!(parsed.mcp_config(), Some(Path::new("/tmp/.mcp.json")));
-        assert!(parsed.skills_dir().is_none());
+        assert_eq!(parsed.skills_dir(), Path::new("/tmp/skills"));
     }
 
     #[test]
@@ -574,16 +522,10 @@ type = "directory"
 enabled = true
 method = "symlink"
 skills_dir = "~/.gemini/antigravity/skills"
-
-[targets.codex]
-enabled = true
-method = "mcp"
-mcp_config = "~/.codex/.mcp.json"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
         assert_eq!(config.sources.len(), 2);
         assert!(config.targets.contains_key("antigravity"));
-        assert!(config.targets.contains_key("codex"));
         assert!(!config.targets.contains_key("openclaw"));
     }
 
@@ -622,7 +564,7 @@ mcp_config = "~/.codex/.mcp.json"
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         let claude = parsed.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
-        assert_eq!(claude.skills_dir(), Some(Path::new("/tmp/claude-skills")));
+        assert_eq!(claude.skills_dir(), Path::new("/tmp/claude-skills"));
     }
 
     #[test]
@@ -636,7 +578,7 @@ skills_dir = "~/.claude/skills"
         let config: Config = toml::from_str(toml_str).unwrap();
         let claude = config.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
-        assert!(claude.skills_dir().is_some());
+        assert_eq!(claude.skills_dir(), Path::new("~/.claude/skills"));
     }
 
     #[test]
@@ -650,7 +592,7 @@ skills_dir = "~/.amp/skills"
         let config: Config = toml::from_str(toml_str).unwrap();
         let amp = config.targets.get("amp").expect("amp target missing");
         assert!(amp.enabled);
-        assert_eq!(amp.skills_dir(), Some(Path::new("~/.amp/skills")));
+        assert_eq!(amp.skills_dir(), Path::new("~/.amp/skills"));
     }
 
     #[test]

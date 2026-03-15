@@ -15,7 +15,7 @@ graph TB
     end
 
     subgraph TEST_SUITE["cargo test --all"]
-        UNIT["Unit Tests<br/><i>195 tests across 15 modules</i>"]
+        UNIT["Unit Tests<br/><i>175 tests across 14 modules</i>"]
         INTEG["Integration Tests<br/><i>31 tests in tests/cli.rs</i>"]
     end
 
@@ -53,20 +53,19 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph unit_tests["Unit Tests (195)"]
-        CONFIG["config.rs<br/>─────────<br/>23 tests"]
+    subgraph unit_tests["Unit Tests (175)"]
+        CONFIG["config.rs<br/>─────────<br/>21 tests"]
         DISCOVER["discover.rs<br/>─────────<br/>17 tests"]
         LIBRARY["library.rs<br/>─────────<br/>30 tests"]
-        DISTRIBUTE["distribute.rs<br/>─────────<br/>16 tests"]
+        DISTRIBUTE["distribute.rs<br/>─────────<br/>11 tests"]
         CLEANUP["cleanup.rs<br/>─────────<br/>8 tests"]
         DOCTOR["doctor.rs<br/>─────────<br/>19 tests"]
         STATUS["status.rs<br/>─────────<br/>16 tests"]
         LOCKFILE["lockfile.rs<br/>─────────<br/>15 tests"]
         MANIFEST["manifest.rs<br/>─────────<br/>8 tests"]
         MACHINE["machine.rs<br/>─────────<br/>8 tests"]
-        MCP["mcp.rs<br/>─────────<br/>7 tests"]
         UPDATE["update.rs<br/>─────────<br/>8 tests"]
-        WIZARD["wizard.rs<br/>─────────<br/>7 tests"]
+        WIZARD["wizard.rs<br/>─────────<br/>6 tests"]
         PATHS["paths.rs<br/>─────────<br/>5 tests"]
         LIB["lib.rs<br/>─────────<br/>8 tests"]
     end
@@ -85,7 +84,6 @@ graph TB
     style LOCKFILE fill:#e8f4e8
     style MANIFEST fill:#e8f4e8
     style MACHINE fill:#e8f4e8
-    style MCP fill:#e8f4e8
     style UPDATE fill:#e8f4e8
     style WIZARD fill:#e8f4e8
     style PATHS fill:#e8f4e8
@@ -93,7 +91,7 @@ graph TB
     style CLI fill:#e8e4f4
 ```
 
-### `config.rs` — 23 tests
+### `config.rs` — 21 tests
 
 Tests config loading, serialization, tilde expansion, validation, and target parsing.
 
@@ -112,10 +110,9 @@ Tests config loading, serialization, tilde expansion, validation, and target par
 | `config_roundtrip_claude_target` | Claude target serialization roundtrip |
 | `load_or_default_errors_when_parent_dir_missing` | Missing parent dir returns error |
 | `load_or_default_returns_defaults_when_parent_exists` | Existing parent dir with no file returns defaults |
-| `target_config_roundtrip_mcp` | MCP target serialization roundtrip |
 | `target_config_roundtrip_symlink` | Symlink target serialization roundtrip |
 | `targets_iter_includes_claude` | Claude target included in iterator |
-| `try_from_raw_rejects_mcp_without_mcp_config` | MCP target requires `mcp_config` field |
+| `try_from_raw_rejects_unknown_method` | Unknown method string rejected |
 | `try_from_raw_rejects_symlink_without_skills_dir` | Symlink target requires `skills_dir` field |
 | `validate_passes_for_valid_config` | Valid config passes validation |
 | `validate_rejects_duplicate_source_names` | Duplicate source names rejected |
@@ -184,7 +181,7 @@ Tests the consolidation step — copying local skills and symlinking managed ski
 | `gitignore_idempotent` | Repeated gitignore writes are idempotent |
 | `gitignore_always_ignores_tmp_files` | `.gitignore` includes `*.tmp` pattern |
 
-### `distribute.rs` — 16 tests
+### `distribute.rs` — 11 tests
 
 Tests the distribution step — pushing skills from library to target tools.
 
@@ -202,10 +199,6 @@ Tests the distribution step — pushing skills from library to target tools.
 | `distribute_skips_disabled_skills` | Machine-disabled skills not distributed |
 | `distribute_skips_skills_originating_from_target_dir` | Skills from target's own dir skipped |
 | `distribute_idempotent_with_canonicalized_paths` | Idempotent with canonicalized paths |
-| `distribute_mcp_creates_config` | MCP method creates `.mcp.json` with tome entry |
-| `distribute_mcp_preserves_existing_servers` | Adding tome entry doesn't clobber existing servers |
-| `distribute_mcp_dry_run_does_not_write_file` | MCP dry run writes nothing |
-| `distribute_mcp_rejects_non_object_mcp_servers` | Invalid mcpServers handled |
 
 ### `cleanup.rs` — 8 tests
 
@@ -300,20 +293,6 @@ Tests library manifest operations and content hashing.
 | `hash_directory_includes_subdirs` | Subdirectory contents included in hash |
 | `now_iso8601_format` | Timestamp format is ISO 8601 |
 
-### `mcp.rs` — 7 tests
-
-Tests the MCP server tool handlers.
-
-| Test | What it verifies |
-|------|-----------------|
-| `list_skills_returns_skills` | Skills discovered and returned |
-| `list_skills_with_no_sources` | Empty sources returns empty list |
-| `list_skills_excludes_disabled` | Machine-disabled skills excluded |
-| `read_skill_returns_content` | Skill content read correctly |
-| `read_skill_not_found` | Unknown skill returns not found |
-| `read_skill_returns_not_found_for_disabled` | Disabled skill returns not found |
-| `read_skill_rejects_skill_md_symlink_escape` | Path traversal via symlink rejected |
-
 ### `status.rs` — 16 tests
 
 Tests status gathering and health checks.
@@ -352,7 +331,7 @@ Tests lockfile diffing for the `tome update` command.
 | `diff_mixed_changes` | Mix of added/removed/changed/unchanged |
 | `diff_detects_managed_skill` | Managed skills flagged in diff |
 
-### `wizard.rs` — 7 tests
+### `wizard.rs` — 6 tests
 
 Tests wizard auto-discovery and overlap detection.
 
@@ -364,7 +343,6 @@ Tests wizard auto-discovery and overlap detection.
 | `detects_source_target_overlap` | Source/target path overlap detected |
 | `detects_claude_source_target_overlap` | Claude-specific overlap detected |
 | `no_overlap_when_paths_differ` | Distinct paths pass overlap check |
-| `no_overlap_with_mcp_targets` | MCP targets don't trigger overlap |
 
 ### `lib.rs` — 8 tests
 

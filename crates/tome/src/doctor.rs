@@ -69,10 +69,8 @@ pub fn check(config: &Config) -> Result<DoctorReport> {
 
     let mut target_issues = Vec::new();
     for (name, t) in config.targets.iter() {
-        if t.enabled
-            && let Some(skills_dir) = t.skills_dir()
-        {
-            let issues = check_target_dir(name, skills_dir, &config.library_dir)?;
+        if t.enabled {
+            let issues = check_target_dir(name, t.skills_dir(), &config.library_dir)?;
             target_issues.push((name.to_string(), issues));
         }
     }
@@ -140,11 +138,9 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
                 repair_library(&config.library_dir)?;
 
                 for (name, t) in config.targets.iter() {
-                    if t.enabled
-                        && let Some(skills_dir) = t.skills_dir()
-                    {
+                    if t.enabled {
                         let removed =
-                            cleanup::cleanup_target(skills_dir, &config.library_dir, false)?;
+                            cleanup::cleanup_target(t.skills_dir(), &config.library_dir, false)?;
                         if removed > 0 {
                             println!(
                                 "  {} Removed {} stale symlink(s) from {}",

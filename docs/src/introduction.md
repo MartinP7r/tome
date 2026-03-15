@@ -51,7 +51,7 @@ graph LR
 
     subgraph Targets
         T1["Antigravity<br/>(symlinks)"]
-        T2["Codex<br/>(MCP config)"]
+        T2["Codex<br/>(symlinks)"]
         T3["OpenClaw<br/>(symlinks)"]
     end
 
@@ -65,7 +65,7 @@ graph LR
 
 1. **Discover** — Scan configured sources for `*/SKILL.md` directories
 2. **Consolidate** — Gather skills into a central library: local skills are copied, managed (plugin) skills are symlinked; deduplicates with first source winning
-3. **Distribute** — Create symlinks or MCP config entries in each target tool's directory (respects per-machine disabled list)
+3. **Distribute** — Create symlinks in each target tool's skills directory (respects per-machine disabled list)
 4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
 
 ## License

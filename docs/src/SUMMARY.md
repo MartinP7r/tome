@@ -5,7 +5,6 @@
 - [Commands](commands.md)
 - [Configuration](configuration.md)
 - [Architecture](architecture.md)
-- [MCP Server](mcp-server.md)
 - [Tool Landscape](tool-landscape.md)
 - [Frontmatter Compatibility](frontmatter-compatibility.md)
 - [Vercel Skills Comparison](vercel-skills-comparison.md)

@@ -29,10 +29,6 @@ ratatui = "0.30"
 crossterm = "0.29"
 nucleo-matcher = "0.3"
 
-# Async / MCP
-rmcp = { version = "1.1", features = ["server", "transport-io"] }
-tokio = { version = "1", features = ["full"] }
-
 # Dev dependencies
 assert_cmd = "2"
 assert_fs = "1"

@@ -51,7 +51,6 @@ clean:
 
 install:
 	cargo install --path crates/tome
-	cargo install --path crates/tome-mcp
 
 ci: fmt-check lint test
 	@echo "All checks passed"

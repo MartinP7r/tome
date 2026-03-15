@@ -16,7 +16,6 @@
 //!
 //! - [`config`] — TOML configuration loading and validation
 //! - [`cli`] — command-line argument parsing (clap)
-//! - [`mcp`] — MCP server for exposing skills to AI tools
 //! - [`run()`] — entry point that dispatches CLI commands
 
 pub(crate) mod browse;
@@ -30,7 +29,6 @@ pub(crate) mod library;
 pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
-pub mod mcp;
 pub(crate) mod paths;
 pub(crate) mod status;
 pub(crate) mod update;
@@ -128,10 +126,6 @@ pub fn run(cli: Cli) -> Result<()> {
         )?,
         Command::Status => status::show(&config)?,
         Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
-        Command::Serve => {
-            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-            tokio::runtime::Runtime::new()?.block_on(mcp::serve(config, Some(&machine_path)))?;
-        }
         Command::Browse => {
             let mut warnings = Vec::new();
             let skills = discover::discover_all(&config, &mut warnings)?;
@@ -254,17 +248,11 @@ fn sync(
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
-        if let Some(skills_dir) = target.skills_dir() {
-            removed_from_targets +=
-                cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
-            // Also clean up symlinks for disabled skills
-            removed_from_targets += cleanup_disabled_from_target(
-                skills_dir,
-                &config.library_dir,
-                &machine_prefs,
-                dry_run,
-            )?;
-        }
+        let skills_dir = target.skills_dir();
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        // Also clean up symlinks for disabled skills
+        removed_from_targets +=
+            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
     }
     // Save manifest after cleanup (may have removed entries)
     if !dry_run && config.library_dir.is_dir() {
@@ -439,17 +427,11 @@ fn update_cmd(
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
-        if let Some(skills_dir) = target.skills_dir() {
-            removed_from_targets +=
-                cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
-            // Also clean up symlinks for disabled skills
-            removed_from_targets += cleanup_disabled_from_target(
-                skills_dir,
-                &config.library_dir,
-                &machine_prefs,
-                dry_run,
-            )?;
-        }
+        let skills_dir = target.skills_dir();
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        // Also clean up symlinks for disabled skills
+        removed_from_targets +=
+            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
     }
 
     if let Some(sp) = sp {

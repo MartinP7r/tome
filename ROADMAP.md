@@ -84,7 +84,7 @@ Complete the multi-machine skill management story. The lockfile (#38, shipped ea
 - Preserve original format — transforms are output-only
 - Connectors declare input/output formats; the pipeline resolves the translation chain
 - **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
-- **Deprecate `DistributionMethod::Mcp`**: No known targets use MCP distribution as of March 2026 — all major AI coding tools now support SKILL.md directory scanning natively. Emit a deprecation warning when MCP targets are configured; remove the variant in a future major version.
+- ~~**Deprecate `DistributionMethod::Mcp`**~~: Removed in [#262](https://github.com/MartinP7r/tome/issues/262). No known targets used MCP distribution — all major AI coding tools read SKILL.md files from disk via symlinks. The `tome-mcp` binary, `tome serve` command, and `TargetMethod::Mcp` distribution path were removed along with the `rmcp` and `tokio` dependencies. MCP support can be re-added if a concrete use case emerges.
 
 ## v0.4.x — Browse + Skill Validation
 
@@ -108,7 +108,7 @@ Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool c
 - Add `serde_yaml` dependency
 - Create a `Skill` struct with typed fields for the base standard (name, description, license, compatibility, metadata, allowed-tools)
 - Parse frontmatter during discovery (enrich `DiscoveredSkill`)
-- Store parsed metadata for validation, MCP responses, and status display
+- Store parsed metadata for validation and status display
 
 ### `tome lint` Command
 
