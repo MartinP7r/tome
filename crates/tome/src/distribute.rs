@@ -114,12 +114,10 @@ fn distribute_symlinks(
                     result.unchanged += 1;
                     continue;
                 }
-                (Err(_), _) | (_, Err(_)) => {
-                    eprintln!(
-                        "warning: could not resolve paths for circular symlink check on '{}', proceeding",
-                        skill_name_str
-                    );
-                }
+                // If either path can't be canonicalized (e.g. target dir doesn't
+                // exist yet in dry-run mode), they can't be the same physical
+                // directory — no circular symlink risk.
+                (Err(_), _) | (_, Err(_)) => {}
                 _ => {}
             }
         }
