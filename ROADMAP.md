@@ -7,8 +7,8 @@
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
-| **v0.4**   | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
-| **v0.4.x** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
+| **v0.4.1** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
+| **v0.4.2** | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
@@ -20,7 +20,7 @@
 - **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — `dialoguer` doesn't surface these by default
 - **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
 - **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
-- ~~**Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.~~ → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.x.
+- ~~**Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.~~ → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.1.
 - **Progress spinners for sync** (`indicatif`): Show spinners/progress during discover → consolidate → distribute steps instead of silent waits or verbose text dumps
 - **Table-formatted output** (`tabled`): Replace manual `format!` column alignment in `tome list` and `tome status` with proper table rendering — handles terminal width, truncation, and alignment automatically
 - ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
@@ -44,9 +44,9 @@ Make the library the source of truth for local skills. `tome sync` copies skill 
 
 ## v0.2.1 — Output Layer ✓
 
-Decouple output rendering from business logic. Prerequisite for `tome browse` (v0.4.x) and `--json` output (#167), ensuring new connectors in v0.3 get clean data separation from day one.
+Decouple output rendering from business logic. Prerequisite for `tome browse` (v0.4.1) and `--json` output (#167), ensuring new connectors in v0.3 get clean data separation from day one.
 
-- ~~**Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations~~ — Closed as superseded (#183). Data struct extraction was the real prerequisite; ratatui (v0.4.x) will consume data structs directly rather than going through a trait.
+- ~~**Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations~~ — Closed as superseded (#183). Data struct extraction was the real prerequisite; ratatui (v0.4.1) will consume data structs directly rather than going through a trait.
 - **Data struct extraction**: `status::gather() -> StatusReport`, `doctor::diagnose() -> DoctorReport`, sync pipeline returns `SyncReport` — pure computation separated from rendering
 - **Warning collection**: Replace scattered `eprintln!` in discover/library/distribute with `Vec<Warning>` returned alongside results
 - ~~**TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait~~ — Superseded along with Renderer trait.
@@ -67,7 +67,7 @@ Replaced the hardcoded `Targets` struct with a flexible, data-driven target conf
 
 - **Connector trait** → [#192](https://github.com/MartinP7r/tome/issues/192). Unified source/target interface. The BTreeMap solved config flexibility; the trait solves architectural abstraction.
 - **Built-in connectors** → Part of [#192](https://github.com/MartinP7r/tome/issues/192). Claude, Codex, Antigravity, Cursor, Windsurf, Amp, Goose, etc.
-- **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4 Format Transforms).
+- **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4.2 Format Transforms).
 - **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Separate concern from skills.
 - **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). High complexity, needs design.
 
@@ -78,15 +78,7 @@ Complete the multi-machine skill management story. The lockfile (#38, shipped ea
 - ~~**Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`)~~: Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3. Disabled skills stay in the library but are skipped during distribution.
 - ~~**`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40))~~: Reads lockfile, diffs against local state, surfaces new/changed/removed skills interactively. Offers to disable unwanted new skills. Notification-only for managed plugins — auto-install deferred to v0.5.
 
-## v0.4 — Format Transforms
-
-- Pluggable transform pipeline driven by connector format declarations
-- Preserve original format — transforms are output-only
-- Connectors declare input/output formats; the pipeline resolves the translation chain
-- **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
-- ~~**Deprecate `DistributionMethod::Mcp`**~~: Removed in [#262](https://github.com/MartinP7r/tome/issues/262). No known targets used MCP distribution — all major AI coding tools read SKILL.md files from disk via symlinks. The `tome-mcp` binary, `tome serve` command, and `TargetMethod::Mcp` distribution path were removed along with the `rmcp` and `tokio` dependencies. MCP support can be re-added if a concrete use case emerges.
-
-## v0.4.x — Browse + Skill Validation
+## v0.4.1 — Browse + Skill Validation
 
 Interactive skill browser and YAML frontmatter linting. Depends on v0.2.1 output layer for clean data access.
 
@@ -144,6 +136,14 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Fields unsupported by that target
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
+
+## v0.4.2 — Format Transforms
+
+- Pluggable transform pipeline driven by connector format declarations
+- Preserve original format — transforms are output-only
+- Connectors declare input/output formats; the pipeline resolves the translation chain
+- **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
+- ~~**Deprecate `DistributionMethod::Mcp`**~~: Removed in [#262](https://github.com/MartinP7r/tome/issues/262). No known targets used MCP distribution — all major AI coding tools read SKILL.md files from disk via symlinks. The `tome-mcp` binary, `tome serve` command, and `TargetMethod::Mcp` distribution path were removed along with the `rmcp` and `tokio` dependencies. MCP support can be re-added if a concrete use case emerges.
 
 ## v0.5 — Managed Sources
 
