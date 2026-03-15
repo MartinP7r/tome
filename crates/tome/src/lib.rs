@@ -248,17 +248,11 @@ fn sync(
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
-        if let Some(skills_dir) = target.skills_dir() {
-            removed_from_targets +=
-                cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
-            // Also clean up symlinks for disabled skills
-            removed_from_targets += cleanup_disabled_from_target(
-                skills_dir,
-                &config.library_dir,
-                &machine_prefs,
-                dry_run,
-            )?;
-        }
+        let skills_dir = target.skills_dir();
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        // Also clean up symlinks for disabled skills
+        removed_from_targets +=
+            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
     }
     // Save manifest after cleanup (may have removed entries)
     if !dry_run && config.library_dir.is_dir() {
@@ -433,17 +427,11 @@ fn update_cmd(
 
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
-        if let Some(skills_dir) = target.skills_dir() {
-            removed_from_targets +=
-                cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
-            // Also clean up symlinks for disabled skills
-            removed_from_targets += cleanup_disabled_from_target(
-                skills_dir,
-                &config.library_dir,
-                &machine_prefs,
-                dry_run,
-            )?;
-        }
+        let skills_dir = target.skills_dir();
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        // Also clean up symlinks for disabled skills
+        removed_from_targets +=
+            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
     }
 
     if let Some(sp) = sp {

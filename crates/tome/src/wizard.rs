@@ -8,8 +8,7 @@ use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Config, DistributionMethod, Source, SourceType, TargetConfig, TargetMethod,
-    default_config_path, expand_tilde,
+    Config, Source, SourceType, TargetConfig, TargetMethod, default_config_path, expand_tilde,
 };
 
 /// Run the interactive setup wizard.
@@ -265,7 +264,6 @@ fn configure_library() -> Result<PathBuf> {
 struct KnownTarget {
     name: &'static str,
     display: &'static str,
-    method: DistributionMethod,
     /// Path relative to $HOME
     default_path: &'static str,
     path_prompt: &'static str,
@@ -275,63 +273,54 @@ const KNOWN_TARGETS: &[KnownTarget] = &[
     KnownTarget {
         name: "claude",
         display: "Claude Code",
-        method: DistributionMethod::Symlink,
         default_path: ".claude/skills",
         path_prompt: "Claude Code skills directory",
     },
     KnownTarget {
         name: "antigravity",
         display: "Antigravity",
-        method: DistributionMethod::Symlink,
         default_path: ".gemini/antigravity/skills",
         path_prompt: "Antigravity skills directory",
     },
     KnownTarget {
         name: "codex",
         display: "Codex",
-        method: DistributionMethod::Symlink,
         default_path: ".agents/skills",
         path_prompt: "Codex skills directory",
     },
     KnownTarget {
         name: "openclaw",
         display: "OpenClaw",
-        method: DistributionMethod::Symlink,
         default_path: ".openclaw/skills",
         path_prompt: "OpenClaw skills directory",
     },
     KnownTarget {
         name: "goose",
         display: "Goose",
-        method: DistributionMethod::Symlink,
         default_path: ".config/goose/skills",
         path_prompt: "Goose skills directory",
     },
     KnownTarget {
         name: "gemini-cli",
         display: "Gemini CLI",
-        method: DistributionMethod::Symlink,
         default_path: ".gemini/skills",
         path_prompt: "Gemini CLI skills directory",
     },
     KnownTarget {
         name: "amp",
         display: "Amp",
-        method: DistributionMethod::Symlink,
         default_path: ".config/amp/skills",
         path_prompt: "Amp skills directory",
     },
     KnownTarget {
         name: "opencode",
         display: "OpenCode",
-        method: DistributionMethod::Symlink,
         default_path: ".config/opencode/skills",
         path_prompt: "OpenCode skills directory",
     },
     KnownTarget {
         name: "copilot",
         display: "VS Code Copilot",
-        method: DistributionMethod::Symlink,
         default_path: ".copilot/skills",
         path_prompt: "Copilot skills directory",
     },
@@ -361,20 +350,13 @@ fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
             .default(default_path.display().to_string())
             .interact_text()?;
 
-        let method = match known.method {
-            DistributionMethod::Symlink => TargetMethod::Symlink {
-                skills_dir: expand_tilde(&PathBuf::from(path))?,
-            },
-            DistributionMethod::Mcp => TargetMethod::Mcp {
-                mcp_config: expand_tilde(&PathBuf::from(path))?,
-            },
-        };
-
         targets.insert(
             known.name.to_string(),
             TargetConfig {
                 enabled: true,
-                method,
+                method: TargetMethod::Symlink {
+                    skills_dir: expand_tilde(&PathBuf::from(path))?,
+                },
             },
         );
     }
@@ -391,36 +373,17 @@ fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
             break;
         }
 
-        let method_options = &["symlink", "mcp"];
-        let method_idx = Select::new()
-            .with_prompt("Distribution method")
-            .items(method_options)
-            .default(0)
-            .interact()?;
-
         let path: String = Input::new()
-            .with_prompt(if method_idx == 0 {
-                "Skills directory"
-            } else {
-                "MCP config path"
-            })
+            .with_prompt("Skills directory")
             .interact_text()?;
-
-        let method = if method_idx == 0 {
-            TargetMethod::Symlink {
-                skills_dir: expand_tilde(&PathBuf::from(path))?,
-            }
-        } else {
-            TargetMethod::Mcp {
-                mcp_config: expand_tilde(&PathBuf::from(path))?,
-            }
-        };
 
         targets.insert(
             name,
             TargetConfig {
                 enabled: true,
-                method,
+                method: TargetMethod::Symlink {
+                    skills_dir: expand_tilde(&PathBuf::from(path))?,
+                },
             },
         );
     }
@@ -488,22 +451,16 @@ const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
     ("agents-skills", ".agents/skills", SourceType::Directory),
 ];
 
-/// Check if any source path matches a symlink target path.
+/// Check if any source path matches a target's skills directory.
 ///
 /// Returns `(source_name, overlapping_path)` pairs for each conflict.
-/// Only compares against `Symlink` targets (not `Mcp`), since MCP config
-/// files are JSON configs, not skills directories.
-///
-/// NOTE: No known targets use MCP distribution as of March 2026.
-/// All major AI coding tools now support SKILL.md directory scanning natively.
-/// MCP distribution is retained for custom user targets but may be removed in a future version.
 fn find_source_target_overlaps(
     sources: &[Source],
     targets: &BTreeMap<String, TargetConfig>,
 ) -> Vec<(String, PathBuf)> {
     let target_paths: Vec<PathBuf> = targets
         .values()
-        .filter_map(|config| config.skills_dir().map(|p| p.to_path_buf()))
+        .map(|config| config.skills_dir().to_path_buf())
         .collect();
 
     sources
@@ -670,30 +627,5 @@ mod tests {
         let overlaps = find_source_target_overlaps(&sources, &targets);
         assert_eq!(overlaps.len(), 1);
         assert_eq!(overlaps[0].0, "claude-skills");
-    }
-
-    #[test]
-    fn no_overlap_with_mcp_targets() {
-        // Synthetic MCP target — no known targets use MCP as of March 2026,
-        // but custom user targets may still use it.
-        let sources = vec![Source {
-            name: "custom-skills".into(),
-            path: PathBuf::from("/home/user/.custom/.mcp.json"),
-            source_type: SourceType::Directory,
-        }];
-
-        let targets = BTreeMap::from([(
-            "custom-mcp".to_string(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Mcp {
-                    mcp_config: PathBuf::from("/home/user/.custom/.mcp.json"),
-                },
-            },
-        )]);
-
-        // MCP targets should not be compared — mcp_config is a JSON file, not a skills dir
-        let overlaps = find_source_target_overlaps(&sources, &targets);
-        assert!(overlaps.is_empty());
     }
 }
