@@ -23,7 +23,7 @@ endif
 	git add Cargo.toml Cargo.lock; \
 	git commit -m "Bump version to $$SEMVER"; \
 	git push -u origin "$$BRANCH"; \
-	gh pr create --title "Bump version to $$SEMVER" --body "Release $$TAG" --assignee MartinP7r; \
+	gh pr create --head "$$BRANCH" --title "Bump version to $$SEMVER" --body "Release $$TAG" --assignee MartinP7r; \
 	gh pr merge --squash --delete-branch; \
 	git checkout main; \
 	git pull origin main; \
