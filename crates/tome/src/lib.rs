@@ -87,12 +87,12 @@ fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::Pa
 fn resolve_tome_home(cli_config: Option<&Path>) -> Result<std::path::PathBuf> {
     match cli_config {
         Some(p) => {
-            let parent = p.parent().context("config path has no parent directory")?;
             anyhow::ensure!(
-                !parent.as_os_str().is_empty(),
-                "config path '{}' has no parent directory — use an absolute path",
+                p.is_absolute(),
+                "config path '{}' must be an absolute path",
                 p.display()
             );
+            let parent = p.parent().context("config path has no parent directory")?;
             Ok(parent.to_path_buf())
         }
         None => config::default_tome_home(),
@@ -944,9 +944,22 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("no parent directory"),
+            err_msg.contains("must be an absolute path"),
             "unexpected error: {err_msg}"
         );
+    }
+
+    #[test]
+    fn resolve_tome_home_relative_path_returns_error() {
+        for path in &["./tome.toml", "../tome.toml", "subdir/tome.toml"] {
+            let result = resolve_tome_home(Some(Path::new(path)));
+            assert!(result.is_err(), "expected error for relative path: {path}");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("must be an absolute path"),
+                "unexpected error for '{path}': {err_msg}"
+            );
+        }
     }
 
     #[test]
