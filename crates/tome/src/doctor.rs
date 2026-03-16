@@ -54,7 +54,7 @@ impl DoctorReport {
 
 /// Run all diagnostic checks and return a structured report.
 pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
-    let configured = paths.library_dir.is_dir() || !config.sources.is_empty();
+    let configured = paths.library_dir().is_dir() || !config.sources.is_empty();
 
     if !configured {
         return Ok(DoctorReport {
@@ -70,7 +70,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
     let mut target_issues = Vec::new();
     for (name, t) in config.targets.iter() {
         if t.enabled {
-            let issues = check_target_dir(name.as_str(), t.skills_dir(), &paths.library_dir)?;
+            let issues = check_target_dir(name.as_str(), t.skills_dir(), paths.library_dir())?;
             target_issues.push((name.as_str().to_string(), issues));
         }
     }
@@ -140,7 +140,7 @@ pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()>
                 for (name, t) in config.targets.iter() {
                     if t.enabled {
                         let removed =
-                            cleanup::cleanup_target(t.skills_dir(), &paths.library_dir, false)?;
+                            cleanup::cleanup_target(t.skills_dir(), paths.library_dir(), false)?;
                         if removed > 0 {
                             println!(
                                 "  {} Removed {} stale symlink(s) from {}",
@@ -191,8 +191,8 @@ fn render_issues_for_target(name: &str, issues: &[DiagnosticIssue]) {
 // -- Check functions (return structured data) --
 
 fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
-    let library_dir = &paths.library_dir;
-    let tome_home = &paths.tome_home;
+    let library_dir = paths.library_dir();
+    let tome_home = paths.tome_home();
     let mut issues = Vec::new();
 
     if !library_dir.is_dir() {
@@ -348,8 +348,8 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
 
 /// Repair library issues: remove orphan manifest entries and broken symlinks.
 fn repair_library(paths: &TomePaths) -> Result<()> {
-    let library_dir = &paths.library_dir;
-    let tome_home = &paths.tome_home;
+    let library_dir = paths.library_dir();
+    let tome_home = paths.tome_home();
     let mut m = manifest::load(tome_home).with_context(|| {
         "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
     })?;
@@ -426,7 +426,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let report = check(
             &config,
-            &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()),
+            &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert!(!report.configured);
@@ -459,7 +459,7 @@ mod tests {
 
         let report = check(
             &config,
-            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()),
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert!(report.configured);
@@ -478,7 +478,7 @@ mod tests {
 
         let report = check(
             &config,
-            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()),
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert_eq!(report.library_issues.len(), 1);
@@ -502,7 +502,7 @@ mod tests {
 
         let report = check(
             &config,
-            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()),
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert_eq!(report.config_issues.len(), 1);
@@ -514,10 +514,13 @@ mod tests {
     #[test]
     fn check_library_missing_dir() {
         let tmp = TempDir::new().unwrap();
-        let result = check_library(&TomePaths::new(
-            tmp.path().to_path_buf(),
-            Path::new("/nonexistent/library").to_path_buf(),
-        ))
+        let result = check_library(
+            &TomePaths::new(
+                tmp.path().to_path_buf(),
+                Path::new("/nonexistent/library").to_path_buf(),
+            )
+            .unwrap(),
+        )
         .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Warning);
@@ -542,10 +545,9 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        let result = check_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        let result = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert!(result.is_empty());
     }
@@ -567,10 +569,9 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        let result = check_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        let result = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Error);
@@ -581,10 +582,9 @@ mod tests {
         let lib = TempDir::new().unwrap();
         std::fs::create_dir_all(lib.path().join("orphan")).unwrap();
 
-        let result = check_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        let result = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Warning);
@@ -595,10 +595,9 @@ mod tests {
         let lib = TempDir::new().unwrap();
         unix_fs::symlink("/nonexistent/target", lib.path().join("broken")).unwrap();
 
-        let result = check_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        let result = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Error);
@@ -682,7 +681,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let result = diagnose(
             &config,
-            &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()),
+            &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()).unwrap(),
             true,
         );
         assert!(result.is_ok());
@@ -714,10 +713,9 @@ mod tests {
         manifest::save(&m, tome_home.path()).unwrap();
 
         // check_library should read manifest from tome_home, not library_dir
-        let issues = check_library(&TomePaths::new(
-            tome_home.path().to_path_buf(),
-            library.path().to_path_buf(),
-        ))
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert!(
             issues.is_empty(),
@@ -726,10 +724,9 @@ mod tests {
 
         // Verify it would fail if we pointed tome_home at the wrong place
         // (library_dir has no manifest, so it loads an empty one and sees an orphan)
-        let issues = check_library(&TomePaths::new(
-            library.path().to_path_buf(),
-            library.path().to_path_buf(),
-        ))
+        let issues = check_library(
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
         assert_eq!(
             issues.len(),
@@ -756,10 +753,9 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        repair_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
 
         let after = manifest::load(lib.path()).unwrap();
@@ -788,10 +784,9 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        repair_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
 
         assert!(
@@ -809,10 +804,9 @@ mod tests {
         // Broken legacy symlink (not in manifest)
         unix_fs::symlink("/nonexistent/v01/skill", lib.path().join("legacy")).unwrap();
 
-        repair_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        repair_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
 
         assert!(
@@ -840,10 +834,9 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(&TomePaths::new(
-            lib.path().to_path_buf(),
-            lib.path().to_path_buf(),
-        ))
+        repair_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
 
         let after = manifest::load(lib.path()).unwrap();

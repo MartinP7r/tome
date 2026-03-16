@@ -44,10 +44,10 @@ pub struct StatusReport {
 
 /// Gather status data without producing any output.
 pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
-    let configured = paths.library_dir.is_dir() || !config.sources.is_empty();
+    let configured = paths.library_dir().is_dir() || !config.sources.is_empty();
 
-    let library_count = if paths.library_dir.is_dir() {
-        count_entries(&paths.library_dir).map_err(|e| e.to_string())
+    let library_count = if paths.library_dir().is_dir() {
+        count_entries(paths.library_dir()).map_err(|e| e.to_string())
     } else {
         Ok(0)
     };
@@ -83,15 +83,15 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         })
         .collect();
 
-    let health = if paths.library_dir.is_dir() {
-        count_health_issues(&paths.library_dir, &paths.tome_home).map_err(|e| e.to_string())
+    let health = if paths.library_dir().is_dir() {
+        count_health_issues(paths.library_dir(), paths.tome_home()).map_err(|e| e.to_string())
     } else {
         Ok(0)
     };
 
     Ok(StatusReport {
         configured,
-        library_dir: paths.library_dir.clone(),
+        library_dir: paths.library_dir().to_path_buf(),
         library_count,
         sources,
         targets,
@@ -283,7 +283,7 @@ mod tests {
 
         let report = gather(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert!(!report.configured);
@@ -307,7 +307,7 @@ mod tests {
 
         let report = gather(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert!(report.configured);
@@ -330,7 +330,7 @@ mod tests {
 
         let report = gather(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert!(report.configured);
@@ -361,7 +361,7 @@ mod tests {
 
         let report = gather(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert_eq!(report.targets.len(), 1);
@@ -382,7 +382,7 @@ mod tests {
 
         let report = gather(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
         assert_eq!(report.health.unwrap(), 1);
@@ -399,7 +399,7 @@ mod tests {
 
         let result = show(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         );
         assert!(result.is_ok());
     }
@@ -420,7 +420,7 @@ mod tests {
 
         let result = show(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         );
         assert!(result.is_ok());
     }
@@ -465,7 +465,7 @@ mod tests {
 
         let result = show(
             &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()),
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         );
         assert!(result.is_ok());
     }

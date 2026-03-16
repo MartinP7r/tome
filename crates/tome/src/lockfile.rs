@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::discover::DiscoveredSkill;
 use crate::manifest::Manifest;
 
-const LOCKFILE_NAME: &str = "tome.lock";
+pub(crate) const LOCKFILE_NAME: &str = "tome.lock";
 
 /// Top-level lockfile structure.
 #[derive(Debug, Serialize, Deserialize, PartialEq)]

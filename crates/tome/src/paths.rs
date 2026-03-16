@@ -5,6 +5,8 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
+
 /// Resolved filesystem paths for a tome instance.
 ///
 /// Groups `tome_home` (metadata directory, `~/.tome/`) and `library_dir`
@@ -14,28 +16,56 @@ use std::path::{Path, PathBuf};
 pub struct TomePaths {
     /// Top-level directory for metadata (manifest, lockfile, config).
     /// Typically `~/.tome/`.
-    pub tome_home: PathBuf,
+    tome_home: PathBuf,
     /// Directory where skill contents are stored.
     /// Typically `~/.tome/skills/`.
-    pub library_dir: PathBuf,
+    library_dir: PathBuf,
 }
 
 impl TomePaths {
-    pub fn new(tome_home: PathBuf, library_dir: PathBuf) -> Self {
-        Self {
+    pub fn new(tome_home: PathBuf, library_dir: PathBuf) -> Result<Self> {
+        anyhow::ensure!(
+            !tome_home.as_os_str().is_empty(),
+            "tome_home path cannot be empty"
+        );
+        anyhow::ensure!(
+            !library_dir.as_os_str().is_empty(),
+            "library_dir path cannot be empty"
+        );
+        anyhow::ensure!(
+            tome_home.is_absolute(),
+            "tome_home must be an absolute path: {}",
+            tome_home.display()
+        );
+        anyhow::ensure!(
+            library_dir.is_absolute(),
+            "library_dir must be an absolute path: {}",
+            library_dir.display()
+        );
+        Ok(Self {
             tome_home,
             library_dir,
-        }
+        })
+    }
+
+    /// Returns the tome home directory path.
+    pub fn tome_home(&self) -> &Path {
+        &self.tome_home
+    }
+
+    /// Returns the library directory path.
+    pub fn library_dir(&self) -> &Path {
+        &self.library_dir
     }
 
     /// Path to the manifest file.
     pub fn manifest_path(&self) -> PathBuf {
-        self.tome_home.join(".tome-manifest.json")
+        self.tome_home.join(crate::manifest::MANIFEST_FILENAME)
     }
 
     /// Path to the lockfile.
     pub fn lockfile_path(&self) -> PathBuf {
-        self.tome_home.join("tome.lock")
+        self.tome_home.join(crate::lockfile::LOCKFILE_NAME)
     }
 }
 
@@ -142,9 +172,10 @@ mod tests {
         let paths = TomePaths::new(
             PathBuf::from("/home/.tome"),
             PathBuf::from("/home/.tome/skills"),
-        );
-        assert_eq!(paths.tome_home, PathBuf::from("/home/.tome"));
-        assert_eq!(paths.library_dir, PathBuf::from("/home/.tome/skills"));
+        )
+        .unwrap();
+        assert_eq!(paths.tome_home(), Path::new("/home/.tome"));
+        assert_eq!(paths.library_dir(), Path::new("/home/.tome/skills"));
     }
 
     #[test]
@@ -152,7 +183,8 @@ mod tests {
         let paths = TomePaths::new(
             PathBuf::from("/home/.tome"),
             PathBuf::from("/home/.tome/skills"),
-        );
+        )
+        .unwrap();
         assert_eq!(
             paths.manifest_path(),
             PathBuf::from("/home/.tome/.tome-manifest.json")
@@ -164,10 +196,71 @@ mod tests {
         let paths = TomePaths::new(
             PathBuf::from("/home/.tome"),
             PathBuf::from("/home/.tome/skills"),
-        );
+        )
+        .unwrap();
         assert_eq!(
             paths.lockfile_path(),
             PathBuf::from("/home/.tome/tome.lock")
         );
+    }
+
+    #[test]
+    fn tome_paths_rejects_empty_tome_home() {
+        let result = TomePaths::new(PathBuf::from(""), PathBuf::from("/home/.tome/skills"));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("tome_home path cannot be empty")
+        );
+    }
+
+    #[test]
+    fn tome_paths_rejects_empty_library_dir() {
+        let result = TomePaths::new(PathBuf::from("/home/.tome"), PathBuf::from(""));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("library_dir path cannot be empty")
+        );
+    }
+
+    #[test]
+    fn tome_paths_rejects_relative_tome_home() {
+        let result = TomePaths::new(
+            PathBuf::from("relative/path"),
+            PathBuf::from("/home/.tome/skills"),
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("tome_home must be an absolute path")
+        );
+    }
+
+    #[test]
+    fn tome_paths_rejects_relative_library_dir() {
+        let result = TomePaths::new(PathBuf::from("/home/.tome"), PathBuf::from("relative/path"));
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("library_dir must be an absolute path")
+        );
+    }
+
+    #[test]
+    fn tome_paths_accepts_both_absolute() {
+        let result = TomePaths::new(
+            PathBuf::from("/home/.tome"),
+            PathBuf::from("/home/.tome/skills"),
+        );
+        assert!(result.is_ok());
     }
 }

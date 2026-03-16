@@ -14,7 +14,7 @@ use walkdir::WalkDir;
 
 use crate::discover::SkillName;
 
-const MANIFEST_FILENAME: &str = ".tome-manifest.json";
+pub(crate) const MANIFEST_FILENAME: &str = ".tome-manifest.json";
 
 /// The library manifest, tracking all skills and their provenance.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
