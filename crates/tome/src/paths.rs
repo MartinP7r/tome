@@ -1,6 +1,43 @@
 //! Symlink path utilities — resolving relative symlink targets and comparing symlink destinations.
+//!
+//! Also defines [`TomePaths`], a struct that groups `tome_home` and `library_dir`
+//! to prevent accidental parameter swaps.
 
 use std::path::{Path, PathBuf};
+
+/// Resolved filesystem paths for a tome instance.
+///
+/// Groups `tome_home` (metadata directory, `~/.tome/`) and `library_dir`
+/// (skill storage, typically `~/.tome/skills/`) into a single value to
+/// prevent accidental parameter swaps.
+#[derive(Debug, Clone)]
+pub struct TomePaths {
+    /// Top-level directory for metadata (manifest, lockfile, config).
+    /// Typically `~/.tome/`.
+    pub tome_home: PathBuf,
+    /// Directory where skill contents are stored.
+    /// Typically `~/.tome/skills/`.
+    pub library_dir: PathBuf,
+}
+
+impl TomePaths {
+    pub fn new(tome_home: PathBuf, library_dir: PathBuf) -> Self {
+        Self {
+            tome_home,
+            library_dir,
+        }
+    }
+
+    /// Path to the manifest file.
+    pub fn manifest_path(&self) -> PathBuf {
+        self.tome_home.join(".tome-manifest.json")
+    }
+
+    /// Path to the lockfile.
+    pub fn lockfile_path(&self) -> PathBuf {
+        self.tome_home.join("tome.lock")
+    }
+}
 
 /// Resolve a symlink's raw target to an absolute path.
 ///
@@ -98,5 +135,39 @@ mod tests {
         unix_fs::symlink(&target_a, &link).unwrap();
 
         assert!(!symlink_points_to(&link, &target_b));
+    }
+
+    #[test]
+    fn tome_paths_new_stores_fields() {
+        let paths = TomePaths::new(
+            PathBuf::from("/home/.tome"),
+            PathBuf::from("/home/.tome/skills"),
+        );
+        assert_eq!(paths.tome_home, PathBuf::from("/home/.tome"));
+        assert_eq!(paths.library_dir, PathBuf::from("/home/.tome/skills"));
+    }
+
+    #[test]
+    fn tome_paths_manifest_path() {
+        let paths = TomePaths::new(
+            PathBuf::from("/home/.tome"),
+            PathBuf::from("/home/.tome/skills"),
+        );
+        assert_eq!(
+            paths.manifest_path(),
+            PathBuf::from("/home/.tome/.tome-manifest.json")
+        );
+    }
+
+    #[test]
+    fn tome_paths_lockfile_path() {
+        let paths = TomePaths::new(
+            PathBuf::from("/home/.tome"),
+            PathBuf::from("/home/.tome/skills"),
+        );
+        assert_eq!(
+            paths.lockfile_path(),
+            PathBuf::from("/home/.tome/tome.lock")
+        );
     }
 }
