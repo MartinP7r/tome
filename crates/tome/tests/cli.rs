@@ -1122,3 +1122,55 @@ fn update_disable_removes_symlink() {
         "disabled skill's symlink should be removed by update"
     );
 }
+
+#[test]
+fn sync_respects_machine_disabled_targets() {
+    // Test that sync with a disabled target does not distribute skills there,
+    // and that an unknown disabled_target produces a warning on stderr.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+
+    let config = write_config_with_target(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        &target_dir,
+    );
+
+    // Create machine.toml that disables the configured target and also lists an unknown target
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(
+        &machine_path,
+        "disabled_targets = [\"test-target\", \"nonexistent-target\"]\n",
+    )
+    .unwrap();
+
+    tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "sync",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"))
+        .stderr(predicate::str::contains(
+            "warning: disabled target 'nonexistent-target' in machine.toml does not match any configured target",
+        ));
+
+    // The target directory should not have the skill (target is disabled)
+    assert!(
+        !target_dir.join("my-skill").exists(),
+        "disabled target should not receive skills"
+    );
+
+    // The skill should still be in the library
+    assert!(tmp.path().join("library/my-skill").is_dir());
+}
