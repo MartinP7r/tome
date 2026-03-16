@@ -27,7 +27,7 @@ pub struct Lockfile {
 /// A single skill entry in the lockfile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockEntry {
-    /// Config source name (maps to a `[[sources]]` entry in `config.toml`).
+    /// Config source name (maps to a `[[sources]]` entry in `tome.toml`).
     pub source_name: String,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: String,

@@ -70,6 +70,10 @@ fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_
 /// A manifest tracks content hashes and provenance for idempotent updates.
 /// When `force` is true, all skills are re-synced regardless of state.
 ///
+/// `tome_home` is the top-level `~/.tome/` directory where metadata files (manifest,
+/// lockfile, config) are stored. `library_dir` is the subdirectory (typically
+/// `~/.tome/skills/`) where skill contents actually live.
+///
 /// Returns both the operation result and the (possibly updated) manifest so the
 /// caller can pass it directly to distribute/cleanup without a redundant disk read.
 /// In dry-run mode the manifest is never written to disk, so returning it here is
