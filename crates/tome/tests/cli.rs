@@ -177,8 +177,8 @@ fn sync_copies_skills_to_library() {
     assert!(!library.join("beta").is_symlink());
     // Content should be copied
     assert!(library.join("alpha/SKILL.md").is_file());
-    // Manifest should exist
-    assert!(library.join(".tome-manifest.json").is_file());
+    // Manifest should exist at tome home (config file's parent dir)
+    assert!(tmp.path().join(".tome-manifest.json").is_file());
 }
 
 #[test]
@@ -231,7 +231,8 @@ fn sync_creates_lockfile() {
         .assert()
         .success();
 
-    let lockfile_path = tmp.path().join("library/tome.lock");
+    // Lockfile now lives at tome home (config file's parent dir), not library
+    let lockfile_path = tmp.path().join("tome.lock");
     assert!(
         lockfile_path.exists(),
         "tome.lock should be created by sync"
@@ -272,7 +273,7 @@ fn sync_dry_run_does_not_create_lockfile() {
         .success();
 
     assert!(
-        !tmp.path().join("library/tome.lock").exists(),
+        !tmp.path().join("tome.lock").exists(),
         "dry-run should not create tome.lock"
     );
 }
@@ -303,7 +304,7 @@ fn config_path_prints_default_path() {
         .args(["config", "--path"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("config.toml"));
+        .stdout(predicate::str::contains("tome.toml"));
 }
 
 // -- Sync with targets --
@@ -921,8 +922,8 @@ fn update_with_no_lockfile_works_gracefully() {
     assert!(tmp.path().join("library/my-skill").is_dir());
     // Target should have symlink
     assert!(target_dir.join("my-skill").is_symlink());
-    // Lockfile should be created
-    assert!(tmp.path().join("library/tome.lock").exists());
+    // Lockfile should be created at tome home (config file's parent dir)
+    assert!(tmp.path().join("tome.lock").exists());
 }
 
 #[test]

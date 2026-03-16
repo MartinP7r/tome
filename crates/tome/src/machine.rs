@@ -12,12 +12,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::discover::SkillName;
 
-/// Per-machine preferences — currently just a set of disabled skill names.
+/// Per-machine preferences — disabled skills and targets for this machine.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MachinePrefs {
     /// Skills that should not be distributed to targets on this machine.
     #[serde(default)]
     pub disabled: BTreeSet<SkillName>,
+
+    /// Targets to skip on this machine (e.g. machine A doesn't have a certain tool installed).
+    #[serde(default)]
+    pub disabled_targets: BTreeSet<String>,
 }
 
 impl MachinePrefs {
@@ -29,6 +33,11 @@ impl MachinePrefs {
     /// Mark a skill as disabled on this machine.
     pub fn disable(&mut self, name: SkillName) {
         self.disabled.insert(name);
+    }
+
+    /// Returns true if the given target is disabled on this machine.
+    pub fn is_target_disabled(&self, name: &str) -> bool {
+        self.disabled_targets.contains(name)
     }
 }
 
@@ -159,5 +168,65 @@ mod tests {
         let prefs = MachinePrefs::default();
         save(&prefs, &path).unwrap();
         assert!(path.exists());
+    }
+
+    #[test]
+    fn is_target_disabled_checks_set() {
+        let mut prefs = MachinePrefs::default();
+        prefs.disabled_targets.insert("claude".to_string());
+        prefs.disabled_targets.insert("codex".to_string());
+
+        assert!(prefs.is_target_disabled("claude"));
+        assert!(prefs.is_target_disabled("codex"));
+        assert!(!prefs.is_target_disabled("cursor"));
+        assert!(!prefs.is_target_disabled(""));
+    }
+
+    #[test]
+    fn disabled_targets_roundtrip() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let mut prefs = MachinePrefs::default();
+        prefs.disable(SkillName::new("skill-a").unwrap());
+        prefs.disabled_targets.insert("claude".to_string());
+        prefs.disabled_targets.insert("codex".to_string());
+
+        save(&prefs, &path).unwrap();
+        let loaded = load(&path).unwrap();
+
+        assert_eq!(loaded.disabled_targets.len(), 2);
+        assert!(loaded.is_target_disabled("claude"));
+        assert!(loaded.is_target_disabled("codex"));
+        // Verify skills survived too
+        assert!(loaded.is_disabled("skill-a"));
+    }
+
+    #[test]
+    fn disabled_targets_defaults_empty() {
+        // TOML with only the disabled field — disabled_targets should default to empty
+        let toml_str = "disabled = [\"some-skill\"]\n";
+        let prefs: MachinePrefs = toml::from_str(toml_str).unwrap();
+
+        assert!(prefs.disabled_targets.is_empty());
+        assert!(!prefs.is_target_disabled("anything"));
+        assert!(prefs.is_disabled("some-skill"));
+    }
+
+    #[test]
+    fn disabled_targets_toml_format() {
+        let mut prefs = MachinePrefs::default();
+        prefs.disabled_targets.insert("claude".to_string());
+        prefs.disabled_targets.insert("windsurf".to_string());
+
+        let toml_str = toml::to_string_pretty(&prefs).unwrap();
+        assert!(toml_str.contains("disabled_targets"));
+        assert!(toml_str.contains("claude"));
+        assert!(toml_str.contains("windsurf"));
+
+        // Should be parseable back
+        let parsed: MachinePrefs = toml::from_str(&toml_str).unwrap();
+        assert!(parsed.is_target_disabled("claude"));
+        assert!(parsed.is_target_disabled("windsurf"));
     }
 }

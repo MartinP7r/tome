@@ -97,10 +97,10 @@ graph LR
 
 ## Configuration
 
-TOML at `~/.config/tome/config.toml`:
+TOML at `~/.tome/tome.toml`:
 
 ```toml
-library_dir = "~/.local/share/tome/skills"
+library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]
@@ -125,6 +125,7 @@ Control which skills are active on each machine via `~/.config/tome/machine.toml
 
 ```toml
 disabled = ["noisy-skill", "work-only-skill"]
+disabled_targets = ["openclaw"]
 ```
 
 Disabled skills stay in the library but are skipped during distribution. Use `tome update` to interactively review new or changed skills and disable unwanted ones.

@@ -2,10 +2,10 @@
 
 ## Main Config
 
-TOML at `~/.config/tome/config.toml`:
+TOML at `~/.tome/tome.toml`:
 
 ```toml
-library_dir = "~/.local/share/tome/skills"
+library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]
@@ -52,9 +52,15 @@ Per-machine opt-in/opt-out at `~/.config/tome/machine.toml`:
 
 ```toml
 disabled = ["noisy-skill", "work-only-skill"]
+disabled_targets = ["openclaw"]
 ```
 
-Disabled skills remain in the library but are skipped during distribution (no symlinks created in targets).
+| Field | Description |
+|-------|-------------|
+| `disabled` | List of skill names to skip during distribution (no symlinks created in targets). |
+| `disabled_targets` | List of target names to skip entirely on this machine. |
+
+Disabled skills remain in the library but are skipped during distribution.
 
 This allows sharing a single library (e.g., via git) across machines while customizing which skills are active on each one.
 
@@ -62,7 +68,7 @@ Use `tome update` to interactively review new or changed skills and disable unwa
 
 ## Lockfile
 
-`tome sync` generates a `tome.lock` file in the library directory. This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. It is used by `tome update` to diff against the current state and surface changes.
+`tome sync` generates a `tome.lock` file in the tome home directory (`~/.tome/tome.lock`). This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. It is used by `tome update` to diff against the current state and surface changes.
 
 The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome update` on a new machine can detect what changed since the last sync.
 

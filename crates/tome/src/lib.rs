@@ -80,6 +80,20 @@ fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::Pa
     }
 }
 
+/// Derive the tome home directory from the config file path.
+///
+/// If an explicit `--config` path is given, tome home is its parent directory.
+/// Otherwise, use the default `~/.tome/`.
+fn resolve_tome_home(cli_config: Option<&Path>) -> Result<std::path::PathBuf> {
+    match cli_config {
+        Some(p) => Ok(p
+            .parent()
+            .context("config path has no parent directory")?
+            .to_path_buf()),
+        None => config::default_tome_home(),
+    }
+}
+
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
     if matches!(cli.command, Command::Init) {
@@ -89,11 +103,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 e
             );
         }
+        let tome_home = resolve_tome_home(cli.config.as_deref())?;
         let config = wizard::run(cli.dry_run)?;
         config.validate()?;
         if !cli.dry_run {
             sync(
                 &config,
+                &tome_home,
                 cli.dry_run,
                 false,
                 cli.verbose,
@@ -106,11 +122,13 @@ pub fn run(cli: Cli) -> Result<()> {
 
     let config = Config::load_or_default(cli.config.as_deref())?;
     config.validate()?;
+    let tome_home = resolve_tome_home(cli.config.as_deref())?;
 
     match cli.command {
         Command::Init => unreachable!(),
         Command::Sync { force } => sync(
             &config,
+            &tome_home,
             cli.dry_run,
             force,
             cli.verbose,
@@ -119,13 +137,14 @@ pub fn run(cli: Cli) -> Result<()> {
         )?,
         Command::Update => update_cmd(
             &config,
+            &tome_home,
             cli.dry_run,
             cli.verbose,
             cli.quiet,
             cli.machine.as_deref(),
         )?,
-        Command::Status => status::show(&config)?,
-        Command::Doctor => doctor::diagnose(&config, cli.dry_run)?,
+        Command::Status => status::show(&config, &tome_home)?,
+        Command::Doctor => doctor::diagnose(&config, &tome_home, cli.dry_run)?,
         Command::Browse => {
             let mut warnings = Vec::new();
             let skills = discover::discover_all(&config, &mut warnings)?;
@@ -150,6 +169,7 @@ pub fn run(cli: Cli) -> Result<()> {
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(
     config: &Config,
+    tome_home: &Path,
     dry_run: bool,
     force: bool,
     verbose: bool,
@@ -199,7 +219,7 @@ fn sync(
         eprintln!("{}", style("Consolidating to library...").dim());
     }
     let (consolidate_result, mut manifest) =
-        library::consolidate(&skills, &config.library_dir, dry_run, force)?;
+        library::consolidate(&skills, &config.library_dir, tome_home, dry_run, force)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -207,13 +227,16 @@ fn sync(
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
-    // Load per-machine preferences (disabled skills)
+    // Load per-machine preferences (disabled skills and targets)
     let machine_path = resolve_machine_path(machine_override)?;
     let machine_prefs = machine::load(&machine_path)?;
 
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
+        if machine_prefs.is_target_disabled(name) {
+            continue;
+        }
         let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
@@ -255,8 +278,8 @@ fn sync(
             cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
     }
     // Save manifest after cleanup (may have removed entries)
-    if !dry_run && config.library_dir.is_dir() {
-        manifest::save(&manifest, &config.library_dir)?;
+    if !dry_run && tome_home.is_dir() {
+        manifest::save(&manifest, tome_home)?;
     }
 
     // Generate .gitignore after cleanup so stale entries are excluded
@@ -265,9 +288,9 @@ fn sync(
     }
 
     // Generate lockfile for reproducibility
-    if !dry_run && config.library_dir.is_dir() {
+    if !dry_run && tome_home.is_dir() {
         let lf = lockfile::generate(&manifest, &skills);
-        lockfile::save(&lf, &config.library_dir)?;
+        lockfile::save(&lf, tome_home)?;
     }
 
     if let Some(sp) = sp {
@@ -301,8 +324,10 @@ fn sync(
 }
 
 /// The update command: diff-then-distribute with interactive triage.
+#[allow(clippy::too_many_arguments)]
 fn update_cmd(
     config: &Config,
+    tome_home: &Path,
     dry_run: bool,
     verbose: bool,
     quiet: bool,
@@ -322,7 +347,7 @@ fn update_cmd(
     let mut machine_prefs = machine::load(&machine_path)?;
 
     // 1. Load existing lockfile (may be committed by another machine)
-    let old_lockfile = lockfile::load(&config.library_dir)?;
+    let old_lockfile = lockfile::load(tome_home)?;
 
     // 2. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
@@ -353,7 +378,7 @@ fn update_cmd(
         eprintln!("{}", style("Consolidating to library...").dim());
     }
     let (consolidate_result, mut manifest) =
-        library::consolidate(&skills, &config.library_dir, dry_run, false)?;
+        library::consolidate(&skills, &config.library_dir, tome_home, dry_run, false)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -393,6 +418,9 @@ fn update_cmd(
     // 5. Distribute (respects machine_prefs including just-disabled skills)
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
+        if machine_prefs.is_target_disabled(name) {
+            continue;
+        }
         let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
@@ -439,10 +467,12 @@ fn update_cmd(
     }
 
     // 7. Save lockfile + manifest
-    if !dry_run && config.library_dir.is_dir() {
-        manifest::save(&manifest, &config.library_dir)?;
-        library::generate_gitignore(&config.library_dir, &manifest)?;
-        lockfile::save(&new_lockfile, &config.library_dir)?;
+    if !dry_run && tome_home.is_dir() {
+        manifest::save(&manifest, tome_home)?;
+        if config.library_dir.is_dir() {
+            library::generate_gitignore(&config.library_dir, &manifest)?;
+        }
+        lockfile::save(&new_lockfile, tome_home)?;
     }
 
     let report = SyncReport {
@@ -696,12 +726,9 @@ fn offer_git_commit(
     }
 
     // Stage specific paths instead of `git add .` to avoid accidentally
-    // committing unrelated files.
-    let mut paths: Vec<String> = vec![
-        ".gitignore".into(),
-        ".tome-manifest.json".into(),
-        "tome.lock".into(),
-    ];
+    // committing unrelated files. Manifest and lockfile live at tome home
+    // (outside the library), so only stage .gitignore and skill dirs.
+    let mut paths: Vec<String> = vec![".gitignore".into()];
     for (name, entry) in manifest.iter() {
         if !entry.managed {
             paths.push(name.as_str().to_string());

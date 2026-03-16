@@ -101,9 +101,9 @@ impl SkillEntry {
     }
 }
 
-/// Load the manifest from the library directory, or return an empty one if missing.
-pub fn load(library_dir: &Path) -> Result<Manifest> {
-    let path = library_dir.join(MANIFEST_FILENAME);
+/// Load the manifest from the tome home directory, or return an empty one if missing.
+pub fn load(tome_home: &Path) -> Result<Manifest> {
+    let path = tome_home.join(MANIFEST_FILENAME);
     if !path.exists() {
         return Ok(Manifest::default());
     }
@@ -114,14 +114,14 @@ pub fn load(library_dir: &Path) -> Result<Manifest> {
     Ok(manifest)
 }
 
-/// Save the manifest to the library directory.
+/// Save the manifest to the tome home directory.
 ///
 /// Uses a write-to-temp-then-rename pattern so the manifest file is never left in a partially
 /// written (corrupted) state if the process is killed mid-write. `rename` is atomic on POSIX
 /// filesystems when source and destination are on the same filesystem.
-pub fn save(manifest: &Manifest, library_dir: &Path) -> Result<()> {
-    let path = library_dir.join(MANIFEST_FILENAME);
-    let tmp_path = library_dir.join(".tome-manifest.tmp");
+pub fn save(manifest: &Manifest, tome_home: &Path) -> Result<()> {
+    let path = tome_home.join(MANIFEST_FILENAME);
+    let tmp_path = tome_home.join(".tome-manifest.tmp");
     let content = serde_json::to_string_pretty(manifest).context("failed to serialize manifest")?;
     std::fs::write(&tmp_path, &content)
         .with_context(|| format!("failed to write temporary manifest {}", tmp_path.display()))?;

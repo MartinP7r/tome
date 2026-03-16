@@ -80,11 +80,11 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
     }
 }
 
-/// Load an existing lockfile from the library directory.
+/// Load an existing lockfile from the tome home directory.
 ///
 /// Returns `None` if the file doesn't exist (first run). Errors on corrupt JSON.
-pub fn load(library_dir: &Path) -> Result<Option<Lockfile>> {
-    let path = library_dir.join(LOCKFILE_NAME);
+pub fn load(tome_home: &Path) -> Result<Option<Lockfile>> {
+    let path = tome_home.join(LOCKFILE_NAME);
     if !path.exists() {
         return Ok(None);
     }
@@ -95,10 +95,10 @@ pub fn load(library_dir: &Path) -> Result<Option<Lockfile>> {
     Ok(Some(lockfile))
 }
 
-/// Write the lockfile to the library directory using atomic temp+rename.
-pub fn save(lockfile: &Lockfile, library_dir: &Path) -> Result<()> {
-    let path = library_dir.join(LOCKFILE_NAME);
-    let tmp_path = library_dir.join("tome.lock.tmp");
+/// Write the lockfile to the tome home directory using atomic temp+rename.
+pub fn save(lockfile: &Lockfile, tome_home: &Path) -> Result<()> {
+    let path = tome_home.join(LOCKFILE_NAME);
+    let tmp_path = tome_home.join("tome.lock.tmp");
     let content = serde_json::to_string_pretty(lockfile).context("failed to serialize lockfile")?;
     // Add trailing newline for POSIX compliance
     let content = format!("{content}\n");

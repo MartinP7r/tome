@@ -634,7 +634,7 @@ flowchart TD
         C2["Skip unchanged<br>update stale links"]
     end
 
-    LIB[("Library<br>~/.local/share/tome/skills/")]
+    LIB[("Library<br>~/.tome/skills/")]
 
     subgraph DIST["Stage 3 — Distribute"]
         DI1["Symlink method:<br>link into target skills dir"]
@@ -875,7 +875,7 @@ flowchart TD
       <div class="ve-card__desc">
         With the Symlink method, each skill has a two-hop symlink chain. The original file is never moved.
         <br><br>
-        <code>~/.claude/skills/my-skill</code> → <code>~/.local/share/tome/skills/my-skill</code> → <code>/original/path/my-skill</code>
+        <code>~/.claude/skills/my-skill</code> → <code>~/.tome/skills/my-skill</code> → <code>/original/path/my-skill</code>
         <br><br>
         The library is the single source of truth for which skills are active.
         Cleanup walks each hop and removes links whose target no longer exists.
@@ -889,19 +889,22 @@ flowchart TD
 
     <div class="ve-card ve-card--elevated" style="margin-bottom: 20px;">
       <div class="fs-tree">
-        <div><span class="dir">~/.config/tome/</span></div>
-        <div class="indent"><span class="file">config.toml</span> <span class="desc">— Sources, targets, exclude list, library path</span></div>
-
-        <div class="spacer-sm"></div>
-        <div><span class="dir">~/.local/share/tome/</span></div>
+        <div><span class="dir">~/.tome/</span></div>
+        <div class="indent"><span class="file">tome.toml</span> <span class="desc">— Sources, targets, exclude list, library path</span></div>
+        <div class="indent"><span class="file">tome.lock</span> <span class="desc">— Lockfile snapshot</span></div>
+        <div class="indent"><span class="file">.tome-manifest.json</span> <span class="desc">— Live provenance registry</span></div>
         <div class="indent"><span class="dir">skills/</span> <span class="desc">— The library (central skill registry)</span></div>
         <div class="indent2"><span class="file">my-skill/</span> <span class="arrow">→</span> <span class="desc">/original/source/my-skill/</span></div>
         <div class="indent2"><span class="file">another-skill/</span> <span class="arrow">→</span> <span class="desc">/other/source/another-skill/</span></div>
 
         <div class="spacer-sm"></div>
+        <div><span class="dir">~/.config/tome/</span></div>
+        <div class="indent"><span class="file">machine.toml</span> <span class="desc">— Per-machine preferences (disabled skills/targets)</span></div>
+
+        <div class="spacer-sm"></div>
         <div><span class="dir">~/.claude/</span></div>
         <div class="indent"><span class="dir">skills/</span> <span class="desc">— Claude Code target (symlinks from library)</span></div>
-        <div class="indent2"><span class="file">my-skill/</span> <span class="arrow">→</span> <span class="desc">~/.local/share/tome/skills/my-skill/</span></div>
+        <div class="indent2"><span class="file">my-skill/</span> <span class="arrow">→</span> <span class="desc">~/.tome/skills/my-skill/</span></div>
 
         <div class="spacer-sm"></div>
         <div><span class="dir">~/.gemini/antigravity/</span></div>
@@ -921,7 +924,7 @@ flowchart TD
       <div class="ve-card accent-border-gold">
         <div class="ve-card__label ve-card__label--gold">Config</div>
         <div class="ve-card__desc">
-          <code>~/.config/tome/config.toml</code><br>
+          <code>~/.tome/tome.toml</code><br>
           Defines sources (what to scan), targets (where to push), exclude list, and library path.
           <code>Config::load_or_default</code> handles missing files gracefully.
         </div>
@@ -929,7 +932,7 @@ flowchart TD
       <div class="ve-card accent-border-teal">
         <div class="ve-card__label ve-card__label--teal">Library</div>
         <div class="ve-card__desc">
-          <code>~/.local/share/tome/skills/</code><br>
+          <code>~/.tome/skills/</code><br>
           Central registry. One symlink per active skill, pointing to the original source.
           The library is the single source of truth.
         </div>

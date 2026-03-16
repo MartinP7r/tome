@@ -53,7 +53,7 @@ impl DoctorReport {
 // -- Data gathering (pure computation, no I/O) --
 
 /// Run all diagnostic checks and return a structured report.
-pub fn check(config: &Config) -> Result<DoctorReport> {
+pub fn check(config: &Config, tome_home: &Path) -> Result<DoctorReport> {
     let configured = config.library_dir.is_dir() || !config.sources.is_empty();
 
     if !configured {
@@ -65,7 +65,7 @@ pub fn check(config: &Config) -> Result<DoctorReport> {
         });
     }
 
-    let library_issues = check_library(&config.library_dir)?;
+    let library_issues = check_library(&config.library_dir, tome_home)?;
 
     let mut target_issues = Vec::new();
     for (name, t) in config.targets.iter() {
@@ -88,8 +88,8 @@ pub fn check(config: &Config) -> Result<DoctorReport> {
 // -- Rendering + control flow --
 
 /// Diagnose and optionally repair issues.
-pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
-    let report = check(config)?;
+pub fn diagnose(config: &Config, tome_home: &Path, dry_run: bool) -> Result<()> {
+    let report = check(config, tome_home)?;
 
     if !report.configured {
         println!("Not configured yet. Run `tome init` to get started.");
@@ -135,7 +135,7 @@ pub fn diagnose(config: &Config, dry_run: bool) -> Result<()> {
             if confirmed {
                 println!();
                 println!("{}", style("Repairing...").bold());
-                repair_library(&config.library_dir)?;
+                repair_library(&config.library_dir, tome_home)?;
 
                 for (name, t) in config.targets.iter() {
                     if t.enabled {
@@ -190,7 +190,7 @@ fn render_issues_for_target(name: &str, issues: &[DiagnosticIssue]) {
 
 // -- Check functions (return structured data) --
 
-fn check_library(library_dir: &Path) -> Result<Vec<DiagnosticIssue>> {
+fn check_library(library_dir: &Path, tome_home: &Path) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
 
     if !library_dir.is_dir() {
@@ -201,7 +201,7 @@ fn check_library(library_dir: &Path) -> Result<Vec<DiagnosticIssue>> {
         return Ok(issues);
     }
 
-    let m = match manifest::load(library_dir) {
+    let m = match manifest::load(tome_home) {
         Ok(m) => m,
         Err(e) => {
             issues.push(DiagnosticIssue {
@@ -345,8 +345,8 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
 }
 
 /// Repair library issues: remove orphan manifest entries and broken symlinks.
-fn repair_library(library_dir: &Path) -> Result<()> {
-    let mut m = manifest::load(library_dir).with_context(|| {
+fn repair_library(library_dir: &Path, tome_home: &Path) -> Result<()> {
+    let mut m = manifest::load(tome_home).with_context(|| {
         "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
     })?;
     let mut fixed = 0;
@@ -396,7 +396,7 @@ fn repair_library(library_dir: &Path) -> Result<()> {
     }
 
     if fixed > 0 {
-        manifest::save(&m, library_dir)?;
+        manifest::save(&m, tome_home)?;
     }
 
     Ok(())
@@ -419,7 +419,8 @@ mod tests {
             ..Config::default()
         };
 
-        let report = check(&config).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let report = check(&config, tmp.path()).unwrap();
         assert!(!report.configured);
         assert_eq!(report.total_issues(), 0);
     }
@@ -448,7 +449,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = check(&config).unwrap();
+        let report = check(&config, lib.path()).unwrap();
         assert!(report.configured);
         assert_eq!(report.total_issues(), 0);
     }
@@ -463,7 +464,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = check(&config).unwrap();
+        let report = check(&config, lib.path()).unwrap();
         assert_eq!(report.library_issues.len(), 1);
         assert_eq!(report.library_issues[0].severity, IssueSeverity::Warning);
         assert!(report.library_issues[0].message.contains("orphan"));
@@ -483,7 +484,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = check(&config).unwrap();
+        let report = check(&config, lib.path()).unwrap();
         assert_eq!(report.config_issues.len(), 1);
         assert!(report.config_issues[0].message.contains("gone"));
     }
@@ -492,7 +493,8 @@ mod tests {
 
     #[test]
     fn check_library_missing_dir() {
-        let result = check_library(Path::new("/nonexistent/library")).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let result = check_library(Path::new("/nonexistent/library"), tmp.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Warning);
     }
@@ -516,7 +518,7 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        let result = check_library(lib.path()).unwrap();
+        let result = check_library(lib.path(), lib.path()).unwrap();
         assert!(result.is_empty());
     }
 
@@ -537,7 +539,7 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        let result = check_library(lib.path()).unwrap();
+        let result = check_library(lib.path(), lib.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Error);
     }
@@ -547,7 +549,7 @@ mod tests {
         let lib = TempDir::new().unwrap();
         std::fs::create_dir_all(lib.path().join("orphan")).unwrap();
 
-        let result = check_library(lib.path()).unwrap();
+        let result = check_library(lib.path(), lib.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Warning);
     }
@@ -557,7 +559,7 @@ mod tests {
         let lib = TempDir::new().unwrap();
         unix_fs::symlink("/nonexistent/target", lib.path().join("broken")).unwrap();
 
-        let result = check_library(lib.path()).unwrap();
+        let result = check_library(lib.path(), lib.path()).unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].severity, IssueSeverity::Error);
     }
@@ -637,7 +639,8 @@ mod tests {
             ..Config::default()
         };
 
-        let result = diagnose(&config, true);
+        let tmp = TempDir::new().unwrap();
+        let result = diagnose(&config, tmp.path(), true);
         assert!(result.is_ok());
     }
 
@@ -661,7 +664,7 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(lib.path()).unwrap();
+        repair_library(lib.path(), lib.path()).unwrap();
 
         let after = manifest::load(lib.path()).unwrap();
         assert!(
@@ -689,7 +692,7 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(lib.path()).unwrap();
+        repair_library(lib.path(), lib.path()).unwrap();
 
         assert!(
             !lib.path().join("broken-plugin").exists(),
@@ -706,7 +709,7 @@ mod tests {
         // Broken legacy symlink (not in manifest)
         unix_fs::symlink("/nonexistent/v01/skill", lib.path().join("legacy")).unwrap();
 
-        repair_library(lib.path()).unwrap();
+        repair_library(lib.path(), lib.path()).unwrap();
 
         assert!(
             !lib.path().join("legacy").exists(),
@@ -733,7 +736,7 @@ mod tests {
         );
         manifest::save(&m, lib.path()).unwrap();
 
-        repair_library(lib.path()).unwrap();
+        repair_library(lib.path(), lib.path()).unwrap();
 
         let after = manifest::load(lib.path()).unwrap();
         assert!(after.contains_key("healthy-skill"));
