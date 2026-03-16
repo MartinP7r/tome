@@ -15,7 +15,7 @@
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--config <path>` | | Path to config file (default: `~/.tome/tome.toml`) |
-| `--machine <path>` | | Path to machine preferences file (default: `~/.tome/machine.toml`) |
+| `--machine <path>` | | Path to machine preferences file (default: `~/.config/tome/machine.toml`) |
 | `--dry-run` | | Preview changes without modifying filesystem |
 | `--verbose` | `-v` | Detailed output |
 | `--quiet` | `-q` | Suppress non-error output (conflicts with `--verbose`) |

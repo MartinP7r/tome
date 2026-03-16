@@ -48,7 +48,7 @@ Targets are data-driven — any tool can be added without code changes. The `tom
 
 ## Machine Preferences
 
-Per-machine opt-in/opt-out at `~/.tome/machine.toml`:
+Per-machine opt-in/opt-out at `~/.config/tome/machine.toml`:
 
 ```toml
 disabled = ["noisy-skill", "work-only-skill"]
