@@ -230,7 +230,7 @@ Vercel's `sanitizeName()` prevents directory traversal via skill names, and `isS
 | Aspect                 | tome                                             | Vercel Skills                              |
 | ---------------------- | ------------------------------------------------ | ------------------------------------------ |
 | **Data flow**          | Sources → Library → Targets                      | Remote → Agent directories                 |
-| **Canonical location** | Library dir (`~/.local/share/tome/`)             | Agent skills dirs (`.agents/skills/`)      |
+| **Canonical location** | Library dir (`~/.tome/skills/`)                  | Agent skills dirs (`.agents/skills/`)      |
 | **Multi-machine**      | Lockfile + per-machine prefs                     | Single-machine only                        |
 | **Offline support**    | Full (library is local)                          | Partial (needs network for remote sources) |
 | **Update model**       | Diff-based triage (`tome update`)                | Replace-based (`skills update`)            |

@@ -26,7 +26,7 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 - `status.rs` — Read-only summary of library, sources, targets, and health. Single-pass directory scan for efficiency.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
 - `lockfile.rs` — Generates and loads `tome.lock` files. Each entry records skill name, content hash, source, and provenance metadata. Uses atomic temp+rename writes to prevent corruption.
-- `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks a `disabled` set of skill names and a `disabled_targets` set of target names. Uses atomic temp+rename writes. Loaded during sync to filter skills.
+- `machine.rs` — Per-machine preferences (`~/.tome/machine.toml`). Tracks a `disabled` set of skill names and a `disabled_targets` set of target names. Uses atomic temp+rename writes. Loaded during sync to filter skills.
 - `update.rs` — Implements `tome update`: loads the previous lockfile, diffs against current state, presents added/changed/removed skills interactively, and offers to disable unwanted new skills.
 - `paths.rs` — Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination.
 

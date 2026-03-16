@@ -402,7 +402,7 @@ Each test compiles and runs the `tome` binary in a temp directory with a custom 
 Every test creates its own `TempDir` that is automatically cleaned up when the test ends. This means:
 
 - Tests never interfere with each other (no shared state)
-- Tests never touch the real `~/.config/tome/` or `~/.local/share/tome/`
+- Tests never touch the real `~/.tome/`
 - No manual cleanup is needed
 - Tests can run in parallel safely
 
