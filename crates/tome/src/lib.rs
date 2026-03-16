@@ -174,6 +174,19 @@ pub fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
+/// Warn about `disabled_targets` entries in machine.toml that don't match any
+/// configured target name. Helps catch typos and stale entries.
+fn warn_unknown_disabled_targets(machine_prefs: &machine::MachinePrefs, config: &Config) {
+    for name in &machine_prefs.disabled_targets {
+        if !config.targets.contains_key(name.as_str()) {
+            eprintln!(
+                "warning: disabled target '{}' in machine.toml does not match any configured target",
+                name
+            );
+        }
+    }
+}
+
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(
     config: &Config,
@@ -240,14 +253,7 @@ fn sync(
 
     // Warn about disabled_targets that don't match any configured target
     if !quiet {
-        for name in &machine_prefs.disabled_targets {
-            if !config.targets.contains_key(name.as_str()) {
-                eprintln!(
-                    "warning: disabled target '{}' in machine.toml does not match any configured target",
-                    name
-                );
-            }
-        }
+        warn_unknown_disabled_targets(&machine_prefs, config);
     }
 
     // 3. Distribute to targets
@@ -376,14 +382,7 @@ fn update_cmd(
 
     // Warn about disabled_targets that don't match any configured target
     if !quiet {
-        for name in &machine_prefs.disabled_targets {
-            if !config.targets.contains_key(name.as_str()) {
-                eprintln!(
-                    "warning: disabled target '{}' in machine.toml does not match any configured target",
-                    name
-                );
-            }
-        }
+        warn_unknown_disabled_targets(&machine_prefs, config);
     }
 
     // 1. Load existing lockfile (may be committed by another machine)

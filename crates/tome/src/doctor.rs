@@ -739,6 +739,42 @@ mod tests {
     }
 
     #[test]
+    fn repair_library_uses_tome_home_for_manifest() {
+        // Verify that repair_library reads the manifest from tome_home
+        // and operates on the separate library_dir.
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        // Create a manifest at tome_home with an orphan entry (no dir in library)
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("orphan-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/orphan-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        // Repair should read manifest from tome_home and check library_dir
+        repair_library(&TomePaths::new(
+            tome_home.path().to_path_buf(),
+            library.path().to_path_buf(),
+        ))
+        .unwrap();
+
+        // The orphan entry should be removed from the manifest at tome_home
+        let after = manifest::load(tome_home.path()).unwrap();
+        assert!(
+            !after.contains_key("orphan-skill"),
+            "repair should remove orphan manifest entry when using separate tome_home"
+        );
+    }
+
+    #[test]
     fn repair_library_removes_orphan_manifest_entry() {
         let lib = TempDir::new().unwrap();
 
