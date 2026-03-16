@@ -1,7 +1,8 @@
 //! Per-machine preferences for skill management.
 //!
-//! Each machine can opt out of specific skills via `machine.toml`, which lives alongside
-//! the main `config.toml` at `~/.config/tome/machine.toml`. The library stays complete
+//! Each machine can opt out of specific skills via `machine.toml` at `~/.config/tome/machine.toml`.
+//! This is intentionally separate from `tome.toml` at `~/.tome/tome.toml` — machine-specific
+//! preferences should not live in the portable tome home directory. The library stays complete
 //! across machines; disabled skills are simply skipped during distribution.
 
 use std::collections::BTreeSet;

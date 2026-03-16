@@ -1022,7 +1022,7 @@ impl TargetConfig {
       <div class="code-file__header"><span>Config — Top-level configuration</span></div>
       <pre class="code-file__body"><code>pub struct Config {
     pub sources: Vec&lt;Source&gt;,       // what to scan
-    pub targets: Targets,           // where to push (hardcoded struct, not Vec)
+    pub targets: BTreeMap&lt;String, TargetConfig&gt;, // data-driven targets
     pub library_dir: PathBuf,       // central library path
     pub exclude: BTreeSet&lt;SkillName&gt;, // skills to skip
 }
@@ -1031,13 +1031,6 @@ pub struct Source {
     pub name: String,
     pub path: PathBuf,
     pub source_type: SourceType,    // ClaudePlugins or Directory
-}
-
-pub struct Targets {
-    pub antigravity: Option&lt;TargetConfig&gt;,
-    pub claude: Option&lt;TargetConfig&gt;,
-    pub codex: Option&lt;TargetConfig&gt;,
-    pub openclaw: Option&lt;TargetConfig&gt;,
 }
 
 // Config::load_or_default handles missing files

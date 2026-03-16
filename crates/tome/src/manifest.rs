@@ -1,6 +1,6 @@
 //! Library manifest — tracks provenance and content hashes for each skill in the library.
 //!
-//! The manifest file (`.tome-manifest.json`) lives at the library root and records where each
+//! The manifest file (`.tome-manifest.json`) lives at the tome home directory (`~/.tome/`) and records where each
 //! skill was copied from, its content hash, and when it was last synced. This enables idempotent
 //! copy-based consolidation: unchanged skills are skipped, modified skills are re-copied.
 

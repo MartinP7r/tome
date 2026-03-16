@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current State
 
-**v0.3.0 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Next up: **v0.4.1 Browse + Validation** (`tome browse`, `tome lint`, frontmatter parsing) and **v0.4.2 Format Transforms** (pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
+**v0.3.3 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Unified home directory restructured to `~/.tome/`. Next up: **v0.4.1 Browse + Validation** (`tome browse`, `tome lint`, frontmatter parsing) and **v0.4.2 Format Transforms** (rules/instructions syncing, pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
 
 ## Quick Reference
 

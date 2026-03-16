@@ -48,7 +48,7 @@ Targets are data-driven — any tool can be added without code changes. The `tom
 
 ## Machine Preferences
 
-Per-machine opt-in/opt-out at `~/.config/tome/machine.toml`:
+Per-machine opt-in/opt-out at `~/.config/tome/machine.toml` (intentionally kept separate from `~/.tome/` — machine-specific preferences should not be in the portable tome home directory):
 
 ```toml
 disabled = ["noisy-skill", "work-only-skill"]
@@ -78,6 +78,6 @@ The lockfile is designed to be committed to version control alongside the librar
 
 - **Managed skills** (symlinked from package managers) are gitignored — they are recreated by `tome sync`
 - **Local skills** (copied into the library) are tracked in version control
-- **Temporary files** (`.tome-manifest.tmp`, `tome.lock.tmp`) are always ignored
+- **Temporary files** (`tome.lock.tmp`) are always ignored
 
 This allows the library directory to serve as a git repository for portable skill management while keeping transient entries out of version control.
