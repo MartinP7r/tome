@@ -22,6 +22,14 @@ impl TargetName {
         let name = name.into();
         anyhow::ensure!(!name.is_empty(), "target name cannot be empty");
         anyhow::ensure!(
+            name != "." && name != "..",
+            "target name cannot be '.' or '..'"
+        );
+        anyhow::ensure!(
+            !name.chars().all(|c| c.is_whitespace()) && name.trim() == name,
+            "target name cannot be whitespace-only or have leading/trailing whitespace: '{name}'"
+        );
+        anyhow::ensure!(
             !name.contains('/') && !name.contains('\\'),
             "target name contains path separator: '{name}'"
         );
@@ -706,6 +714,19 @@ skills_dir = "~/.amp/skills"
         assert_eq!(name.as_str(), "my-target-123");
         assert_eq!(name.to_string(), "my-target-123");
         assert_eq!(name, *"my-target-123");
+    }
+
+    #[test]
+    fn target_name_rejects_dot_special() {
+        assert!(TargetName::new(".").is_err());
+        assert!(TargetName::new("..").is_err());
+    }
+
+    #[test]
+    fn target_name_rejects_whitespace() {
+        assert!(TargetName::new("  ").is_err());
+        assert!(TargetName::new(" leading").is_err());
+        assert!(TargetName::new("trailing ").is_err());
     }
 
     #[test]

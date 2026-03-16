@@ -36,6 +36,14 @@ impl SkillName {
         let name = name.into();
         anyhow::ensure!(!name.is_empty(), "skill name cannot be empty");
         anyhow::ensure!(
+            name != "." && name != "..",
+            "skill name cannot be '.' or '..'"
+        );
+        anyhow::ensure!(
+            !name.chars().all(|c| c.is_whitespace()) && name.trim() == name,
+            "skill name cannot be whitespace-only or have leading/trailing whitespace: '{name}'"
+        );
+        anyhow::ensure!(
             !name.contains('/') && !name.contains('\\'),
             "skill name contains path separator: '{name}'"
         );
@@ -714,6 +722,19 @@ mod tests {
         assert_eq!(name.as_str(), "my-skill-123");
         assert_eq!(name.to_string(), "my-skill-123");
         assert_eq!(name, *"my-skill-123");
+    }
+
+    #[test]
+    fn skill_name_rejects_dot_special() {
+        assert!(SkillName::new(".").is_err());
+        assert!(SkillName::new("..").is_err());
+    }
+
+    #[test]
+    fn skill_name_rejects_whitespace() {
+        assert!(SkillName::new("  ").is_err());
+        assert!(SkillName::new(" leading").is_err());
+        assert!(SkillName::new("trailing ").is_err());
     }
 
     #[test]
