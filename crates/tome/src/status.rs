@@ -486,6 +486,43 @@ mod tests {
     // -- count_health_issues --
 
     #[test]
+    fn count_health_issues_uses_tome_home() {
+        let tome_home = tempfile::TempDir::new().unwrap();
+        let library = tempfile::TempDir::new().unwrap();
+
+        // Create a skill directory in the library
+        std::fs::create_dir_all(library.path().join("my-skill")).unwrap();
+
+        // Save manifest at tome_home (not library_dir)
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/my-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        // Should find 0 issues when manifest is at tome_home
+        assert_eq!(
+            count_health_issues(library.path(), tome_home.path()).unwrap(),
+            0,
+            "should find no issues when manifest at tome_home matches library contents"
+        );
+
+        // Should find 1 orphan when using library_dir as tome_home (no manifest there)
+        assert_eq!(
+            count_health_issues(library.path(), library.path()).unwrap(),
+            1,
+            "should detect orphan when manifest is not at the given tome_home"
+        );
+    }
+
+    #[test]
     fn count_health_issues_empty_dir() {
         let dir = tempfile::TempDir::new().unwrap();
         assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 0);

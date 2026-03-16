@@ -647,6 +647,46 @@ mod tests {
     // -- repair_library --
 
     #[test]
+    fn check_library_uses_tome_home_for_manifest() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        // Create a skill directory in the library
+        let skill_dir = library.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        // Save manifest at tome_home (not library_dir)
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/my-skill"),
+                source_name: "test".to_string(),
+                content_hash: "abc".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        // check_library should read manifest from tome_home, not library_dir
+        let issues = check_library(library.path(), tome_home.path()).unwrap();
+        assert!(
+            issues.is_empty(),
+            "should find no issues when manifest is at tome_home and skill exists in library"
+        );
+
+        // Verify it would fail if we pointed tome_home at the wrong place
+        // (library_dir has no manifest, so it loads an empty one and sees an orphan)
+        let issues = check_library(library.path(), library.path()).unwrap();
+        assert_eq!(
+            issues.len(),
+            1,
+            "should detect orphan when manifest is not at the given tome_home"
+        );
+    }
+
+    #[test]
     fn repair_library_removes_orphan_manifest_entry() {
         let lib = TempDir::new().unwrap();
 
