@@ -77,6 +77,7 @@ fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_
 pub fn consolidate(
     skills: &[DiscoveredSkill],
     library_dir: &Path,
+    tome_home: &Path,
     dry_run: bool,
     force: bool,
 ) -> Result<(ConsolidateResult, Manifest)> {
@@ -85,8 +86,8 @@ pub fn consolidate(
             .with_context(|| format!("failed to create library dir {}", library_dir.display()))?;
     }
 
-    let mut manifest = if library_dir.is_dir() {
-        manifest::load(library_dir)?
+    let mut manifest = if tome_home.is_dir() {
+        manifest::load(tome_home)?
     } else {
         Manifest::default()
     };
@@ -111,8 +112,8 @@ pub fn consolidate(
         }
     }
 
-    if !dry_run && library_dir.is_dir() {
-        manifest::save(&manifest, library_dir)?;
+    if !dry_run && tome_home.is_dir() {
+        manifest::save(&manifest, tome_home)?;
     }
 
     Ok((result, manifest))
@@ -344,9 +345,7 @@ pub fn generate_gitignore(library_dir: &Path, manifest: &Manifest) -> Result<()>
         }
     }
 
-    content.push_str("# Internal\n");
-    content.push_str(".tome-manifest.tmp\n");
-    content.push_str("tome.lock.tmp\n");
+    // No internal entries — manifest and lockfile now live at tome home, not in library
 
     let gitignore_path = library_dir.join(".gitignore");
 
@@ -397,7 +396,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (result, _manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.created, 1);
         assert_eq!(result.unchanged, 0);
 
@@ -413,9 +413,22 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
-        let (result, _manifest) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
+        let (result, _manifest) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.created, 0);
         assert_eq!(result.unchanged, 1);
     }
@@ -426,9 +439,22 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
-        let (result, _manifest) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, true).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
+        let (result, _manifest) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            true,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1, "force should recopy unchanged skill");
         assert_eq!(result.unchanged, 0);
     }
@@ -439,13 +465,26 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
 
         // Modify source content
         std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
 
-        let (result, _manifest) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (result, _manifest) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
 
         // Library copy should have the new content
@@ -459,7 +498,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (result, _manifest) = consolidate(&[skill], library.path(), true, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), library.path(), true, false).unwrap();
         assert_eq!(result.created, 1);
 
         // Directory should NOT exist
@@ -473,7 +513,8 @@ mod tests {
         let source = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (result, _manifest) = consolidate(&[skill], &nonexistent_lib, true, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], &nonexistent_lib, &nonexistent_lib, true, false).unwrap();
         assert_eq!(result.created, 1);
         assert!(!nonexistent_lib.exists());
     }
@@ -490,7 +531,8 @@ mod tests {
         std::fs::create_dir_all(&collision).unwrap();
         std::fs::write(collision.join("README.md"), "user-created").unwrap();
 
-        let (result, _manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.created, 0);
         assert_eq!(result.unchanged, 0);
         assert_eq!(result.skipped, 1);
@@ -514,7 +556,8 @@ mod tests {
         unix_fs::symlink(&skill.path, library.path().join("my-skill")).unwrap();
         assert!(library.path().join("my-skill").is_symlink());
 
-        let (result, _manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.updated, 1, "symlink should be migrated");
 
         // Should now be a real directory, not a symlink
@@ -535,7 +578,7 @@ mod tests {
         let library = TempDir::new().unwrap();
 
         let skill1 = make_skill(source1.path(), "my-skill");
-        consolidate(&[skill1], library.path(), false, false).unwrap();
+        consolidate(&[skill1], library.path(), library.path(), false, false).unwrap();
 
         // New skill from a different source with different content
         let skill2_dir = source2.path().join("my-skill");
@@ -549,8 +592,14 @@ mod tests {
             provenance: None,
         };
 
-        let (result, _manifest) =
-            consolidate(std::slice::from_ref(&skill2), library.path(), false, false).unwrap();
+        let (result, _manifest) = consolidate(
+            std::slice::from_ref(&skill2),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
 
         let content = std::fs::read_to_string(library.path().join("my-skill/SKILL.md")).unwrap();
@@ -563,7 +612,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (_, manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (_, manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
 
         assert_eq!(manifest.len(), 1);
         assert!(manifest.contains_key("my-skill"));
@@ -586,7 +636,8 @@ mod tests {
         )
         .unwrap();
 
-        let (result, _manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.updated, 1);
 
         let dest = library.path().join("my-skill");
@@ -614,7 +665,8 @@ mod tests {
             provenance: None,
         };
 
-        let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.created, 1);
         assert!(
             library
@@ -635,7 +687,8 @@ mod tests {
         std::fs::create_dir_all(library.path()).unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (result, _) = consolidate(&[skill], library.path(), true, false).unwrap();
+        let (result, _) =
+            consolidate(&[skill], library.path(), library.path(), true, false).unwrap();
         assert_eq!(result.created, 1);
         assert!(
             !library.path().join(".tome-manifest.json").exists(),
@@ -651,12 +704,18 @@ mod tests {
 
         // First: consolidate as local (creates real copy + manifest entry)
         let local_skill = make_skill(source.path(), "my-skill");
-        consolidate(&[local_skill], library.path(), false, false).unwrap();
+        consolidate(&[local_skill], library.path(), library.path(), false, false).unwrap();
 
         // Now: dry-run consolidate the same skill as managed
         let managed_skill = make_managed_skill(source.path(), "my-skill");
-        let (result, manifest) =
-            consolidate(&[managed_skill], library.path(), true, false).unwrap();
+        let (result, manifest) = consolidate(
+            &[managed_skill],
+            library.path(),
+            library.path(),
+            true,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
 
         // In-memory manifest should reflect managed=true even though no disk changes
@@ -681,8 +740,14 @@ mod tests {
 
         unix_fs::symlink(&skill.path, library.path().join("my-skill")).unwrap();
 
-        let (_, manifest) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (_, manifest) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         let entry = manifest
             .get("my-skill")
             .expect("manifest should have entry");
@@ -700,7 +765,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        let (result, manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.created, 1);
 
         let dest = library.path().join("plugin-skill");
@@ -717,9 +783,22 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
-        let (result, _) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
+        let (result, _) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.created, 0);
         assert_eq!(result.updated, 0);
@@ -732,12 +811,18 @@ mod tests {
         let library = TempDir::new().unwrap();
 
         let skill1 = make_managed_skill(source1.path(), "plugin-skill");
-        consolidate(&[skill1], library.path(), false, false).unwrap();
+        consolidate(&[skill1], library.path(), library.path(), false, false).unwrap();
 
         // Same skill name from different path
         let skill2 = make_managed_skill(source2.path(), "plugin-skill");
-        let (result, _) =
-            consolidate(std::slice::from_ref(&skill2), library.path(), false, false).unwrap();
+        let (result, _) = consolidate(
+            std::slice::from_ref(&skill2),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
 
         // Should point to the new path
@@ -754,15 +839,21 @@ mod tests {
 
         // First: consolidate as local (copy)
         let local_skill = make_skill(source.path(), "my-skill");
-        consolidate(&[local_skill], library.path(), false, false).unwrap();
+        consolidate(&[local_skill], library.path(), library.path(), false, false).unwrap();
         let dest = library.path().join("my-skill");
         assert!(dest.is_dir());
         assert!(!dest.is_symlink(), "should be a real dir initially");
 
         // Now: same skill but managed
         let managed_skill = make_managed_skill(source.path(), "my-skill");
-        let (result, manifest) =
-            consolidate(&[managed_skill], library.path(), false, false).unwrap();
+        let (result, manifest) = consolidate(
+            &[managed_skill],
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
         assert!(dest.is_symlink(), "should now be a symlink");
         assert!(manifest.get("my-skill").unwrap().managed);
@@ -775,13 +866,21 @@ mod tests {
 
         // First: consolidate as managed (symlink)
         let managed_skill = make_managed_skill(source.path(), "my-skill");
-        consolidate(&[managed_skill], library.path(), false, false).unwrap();
+        consolidate(
+            &[managed_skill],
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         let dest = library.path().join("my-skill");
         assert!(dest.is_symlink(), "should be a symlink initially");
 
         // Now: same skill but local
         let local_skill = make_skill(source.path(), "my-skill");
-        let (result, manifest) = consolidate(&[local_skill], library.path(), false, false).unwrap();
+        let (result, manifest) =
+            consolidate(&[local_skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.updated, 1);
         assert!(dest.is_dir());
         assert!(!dest.is_symlink(), "should now be a real directory");
@@ -794,7 +893,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        let (_, manifest) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (_, manifest) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         let entry = manifest.get("plugin-skill").unwrap();
         assert!(entry.managed);
         assert!(!entry.content_hash.is_empty());
@@ -810,7 +910,14 @@ mod tests {
         let managed = make_managed_skill(source.path(), "plugin-a");
         let local = make_skill(source.path(), "user-skill");
 
-        let (_, manifest) = consolidate(&[managed, local], library.path(), false, false).unwrap();
+        let (_, manifest) = consolidate(
+            &[managed, local],
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         generate_gitignore(library.path(), &manifest).unwrap();
 
         let content = std::fs::read_to_string(library.path().join(".gitignore")).unwrap();
@@ -828,7 +935,14 @@ mod tests {
         let managed = make_managed_skill(source.path(), "plugin-a");
         let local = make_skill(source.path(), "user-skill");
 
-        let (_, manifest) = consolidate(&[managed, local], library.path(), false, false).unwrap();
+        let (_, manifest) = consolidate(
+            &[managed, local],
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         generate_gitignore(library.path(), &manifest).unwrap();
 
         let content = std::fs::read_to_string(library.path().join(".gitignore")).unwrap();
@@ -844,7 +958,8 @@ mod tests {
         let source = TempDir::new().unwrap();
 
         let managed = make_managed_skill(source.path(), "plugin-a");
-        let (_, manifest) = consolidate(&[managed], library.path(), false, false).unwrap();
+        let (_, manifest) =
+            consolidate(&[managed], library.path(), library.path(), false, false).unwrap();
 
         generate_gitignore(library.path(), &manifest).unwrap();
         let first = std::fs::read_to_string(library.path().join(".gitignore")).unwrap();
@@ -864,7 +979,8 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        let (result, manifest) = consolidate(&[skill], library.path(), true, false).unwrap();
+        let (result, manifest) =
+            consolidate(&[skill], library.path(), library.path(), true, false).unwrap();
         assert_eq!(result.created, 1);
 
         // Symlink should NOT exist on disk
@@ -883,9 +999,22 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
-        let (result, _) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, true).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
+        let (result, _) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            true,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1, "force should recreate managed symlink");
         assert_eq!(result.unchanged, 0);
 
@@ -900,7 +1029,14 @@ mod tests {
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
         // First: consolidate normally (creates symlink)
-        consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         let dest = library.path().join("plugin-skill");
         assert!(dest.is_symlink(), "should be a symlink initially");
 
@@ -914,8 +1050,14 @@ mod tests {
         );
 
         // Re-consolidate — should repair by replacing dir with symlink
-        let (result, _) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (result, _) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1, "should repair stale directory");
         assert_eq!(result.unchanged, 0);
         assert!(dest.is_symlink(), "should be a symlink again after repair");
@@ -933,7 +1075,8 @@ mod tests {
         std::fs::create_dir_all(&collision).unwrap();
         std::fs::write(collision.join("README.md"), "user-created").unwrap();
 
-        let (result, _) = consolidate(&[skill], library.path(), false, false).unwrap();
+        let (result, _) =
+            consolidate(&[skill], library.path(), library.path(), false, false).unwrap();
         assert_eq!(result.skipped, 1);
         assert_eq!(result.created, 0);
 
@@ -949,15 +1092,27 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (_, manifest1) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (_, manifest1) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         let hash1 = manifest1.get("my-skill").unwrap().content_hash.clone();
 
         // Modify source content
         std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
 
-        let (result, manifest2) =
-            consolidate(std::slice::from_ref(&skill), library.path(), false, false).unwrap();
+        let (result, manifest2) = consolidate(
+            std::slice::from_ref(&skill),
+            library.path(),
+            library.path(),
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.updated, 1);
 
         let entry = manifest2.get("my-skill").expect("should have entry");
@@ -970,7 +1125,7 @@ mod tests {
     }
 
     #[test]
-    fn gitignore_always_ignores_tmp_files() {
+    fn gitignore_empty_manifest_no_tmp_entries() {
         let library = TempDir::new().unwrap();
         std::fs::create_dir_all(library.path()).unwrap();
 
@@ -979,10 +1134,13 @@ mod tests {
         generate_gitignore(library.path(), &manifest).unwrap();
 
         let content = std::fs::read_to_string(library.path().join(".gitignore")).unwrap();
-        assert!(content.contains(".tome-manifest.tmp"));
         assert!(
-            content.contains("tome.lock.tmp"),
-            "gitignore should include lockfile tmp"
+            !content.contains(".tome-manifest.tmp"),
+            "manifest tmp files now live at tome home, not in library"
+        );
+        assert!(
+            !content.contains("tome.lock.tmp"),
+            "lockfile tmp files now live at tome home, not in library"
         );
     }
 }

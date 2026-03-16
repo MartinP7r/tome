@@ -236,7 +236,7 @@ fn configure_library() -> Result<PathBuf> {
 
     let default = dirs::home_dir()
         .context("could not determine home directory")?
-        .join(".local/share/tome/skills");
+        .join(".tome/skills");
 
     let options = vec![
         format!("{} (default)", default.display()),

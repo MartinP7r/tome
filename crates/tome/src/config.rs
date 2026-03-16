@@ -166,7 +166,7 @@ impl Config {
     /// # Examples
     ///
     /// ```text
-    /// // Load from default ~/.config/tome/config.toml
+    /// // Load from default ~/.tome/tome.toml
     /// let config = Config::load_or_default(None)?;
     ///
     /// // Load from explicit path (parent dir must exist)
@@ -274,13 +274,16 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Default config file path: ~/.config/tome/config.toml
-pub fn default_config_path() -> Result<PathBuf> {
+/// Default tome home directory: ~/.tome/
+pub fn default_tome_home() -> Result<PathBuf> {
     Ok(dirs::home_dir()
         .context("could not determine home directory")?
-        .join(".config")
-        .join("tome")
-        .join("config.toml"))
+        .join(".tome"))
+}
+
+/// Default config file path: ~/.tome/tome.toml
+pub fn default_config_path() -> Result<PathBuf> {
+    Ok(default_tome_home()?.join("tome.toml"))
 }
 
 mod defaults {
@@ -291,9 +294,7 @@ mod defaults {
         // surface a proper error if home is unavailable.
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".local")
-            .join("share")
-            .join("tome")
+            .join(".tome")
             .join("skills")
     }
 }
@@ -505,7 +506,7 @@ mod tests {
     #[test]
     fn config_parses_full_toml() {
         let toml_str = r#"
-library_dir = "~/.local/share/tome/skills"
+library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
 [[sources]]

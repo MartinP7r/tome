@@ -8,7 +8,7 @@
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
 | **v0.4.1** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
-| **v0.4.2** | Format Transforms      | Pluggable transform pipeline, Copilot/Cursor/Windsurf format support    |        |
+| **v0.4.2** | Format Transforms      | `~/.tome/` unified home, rules/instructions syncing, transform pipeline |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
@@ -69,8 +69,8 @@ Replaced the hardcoded `Targets` struct with a flexible, data-driven target conf
 - **Connector trait** → [#192](https://github.com/MartinP7r/tome/issues/192). Unified source/target interface. The BTreeMap solved config flexibility; the trait solves architectural abstraction.
 - **Built-in connectors** → Part of [#192](https://github.com/MartinP7r/tome/issues/192). Claude, Codex, Antigravity, Cursor, Windsurf, Amp, Goose, etc.
 - **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4.2 Format Transforms).
-- **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Separate concern from skills.
-- **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). High complexity, needs design.
+- **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Managed from `~/.tome/rules/`, distributed to each target's rules dir. See v0.4.2.
+- **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). Managed from `~/.tome/instructions/`, mapped to tool-specific filenames. See v0.4.2.
 
 ## v0.3.x — Portable Library (MVP) ✓
 
@@ -138,7 +138,30 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.4.2 — Format Transforms
+## v0.4.2 — Format Transforms & Unified Home Directory
+
+### `~/.tome/` — Unified Home Directory
+
+All tome state moves under a single `~/.tome/` directory, replacing the previous split across `~/.config/tome/` and `~/.local/share/tome/`. The new layout:
+
+```
+~/.tome/
+├── tome.toml          # main config (was ~/.config/tome/config.toml)
+├── tome.lock          # lockfile
+├── skills/            # skill library (was ~/.local/share/tome/skills/)
+├── rules/             # shared rules → .claude/rules/, .cursor/rules/, etc.
+└── instructions/      # instruction files → CLAUDE.md, AGENTS.md, GEMINI.md, etc.
+```
+
+### Rules Syncing ([#193](https://github.com/MartinP7r/tome/issues/193))
+
+Manage tool-specific rule files from a single canonical location. `~/.tome/rules/` contains shared rules that get distributed to each target's rules directory (e.g., `.claude/rules/`, `.cursor/rules/`). Same two-tier model as skills: `~/.tome/rules/` is the source of truth, targets get symlinks.
+
+### Instruction File Syncing ([#194](https://github.com/MartinP7r/tome/issues/194))
+
+Manage root-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, .cursorrules, etc.) from `~/.tome/instructions/`. High complexity — each tool expects a different filename and format at the project root. Needs a mapping layer (instruction → tool-specific filename) and careful conflict handling for user-managed instruction files.
+
+### Format Transforms
 
 - Pluggable transform pipeline driven by connector format declarations
 - Preserve original format — transforms are output-only
@@ -188,7 +211,7 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Browse & manage library**: View all skills in the tome library with rendered Markdown previews using [swift-markdown-ui](https://github.com/gonzalezreal/swift-markdown-ui)
 - **Visual skill editing**: Edit skill frontmatter and body with live preview
 - **Sync trigger**: Run `tome sync` from the GUI with status feedback
-- **Source & target management**: Configure sources and targets visually instead of editing `config.toml`
+- **Source & target management**: Configure sources and targets visually instead of editing `tome.toml`
 - **Health dashboard**: Surface `tome doctor` and `tome status` diagnostics in a native UI
 - **Import/export**: Import skills from folders or zip files; export skills for sharing
 - **Tech stack**: SwiftUI (macOS 15+), swift-markdown-ui for rendering, invokes `tome` CLI under the hood

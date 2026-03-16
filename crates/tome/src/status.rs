@@ -42,7 +42,7 @@ pub struct StatusReport {
 // -- Data gathering (pure computation, no I/O) --
 
 /// Gather status data without producing any output.
-pub fn gather(config: &Config) -> Result<StatusReport> {
+pub fn gather(config: &Config, tome_home: &Path) -> Result<StatusReport> {
     let configured = config.library_dir.is_dir() || !config.sources.is_empty();
 
     let library_count = if config.library_dir.is_dir() {
@@ -83,7 +83,7 @@ pub fn gather(config: &Config) -> Result<StatusReport> {
         .collect();
 
     let health = if config.library_dir.is_dir() {
-        count_health_issues(&config.library_dir).map_err(|e| e.to_string())
+        count_health_issues(&config.library_dir, tome_home).map_err(|e| e.to_string())
     } else {
         Ok(0)
     };
@@ -101,8 +101,8 @@ pub fn gather(config: &Config) -> Result<StatusReport> {
 // -- Rendering --
 
 /// Display the current status of the tome system.
-pub fn show(config: &Config) -> Result<()> {
-    let report = gather(config)?;
+pub fn show(config: &Config, tome_home: &Path) -> Result<()> {
+    let report = gather(config, tome_home)?;
     render_status(&report);
     Ok(())
 }
@@ -235,8 +235,8 @@ fn count_entries(dir: &Path) -> Result<usize> {
 }
 
 /// Count health issues: manifest/disk mismatches.
-fn count_health_issues(dir: &Path) -> Result<usize> {
-    let m = manifest::load(dir)?;
+fn count_health_issues(dir: &Path, tome_home: &Path) -> Result<usize> {
+    let m = manifest::load(tome_home)?;
     let mut issues = 0;
 
     // Check manifest entries exist on disk
@@ -280,7 +280,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = gather(&config).unwrap();
+        let report = gather(&config, config.library_dir.as_path()).unwrap();
         assert!(!report.configured);
         assert!(report.sources.is_empty());
         assert!(report.targets.is_empty());
@@ -300,7 +300,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = gather(&config).unwrap();
+        let report = gather(&config, config.library_dir.as_path()).unwrap();
         assert!(report.configured);
         assert_eq!(report.sources.len(), 1);
         assert_eq!(report.sources[0].name, "test");
@@ -319,7 +319,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = gather(&config).unwrap();
+        let report = gather(&config, config.library_dir.as_path()).unwrap();
         assert!(report.configured);
         assert_eq!(report.library_count.unwrap(), 2);
     }
@@ -346,7 +346,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = gather(&config).unwrap();
+        let report = gather(&config, config.library_dir.as_path()).unwrap();
         assert_eq!(report.targets.len(), 1);
         assert_eq!(report.targets[0].name, "claude");
         assert!(report.targets[0].enabled);
@@ -363,7 +363,7 @@ mod tests {
             ..Config::default()
         };
 
-        let report = gather(&config).unwrap();
+        let report = gather(&config, config.library_dir.as_path()).unwrap();
         assert_eq!(report.health.unwrap(), 1);
     }
 
@@ -376,7 +376,7 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(&config);
+        let result = show(&config, config.library_dir.as_path());
         assert!(result.is_ok());
     }
 
@@ -394,7 +394,7 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(&config);
+        let result = show(&config, config.library_dir.as_path());
         assert!(result.is_ok());
     }
 
@@ -436,7 +436,7 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(&config);
+        let result = show(&config, config.library_dir.as_path());
         assert!(result.is_ok());
     }
 
@@ -488,7 +488,7 @@ mod tests {
     #[test]
     fn count_health_issues_empty_dir() {
         let dir = tempfile::TempDir::new().unwrap();
-        assert_eq!(count_health_issues(dir.path()).unwrap(), 0);
+        assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 0);
     }
 
     #[test]
@@ -509,7 +509,7 @@ mod tests {
         );
         manifest::save(&m, dir.path()).unwrap();
 
-        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+        assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 1);
     }
 
     #[test]
@@ -519,7 +519,7 @@ mod tests {
         // Create a directory not tracked by manifest
         std::fs::create_dir_all(dir.path().join("orphan-skill")).unwrap();
 
-        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+        assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 1);
     }
 
     #[test]
@@ -546,7 +546,7 @@ mod tests {
         unix_fs::symlink("/nonexistent/source", dir.path().join("managed-skill")).unwrap();
 
         // Should count exactly 1 issue (manifest-vs-disk), not 2
-        assert_eq!(count_health_issues(dir.path()).unwrap(), 1);
+        assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 1);
     }
 
     #[test]
@@ -556,6 +556,6 @@ mod tests {
         // .git dir should not be counted as an orphan
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
 
-        assert_eq!(count_health_issues(dir.path()).unwrap(), 0);
+        assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 0);
     }
 }
