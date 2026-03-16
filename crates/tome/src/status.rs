@@ -75,7 +75,7 @@ pub fn gather(config: &Config, tome_home: &Path) -> Result<StatusReport> {
                 crate::config::TargetMethod::Symlink { .. } => "symlink",
             };
             TargetStatus {
-                name: name.to_string(),
+                name: name.as_str().to_string(),
                 enabled: t.enabled,
                 method: method.to_string(),
             }
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn gather_with_targets_populates_target_status() {
-        use crate::config::{TargetConfig, TargetMethod};
+        use crate::config::{TargetConfig, TargetMethod, TargetName};
         use std::collections::BTreeMap;
 
         let lib_dir = tempfile::TempDir::new().unwrap();
@@ -335,7 +335,7 @@ mod tests {
         let config = Config {
             library_dir: lib_dir.path().to_path_buf(),
             targets: BTreeMap::from([(
-                "claude".to_string(),
+                TargetName::new("claude").unwrap(),
                 TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
@@ -400,7 +400,7 @@ mod tests {
 
     #[test]
     fn status_shows_tables_with_configured_sources_and_targets() {
-        use crate::config::{Source, SourceType, TargetConfig, TargetMethod};
+        use crate::config::{Source, SourceType, TargetConfig, TargetMethod, TargetName};
         use std::collections::BTreeMap;
 
         let lib_dir = tempfile::TempDir::new().unwrap();
@@ -425,7 +425,7 @@ mod tests {
                 source_type: SourceType::Directory,
             }],
             targets: BTreeMap::from([(
-                "antigravity".to_string(),
+                TargetName::new("antigravity").unwrap(),
                 TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {

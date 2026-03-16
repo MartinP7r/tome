@@ -7,6 +7,86 @@ use std::path::{Path, PathBuf};
 
 use crate::discover::SkillName;
 
+/// A validated target name.
+///
+/// Rejects empty names and path separators, matching the `SkillName` validation pattern.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
+pub struct TargetName(String);
+
+impl TargetName {
+    /// Create a new target name from any string-like value.
+    ///
+    /// Rejects empty names and names containing path separators (`/` or `\`).
+    pub fn new(name: impl Into<String>) -> Result<Self> {
+        let name = name.into();
+        anyhow::ensure!(!name.is_empty(), "target name cannot be empty");
+        anyhow::ensure!(
+            !name.contains('/') && !name.contains('\\'),
+            "target name contains path separator: '{name}'"
+        );
+        Ok(Self(name))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for TargetName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for TargetName {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<Path> for TargetName {
+    fn as_ref(&self) -> &Path {
+        Path::new(&self.0)
+    }
+}
+
+impl PartialEq<str> for TargetName {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for TargetName {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl std::borrow::Borrow<str> for TargetName {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for TargetName {
+    type Error = anyhow::Error;
+
+    fn try_from(s: String) -> Result<Self> {
+        Self::new(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for TargetName {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        TargetName::new(s).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Top-level configuration for tome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -23,8 +103,8 @@ pub struct Config {
     pub sources: Vec<Source>,
 
     /// Distribution targets — keyed by tool name (e.g. "claude", "antigravity")
-    #[serde(default)]
-    pub targets: BTreeMap<String, TargetConfig>,
+    #[serde(default, deserialize_with = "deserialize_targets")]
+    pub targets: BTreeMap<TargetName, TargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +220,22 @@ impl<'de> Deserialize<'de> for TargetConfig {
     }
 }
 
+/// Deserialize targets map from TOML, validating target names.
+fn deserialize_targets<'de, D>(
+    deserializer: D,
+) -> std::result::Result<BTreeMap<TargetName, TargetConfig>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw: BTreeMap<String, TargetConfig> = BTreeMap::deserialize(deserializer)?;
+    raw.into_iter()
+        .map(|(k, v)| {
+            let name = TargetName::new(k).map_err(serde::de::Error::custom)?;
+            Ok((name, v))
+        })
+        .collect()
+}
+
 impl Config {
     /// Load config from file, or return defaults if file doesn't exist.
     pub fn load(path: &Path) -> Result<Self> {
@@ -222,10 +318,7 @@ impl Config {
             );
         }
 
-        // Empty target names
-        for name in self.targets.keys() {
-            anyhow::ensure!(!name.is_empty(), "target name cannot be empty");
-        }
+        // TargetName validation is enforced at parse time; no additional check needed here.
 
         Ok(())
     }
@@ -391,7 +484,7 @@ mod tests {
                 source_type: SourceType::Directory,
             }],
             targets: BTreeMap::from([(
-                "antigravity".to_string(),
+                TargetName::new("antigravity").unwrap(),
                 TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
@@ -532,8 +625,8 @@ skills_dir = "~/.gemini/antigravity/skills"
 
     #[test]
     fn targets_iter_includes_claude() {
-        let targets: BTreeMap<String, TargetConfig> = BTreeMap::from([(
-            "claude".to_string(),
+        let targets: BTreeMap<TargetName, TargetConfig> = BTreeMap::from([(
+            TargetName::new("claude").unwrap(),
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
@@ -552,7 +645,7 @@ skills_dir = "~/.gemini/antigravity/skills"
             exclude: BTreeSet::new(),
             sources: Vec::new(),
             targets: BTreeMap::from([(
-                "claude".to_string(),
+                TargetName::new("claude").unwrap(),
                 TargetConfig {
                     enabled: true,
                     method: TargetMethod::Symlink {
@@ -597,23 +690,30 @@ skills_dir = "~/.amp/skills"
     }
 
     #[test]
-    fn validate_rejects_empty_target_name() {
-        let config = Config {
-            targets: BTreeMap::from([(
-                "".to_string(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: PathBuf::from("/tmp/target"),
-                    },
-                },
-            )]),
-            ..Default::default()
-        };
-        let err = config.validate().unwrap_err();
-        assert!(
-            err.to_string().contains("target name cannot be empty"),
-            "unexpected error: {err}"
-        );
+    fn target_name_rejects_empty() {
+        assert!(TargetName::new("").is_err());
+    }
+
+    #[test]
+    fn target_name_rejects_path_separator() {
+        assert!(TargetName::new("foo/bar").is_err());
+        assert!(TargetName::new("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn target_name_accepts_valid() {
+        let name = TargetName::new("my-target-123").unwrap();
+        assert_eq!(name.as_str(), "my-target-123");
+        assert_eq!(name.to_string(), "my-target-123");
+        assert_eq!(name, *"my-target-123");
+    }
+
+    #[test]
+    fn target_name_deserialize_rejects_empty() {
+        // TOML with an empty target key would be malformed TOML, but we can test
+        // the TargetName::new validation directly (already covered above).
+        // Instead, test that TargetName rejects empty via serde:
+        let result: std::result::Result<TargetName, _> = serde_json::from_str(r#""""#);
+        assert!(result.is_err());
     }
 }

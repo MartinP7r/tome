@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::config::TargetName;
 use crate::discover::SkillName;
 
 /// Per-machine preferences — disabled skills and targets for this machine.
@@ -22,7 +23,7 @@ pub struct MachinePrefs {
 
     /// Targets to skip on this machine (e.g. machine A doesn't have a certain tool installed).
     #[serde(default)]
-    pub disabled_targets: BTreeSet<String>,
+    pub disabled_targets: BTreeSet<TargetName>,
 }
 
 impl MachinePrefs {
@@ -39,6 +40,12 @@ impl MachinePrefs {
     /// Returns true if the given target is disabled on this machine.
     pub fn is_target_disabled(&self, name: &str) -> bool {
         self.disabled_targets.contains(name)
+    }
+
+    /// Mark a target as disabled on this machine.
+    #[allow(dead_code)]
+    pub fn disable_target(&mut self, name: TargetName) {
+        self.disabled_targets.insert(name);
     }
 }
 
@@ -174,13 +181,12 @@ mod tests {
     #[test]
     fn is_target_disabled_checks_set() {
         let mut prefs = MachinePrefs::default();
-        prefs.disabled_targets.insert("claude".to_string());
-        prefs.disabled_targets.insert("codex".to_string());
+        prefs.disable_target(TargetName::new("claude").unwrap());
+        prefs.disable_target(TargetName::new("codex").unwrap());
 
         assert!(prefs.is_target_disabled("claude"));
         assert!(prefs.is_target_disabled("codex"));
         assert!(!prefs.is_target_disabled("cursor"));
-        assert!(!prefs.is_target_disabled(""));
     }
 
     #[test]
@@ -190,8 +196,8 @@ mod tests {
 
         let mut prefs = MachinePrefs::default();
         prefs.disable(SkillName::new("skill-a").unwrap());
-        prefs.disabled_targets.insert("claude".to_string());
-        prefs.disabled_targets.insert("codex".to_string());
+        prefs.disable_target(TargetName::new("claude").unwrap());
+        prefs.disable_target(TargetName::new("codex").unwrap());
 
         save(&prefs, &path).unwrap();
         let loaded = load(&path).unwrap();
@@ -217,8 +223,8 @@ mod tests {
     #[test]
     fn disabled_targets_toml_format() {
         let mut prefs = MachinePrefs::default();
-        prefs.disabled_targets.insert("claude".to_string());
-        prefs.disabled_targets.insert("windsurf".to_string());
+        prefs.disable_target(TargetName::new("claude").unwrap());
+        prefs.disable_target(TargetName::new("windsurf").unwrap());
 
         let toml_str = toml::to_string_pretty(&prefs).unwrap();
         assert!(toml_str.contains("disabled_targets"));
