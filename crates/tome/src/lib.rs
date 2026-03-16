@@ -48,6 +48,7 @@ use cli::{Cli, Command};
 use config::Config;
 use distribute::DistributeResult;
 use library::ConsolidateResult;
+pub use paths::TomePaths;
 
 /// Summary of a complete sync operation.
 pub struct SyncReport {
@@ -112,9 +113,10 @@ pub fn run(cli: Cli) -> Result<()> {
         let config = wizard::run(cli.dry_run)?;
         config.validate()?;
         if !cli.dry_run {
+            let paths = TomePaths::new(tome_home, config.library_dir.clone());
             sync(
                 &config,
-                &tome_home,
+                &paths,
                 cli.dry_run,
                 false,
                 cli.verbose,
@@ -128,12 +130,13 @@ pub fn run(cli: Cli) -> Result<()> {
     let config = Config::load_or_default(cli.config.as_deref())?;
     config.validate()?;
     let tome_home = resolve_tome_home(cli.config.as_deref())?;
+    let paths = TomePaths::new(tome_home, config.library_dir.clone());
 
     match cli.command {
         Command::Init => unreachable!(),
         Command::Sync { force } => sync(
             &config,
-            &tome_home,
+            &paths,
             cli.dry_run,
             force,
             cli.verbose,
@@ -142,14 +145,14 @@ pub fn run(cli: Cli) -> Result<()> {
         )?,
         Command::Update => update_cmd(
             &config,
-            &tome_home,
+            &paths,
             cli.dry_run,
             cli.verbose,
             cli.quiet,
             cli.machine.as_deref(),
         )?,
-        Command::Status => status::show(&config, &tome_home)?,
-        Command::Doctor => doctor::diagnose(&config, &tome_home, cli.dry_run)?,
+        Command::Status => status::show(&config, &paths)?,
+        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run)?,
         Command::Browse => {
             let mut warnings = Vec::new();
             let skills = discover::discover_all(&config, &mut warnings)?;
@@ -174,7 +177,7 @@ pub fn run(cli: Cli) -> Result<()> {
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(
     config: &Config,
-    tome_home: &Path,
+    paths: &TomePaths,
     dry_run: bool,
     force: bool,
     verbose: bool,
@@ -223,8 +226,7 @@ fn sync(
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
-    let (consolidate_result, mut manifest) =
-        library::consolidate(&skills, &config.library_dir, tome_home, dry_run, force)?;
+    let (consolidate_result, mut manifest) = library::consolidate(&skills, paths, dry_run, force)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -269,7 +271,7 @@ fn sync(
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
         let result = distribute::distribute_to_target(
-            &config.library_dir,
+            &paths.library_dir,
             name.as_str(),
             target,
             &manifest,
@@ -289,7 +291,7 @@ fn sync(
         eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
     let cleanup_result = cleanup::cleanup_library(
-        &config.library_dir,
+        &paths.library_dir,
         &discovered_names,
         &mut manifest,
         dry_run,
@@ -299,25 +301,25 @@ fn sync(
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
         let skills_dir = target.skills_dir();
-        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &paths.library_dir, dry_run)?;
         // Also clean up symlinks for disabled skills
         removed_from_targets +=
-            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
+            cleanup_disabled_from_target(skills_dir, &paths.library_dir, &machine_prefs, dry_run)?;
     }
     // Save manifest after cleanup (may have removed entries)
-    if !dry_run && tome_home.is_dir() {
-        manifest::save(&manifest, tome_home)?;
+    if !dry_run && paths.tome_home.is_dir() {
+        manifest::save(&manifest, &paths.tome_home)?;
     }
 
     // Generate .gitignore after cleanup so stale entries are excluded
-    if !dry_run && config.library_dir.is_dir() {
-        library::generate_gitignore(&config.library_dir, &manifest)?;
+    if !dry_run && paths.library_dir.is_dir() {
+        library::generate_gitignore(&paths.library_dir, &manifest)?;
     }
 
     // Generate lockfile for reproducibility
-    if !dry_run && tome_home.is_dir() {
+    if !dry_run && paths.tome_home.is_dir() {
         let lf = lockfile::generate(&manifest, &skills);
-        lockfile::save(&lf, tome_home)?;
+        lockfile::save(&lf, &paths.tome_home)?;
     }
 
     if let Some(sp) = sp {
@@ -339,7 +341,7 @@ fn sync(
     // Offer git commit if the library dir is a git repo with changes
     if !dry_run && !quiet {
         offer_git_commit(
-            &config.library_dir,
+            &paths.library_dir,
             &manifest,
             report.consolidate.created,
             report.consolidate.updated,
@@ -351,10 +353,9 @@ fn sync(
 }
 
 /// The update command: diff-then-distribute with interactive triage.
-#[allow(clippy::too_many_arguments)]
 fn update_cmd(
     config: &Config,
-    tome_home: &Path,
+    paths: &TomePaths,
     dry_run: bool,
     verbose: bool,
     quiet: bool,
@@ -386,7 +387,7 @@ fn update_cmd(
     }
 
     // 1. Load existing lockfile (may be committed by another machine)
-    let old_lockfile = lockfile::load(tome_home)?;
+    let old_lockfile = lockfile::load(&paths.tome_home)?;
 
     // 2. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
@@ -416,8 +417,7 @@ fn update_cmd(
     if verbose {
         eprintln!("{}", style("Consolidating to library...").dim());
     }
-    let (consolidate_result, mut manifest) =
-        library::consolidate(&skills, &config.library_dir, tome_home, dry_run, false)?;
+    let (consolidate_result, mut manifest) = library::consolidate(&skills, paths, dry_run, false)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -475,7 +475,7 @@ fn update_cmd(
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
         let result = distribute::distribute_to_target(
-            &config.library_dir,
+            &paths.library_dir,
             name.as_str(),
             target,
             &manifest,
@@ -495,7 +495,7 @@ fn update_cmd(
         eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
     let cleanup_result = cleanup::cleanup_library(
-        &config.library_dir,
+        &paths.library_dir,
         &discovered_names,
         &mut manifest,
         dry_run,
@@ -505,10 +505,10 @@ fn update_cmd(
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
         let skills_dir = target.skills_dir();
-        removed_from_targets += cleanup::cleanup_target(skills_dir, &config.library_dir, dry_run)?;
+        removed_from_targets += cleanup::cleanup_target(skills_dir, &paths.library_dir, dry_run)?;
         // Also clean up symlinks for disabled skills
         removed_from_targets +=
-            cleanup_disabled_from_target(skills_dir, &config.library_dir, &machine_prefs, dry_run)?;
+            cleanup_disabled_from_target(skills_dir, &paths.library_dir, &machine_prefs, dry_run)?;
     }
 
     if let Some(sp) = sp {
@@ -516,12 +516,12 @@ fn update_cmd(
     }
 
     // 7. Save lockfile + manifest
-    if !dry_run && tome_home.is_dir() {
-        manifest::save(&manifest, tome_home)?;
-        if config.library_dir.is_dir() {
-            library::generate_gitignore(&config.library_dir, &manifest)?;
+    if !dry_run && paths.tome_home.is_dir() {
+        manifest::save(&manifest, &paths.tome_home)?;
+        if paths.library_dir.is_dir() {
+            library::generate_gitignore(&paths.library_dir, &manifest)?;
         }
-        lockfile::save(&new_lockfile, tome_home)?;
+        lockfile::save(&new_lockfile, &paths.tome_home)?;
     }
 
     let report = SyncReport {
@@ -539,7 +539,7 @@ fn update_cmd(
     // Offer git commit if the library dir is a git repo with changes
     if !dry_run && !quiet {
         offer_git_commit(
-            &config.library_dir,
+            &paths.library_dir,
             &manifest,
             report.consolidate.created,
             report.consolidate.updated,
