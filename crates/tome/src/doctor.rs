@@ -70,8 +70,8 @@ pub fn check(config: &Config, tome_home: &Path) -> Result<DoctorReport> {
     let mut target_issues = Vec::new();
     for (name, t) in config.targets.iter() {
         if t.enabled {
-            let issues = check_target_dir(name, t.skills_dir(), &config.library_dir)?;
-            target_issues.push((name.to_string(), issues));
+            let issues = check_target_dir(name.as_str(), t.skills_dir(), &config.library_dir)?;
+            target_issues.push((name.as_str().to_string(), issues));
         }
     }
 

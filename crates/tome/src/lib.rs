@@ -251,7 +251,7 @@ fn sync(
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
-        if machine_prefs.is_target_disabled(name) {
+        if machine_prefs.is_target_disabled(name.as_str()) {
             if verbose {
                 eprintln!(
                     "{}",
@@ -270,7 +270,7 @@ fn sync(
         }
         let result = distribute::distribute_to_target(
             &config.library_dir,
-            name,
+            name.as_str(),
             target,
             &manifest,
             &machine_prefs,
@@ -457,7 +457,7 @@ fn update_cmd(
     // 5. Distribute (respects machine_prefs including just-disabled skills)
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
-        if machine_prefs.is_target_disabled(name) {
+        if machine_prefs.is_target_disabled(name.as_str()) {
             if verbose {
                 eprintln!(
                     "{}",
@@ -476,7 +476,7 @@ fn update_cmd(
         }
         let result = distribute::distribute_to_target(
             &config.library_dir,
-            name,
+            name.as_str(),
             target,
             &manifest,
             &machine_prefs,

@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::collections::BTreeMap;
 
 use crate::config::{
-    Config, Source, SourceType, TargetConfig, TargetMethod, default_config_path, expand_tilde,
+    Config, Source, SourceType, TargetConfig, TargetMethod, TargetName, default_config_path,
+    expand_tilde,
 };
 
 /// Run the interactive setup wizard.
@@ -326,7 +327,7 @@ const KNOWN_TARGETS: &[KnownTarget] = &[
     },
 ];
 
-fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
+fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
     step_divider("Step 3: Distribution targets");
 
     let home = dirs::home_dir().context("could not determine home directory")?;
@@ -351,7 +352,7 @@ fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
             .interact_text()?;
 
         targets.insert(
-            known.name.to_string(),
+            TargetName::new(known.name)?,
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
@@ -378,7 +379,7 @@ fn configure_targets() -> Result<BTreeMap<String, TargetConfig>> {
             .interact_text()?;
 
         targets.insert(
-            name,
+            TargetName::new(name)?,
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
@@ -456,7 +457,7 @@ const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
 /// Returns `(source_name, overlapping_path)` pairs for each conflict.
 fn find_source_target_overlaps(
     sources: &[Source],
-    targets: &BTreeMap<String, TargetConfig>,
+    targets: &BTreeMap<TargetName, TargetConfig>,
 ) -> Vec<(String, PathBuf)> {
     let target_paths: Vec<PathBuf> = targets
         .values()
@@ -566,7 +567,7 @@ mod tests {
         }];
 
         let targets = BTreeMap::from([(
-            "antigravity".to_string(),
+            TargetName::new("antigravity").unwrap(),
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
@@ -593,7 +594,7 @@ mod tests {
         }];
 
         let targets = BTreeMap::from([(
-            "antigravity".to_string(),
+            TargetName::new("antigravity").unwrap(),
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
@@ -615,7 +616,7 @@ mod tests {
         }];
 
         let targets = BTreeMap::from([(
-            "claude".to_string(),
+            TargetName::new("claude").unwrap(),
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
