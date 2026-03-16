@@ -231,6 +231,18 @@ fn sync(
     let machine_path = resolve_machine_path(machine_override)?;
     let machine_prefs = machine::load(&machine_path)?;
 
+    // Warn about disabled_targets that don't match any configured target
+    if !quiet {
+        for name in &machine_prefs.disabled_targets {
+            if !config.targets.contains_key(name.as_str()) {
+                eprintln!(
+                    "warning: disabled target '{}' in machine.toml does not match any configured target",
+                    name
+                );
+            }
+        }
+    }
+
     // 3. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
@@ -345,6 +357,18 @@ fn update_cmd(
     // Load per-machine preferences
     let machine_path = resolve_machine_path(machine_override)?;
     let mut machine_prefs = machine::load(&machine_path)?;
+
+    // Warn about disabled_targets that don't match any configured target
+    if !quiet {
+        for name in &machine_prefs.disabled_targets {
+            if !config.targets.contains_key(name.as_str()) {
+                eprintln!(
+                    "warning: disabled target '{}' in machine.toml does not match any configured target",
+                    name
+                );
+            }
+        }
+    }
 
     // 1. Load existing lockfile (may be committed by another machine)
     let old_lockfile = lockfile::load(tome_home)?;
