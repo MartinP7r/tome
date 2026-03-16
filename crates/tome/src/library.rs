@@ -1125,6 +1125,33 @@ mod tests {
     }
 
     #[test]
+    fn consolidate_manifest_lives_at_tome_home() {
+        let source = TempDir::new().unwrap();
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+
+        let (result, _manifest) =
+            consolidate(&[skill], library.path(), tome_home.path(), false, false).unwrap();
+        assert_eq!(result.created, 1);
+
+        // Manifest should live at tome_home, not library_dir
+        assert!(
+            tome_home.path().join(".tome-manifest.json").exists(),
+            "manifest should be written to tome_home"
+        );
+        assert!(
+            !library.path().join(".tome-manifest.json").exists(),
+            "manifest should NOT be written to library_dir"
+        );
+
+        // Skills should live at library_dir
+        let dest = library.path().join("my-skill");
+        assert!(dest.is_dir(), "skill should be copied to library_dir");
+        assert!(dest.join("SKILL.md").is_file());
+    }
+
+    #[test]
     fn gitignore_empty_manifest_no_tmp_entries() {
         let library = TempDir::new().unwrap();
         std::fs::create_dir_all(library.path()).unwrap();
