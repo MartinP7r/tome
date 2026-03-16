@@ -86,10 +86,15 @@ fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::Pa
 /// Otherwise, use the default `~/.tome/`.
 fn resolve_tome_home(cli_config: Option<&Path>) -> Result<std::path::PathBuf> {
     match cli_config {
-        Some(p) => Ok(p
-            .parent()
-            .context("config path has no parent directory")?
-            .to_path_buf()),
+        Some(p) => {
+            anyhow::ensure!(
+                p.is_absolute(),
+                "config path '{}' must be an absolute path",
+                p.display()
+            );
+            let parent = p.parent().context("config path has no parent directory")?;
+            Ok(parent.to_path_buf())
+        }
         None => config::default_tome_home(),
     }
 }
@@ -925,5 +930,42 @@ mod tests {
             target.path().join("disabled-skill").is_symlink(),
             "dry-run should not actually remove"
         );
+    }
+
+    #[test]
+    fn resolve_tome_home_absolute_path_returns_parent() {
+        let result = resolve_tome_home(Some(Path::new("/home/user/.tome/tome.toml"))).unwrap();
+        assert_eq!(result, Path::new("/home/user/.tome"));
+    }
+
+    #[test]
+    fn resolve_tome_home_bare_filename_returns_error() {
+        let result = resolve_tome_home(Some(Path::new("tome.toml")));
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("must be an absolute path"),
+            "unexpected error: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_relative_path_returns_error() {
+        for path in &["./tome.toml", "../tome.toml", "subdir/tome.toml"] {
+            let result = resolve_tome_home(Some(Path::new(path)));
+            assert!(result.is_err(), "expected error for relative path: {path}");
+            let err_msg = result.unwrap_err().to_string();
+            assert!(
+                err_msg.contains("must be an absolute path"),
+                "unexpected error for '{path}': {err_msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_tome_home_none_returns_default() {
+        let result = resolve_tome_home(None).unwrap();
+        let expected = config::default_tome_home().unwrap();
+        assert_eq!(result, expected);
     }
 }
