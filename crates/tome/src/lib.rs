@@ -252,6 +252,16 @@ fn sync(
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
         if machine_prefs.is_target_disabled(name) {
+            if verbose {
+                eprintln!(
+                    "{}",
+                    style(format!(
+                        "Skipping target '{}' (disabled in machine preferences)",
+                        name
+                    ))
+                    .dim()
+                );
+            }
             continue;
         }
         let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
@@ -448,6 +458,16 @@ fn update_cmd(
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
         if machine_prefs.is_target_disabled(name) {
+            if verbose {
+                eprintln!(
+                    "{}",
+                    style(format!(
+                        "Skipping target '{}' (disabled in machine preferences)",
+                        name
+                    ))
+                    .dim()
+                );
+            }
             continue;
         }
         let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
