@@ -15,8 +15,8 @@ graph TB
     end
 
     subgraph TEST_SUITE["cargo test --all"]
-        UNIT["Unit Tests<br/><i>175 tests across 14 modules</i>"]
-        INTEG["Integration Tests<br/><i>31 tests in tests/cli.rs</i>"]
+        UNIT["Unit Tests<br/><i>214 tests across 15 modules</i>"]
+        INTEG["Integration Tests<br/><i>32 tests in tests/cli.rs</i>"]
     end
 
     TEST --> TEST_SUITE
@@ -51,27 +51,30 @@ graph LR
 
 ## Module-by-Module Breakdown
 
+> **Note:** Test counts below reflect a point-in-time snapshot. Run `cargo test` for current counts.
+
 ```mermaid
 graph TB
-    subgraph unit_tests["Unit Tests (175)"]
-        CONFIG["config.rs<br/>─────────<br/>21 tests"]
+    subgraph unit_tests["Unit Tests (214)"]
+        CONFIG["config.rs<br/>─────────<br/>25 tests"]
         DISCOVER["discover.rs<br/>─────────<br/>17 tests"]
-        LIBRARY["library.rs<br/>─────────<br/>30 tests"]
-        DISTRIBUTE["distribute.rs<br/>─────────<br/>11 tests"]
+        LIBRARY["library.rs<br/>─────────<br/>31 tests"]
+        DISTRIBUTE["distribute.rs<br/>─────────<br/>12 tests"]
         CLEANUP["cleanup.rs<br/>─────────<br/>8 tests"]
-        DOCTOR["doctor.rs<br/>─────────<br/>19 tests"]
-        STATUS["status.rs<br/>─────────<br/>16 tests"]
+        DOCTOR["doctor.rs<br/>─────────<br/>20 tests"]
+        STATUS["status.rs<br/>─────────<br/>18 tests"]
         LOCKFILE["lockfile.rs<br/>─────────<br/>15 tests"]
         MANIFEST["manifest.rs<br/>─────────<br/>8 tests"]
-        MACHINE["machine.rs<br/>─────────<br/>8 tests"]
+        MACHINE["machine.rs<br/>─────────<br/>12 tests"]
         UPDATE["update.rs<br/>─────────<br/>8 tests"]
         WIZARD["wizard.rs<br/>─────────<br/>6 tests"]
-        PATHS["paths.rs<br/>─────────<br/>5 tests"]
-        LIB["lib.rs<br/>─────────<br/>8 tests"]
+        PATHS["paths.rs<br/>─────────<br/>8 tests"]
+        BROWSE["browse/<br/>─────────<br/>14 tests"]
+        LIB["lib.rs<br/>─────────<br/>12 tests"]
     end
 
-    subgraph integration_tests["Integration Tests (31)"]
-        CLI["tests/cli.rs<br/>─────────<br/>31 tests"]
+    subgraph integration_tests["Integration Tests (32)"]
+        CLI["tests/cli.rs<br/>─────────<br/>32 tests"]
     end
 
     style CONFIG fill:#e8f4e8
@@ -87,11 +90,12 @@ graph TB
     style UPDATE fill:#e8f4e8
     style WIZARD fill:#e8f4e8
     style PATHS fill:#e8f4e8
+    style BROWSE fill:#e8f4e8
     style LIB fill:#e8f4e8
     style CLI fill:#e8e4f4
 ```
 
-### `config.rs` — 21 tests
+### `config.rs` — 25 tests
 
 Tests config loading, serialization, tilde expansion, validation, and target parsing.
 
@@ -117,8 +121,11 @@ Tests config loading, serialization, tilde expansion, validation, and target par
 | `validate_passes_for_valid_config` | Valid config passes validation |
 | `validate_rejects_duplicate_source_names` | Duplicate source names rejected |
 | `validate_rejects_empty_source_name` | Empty source name rejected |
-| `validate_rejects_empty_target_name` | Empty target name rejected |
 | `validate_rejects_library_dir_that_is_a_file` | Library dir pointing to a file rejected |
+| `target_name_accepts_valid` | Valid target names pass validation |
+| `target_name_rejects_empty` | Empty target name rejected |
+| `target_name_rejects_path_separator` | Target names with `/` rejected |
+| `target_name_deserialize_rejects_empty` | Empty target name rejected during deserialization |
 
 ### `discover.rs` — 17 tests
 
@@ -144,7 +151,7 @@ Tests skill discovery from both Directory and ClaudePlugins source types, plus s
 | `skill_name_rejects_path_separator` | Names with `/` rejected |
 | `skill_name_conventional_check` | Naming convention warnings |
 
-### `library.rs` — 30 tests
+### `library.rs` — 31 tests
 
 Tests the consolidation step — copying local skills and symlinking managed skills into the library.
 
@@ -181,7 +188,7 @@ Tests the consolidation step — copying local skills and symlinking managed ski
 | `gitignore_idempotent` | Repeated gitignore writes are idempotent |
 | `gitignore_always_ignores_tmp_files` | `.gitignore` includes `*.tmp` pattern |
 
-### `distribute.rs` — 11 tests
+### `distribute.rs` — 12 tests
 
 Tests the distribution step — pushing skills from library to target tools.
 
@@ -215,7 +222,7 @@ Tests stale symlink and manifest cleanup from library and targets.
 | `cleanup_target_dry_run_preserves_stale_links` | Target dry run preserves links |
 | `cleanup_target_preserves_external_symlinks` | Links pointing outside library preserved |
 
-### `doctor.rs` — 19 tests
+### `doctor.rs` — 20 tests
 
 Tests library diagnostics and repair.
 
@@ -263,9 +270,9 @@ Tests lockfile generation, loading, and serialization.
 | `empty_version_string_becomes_none` | Empty version string normalized to None |
 | `local_skill_omits_registry_fields_in_json` | Local skills omit registry fields in JSON |
 
-### `machine.rs` — 8 tests
+### `machine.rs` — 12 tests
 
-Tests per-machine preferences loading, saving, and disabled skill tracking.
+Tests per-machine preferences loading, saving, and disabled skill/target tracking.
 
 | Test | What it verifies |
 |------|-----------------|
@@ -277,6 +284,8 @@ Tests per-machine preferences loading, saving, and disabled skill tracking.
 | `save_creates_parent_directories` | Save creates parent dirs if needed |
 | `save_does_not_leave_tmp_file` | Atomic write cleans up temp file |
 | `toml_format_is_readable` | Serialized TOML is human-readable |
+
+> Run `cargo test -p tome -- machine::tests --list` for the full current list.
 
 ### `manifest.rs` — 8 tests
 
@@ -293,7 +302,7 @@ Tests library manifest operations and content hashing.
 | `hash_directory_includes_subdirs` | Subdirectory contents included in hash |
 | `now_iso8601_format` | Timestamp format is ISO 8601 |
 
-### `status.rs` — 16 tests
+### `status.rs` — 18 tests
 
 Tests status gathering and health checks.
 
@@ -344,9 +353,9 @@ Tests wizard auto-discovery and overlap detection.
 | `detects_claude_source_target_overlap` | Claude-specific overlap detected |
 | `no_overlap_when_paths_differ` | Distinct paths pass overlap check |
 
-### `lib.rs` — 8 tests
+### `lib.rs` — 12 tests
 
-Tests orchestration-level functions (disabled skill cleanup, commit message generation).
+Tests orchestration-level functions (disabled skill cleanup, commit message generation, tome home resolution).
 
 | Test | What it verifies |
 |------|-----------------|
@@ -358,8 +367,12 @@ Tests orchestration-level functions (disabled skill cleanup, commit message gene
 | `commit_message_all_changes` | Commit message with all change types |
 | `commit_message_created_only` | Commit message with creates only |
 | `commit_message_no_changes` | Commit message with no changes |
+| `resolve_tome_home_absolute_path_returns_parent` | Absolute path resolves to parent |
+| `resolve_tome_home_none_returns_default` | None returns default home |
+| `resolve_tome_home_relative_path_returns_error` | Relative path rejected |
+| `resolve_tome_home_bare_filename_returns_error` | Bare filename rejected |
 
-### `tests/cli.rs` — 31 integration tests
+### `tests/cli.rs` — 32 integration tests
 
 Each test compiles and runs the `tome` binary in a temp directory with a custom config.
 
@@ -383,6 +396,7 @@ Each test compiles and runs the `tome` binary in a temp directory with a custom 
 | `sync_migrates_v01_symlinks` | `sync` | Legacy v0.1 symlinks migrated |
 | `sync_lifecycle_cleans_up_removed_skills` | `sync` (x2) | Removed source -> cleaned up |
 | `sync_respects_machine_disabled` | `sync` | Disabled skills not distributed |
+| `sync_respects_machine_disabled_targets` | `sync` | Disabled targets skipped during sync |
 | `sync_dry_run_skips_git_commit` | `--dry-run sync` | No git commit in dry run |
 | `sync_quiet_skips_git_commit` | `-q sync` | No git commit in quiet mode |
 | `sync_skips_git_commit_without_tty` | `sync` | No git commit without TTY |

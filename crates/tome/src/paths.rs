@@ -1,7 +1,8 @@
-//! Symlink path utilities — resolving relative symlink targets and comparing symlink destinations.
+//! Filesystem path groupings and symlink utilities.
 //!
-//! Also defines [`TomePaths`], a struct that groups `tome_home` and `library_dir`
-//! to prevent accidental parameter swaps.
+//! Defines [`TomePaths`] to bundle `tome_home` and `library_dir` into a single value,
+//! preventing accidental parameter swaps. Also provides helpers for resolving relative
+//! symlink targets and comparing symlink destinations.
 
 use std::path::{Path, PathBuf};
 
