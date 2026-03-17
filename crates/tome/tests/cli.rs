@@ -1174,3 +1174,51 @@ fn sync_respects_machine_disabled_targets() {
     // The skill should still be in the library
     assert!(tmp.path().join("library/my-skill").is_dir());
 }
+
+#[test]
+fn update_warns_unknown_disabled_targets() {
+    // Test that `tome update` warns about disabled_targets in machine.toml
+    // that don't match any configured target.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+
+    let config = write_config_with_target(
+        tmp.path(),
+        &format!(
+            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        &target_dir,
+    );
+
+    // Initial sync so library and lockfile exist
+    tome()
+        .args(["--config", config.to_str().unwrap(), "sync"])
+        .assert()
+        .success();
+
+    // Create machine.toml with an unknown disabled target
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(
+        &machine_path,
+        "disabled_targets = [\"nonexistent-target\"]\n",
+    )
+    .unwrap();
+
+    tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "update",
+        ])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains(
+            "warning: disabled target 'nonexistent-target' in machine.toml does not match any configured target",
+        ));
+}
