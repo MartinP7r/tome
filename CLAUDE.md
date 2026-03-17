@@ -76,12 +76,12 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 - `lockfile.rs` — Generates and loads `tome.lock` files. Each entry records skill name, content hash, source, and provenance metadata. Uses atomic temp+rename writes.
 - `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks a `disabled` set of skill names and a `disabled_targets` set of target names. Uses atomic temp+rename writes.
 - `update.rs` — Implements `tome update`: loads the previous lockfile, diffs against current state, presents changes interactively, and offers to disable unwanted new skills.
-- `paths.rs` — Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination.
+- `paths.rs` — Defines `TomePaths` (bundles `tome_home` and `library_dir` to prevent parameter swaps). Also provides symlink path utilities: resolves relative symlink targets and checks symlink destinations.
 
 ## Key Patterns
 
 - **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers) are symlinked from library → source dir; local skills are copied into the library. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. Unix-only.
-- **Targets are data-driven**: `config::targets` is a `BTreeMap<String, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
+- **Targets are data-driven**: `config::targets` is a `BTreeMap<TargetName, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
