@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `tome version` subcommand and `-V` short flag (#298)
-- Added `typos-cli`, `cargo-machete`, and `cargo-semver-checks` to CI (#297)
+- `typos-cli`, `cargo-machete`, and `cargo-semver-checks` CI checks (#297)
 - `TomePaths` struct bundles `tome_home` and `library_dir` to prevent parameter swaps (#287)
 - `TargetName` newtype for type-safe target identifiers (#285)
 - Log disabled target skips during sync (#284)
@@ -18,10 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test to verify `tome_home` / `library_dir` separation (#279)
 
 ### Changed
-- Corrected `tome config` help text from "Show or edit" to "Show" (#296)
 - Restructured tome home directory to `~/.tome/` (#271)
 
 ### Fixed
+- Corrected `tome config` help text from "Show or edit" to "Show" (#296)
 - Added missing `.unwrap()` on `TomePaths::new()` in `repair_library` test
 - Fix stale path references after `~/.tome/` restructure (#283, #282)
 - Suppress noisy `canonicalize` warnings in dry-run mode (#266)
