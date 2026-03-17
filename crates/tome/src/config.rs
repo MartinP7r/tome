@@ -677,10 +677,22 @@ enabled = true
 method = "symlink"
 skills_dir = "~/.claude/skills"
 "#;
-        let config: Config = toml::from_str(toml_str).unwrap();
+        let mut config: Config = toml::from_str(toml_str).unwrap();
+        config.expand_tildes().unwrap();
         let claude = config.targets.get("claude").expect("claude target missing");
         assert!(claude.enabled);
-        assert_eq!(claude.skills_dir(), Path::new("~/.claude/skills"));
+        let home = dirs::home_dir().expect("home dir not found");
+        assert!(
+            claude.skills_dir().starts_with(&home),
+            "Expected skills_dir to start with home dir {:?}, got {:?}",
+            home,
+            claude.skills_dir()
+        );
+        assert!(
+            claude.skills_dir().ends_with(".claude/skills"),
+            "Expected skills_dir to end with .claude/skills, got {:?}",
+            claude.skills_dir()
+        );
     }
 
     #[test]
