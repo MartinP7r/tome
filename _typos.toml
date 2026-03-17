@@ -1,1 +1,3 @@
 [default.extend-words]
+ratatui = "ratatui"
+Invokable = "Invokable"
