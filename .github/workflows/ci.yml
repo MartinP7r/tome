@@ -37,3 +37,36 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  typos:
+    name: Typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: crate-ci/typos@v1
+
+  machete:
+    name: Unused dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-machete
+        run: cargo install cargo-machete
+      - name: Check unused dependencies
+        run: cargo machete
+
+  semver:
+    name: Semver check
+    if: >-
+      github.event_name == 'pull_request' &&
+      (startsWith(github.head_ref, 'chore/release') ||
+       startsWith(github.head_ref, 'release/') ||
+       contains(github.event.pull_request.title, 'Bump version'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: obi1kenobi/cargo-semver-checks-action@v2

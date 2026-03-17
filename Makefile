@@ -1,4 +1,4 @@
-.PHONY: build build-release check test lint fmt clean install docs docs-rust docs-serve release deny
+.PHONY: build build-release check test lint fmt clean install docs docs-rust docs-serve release deny typos machete
 
 build:
 	cargo build
@@ -52,11 +52,17 @@ clean:
 install:
 	cargo install --path crates/tome
 
-ci: fmt-check lint test
+ci: fmt-check lint test typos
 	@echo "All checks passed"
 
 deny:
 	cargo deny check
+
+typos:
+	typos
+
+machete:
+	cargo machete
 
 docs: docs-rust
 	mdbook build
