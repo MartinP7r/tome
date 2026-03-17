@@ -102,6 +102,11 @@ fn resolve_tome_home(cli_config: Option<&Path>) -> Result<std::path::PathBuf> {
 
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
+    if matches!(cli.command, Command::Version) {
+        println!("tome {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     if matches!(cli.command, Command::Init) {
         if let Err(e) = Config::load_or_default(cli.config.as_deref()) {
             eprintln!(
@@ -167,6 +172,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             browse::browse(skills)?;
         }
+        Command::Version => unreachable!(),
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
     }
