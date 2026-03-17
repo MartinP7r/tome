@@ -56,7 +56,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         .sources
         .iter()
         .map(|source| {
-            let skill_count = discover::discover_source(source)
+            let skill_count = discover::discover_source(source, &mut Vec::new())
                 .map(|s| s.len())
                 .map_err(|e| e.to_string());
             SourceStatus {
