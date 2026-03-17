@@ -757,10 +757,9 @@ mod tests {
         manifest::save(&m, tome_home.path()).unwrap();
 
         // Repair should read manifest from tome_home and check library_dir
-        repair_library(&TomePaths::new(
-            tome_home.path().to_path_buf(),
-            library.path().to_path_buf(),
-        ))
+        repair_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
         .unwrap();
 
         // The orphan entry should be removed from the manifest at tome_home
