@@ -67,6 +67,9 @@ pub enum Command {
     /// Interactively browse discovered skills
     Browse,
 
+    /// Print version information
+    Version,
+
     /// Show configuration
     Config {
         /// Print config file path only

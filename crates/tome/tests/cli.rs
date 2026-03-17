@@ -76,6 +76,34 @@ fn version_shows_version() {
         .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
 }
 
+#[test]
+fn version_subcommand_shows_version() {
+    tome()
+        .arg("version")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn short_version_flag_shows_version() {
+    tome()
+        .arg("-V")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+}
+
+#[test]
+fn verbose_short_flag_still_works() {
+    // Ensure -v is still --verbose and doesn't conflict with -V
+    tome()
+        .args(["-v", "status", "--config", "/nonexistent/path.toml"])
+        .assert()
+        // This may fail because no config, but should NOT be interpreted as version
+        .stderr(predicate::str::contains("version").not());
+}
+
 // -- List --
 
 #[test]
