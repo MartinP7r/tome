@@ -118,10 +118,6 @@ pub fn consolidate(
         }
     }
 
-    if !dry_run && tome_home.is_dir() {
-        manifest::save(&manifest, tome_home)?;
-    }
-
     Ok((result, manifest))
 }
 
@@ -424,13 +420,14 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -448,13 +445,14 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -472,13 +470,14 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        consolidate(
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
 
         // Modify source content
         std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
@@ -576,7 +575,7 @@ mod tests {
         unix_fs::symlink(&skill.path, library.path().join("my-skill")).unwrap();
         assert!(library.path().join("my-skill").is_symlink());
 
-        let (result, _manifest) = consolidate(
+        let (result, manifest) = consolidate(
             &[skill],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
@@ -592,7 +591,6 @@ mod tests {
         assert!(dest.join("SKILL.md").is_file());
 
         // Manifest should have the entry
-        let manifest = manifest::load(library.path()).unwrap();
         assert!(manifest.contains_key("my-skill"));
     }
 
@@ -603,13 +601,14 @@ mod tests {
         let library = TempDir::new().unwrap();
 
         let skill1 = make_skill(source1.path(), "my-skill");
-        consolidate(
+        let (_, manifest) = consolidate(
             &[skill1],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
 
         // New skill from a different source with different content
         let skill2_dir = source2.path().join("my-skill");
@@ -754,13 +753,14 @@ mod tests {
 
         // First: consolidate as local (creates real copy + manifest entry)
         let local_skill = make_skill(source.path(), "my-skill");
-        consolidate(
+        let (_, manifest) = consolidate(
             &[local_skill],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
 
         // Now: dry-run consolidate the same skill as managed
         let managed_skill = make_managed_skill(source.path(), "my-skill");
@@ -901,13 +901,14 @@ mod tests {
 
         // First: consolidate as local (copy)
         let local_skill = make_skill(source.path(), "my-skill");
-        consolidate(
+        let (_, manifest) = consolidate(
             &[local_skill],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let dest = library.path().join("my-skill");
         assert!(dest.is_dir());
         assert!(!dest.is_symlink(), "should be a real dir initially");
@@ -1111,13 +1112,14 @@ mod tests {
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
         // First: consolidate normally (creates symlink)
-        consolidate(
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let dest = library.path().join("plugin-skill");
         assert!(dest.is_symlink(), "should be a symlink initially");
 
@@ -1184,6 +1186,7 @@ mod tests {
             false,
         )
         .unwrap();
+        manifest::save(&manifest1, library.path()).unwrap();
         let hash1 = manifest1.get("my-skill").unwrap().content_hash.clone();
 
         // Modify source content
@@ -1208,13 +1211,13 @@ mod tests {
     }
 
     #[test]
-    fn consolidate_manifest_lives_at_tome_home() {
+    fn consolidate_does_not_save_manifest_to_disk() {
         let source = TempDir::new().unwrap();
         let tome_home = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
         let skill = make_skill(source.path(), "my-skill");
 
-        let (result, _manifest) = consolidate(
+        let (result, manifest) = consolidate(
             &[skill],
             &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
@@ -1223,14 +1226,20 @@ mod tests {
         .unwrap();
         assert_eq!(result.created, 1);
 
-        // Manifest should live at tome_home, not library_dir
+        // consolidate() no longer saves the manifest — that's the caller's job
         assert!(
-            tome_home.path().join(".tome-manifest.json").exists(),
-            "manifest should be written to tome_home"
+            !tome_home.path().join(".tome-manifest.json").exists(),
+            "consolidate should NOT write manifest to disk"
         );
         assert!(
             !library.path().join(".tome-manifest.json").exists(),
-            "manifest should NOT be written to library_dir"
+            "consolidate should NOT write manifest to library_dir"
+        );
+
+        // But the returned manifest should have the entry
+        assert!(
+            manifest.contains_key("my-skill"),
+            "returned manifest should contain the skill"
         );
 
         // Skills should live at library_dir
