@@ -691,10 +691,22 @@ enabled = true
 method = "symlink"
 skills_dir = "~/.amp/skills"
 "#;
-        let config: Config = toml::from_str(toml_str).unwrap();
+        let mut config: Config = toml::from_str(toml_str).unwrap();
+        config.expand_tildes().unwrap();
         let amp = config.targets.get("amp").expect("amp target missing");
         assert!(amp.enabled);
-        assert_eq!(amp.skills_dir(), Path::new("~/.amp/skills"));
+        let home = dirs::home_dir().expect("home dir not found");
+        assert!(
+            amp.skills_dir().starts_with(&home),
+            "Expected skills_dir to start with home dir {:?}, got {:?}",
+            home,
+            amp.skills_dir()
+        );
+        assert!(
+            amp.skills_dir().ends_with(".amp/skills"),
+            "Expected skills_dir to end with .amp/skills, got {:?}",
+            amp.skills_dir()
+        );
     }
 
     #[test]
