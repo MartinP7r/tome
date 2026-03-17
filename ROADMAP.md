@@ -8,7 +8,7 @@
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
 | **v0.4.1** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
-| **v0.4.2** | Format Transforms      | `~/.tome/` unified home, rules/instructions syncing, transform pipeline |        |
+| **v0.4.2** | Format Transforms      | Rules/instructions syncing, transform pipeline                          |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
@@ -138,20 +138,7 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.4.2 — Format Transforms & Unified Home Directory
-
-### `~/.tome/` — Unified Home Directory
-
-All tome state moves under a single `~/.tome/` directory, replacing the previous split across `~/.config/tome/` and `~/.local/share/tome/`. The new layout:
-
-```
-~/.tome/
-├── tome.toml          # main config (was ~/.config/tome/config.toml)
-├── tome.lock          # lockfile
-├── skills/            # skill library (was ~/.local/share/tome/skills/)
-├── rules/             # shared rules → .claude/rules/, .cursor/rules/, etc.
-└── instructions/      # instruction files → CLAUDE.md, AGENTS.md, GEMINI.md, etc.
-```
+## v0.4.2 — Format Transforms
 
 ### Rules Syncing ([#193](https://github.com/MartinP7r/tome/issues/193))
 
