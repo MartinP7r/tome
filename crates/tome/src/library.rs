@@ -84,8 +84,8 @@ pub fn consolidate(
     dry_run: bool,
     force: bool,
 ) -> Result<(ConsolidateResult, Manifest)> {
-    let library_dir = &paths.library_dir;
-    let tome_home = &paths.tome_home;
+    let library_dir = paths.library_dir();
+    let tome_home = paths.tome_home();
 
     if !dry_run {
         std::fs::create_dir_all(library_dir)
@@ -404,7 +404,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -426,14 +426,14 @@ mod tests {
 
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -450,14 +450,14 @@ mod tests {
 
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             true,
         )
@@ -474,7 +474,7 @@ mod tests {
 
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -485,7 +485,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -505,7 +505,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             true,
             false,
         )
@@ -525,7 +525,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(nonexistent_lib.to_path_buf(), nonexistent_lib.to_path_buf()),
+            &TomePaths::new(nonexistent_lib.to_path_buf(), nonexistent_lib.to_path_buf()).unwrap(),
             true,
             false,
         )
@@ -548,7 +548,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -578,7 +578,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -605,7 +605,7 @@ mod tests {
         let skill1 = make_skill(source1.path(), "my-skill");
         consolidate(
             &[skill1],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -625,7 +625,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             std::slice::from_ref(&skill2),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -644,7 +644,7 @@ mod tests {
 
         let (_, manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -673,7 +673,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -707,7 +707,7 @@ mod tests {
 
         let (result, _) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -734,7 +734,7 @@ mod tests {
 
         let (result, _) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             true,
             false,
         )
@@ -756,7 +756,7 @@ mod tests {
         let local_skill = make_skill(source.path(), "my-skill");
         consolidate(
             &[local_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -766,7 +766,7 @@ mod tests {
         let managed_skill = make_managed_skill(source.path(), "my-skill");
         let (result, manifest) = consolidate(
             &[managed_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             true,
             false,
         )
@@ -797,7 +797,7 @@ mod tests {
 
         let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -821,7 +821,7 @@ mod tests {
 
         let (result, manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -844,14 +844,14 @@ mod tests {
 
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -870,7 +870,7 @@ mod tests {
         let skill1 = make_managed_skill(source1.path(), "plugin-skill");
         consolidate(
             &[skill1],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -880,7 +880,7 @@ mod tests {
         let skill2 = make_managed_skill(source2.path(), "plugin-skill");
         let (result, _) = consolidate(
             std::slice::from_ref(&skill2),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -903,7 +903,7 @@ mod tests {
         let local_skill = make_skill(source.path(), "my-skill");
         consolidate(
             &[local_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -916,7 +916,7 @@ mod tests {
         let managed_skill = make_managed_skill(source.path(), "my-skill");
         let (result, manifest) = consolidate(
             &[managed_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -935,7 +935,7 @@ mod tests {
         let managed_skill = make_managed_skill(source.path(), "my-skill");
         consolidate(
             &[managed_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -947,7 +947,7 @@ mod tests {
         let local_skill = make_skill(source.path(), "my-skill");
         let (result, manifest) = consolidate(
             &[local_skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -966,7 +966,7 @@ mod tests {
 
         let (_, manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -988,7 +988,7 @@ mod tests {
 
         let (_, manifest) = consolidate(
             &[managed, local],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1012,7 +1012,7 @@ mod tests {
 
         let (_, manifest) = consolidate(
             &[managed, local],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1034,7 +1034,7 @@ mod tests {
         let managed = make_managed_skill(source.path(), "plugin-a");
         let (_, manifest) = consolidate(
             &[managed],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1060,7 +1060,7 @@ mod tests {
 
         let (result, manifest) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             true,
             false,
         )
@@ -1085,14 +1085,14 @@ mod tests {
 
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             true,
         )
@@ -1113,7 +1113,7 @@ mod tests {
         // First: consolidate normally (creates symlink)
         consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1133,7 +1133,7 @@ mod tests {
         // Re-consolidate — should repair by replacing dir with symlink
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1157,7 +1157,7 @@ mod tests {
 
         let (result, _) = consolidate(
             &[skill],
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1179,7 +1179,7 @@ mod tests {
 
         let (_, manifest1) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1191,7 +1191,7 @@ mod tests {
 
         let (result, manifest2) = consolidate(
             std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
@@ -1216,7 +1216,7 @@ mod tests {
 
         let (result, _manifest) = consolidate(
             &[skill],
-            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()),
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
