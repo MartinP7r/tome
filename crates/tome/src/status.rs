@@ -19,6 +19,8 @@ pub struct SourceStatus {
     pub path: String,
     /// Number of skills discovered, or an error message if discovery failed.
     pub skill_count: Result<usize, String>,
+    /// Warnings emitted during discovery.
+    pub warnings: Vec<String>,
 }
 
 /// Status of a single configured target.
@@ -56,7 +58,8 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         .sources
         .iter()
         .map(|source| {
-            let skill_count = discover::discover_source(source)
+            let mut warnings = Vec::new();
+            let skill_count = discover::discover_source(source, &mut warnings)
                 .map(|s| s.len())
                 .map_err(|e| e.to_string());
             SourceStatus {
@@ -64,6 +67,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
                 source_type: source.source_type.to_string(),
                 path: source.path.display().to_string(),
                 skill_count,
+                warnings,
             }
         })
         .collect();
@@ -169,6 +173,11 @@ fn render_status(report: &StatusReport) {
             )
             .to_string();
         println!("{table}");
+        for source in &report.sources {
+            for w in &source.warnings {
+                eprintln!("warning: {}", w);
+            }
+        }
     }
     println!();
 

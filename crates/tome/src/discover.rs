@@ -153,7 +153,7 @@ pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<D
     let mut conflicts: Vec<(String, String, String)> = Vec::new();
 
     for source in &config.sources {
-        let source_skills = discover_source(source)?;
+        let source_skills = discover_source(source, warnings)?;
 
         for skill in source_skills {
             if config.exclude.contains(&skill.name) {
@@ -193,10 +193,13 @@ pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<D
 }
 
 /// Discover skills from a single source.
-pub fn discover_source(source: &Source) -> Result<Vec<DiscoveredSkill>> {
+pub fn discover_source(
+    source: &Source,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<DiscoveredSkill>> {
     match source.source_type {
-        SourceType::ClaudePlugins => discover_claude_plugins(source),
-        SourceType::Directory => discover_directory(source),
+        SourceType::ClaudePlugins => discover_claude_plugins(source, warnings),
+        SourceType::Directory => discover_directory(source, warnings),
     }
 }
 
@@ -204,7 +207,10 @@ pub fn discover_source(source: &Source) -> Result<Vec<DiscoveredSkill>> {
 ///
 /// Reads `installed_plugins.json` from the parent of `source.path`,
 /// then scans each plugin's `skills/*/SKILL.md`.
-fn discover_claude_plugins(source: &Source) -> Result<Vec<DiscoveredSkill>> {
+fn discover_claude_plugins(
+    source: &Source,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<DiscoveredSkill>> {
     // Look for installed_plugins.json in multiple locations:
     // 1. Directly in source.path (e.g. ~/.claude/plugins/)
     // 2. Parent directory (when source.path points to cache subdir, e.g. ~/.claude/plugins/cache/)
@@ -219,20 +225,21 @@ fn discover_claude_plugins(source: &Source) -> Result<Vec<DiscoveredSkill>> {
 
     for candidate in &candidates {
         if candidate.exists() {
-            return discover_claude_plugins_from_json(candidate, &source.name);
+            return discover_claude_plugins_from_json(candidate, &source.name, warnings);
         }
     }
 
-    eprintln!(
-        "warning: no installed_plugins.json found for source '{}'",
+    warnings.push(format!(
+        "no installed_plugins.json found for source '{}'",
         source.name
-    );
+    ));
     Ok(Vec::new())
 }
 
 fn discover_claude_plugins_from_json(
     json_path: &Path,
     source_name: &str,
+    warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
     let content = std::fs::read_to_string(json_path)
         .with_context(|| format!("failed to read {}", json_path.display()))?;
@@ -244,25 +251,31 @@ fn discover_claude_plugins_from_json(
 
     if let Some(arr) = plugins.as_array() {
         // v1 format: flat array of plugin objects with "installPath"
-        scan_install_records(arr, source_name, None, &mut raw_skills)?;
+        scan_install_records(arr, source_name, None, &mut raw_skills, warnings)?;
     } else if let Some(obj) = plugins.get("plugins").and_then(|v| v.as_object()) {
         // v2 format: { "version": 2, "plugins": { "name@registry": [records...] } }
         for (plugin_name, records) in obj {
             if let Some(arr) = records.as_array() {
-                scan_install_records(arr, source_name, Some(plugin_name), &mut raw_skills)?;
+                scan_install_records(
+                    arr,
+                    source_name,
+                    Some(plugin_name),
+                    &mut raw_skills,
+                    warnings,
+                )?;
             } else {
-                eprintln!(
-                    "warning: unexpected format for plugin '{}' in {} — expected array, skipping",
+                warnings.push(format!(
+                    "unexpected format for plugin '{}' in {} — expected array, skipping",
                     plugin_name,
                     json_path.display()
-                );
+                ));
             }
         }
     } else {
-        eprintln!(
-            "warning: unrecognized installed_plugins.json format in {}",
+        warnings.push(format!(
+            "unrecognized installed_plugins.json format in {}",
             json_path.display()
-        );
+        ));
     }
 
     // Deduplicate within a single source — multiple install records can point to the
@@ -285,12 +298,13 @@ fn scan_install_records(
     source_name: &str,
     registry_id: Option<&str>,
     skills: &mut Vec<DiscoveredSkill>,
+    warnings: &mut Vec<String>,
 ) -> Result<()> {
     for record in records {
         if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
             let skills_dir = PathBuf::from(install_path).join("skills");
             if skills_dir.is_dir() {
-                let mut found = scan_for_skills(&skills_dir, source_name, true)?;
+                let mut found = scan_for_skills(&skills_dir, source_name, true, warnings)?;
                 if let Some(reg_id) = registry_id {
                     let version = record
                         .get("version")
@@ -313,57 +327,66 @@ fn scan_install_records(
 }
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
-fn discover_directory(source: &Source) -> Result<Vec<DiscoveredSkill>> {
+fn discover_directory(source: &Source, warnings: &mut Vec<String>) -> Result<Vec<DiscoveredSkill>> {
     if !source.path.exists() {
-        eprintln!(
-            "warning: source '{}' path does not exist: {}",
+        warnings.push(format!(
+            "source '{}' path does not exist: {}",
             source.name,
             source.path.display()
-        );
+        ));
         return Ok(Vec::new());
     }
 
     if !source.path.is_dir() {
-        eprintln!(
-            "warning: source '{}' path exists but is not a directory: {} — skipping",
+        warnings.push(format!(
+            "source '{}' path exists but is not a directory: {} — skipping",
             source.name,
             source.path.display()
-        );
+        ));
         return Ok(Vec::new());
     }
 
-    scan_for_skills(&source.path, &source.name, false)
+    scan_for_skills(&source.path, &source.name, false, warnings)
 }
 
 /// Scan a directory for skill subdirectories containing SKILL.md.
-fn scan_for_skills(dir: &Path, source_name: &str, managed: bool) -> Result<Vec<DiscoveredSkill>> {
+fn scan_for_skills(
+    dir: &Path,
+    source_name: &str,
+    managed: bool,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<DiscoveredSkill>> {
     let mut skills = Vec::new();
 
-    for entry in WalkDir::new(dir)
+    // Collect walkdir results into entries and walk errors separately,
+    // so that the mutable borrow of `warnings` isn't held across the loop body.
+    let (entries, walk_errors): (Vec<_>, Vec<_>) = WalkDir::new(dir)
         .follow_links(false)
         .min_depth(1)
         .max_depth(2)
         .into_iter()
-        .filter_map(|e| match e {
-            Ok(entry) => Some(entry),
-            Err(err) => {
-                // Distinguish root errors (whole source unreadable) from sub-entry errors.
-                // A root error means the walk immediately failed — this is likely a config
-                // or permissions issue that warrants a more visible warning.
-                let path = err.path().unwrap_or(dir);
-                if path == dir {
-                    eprintln!(
-                        "warning: cannot read source directory {}: {}",
-                        dir.display(),
-                        err
-                    );
-                } else {
-                    eprintln!("warning: skipping entry in {}: {}", dir.display(), err);
-                }
-                None
-            }
-        })
-    {
+        .partition(|e| e.is_ok());
+
+    // Push walk errors as warnings.
+    for err in walk_errors {
+        let err = err.unwrap_err();
+        // Distinguish root errors (whole source unreadable) from sub-entry errors.
+        // A root error means the walk immediately failed — this is likely a config
+        // or permissions issue that warrants a more visible warning.
+        let path = err.path().unwrap_or(dir);
+        if path == dir {
+            warnings.push(format!(
+                "cannot read source directory {}: {}",
+                dir.display(),
+                err
+            ));
+        } else {
+            warnings.push(format!("skipping entry in {}: {}", dir.display(), err));
+        }
+    }
+
+    for entry in entries {
+        let entry = entry.unwrap();
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()
             && let Some(skill_dir) = entry.path().parent()
@@ -381,7 +404,7 @@ fn scan_for_skills(dir: &Path, source_name: &str, managed: bool) -> Result<Vec<D
                     });
                 }
                 Err(e) => {
-                    eprintln!("warning: skipping skill in {}: {}", skill_dir.display(), e);
+                    warnings.push(format!("skipping skill in {}: {}", skill_dir.display(), e));
                 }
             }
         }
@@ -420,7 +443,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::Directory,
         };
-        let skills = discover_directory(&source).unwrap();
+        let skills = discover_directory(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
     }
 
@@ -431,8 +454,11 @@ mod tests {
             path: PathBuf::from("/nonexistent/path"),
             source_type: SourceType::Directory,
         };
-        let skills = discover_directory(&source).unwrap();
+        let mut warnings = Vec::new();
+        let skills = discover_directory(&source, &mut warnings).unwrap();
         assert!(skills.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("does not exist"));
     }
 
     #[test]
@@ -452,7 +478,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::Directory,
         };
-        let skills = discover_directory(&source).unwrap();
+        let skills = discover_directory(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "real-skill");
     }
@@ -529,7 +555,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::ClaudePlugins,
         };
-        let skills = discover_claude_plugins(&source).unwrap();
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "plugin-skill");
     }
@@ -578,7 +604,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::ClaudePlugins,
         };
-        let skills = discover_claude_plugins(&source).unwrap();
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
 
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
@@ -623,7 +649,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::ClaudePlugins,
         };
-        let skills = discover_claude_plugins(&source).unwrap();
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
             skills[0].provenance.is_none(),
@@ -646,10 +672,16 @@ mod tests {
         )
         .unwrap();
 
-        let skills =
-            discover_claude_plugins_from_json(&tmp.path().join("installed_plugins.json"), "test")
-                .unwrap();
+        let mut warnings = Vec::new();
+        let skills = discover_claude_plugins_from_json(
+            &tmp.path().join("installed_plugins.json"),
+            "test",
+            &mut warnings,
+        )
+        .unwrap();
         assert!(skills.is_empty());
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unrecognized"));
     }
 
     #[test]
@@ -675,7 +707,7 @@ mod tests {
             path: tmp.path().to_path_buf(),
             source_type: SourceType::ClaudePlugins,
         };
-        let skills = discover_claude_plugins(&source).unwrap();
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
         // Should deduplicate to 1, not produce a spurious conflict
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "shared-skill");
