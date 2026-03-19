@@ -25,11 +25,69 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.4.1, v0.4.2, v0.5, etc.)
 - Project board: **"tome Execution Board"** on GitHub Projects
 - Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
-- Workflow: check open issues → create feature branch linked to issue → draft PR → CI must pass → merge
+- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → Beads execution tasks → implementation → archive/close
+- Reference doc: `docs/src/development-workflow.md`
+- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + Beads overhead
 
 ## Tech Stack
 
 Rust edition 2024. Key crates: `clap` (CLI), `dialoguer` (interactive prompts), `indicatif` (progress bars), `tabled` (table output), `walkdir` (dir traversal), `sha2` (hashing), `serde`/`toml` (config). Test crates: `assert_cmd`, `tempfile`, `assert_fs`.
+
+## OpenSpec + Beads Expectations
+
+For substantial changes (new features, significant refactors, architecture-impacting work, or process changes), use the repo workflow described in `docs/src/development-workflow.md`.
+
+### OpenSpec
+
+Use OpenSpec to capture the planning layer:
+- proposal
+- design
+- task checklist
+- any spec deltas needed for changed behavior
+
+Typical commands:
+```bash
+openspec new change <change-id>
+openspec show <change-id>
+openspec status --change <change-id>
+openspec validate <change-id>
+openspec archive <change-id>
+```
+
+### Beads
+
+Use Beads to track execution state, not product strategy.
+
+Minimal `tome` flow:
+```bash
+bd ready
+bd show <task-id>
+bd update <task-id> --claim
+bd close <task-id> "Done in commit <sha>"
+```
+
+When creating Beads tasks from an OpenSpec change, set `spec_id` to the OpenSpec change id.
+
+### Traceability Convention
+
+For meaningful changes, link the layers when they exist:
+- GitHub issue: `#123`
+- OpenSpec change: `<change-id>`
+- Beads task: `tome-xyz` / `tome-xyz.1`
+- Commit / PR: implementation evidence
+
+Suggested commit body or PR footer:
+```text
+Refs #123
+OpenSpec: <change-id>
+Beads: <task-id>[, <task-id>...]
+```
+
+This repo uses:
+- **GitHub Issues** for backlog / roadmap intent
+- **OpenSpec** for requirements + design + checklist
+- **Beads** for execution state
+- **git / PRs** for shipped evidence
 
 ## Build & Development Commands
 

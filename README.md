@@ -48,6 +48,10 @@ tome sync
 tome status
 ```
 
+## Development
+
+For repository workflow guidance, see [docs/src/development-workflow.md](docs/src/development-workflow.md). It explains when `tome` uses GitHub Issues vs OpenSpec vs Beads, and how to link them cleanly in commits and PRs.
+
 ## Commands
 
 | Command       | Description                                              |
