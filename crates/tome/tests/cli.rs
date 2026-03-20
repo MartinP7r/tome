@@ -1,10 +1,31 @@
 use assert_cmd::{Command, cargo_bin_cmd};
 use assert_fs::TempDir;
+use insta::Settings;
 use predicates::prelude::*;
 use std::process::Command as StdCommand;
 
 fn tome() -> Command {
     cargo_bin_cmd!("tome")
+}
+
+/// Create insta Settings with path redaction for the given tmpdir.
+fn snapshot_settings(tmp: &TempDir) -> Settings {
+    let mut settings = Settings::clone_current();
+    let tmp_str = tmp.path().display().to_string();
+    // Escape regex metacharacters in the tmpdir path
+    let escaped = tmp_str
+        .chars()
+        .flat_map(|c| {
+            if r"\.+*?()|[]{}^$-".contains(c) {
+                vec!['\\', c]
+            } else {
+                vec![c]
+            }
+        })
+        .collect::<String>();
+    settings.add_filter(&escaped, "[TMPDIR]");
+    settings.set_snapshot_path("snapshots");
+    settings
 }
 
 fn write_config(dir: &std::path::Path, sources_toml: &str) -> std::path::PathBuf {
@@ -133,15 +154,18 @@ fn list_shows_discovered_skills() {
         ),
     );
 
-    tome()
+    let output = tome()
         .args(["--config", config.to_str().unwrap(), "list"])
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("my-skill")
-                .and(predicate::str::contains("other-skill"))
-                .and(predicate::str::contains("2 skill(s) total")),
-        );
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("list_table_two_skills", stdout);
+    });
 }
 
 // -- Sync --
@@ -191,11 +215,18 @@ fn sync_copies_skills_to_library() {
         ),
     );
 
-    tome()
+    let output = tome()
         .args(["--config", config.to_str().unwrap(), "sync"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Sync complete"));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("sync_initial_two_skills", stdout);
+    });
 
     let library = tmp.path().join("library");
     // v0.2: library entries are real directories, not symlinks
@@ -228,15 +259,23 @@ fn sync_idempotent() {
     // First sync
     tome()
         .args(["--config", config_str, "sync"])
+        .env("NO_COLOR", "1")
         .assert()
         .success();
 
     // Second sync — should report 0 created, 1 unchanged
-    tome()
+    let output = tome()
         .args(["--config", config_str, "sync"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("0 created").and(predicate::str::contains("1 unchanged")));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("sync_idempotent_second_run", stdout);
+    });
 }
 
 #[test]
@@ -256,6 +295,7 @@ fn sync_creates_lockfile() {
 
     tome()
         .args(["--config", config.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
         .assert()
         .success();
 
@@ -267,18 +307,21 @@ fn sync_creates_lockfile() {
     );
 
     let content = std::fs::read_to_string(&lockfile_path).unwrap();
-    let parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
-    assert_eq!(parsed["version"], 1);
-    assert!(parsed["skills"]["alpha-skill"].is_object());
-    assert!(parsed["skills"]["beta-skill"].is_object());
-    assert_eq!(parsed["skills"]["alpha-skill"]["source_name"], "test");
-    assert!(
-        !parsed["skills"]["alpha-skill"]["content_hash"]
-            .as_str()
-            .unwrap()
-            .is_empty(),
-        "content_hash should be present and non-empty"
-    );
+    let mut parsed: serde_json::Value = serde_json::from_str(&content).unwrap();
+
+    // Redact dynamic content_hash fields for snapshot stability
+    if let Some(skills) = parsed.get_mut("skills").and_then(|s| s.as_object_mut()) {
+        for (_name, skill) in skills.iter_mut() {
+            if skill.get("content_hash").is_some() {
+                skill["content_hash"] = serde_json::Value::String("[HASH]".into());
+            }
+        }
+    }
+
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_json_snapshot!("sync_lockfile_two_skills", parsed);
+    });
 }
 
 #[test]
@@ -313,15 +356,18 @@ fn status_shows_library_info() {
     let tmp = TempDir::new().unwrap();
     let config = write_config(tmp.path(), "");
 
-    tome()
+    let output = tome()
         .args(["--config", config.to_str().unwrap(), "status"])
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("Library:")
-                .and(predicate::str::contains("Sources:"))
-                .and(predicate::str::contains("Targets:")),
-        );
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("status_empty_library", stdout);
+    });
 }
 
 // -- Config --
@@ -471,12 +517,18 @@ type = "directory"
     assert!(library_dir.join("my-skill").is_dir());
 
     // Force sync should report recreated, not "unchanged"
-    tome()
+    let output = tome()
         .args(["--config", config_path.to_str().unwrap(), "sync", "--force"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Sync complete"))
-        .stdout(predicate::str::contains("updated").or(predicate::str::contains("created")));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("sync_force_recreate", stdout);
+    });
 }
 
 #[test]
@@ -519,11 +571,18 @@ type = "directory"
     .unwrap();
 
     // Second sync — should detect the change
-    tome()
+    let output = tome()
         .args(["--config", config_path.to_str().unwrap(), "sync"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("1 updated"));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("sync_updates_changed", stdout);
+    });
 
     // Library copy should have the new content
     let content = std::fs::read_to_string(library_dir.join("my-skill/SKILL.md")).unwrap();
@@ -586,11 +645,18 @@ fn doctor_with_clean_state() {
     let tmp = TempDir::new().unwrap();
     let config = write_config(tmp.path(), "");
 
-    tome()
+    let output = tome()
         .args(["--config", config.to_str().unwrap(), "doctor"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No issues found"));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("doctor_clean", stdout);
+    });
 }
 
 #[test]
@@ -628,12 +694,18 @@ fn status_without_config_shows_init_prompt() {
     )
     .unwrap();
 
-    tome()
+    let output = tome()
         .args(["--config", config_path.to_str().unwrap(), "status"])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Not configured yet"))
-        .stdout(predicate::str::contains("tome init"));
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_snapshot!("status_unconfigured", stdout);
+    });
 }
 
 #[test]
@@ -801,6 +873,7 @@ fn list_json_outputs_valid_json() {
 
     let output = tome()
         .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert!(output.status.success());
@@ -810,19 +883,16 @@ fn list_json_outputs_valid_json() {
     let arr = parsed.as_array().expect("should be a JSON array");
     assert_eq!(arr.len(), 2);
 
-    // Each entry should have name, source, and path fields
-    for entry in arr {
-        assert!(entry.get("name").is_some(), "missing 'name' field");
-        assert!(entry.get("source").is_some(), "missing 'source' field");
-        assert!(entry.get("path").is_some(), "missing 'path' field");
+    // Redact dynamic path fields for snapshot stability
+    let mut redacted = parsed.clone();
+    for entry in redacted.as_array_mut().unwrap() {
+        entry["path"] = serde_json::Value::String("[TMPDIR]".into());
     }
 
-    // Check that our source name appears
-    assert!(arr.iter().any(|e| e["source"] == "test-src"));
-    // Check both skill names are present
-    let names: Vec<&str> = arr.iter().map(|e| e["name"].as_str().unwrap()).collect();
-    assert!(names.contains(&"alpha-skill"));
-    assert!(names.contains(&"beta-skill"));
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_json_snapshot!("list_json_two_skills", redacted);
+    });
 }
 
 #[test]
@@ -864,14 +934,18 @@ fn list_json_with_no_skills_outputs_empty_array() {
 
     let output = tome()
         .args(["--config", config.to_str().unwrap(), "list", "--json"])
+        .env("NO_COLOR", "1")
         .output()
         .unwrap();
     assert!(output.status.success());
 
     let parsed: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout should be valid JSON");
-    let arr = parsed.as_array().expect("should be a JSON array");
-    assert_eq!(arr.len(), 0);
+
+    let settings = snapshot_settings(&tmp);
+    settings.bind(|| {
+        insta::assert_json_snapshot!("list_json_empty", parsed);
+    });
 }
 
 #[test]

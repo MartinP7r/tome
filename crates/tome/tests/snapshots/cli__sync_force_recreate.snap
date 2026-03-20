@@ -1,0 +1,6 @@
+---
+source: crates/tome/tests/cli.rs
+expression: stdout
+---
+Sync complete
+  Library: 0 created, 0 unchanged, 1 updated

@@ -1,0 +1,11 @@
+---
+source: crates/tome/tests/cli.rs
+expression: stdout
+---
+Checking library...
+  ok library OK
+Checking targets...
+Checking config...
+  ok config OK
+
+No issues found.

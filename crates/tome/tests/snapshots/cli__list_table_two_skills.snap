@@ -1,0 +1,9 @@
+---
+source: crates/tome/tests/cli.rs
+expression: stdout
+---
+ SKILL         SOURCE   PATH                                                                           
+ my-skill      test     [TMPDIR]/skills/my-skill    
+ other-skill   test     [TMPDIR]/skills/other-skill 
+
+2 skill(s) total
