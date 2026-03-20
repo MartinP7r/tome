@@ -318,4 +318,71 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         assert!(app.preview_content.contains("# skill-1"));
     }
+
+    #[test]
+    fn preview_shows_fallback_for_empty_rows() {
+        let app = make_app(0);
+        assert_eq!(app.preview_content, "No matching skill.");
+        assert_eq!(app.preview_title, "Preview");
+    }
+
+    #[test]
+    fn preview_title_reflects_selected_skill() {
+        let app = make_app(3);
+        assert_eq!(app.preview_title, "Preview: skill-0");
+    }
+
+    #[test]
+    fn preview_header_contains_source_and_path() {
+        let app = make_app(2);
+        assert!(app.preview_content.contains("source: test"));
+        assert!(app.preview_content.contains("path: "));
+    }
+
+    #[test]
+    fn preview_handles_empty_skill_md() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let skill_dir = temp.path().join("empty-skill");
+        fs::create_dir_all(&skill_dir).expect("mkdir");
+        fs::write(skill_dir.join("SKILL.md"), "  \n").expect("write");
+
+        let rows = vec![SkillRow {
+            name: "empty-skill".into(),
+            source: "test".into(),
+            path: skill_dir.display().to_string(),
+        }];
+        let app = App::new(rows);
+        assert!(app.preview_content.contains("[SKILL.md is empty]"));
+    }
+
+    #[test]
+    fn preview_handles_missing_skill_md() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let skill_dir = temp.path().join("no-file");
+        fs::create_dir_all(&skill_dir).expect("mkdir");
+        // No SKILL.md written
+
+        let rows = vec![SkillRow {
+            name: "no-file".into(),
+            source: "test".into(),
+            path: skill_dir.display().to_string(),
+        }];
+        let app = App::new(rows);
+        assert!(app.preview_content.contains("[failed to read"));
+    }
+
+    #[test]
+    fn preview_updates_after_search_filter() {
+        let mut app = make_app(5);
+        assert!(app.preview_content.contains("# skill-0"));
+
+        // Enter search mode and filter to skill-3
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for c in "skill-3".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+
+        // Preview should have updated to the first filtered match
+        assert!(app.preview_content.contains("skill-3"));
+    }
 }
