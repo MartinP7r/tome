@@ -186,13 +186,12 @@ mod tests {
 
     use super::*;
 
-    fn make_app(n: usize) -> App {
+    fn make_app(n: usize) -> (App, tempfile::TempDir) {
         let temp_root = tempfile::tempdir().expect("tempdir");
-        let root = temp_root.keep();
 
         let rows: Vec<SkillRow> = (0..n)
             .map(|i| {
-                let skill_dir = root.join(format!("skill-{i}"));
+                let skill_dir = temp_root.path().join(format!("skill-{i}"));
                 fs::create_dir_all(&skill_dir).expect("create skill dir");
                 fs::write(skill_dir.join("SKILL.md"), format!("# skill-{i}\n"))
                     .expect("write skill");
@@ -207,12 +206,12 @@ mod tests {
 
         let mut app = App::new(rows);
         app.visible_height = 5;
-        app
+        (app, temp_root)
     }
 
     #[test]
     fn cursor_down_clamps_at_end() {
-        let mut app = make_app(3);
+        let (mut app, _tmp) = make_app(3);
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
@@ -221,14 +220,14 @@ mod tests {
 
     #[test]
     fn cursor_up_clamps_at_start() {
-        let mut app = make_app(3);
+        let (mut app, _tmp) = make_app(3);
         app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
         assert_eq!(app.selected, 0);
     }
 
     #[test]
     fn jump_to_bottom_and_top() {
-        let mut app = make_app(10);
+        let (mut app, _tmp) = make_app(10);
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
         assert_eq!(app.selected, 9);
         app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::NONE));
@@ -238,7 +237,7 @@ mod tests {
 
     #[test]
     fn scroll_offset_follows_cursor() {
-        let mut app = make_app(20);
+        let (mut app, _tmp) = make_app(20);
         app.visible_height = 5;
         // Move down past visible area
         for _ in 0..7 {
@@ -251,7 +250,7 @@ mod tests {
 
     #[test]
     fn search_mode_toggle() {
-        let mut app = make_app(3);
+        let (mut app, _tmp) = make_app(3);
         assert_eq!(app.mode, Mode::Normal);
         app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         assert_eq!(app.mode, Mode::Search);
@@ -261,13 +260,13 @@ mod tests {
 
     #[test]
     fn search_filters_rows() {
-        let mut app = make_app(10);
+        let (mut app, _tmp) = make_app(10);
         app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         // Type "skill-3"
         for c in "skill-3".chars() {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
-        // Should still include the intended match in filtered results
+        // Fuzzy search should include the intended match in results
         assert!(!app.filtered_indices.is_empty());
         assert!(
             app.filtered_indices
@@ -278,7 +277,7 @@ mod tests {
 
     #[test]
     fn esc_in_search_clears_and_restores_all() {
-        let mut app = make_app(10);
+        let (mut app, _tmp) = make_app(10);
         app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
@@ -289,14 +288,14 @@ mod tests {
 
     #[test]
     fn quit_on_q() {
-        let mut app = make_app(3);
+        let (mut app, _tmp) = make_app(3);
         app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE));
         assert!(app.should_quit);
     }
 
     #[test]
     fn half_page_down() {
-        let mut app = make_app(20);
+        let (mut app, _tmp) = make_app(20);
         app.visible_height = 10;
         app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
         assert_eq!(app.selected, 5);
@@ -304,7 +303,7 @@ mod tests {
 
     #[test]
     fn empty_rows_dont_panic() {
-        let mut app = make_app(0);
+        let (mut app, _tmp) = make_app(0);
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
         assert_eq!(app.selected, 0);
@@ -312,7 +311,7 @@ mod tests {
 
     #[test]
     fn preview_updates_for_selected_skill() {
-        let mut app = make_app(3);
+        let (mut app, _tmp) = make_app(3);
         assert!(app.preview_content.contains("# skill-0"));
 
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
@@ -321,20 +320,20 @@ mod tests {
 
     #[test]
     fn preview_shows_fallback_for_empty_rows() {
-        let app = make_app(0);
+        let (app, _tmp) = make_app(0);
         assert_eq!(app.preview_content, "No matching skill.");
         assert_eq!(app.preview_title, "Preview");
     }
 
     #[test]
     fn preview_title_reflects_selected_skill() {
-        let app = make_app(3);
+        let (app, _tmp) = make_app(3);
         assert_eq!(app.preview_title, "Preview: skill-0");
     }
 
     #[test]
     fn preview_header_contains_source_and_path() {
-        let app = make_app(2);
+        let (app, _tmp) = make_app(2);
         assert!(app.preview_content.contains("source: test"));
         assert!(app.preview_content.contains("path: "));
     }
@@ -373,7 +372,7 @@ mod tests {
 
     #[test]
     fn preview_updates_after_search_filter() {
-        let mut app = make_app(5);
+        let (mut app, _tmp) = make_app(5);
         assert!(app.preview_content.contains("# skill-0"));
 
         // Enter search mode and filter to skill-3
