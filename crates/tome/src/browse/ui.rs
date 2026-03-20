@@ -2,7 +2,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Cell, Paragraph, Row, Table};
+use ratatui::widgets::{Block, Borders, Cell, Paragraph, Row, Table, Wrap};
 
 use super::app::{App, Mode};
 
@@ -12,13 +12,16 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::vertical([
         Constraint::Length(1), // header
         Constraint::Length(1), // separator
-        Constraint::Min(1),    // table body
+        Constraint::Min(1),    // body split
         Constraint::Length(1), // status bar
     ])
     .split(area);
 
+    let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(chunks[2]);
+
     // Update visible_height so App can compute scroll distances
-    app.visible_height = chunks[2].height as usize;
+    app.visible_height = body_chunks[0].height as usize;
 
     // -- Header --
     let header = Row::new(vec![
@@ -38,7 +41,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .style(Style::default().fg(Color::DarkGray));
     frame.render_widget(separator, chunks[1]);
 
-    // -- Body --
+    // -- Left body: skills table --
     let visible_rows: Vec<Row> = app
         .filtered_indices
         .iter()
@@ -65,7 +68,17 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .collect();
 
     let body_table = Table::new(visible_rows, widths()).block(Block::default());
-    frame.render_widget(body_table, chunks[2]);
+    frame.render_widget(body_table, body_chunks[0]);
+
+    // -- Right body: selected skill preview --
+    let preview = Paragraph::new(app.preview_content.as_str())
+        .block(
+            Block::default()
+                .title(app.preview_title.as_str())
+                .borders(Borders::LEFT),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(preview, body_chunks[1]);
 
     // -- Status bar --
     let filtered = app.filtered_indices.len();
