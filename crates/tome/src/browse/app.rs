@@ -1,3 +1,6 @@
+use std::fs;
+use std::path::Path;
+
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::fuzzy;
@@ -23,12 +26,14 @@ pub struct App {
     pub scroll_offset: usize,
     pub search_input: String,
     pub visible_height: usize,
+    pub preview_title: String,
+    pub preview_content: String,
 }
 
 impl App {
     pub fn new(rows: Vec<SkillRow>) -> Self {
         let filtered_indices: Vec<usize> = (0..rows.len()).collect();
-        Self {
+        let mut app = Self {
             mode: Mode::Normal,
             should_quit: false,
             filtered_indices,
@@ -37,7 +42,11 @@ impl App {
             scroll_offset: 0,
             search_input: String::new(),
             visible_height: 20,
-        }
+            preview_title: "Preview".into(),
+            preview_content: "No skills discovered.".into(),
+        };
+        app.refresh_preview();
+        app
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
@@ -98,6 +107,7 @@ impl App {
             self.selected = self.filtered_indices.len() - 1;
         }
         self.clamp_scroll();
+        self.refresh_preview();
     }
 
     fn move_cursor_down(&mut self, n: usize) {
@@ -107,16 +117,19 @@ impl App {
         let max = self.filtered_indices.len() - 1;
         self.selected = (self.selected + n).min(max);
         self.clamp_scroll();
+        self.refresh_preview();
     }
 
     fn move_cursor_up(&mut self, n: usize) {
         self.selected = self.selected.saturating_sub(n);
         self.clamp_scroll();
+        self.refresh_preview();
     }
 
     fn jump_to_top(&mut self) {
         self.selected = 0;
         self.scroll_offset = 0;
+        self.refresh_preview();
     }
 
     fn jump_to_bottom(&mut self) {
@@ -124,6 +137,7 @@ impl App {
             self.selected = self.filtered_indices.len() - 1;
         }
         self.clamp_scroll();
+        self.refresh_preview();
     }
 
     fn clamp_scroll(&mut self) {
@@ -137,20 +151,60 @@ impl App {
             self.scroll_offset = self.selected - self.visible_height + 1;
         }
     }
+
+    fn refresh_preview(&mut self) {
+        let Some((name, source, skill_path)) = self.selected_row_meta() else {
+            self.preview_title = "Preview".into();
+            self.preview_content = "No matching skill.".into();
+            return;
+        };
+
+        self.preview_title = format!("Preview: {name}");
+
+        let skill_file = Path::new(&skill_path).join("SKILL.md");
+        let header = format!("source: {source}\npath: {skill_path}\n\n");
+
+        self.preview_content = match fs::read_to_string(&skill_file) {
+            Ok(content) if content.trim().is_empty() => {
+                format!("{header}[SKILL.md is empty]")
+            }
+            Ok(content) => format!("{header}{content}"),
+            Err(err) => format!("{header}[failed to read {}: {err}]", skill_file.display()),
+        };
+    }
+
+    fn selected_row_meta(&self) -> Option<(String, String, String)> {
+        let row_idx = *self.filtered_indices.get(self.selected)?;
+        let row = self.rows.get(row_idx)?;
+        Some((row.name.clone(), row.source.clone(), row.path.clone()))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     fn make_app(n: usize) -> App {
+        let temp_root = tempfile::tempdir().expect("tempdir");
+        let root = temp_root.keep();
+
         let rows: Vec<SkillRow> = (0..n)
-            .map(|i| SkillRow {
-                name: format!("skill-{i}"),
-                source: "test".into(),
-                path: format!("/path/{i}"),
+            .map(|i| {
+                let skill_dir = root.join(format!("skill-{i}"));
+                fs::create_dir_all(&skill_dir).expect("create skill dir");
+                fs::write(skill_dir.join("SKILL.md"), format!("# skill-{i}\n"))
+                    .expect("write skill");
+
+                SkillRow {
+                    name: format!("skill-{i}"),
+                    source: "test".into(),
+                    path: skill_dir.display().to_string(),
+                }
             })
             .collect();
+
         let mut app = App::new(rows);
         app.visible_height = 5;
         app
@@ -213,9 +267,13 @@ mod tests {
         for c in "skill-3".chars() {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
-        // Should have filtered results
+        // Should still include the intended match in filtered results
         assert!(!app.filtered_indices.is_empty());
-        assert!(app.filtered_indices.len() < 10);
+        assert!(
+            app.filtered_indices
+                .iter()
+                .any(|&idx| app.rows[idx].name == "skill-3")
+        );
     }
 
     #[test]
@@ -250,5 +308,14 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
         app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
         assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn preview_updates_for_selected_skill() {
+        let mut app = make_app(3);
+        assert!(app.preview_content.contains("# skill-0"));
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert!(app.preview_content.contains("# skill-1"));
     }
 }
