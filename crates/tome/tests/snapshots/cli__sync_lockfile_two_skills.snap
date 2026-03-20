@@ -1,0 +1,17 @@
+---
+source: crates/tome/tests/cli.rs
+expression: parsed
+---
+{
+  "skills": {
+    "alpha-skill": {
+      "content_hash": "[HASH]",
+      "source_name": "test"
+    },
+    "beta-skill": {
+      "content_hash": "[HASH]",
+      "source_name": "test"
+    }
+  },
+  "version": 1
+}

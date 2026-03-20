@@ -1,0 +1,5 @@
+---
+source: crates/tome/tests/cli.rs
+expression: stdout
+---
+Not configured yet. Run `tome init` to get started.
