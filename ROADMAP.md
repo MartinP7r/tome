@@ -214,3 +214,4 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
 - **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`tome suggest-skills`)
 - **Plugin output generation**: Package the skill library as a distributable Claude plugin, Cursor plugin, etc.
+- **Publish on crates.io**: Make `tome` installable via `cargo install tome` from the crates.io registry
