@@ -8,38 +8,34 @@
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
 | **v0.4.1** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
-| **v0.4.2** | Format Transforms      | Rules/instructions syncing, transform pipeline                          |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
-| **v0.7**   | Watch Mode             | Auto-sync on filesystem changes, desktop notifications                  |        |
-| **v0.8**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
+| **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
 
 ---
 
 ## v0.1.x — Polish & UX
 
-- **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — `dialoguer` doesn't surface these by default
-- **Clarify plugin cache source**: Make it clear that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files
-- **Wizard visual polish**: Add more color, section dividers, and summary output using `console::style()` — helpful cues without clutter
-- ~~**Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework.~~ → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.1.
-- **Progress spinners for sync** (`indicatif`): Show spinners/progress during discover → consolidate → distribute steps instead of silent waits or verbose text dumps
-- **Table-formatted output** (`tabled`): Replace manual `format!` column alignment in `tome list` and `tome status` with proper table rendering — handles terminal width, truncation, and alignment automatically
-- ~~**Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk~~
-- **Optional git init for library**: Ask during `tome init` whether to initialize a git repo in the library directory for change tracking across syncs
-- **Expand wizard auto-discovery**: ~~Added `~/.gemini/antigravity/skills`.~~ `~/.copilot/skills/` and `~/.cursor/` don't exist as official home-dir paths — Copilot uses per-project `.github/skills/` and Cursor uses per-project `.cursor/rules/`. Per-project sources deferred to v0.3 connector architecture.
-- ~~**Fix `installed_plugins.json` v2 parsing**: Current parser expects a flat JSON array (v1); v2 wraps plugins in `{ "version": 2, "plugins": { "name@registry": [...] } }` — discovery silently finds nothing. Support both formats going forward.~~
-- ~~**Finalize tool name**: Decided on **tome** — *"Cook once, serve everywhere."*~~
-- **Improve doc comments for `cargo doc`**: Add module-level `//!` docs, expand struct/function docs, add `# Examples` to key public APIs.
-- ~~**GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.~~
+- [x] **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — embedded in prompt text to work around `dialoguer`'s limitation.
+- [ ] **Clarify plugin cache source**: Make it clearer that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files. Tracked in v0.4.1.
+- [x] **Wizard visual polish**: Color, section dividers, and summary output via `console::style()` — implemented in `wizard.rs`.
+- [x] **Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework. → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.1.
+- [x] **Progress spinners for sync** (`indicatif`): Spinners during discover → consolidate → distribute → cleanup steps, implemented in `lib.rs`.
+- [x] **Table-formatted output** (`tabled`): `tabled::Table` used for `tome list` and `tome status` output.
+- [x] **Explain symlink model in wizard**: Clarify that the library uses symlinks (originals are never moved or copied), so users understand there's no data loss risk.
+- [x] **Optional git init for library**: Wizard asks whether to `git init` the library directory for change tracking — implemented in `wizard.rs`.
+- [x] **Fix `installed_plugins.json` v2 parsing**: Current parser expects a flat JSON array (v1); v2 wraps plugins in `{ "version": 2, "plugins": { "name@registry": [...] } }` — discovery silently finds nothing. Support both formats going forward.
+- [x] **Finalize tool name**: Decided on **tome** — *"Cook once, serve everywhere."*
+- [x] **GitHub Pages deployment**: Add CI workflow to build and deploy mdBook + `cargo doc` to GitHub Pages.
 
 ## v0.2 — Scoped SOT
 
 Make the library the source of truth for local skills. `tome sync` copies skill directories into the library instead of creating symlinks back to sources. Distribution to targets still uses symlinks (target → library).
 
-- **Library as canonical home** ([#37](https://github.com/MartinP7r/tome/issues/37)): Local skills live directly in the library (real directories, not symlinks). `tome sync` copies from sources into library, making the library the single source of truth.
-- **Git-friendly library directory** ([#42](https://github.com/MartinP7r/tome/issues/42)): Library directory works as a git repo — local skills tracked in git, distribution symlinks are separate.
-- **Two-tier symlink model**: Sources → (copy) → Library → (symlink) → Targets. Sources are read-only inputs; the library owns the canonical copies; targets get symlinks into the library.
-- **Idempotent copy semantics**: Only copy when source content has changed (compare timestamps or content hashes). Skip unchanged skills to keep syncs fast.
+- [x] **Library as canonical home** ([#37](https://github.com/MartinP7r/tome/issues/37)): Local skills live directly in the library (real directories, not symlinks). `tome sync` copies from sources into library, making the library the single source of truth.
+- [x] **Git-friendly library directory** ([#42](https://github.com/MartinP7r/tome/issues/42)): Library directory works as a git repo — local skills tracked in git, distribution symlinks are separate.
+- [x] **Two-tier symlink model**: Sources → (copy) → Library → (symlink) → Targets. Sources are read-only inputs; the library owns the canonical copies; targets get symlinks into the library.
+- [x] **Idempotent copy semantics**: Only copy when source content has changed (compare timestamps or content hashes). Skip unchanged skills to keep syncs fast.
 
 **Not in scope** (deferred to v0.5): lockfile, `tome update`, per-machine preferences, managed source support, git-backed backup.
 
@@ -47,12 +43,12 @@ Make the library the source of truth for local skills. `tome sync` copies skill 
 
 Decouple output rendering from business logic. Prerequisite for `tome browse` (v0.4.1) and `--json` output (#167), ensuring new connectors in v0.3 get clean data separation from day one.
 
-- ~~**Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations~~ — Closed as superseded (#183). Data struct extraction was the real prerequisite; ratatui (v0.4.1) will consume data structs directly rather than going through a trait.
-- **Data struct extraction**: `status::gather() -> StatusReport`, `doctor::diagnose() -> DoctorReport`, sync pipeline returns `SyncReport` — pure computation separated from rendering
-- **Warning collection**: Replace scattered `eprintln!` in discover/library/distribute with `Vec<Warning>` returned alongside results
-- ~~**TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait~~ — Superseded along with Renderer trait.
-- ~~**QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output~~ — Closed as superseded (#188). Not needed without the Renderer trait; `quiet` parameter threading is sufficient.
-- **`--json` for `tome list`** ([#167](https://github.com/MartinP7r/tome/issues/167)): Trivially enabled once data structs exist — serialize `Vec<SkillRow>` directly
+- [x] **Renderer trait** (`ui/mod.rs`): Abstract output interface for sync reporting, skill listing, status display, doctor diagnostics, warnings, and confirmations — Closed as superseded (#183). Data struct extraction was the real prerequisite; ratatui (v0.4.1) will consume data structs directly rather than going through a trait.
+- [x] **Data struct extraction**: `status::gather() -> StatusReport`, `doctor::diagnose() -> DoctorReport`, sync pipeline returns `SyncReport` — pure computation separated from rendering
+- [x] **Warning collection**: Replace scattered `eprintln!` in discover/library/distribute with `Vec<Warning>` returned alongside results
+- [x] **TerminalRenderer**: Reimplements current output using `console`/`indicatif`/`tabled`/`dialoguer` — identical user-facing behavior, routed through the trait — Superseded along with Renderer trait.
+- [x] **QuietRenderer**: Replaces `quiet: bool` parameter threading with a renderer that suppresses non-error output — Closed as superseded (#188). Not needed without the Renderer trait; `quiet` parameter threading is sufficient.
+- [x] **`--json` for `tome list`** ([#167](https://github.com/MartinP7r/tome/issues/167)): Trivially enabled once data structs exist — serialize `Vec<SkillRow>` directly
 
 ## v0.3 — Connector Architecture ✓
 
@@ -60,24 +56,24 @@ Replaced the hardcoded `Targets` struct with a flexible, data-driven target conf
 
 ### Delivered
 
-- ~~**Generic `[[targets]]` array**~~: Replaced the hardcoded `Targets` struct with `BTreeMap<String, TargetConfig>` ([#175](https://github.com/MartinP7r/tome/pull/175)). Each target has a `name`, `path`, `method` (symlink/mcp), and connector-specific options. Data-driven `KnownTarget` registry in the wizard enables custom target support without code changes.
-- **npm-based skill source research** ([#97](https://github.com/MartinP7r/tome/issues/97)): Investigated `npx skills` (Vercel Labs). Confirmed: canonical copies in `.agents/skills/<name>/`, lockfile at `.agents/.skill-lock.json` (v3) with content hashes and provenance. A `Directory` source pointed at `~/.agents/skills/` works for basic discovery; a dedicated source type would preserve provenance metadata from the lockfile.
-- **`.agents/skills/` as emerging universal path**: 9 agents converge on `.agents/skills/` as the project-scoped canonical skills directory. Documented in tool-landscape research.
+- [x] **Generic `[[targets]]` array**: Replaced the hardcoded `Targets` struct with `BTreeMap<String, TargetConfig>` ([#175](https://github.com/MartinP7r/tome/pull/175)). Each target has a `name`, `path`, `method` (symlink/mcp), and connector-specific options. Data-driven `KnownTarget` registry in the wizard enables custom target support without code changes.
+- [x] **npm-based skill source research** ([#97](https://github.com/MartinP7r/tome/issues/97)): Investigated `npx skills` (Vercel Labs). Confirmed: canonical copies in `.agents/skills/<name>/`, lockfile at `.agents/.skill-lock.json` (v3) with content hashes and provenance. A `Directory` source pointed at `~/.agents/skills/` works for basic discovery; a dedicated source type would preserve provenance metadata from the lockfile.
+- [x] **`.agents/skills/` as emerging universal path**: 9 agents converge on `.agents/skills/` as the project-scoped canonical skills directory. Documented in tool-landscape research.
 
 ### Moved forward
 
 - **Connector trait** → [#192](https://github.com/MartinP7r/tome/issues/192). Unified source/target interface. The BTreeMap solved config flexibility; the trait solves architectural abstraction.
 - **Built-in connectors** → Part of [#192](https://github.com/MartinP7r/tome/issues/192). Claude, Codex, Antigravity, Cursor, Windsurf, Amp, Goose, etc.
-- **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (v0.4.2 Format Transforms).
-- **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Managed from `~/.tome/rules/`, distributed to each target's rules dir. See v0.4.2.
-- **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). Managed from `~/.tome/instructions/`, mapped to tool-specific filenames. See v0.4.2.
+- **Format awareness per connector** → Captured in [#57](https://github.com/MartinP7r/tome/issues/57) (Format Transforms).
+- **`.claude/rules/` syncing** → [#193](https://github.com/MartinP7r/tome/issues/193). Managed from `~/.tome/rules/`, distributed to each target's rules dir. See Tentative — Format Transforms.
+- **Instruction file syncing** → [#194](https://github.com/MartinP7r/tome/issues/194). Managed from `~/.tome/instructions/`, mapped to tool-specific filenames. See Tentative — Format Transforms.
 
 ## v0.3.x — Portable Library (MVP) ✓
 
 Complete the multi-machine skill management story. The lockfile (#38, shipped early) provides the diff mechanism; this milestone adds the interactive UX and per-machine control.
 
-- ~~**Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`)~~: Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3. Disabled skills stay in the library but are skipped during distribution.
-- ~~**`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40))~~: Reads lockfile, diffs against local state, surfaces new/changed/removed skills interactively. Offers to disable unwanted new skills. Notification-only for managed plugins — auto-install deferred to v0.5.
+- [x] **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3. Disabled skills stay in the library but are skipped during distribution.
+- [x] **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, surfaces new/changed/removed skills interactively. Offers to disable unwanted new skills. Notification-only for managed plugins — auto-install deferred to v0.5.
 
 ## v0.4.1 — Browse + Skill Validation
 
@@ -87,10 +83,10 @@ Interactive skill browser and YAML frontmatter linting. Depends on v0.2.1 output
 
 Full-screen interactive skill browser using **ratatui** for rendering and **nucleo** (Helix editor's fuzzy engine) for matching. skim was ruled out because it owns the terminal and can't be embedded in a ratatui layout.
 
-- **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
-- **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
-- **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
-- **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
+- [ ] **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
+- [ ] **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
+- [ ] **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
+- [ ] **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
 
 ### Skill Validation & Linting
 
@@ -98,10 +94,10 @@ Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool c
 
 ### Frontmatter Parsing
 
-- Add `serde_yaml` dependency
-- Create a `Skill` struct with typed fields for the base standard (name, description, license, compatibility, metadata, allowed-tools)
-- Parse frontmatter during discovery (enrich `DiscoveredSkill`)
-- Store parsed metadata for validation and status display
+- [ ] Add `serde_yaml` dependency
+- [ ] Create a `Skill` struct with typed fields for the base standard (name, description, license, compatibility, metadata, allowed-tools)
+- [ ] Parse frontmatter during discovery (enrich `DiscoveredSkill`)
+- [ ] Store parsed metadata for validation and status display
 
 ### `tome lint` Command
 
@@ -128,8 +124,8 @@ Validation checks ordered by severity:
 
 ### Enhance Existing Commands
 
-- **`tome doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
-- **`tome status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
+- [ ] **`tome doctor`**: Add frontmatter health checks alongside existing symlink diagnostics — parse all library skills and report validation results
+- [ ] **`tome status`**: Show parsed frontmatter summary per skill — name, description (truncated), field count, and any validation issues inline
 
 ### Target-Aware Warnings (Future)
 
@@ -138,58 +134,60 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.4.2 — Format Transforms
-
-### Rules Syncing ([#193](https://github.com/MartinP7r/tome/issues/193))
-
-Manage tool-specific rule files from a single canonical location. `~/.tome/rules/` contains shared rules that get distributed to each target's rules directory (e.g., `.claude/rules/`, `.cursor/rules/`). Same two-tier model as skills: `~/.tome/rules/` is the source of truth, targets get symlinks.
-
-### Instruction File Syncing ([#194](https://github.com/MartinP7r/tome/issues/194))
-
-Manage root-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, .cursorrules, etc.) from `~/.tome/instructions/`. High complexity — each tool expects a different filename and format at the project root. Needs a mapping layer (instruction → tool-specific filename) and careful conflict handling for user-managed instruction files.
-
-### Format Transforms
-
-- Pluggable transform pipeline driven by connector format declarations
-- Preserve original format — transforms are output-only
-- Connectors declare input/output formats; the pipeline resolves the translation chain
-- **Copilot `.instructions.md` format**: Support Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules
-- ~~**Deprecate `DistributionMethod::Mcp`**~~: Removed in [#262](https://github.com/MartinP7r/tome/issues/262). No known targets used MCP distribution — all major AI coding tools read SKILL.md files from disk via symlinks. The `tome-mcp` binary, `tome serve` command, and `TargetMethod::Mcp` distribution path were removed along with the `rmcp` and `tokio` dependencies. MCP support can be re-added if a concrete use case emerges.
-
 ## v0.5 — Managed Sources
 
 Auto-install managed plugins and backup the library. Builds on the portable library foundation from v0.3.x.
 
-- ~~**`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38))~~ ✓ Shipped early (PR #220)
-- ~~**Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39))~~ → Moved to v0.3.x
-- ~~**`tome update` (notification-only)** ([#40](https://github.com/MartinP7r/tome/issues/40))~~ → Moved to v0.3.x
-- **`tome update` auto-install**: Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
-- **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
-- **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
+- [x] **`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38)): Shipped early (PR #220)
+- [x] **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)): Moved to v0.3.x
+- [x] **`tome update` (notification-only)** ([#40](https://github.com/MartinP7r/tome/issues/40)): Moved to v0.3.x
+- [ ] **`tome update` auto-install**: Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
+- [ ] **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
+- [ ] **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
 
 ## v0.6 — Git Sources
 
-- Add `type = "git"` source for remote skill repositories
-- Clone/pull on sync with caching
-- Pin to branch, tag, or commit SHA
-- Support private repos via SSH keys or token auth
+- [ ] Add `type = "git"` source for remote skill repositories
+- [ ] Clone/pull on sync with caching
+- [ ] Pin to branch, tag, or commit SHA
+- [ ] Support private repos via SSH keys or token auth
 
-## v0.7 — Watch Mode
-
-- `tome watch` for auto-sync on filesystem changes
-- Debounced fsnotify-based watcher
-- Optional desktop notification on sync
-
-## v0.8 — Skill Composition ("Wolpertinger")
+## v0.7 — Skill Composition ("Wolpertinger")
 
 Highly experimental. Generate custom skills by combining or synthesizing content from multiple skill authors/sources.
 
-- **Multi-source skill synthesis**: Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
-- **ACP-based authentication**: LLM calls go through an Agent Communication Protocol (ACP) flow — authenticate via existing CLIs the user already has (codex-cli, claude-code, gemini CLI) rather than requiring a separate OAuth/API-key setup
-- **Skill evaluation/creation skill** (SKILL.md): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
-- **`tome lint` standard validation** (extension): Extend `tome lint` (v0.4.1) to validate against the emerging agent skills standard, not just cross-tool frontmatter compat
+- [ ] **Multi-source skill synthesis**: Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
+- [ ] **ACP-based authentication**: LLM calls go through an Agent Communication Protocol (ACP) flow — authenticate via existing CLIs the user already has (codex-cli, claude-code, gemini CLI) rather than requiring a separate OAuth/API-key setup
+- [ ] **Skill evaluation/creation skill** (SKILL.md): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
+- [ ] **`tome lint` standard validation** (extension): Extend `tome lint` (v0.4.1) to validate against the emerging agent skills standard, not just cross-tool frontmatter compat
 
 Dependencies: v0.5 (managed sources for marketplace access), v0.6 (git sources for GitHub repos), v0.4.1 (lint infrastructure)
+
+## Tentative — Format Transforms
+
+Not yet scheduled. Needs more design work before committing to a milestone.
+
+- **Rules syncing** ([#193](https://github.com/MartinP7r/tome/issues/193)): Manage tool-specific rule files from `~/.tome/rules/`, distributed via symlinks to each target's rules directory (`.claude/rules/`, `.cursor/rules/`, etc.)
+- **Instruction file syncing** ([#194](https://github.com/MartinP7r/tome/issues/194)): Manage root-level instruction files (CLAUDE.md, AGENTS.md, GEMINI.md, .cursorrules) from `~/.tome/instructions/`. High complexity — each tool expects a different filename and format; needs a mapping layer and conflict handling.
+- **Connector trait** ([#192](https://github.com/MartinP7r/tome/issues/192)): Unified source/target interface as an architectural abstraction over the existing `BTreeMap` config.
+- **Pluggable transform pipeline**: Connectors declare input/output formats; the pipeline resolves the translation chain. Preserves original format — transforms are output-only.
+- **Copilot `.instructions.md` format**: Copilot's `.instructions.md` as a transform target alongside Cursor `.mdc` and Windsurf rules.
+- [x] **Deprecate `DistributionMethod::Mcp`**: Removed in [#262](https://github.com/MartinP7r/tome/issues/262). No known targets used MCP distribution — all major AI coding tools read SKILL.md files from disk via symlinks. The `tome-mcp` binary, `tome serve` command, and `TargetMethod::Mcp` distribution path were removed along with the `rmcp` and `tokio` dependencies. MCP support can be re-added if a concrete use case emerges.
+
+## Tentative — Expand Wizard Auto-Discovery
+
+Scope needs clarifying before committing. The question: which global home-dir skill paths exist for tools not yet covered by the wizard (e.g. `~/.cursor/skills/`, Windsurf's equivalent, etc.)? Per-project paths (`.github/skills/`, `.cursor/rules/`) are explicitly **out of scope** — only global home-dir paths qualify.
+
+- Audit which global home-dir paths exist across all major tools
+- Add any confirmed paths to `KNOWN_SOURCES` in `wizard.rs`
+
+## Tentative — Watch Mode
+
+Not yet scheduled. Low priority until core sync pipeline stabilizes.
+
+- `tome watch` for auto-sync on filesystem changes ([#59](https://github.com/MartinP7r/tome/issues/59))
+- Debounced fsnotify-based watcher
+- Optional desktop notification on sync
 
 ## Future — Companion macOS App
 
@@ -205,13 +203,14 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 
 ## Future Ideas
 
-- **Plugin registry**: Browse and install community skill packs (precursor to v0.8 Wolpertinger)
+- **Plugin registry**: Browse and install community skill packs (precursor to v0.7 Wolpertinger)
 - **Conflict resolution UI**: Interactive merge when skills collide
 - **Shell completions**: Generate completions for bash, zsh, fish
 - **Homebrew formula**: `brew install tome`
-- ~~**Backup snapshots**: Optional tarball backup of library state before destructive operations~~ → moved to v0.5 as git-backed backup (#94)
+- **Backup snapshots**: Moved to v0.5 as git-backed backup (#94)
 - **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
 - **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
 - **Portable memory extraction**: Suggest MEMORY.md entries that could be promoted to reusable skills (`tome suggest-skills`)
 - **Plugin output generation**: Package the skill library as a distributable Claude plugin, Cursor plugin, etc.
 - **Publish on crates.io**: Make `tome` installable via `cargo install tome` from the crates.io registry
+- **Improve doc comments for `cargo doc`**: Module-level `//!` coverage is uneven across modules; no `# Examples` sections. Low priority polish.
