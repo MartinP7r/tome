@@ -24,6 +24,7 @@ fn snapshot_settings(tmp: &TempDir) -> Settings {
         })
         .collect::<String>();
     settings.add_filter(&escaped, "[TMPDIR]");
+    settings.add_filter(r" +\n", "\n");
     settings.set_snapshot_path("snapshots");
     settings
 }
