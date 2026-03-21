@@ -653,7 +653,8 @@ fn render_sync_report(report: &SyncReport) {
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
     let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &mut warnings)?;
+    let mut skills = discover::discover_all(config, &mut warnings)?;
+    skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     if !quiet {
         for w in &warnings {
             eprintln!("warning: {}", w);
