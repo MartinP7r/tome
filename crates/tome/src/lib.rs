@@ -302,6 +302,11 @@ fn sync(
     if verbose {
         eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
+    // Clear the spinner before cleanup_library runs: cleanup may show interactive
+    // dialoguer prompts, and a live spinner overwrites them, causing an apparent hang.
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
     let cleanup_result = cleanup::cleanup_library(
         paths.library_dir(),
         &discovered_names,
@@ -332,10 +337,6 @@ fn sync(
     if !dry_run && paths.tome_home().is_dir() {
         let lf = lockfile::generate(&manifest, &skills);
         lockfile::save(&lf, paths.tome_home())?;
-    }
-
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
     }
 
     let report = SyncReport {
@@ -499,6 +500,9 @@ fn update_cmd(
     if verbose {
         eprintln!("{}", style("Cleaning up stale entries...").dim());
     }
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
     let cleanup_result = cleanup::cleanup_library(
         paths.library_dir(),
         &discovered_names,
@@ -514,10 +518,6 @@ fn update_cmd(
         // Also clean up symlinks for disabled skills
         removed_from_targets +=
             cleanup_disabled_from_target(skills_dir, paths.library_dir(), &machine_prefs, dry_run)?;
-    }
-
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
     }
 
     // 7. Save lockfile + manifest
