@@ -431,7 +431,7 @@ const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
         SourceType::ClaudePlugins,
     ),
     ("claude-skills", ".claude/skills", SourceType::Directory),
-    ("codex-skills", ".agents/skills", SourceType::Directory),
+    ("codex-skills", ".codex/skills", SourceType::Directory),
     (
         "antigravity-skills",
         ".gemini/antigravity/skills",
