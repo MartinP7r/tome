@@ -342,6 +342,11 @@ fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
         .items(&labels)
         .interact()?;
 
+    println!();
+    println!("  Confirm the skills directory for each selected tool.");
+    println!("  Press enter to accept the default, or type a custom path.");
+    println!();
+
     let mut targets = BTreeMap::new();
 
     for idx in selections {

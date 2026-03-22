@@ -7,7 +7,8 @@
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
-| **v0.4.1** | Browse + Validation    | `tome browse` (ratatui+nucleo), `tome lint`, frontmatter parsing        |        |
+| **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions   |        |
+| **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
@@ -75,22 +76,22 @@ Complete the multi-machine skill management story. The lockfile (#38, shipped ea
 - [x] **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)) (`~/.config/tome/machine.toml`): Per-machine opt-in/opt-out for skills — machine A uses skills 1,2,3 while machine B only wants 1 and 3. Disabled skills stay in the library but are skipped during distribution.
 - [x] **`tome update` command** ([#40](https://github.com/MartinP7r/tome/issues/40)): Reads lockfile, diffs against local state, surfaces new/changed/removed skills interactively. Offers to disable unwanted new skills. Notification-only for managed plugins — auto-install deferred to v0.5.
 
-## v0.4.1 — Browse + Skill Validation
+## v0.4.1 — Browse
 
-Interactive skill browser and YAML frontmatter linting. Depends on v0.2.1 output layer for clean data access.
+Interactive skill browser. Depends on v0.2.1 output layer for clean data access.
 
 ### `tome browse` — Interactive TUI ([#162](https://github.com/MartinP7r/tome/issues/162))
 
 Full-screen interactive skill browser using **ratatui** for rendering and **nucleo** (Helix editor's fuzzy engine) for matching. skim was ruled out because it owns the terminal and can't be embedded in a ratatui layout.
 
-- [ ] **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
-- [ ] **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
+- [x] **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
+- [x] **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
 - [ ] **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
 - [ ] **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
 
-### Skill Validation & Linting
+## v0.4.2 — Skill Validation & Linting
 
-Add YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison.
+YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison. Tracked in [#47](https://github.com/MartinP7r/tome/issues/47) and [#176](https://github.com/MartinP7r/tome/issues/176).
 
 ### Frontmatter Parsing
 
