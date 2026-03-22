@@ -20,9 +20,10 @@ pub fn run(dry_run: bool) -> Result<Config> {
     println!();
 
     println!("{}", style("How it works:").bold());
-    println!("  Tome uses symlinks — your original files are never moved or copied.");
-    println!("  The library and targets contain links pointing back to where your skills");
-    println!("  actually live. Removing tome leaves all your original files untouched.");
+    println!("  Tome copies your local skills into a central library for safekeeping.");
+    println!("  Managed skills (e.g. installed plugins) are symlinked there instead.");
+    println!("  Each target tool receives symlinks into the library — your originals");
+    println!("  are never touched. Removing tome leaves all source files untouched.");
     println!();
 
     // Step 1: Discover and select sources
