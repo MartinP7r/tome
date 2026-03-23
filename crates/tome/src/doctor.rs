@@ -357,7 +357,10 @@ fn repair_library(paths: &TomePaths) -> Result<()> {
     let library_dir = paths.library_dir();
     let tome_home = paths.tome_home();
     let mut m = manifest::load(tome_home).with_context(|| {
-        "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
+        format!(
+            "cannot repair: manifest is unreadable. Back up {} and run sync --force",
+            crate::manifest::MANIFEST_FILENAME
+        )
     })?;
     let mut fixed = 0;
 

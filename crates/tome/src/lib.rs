@@ -32,6 +32,7 @@ pub(crate) mod manifest;
 pub(crate) mod paths;
 pub(crate) mod status;
 pub(crate) mod update;
+pub(crate) mod validation;
 pub(crate) mod wizard;
 
 use std::collections::HashSet;

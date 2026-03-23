@@ -53,14 +53,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
         let (registry_id, version) = skill_map
             .get(name.as_str())
             .and_then(|s| s.provenance.as_ref())
-            .map(|p| {
-                let version = if p.version.is_empty() {
-                    None
-                } else {
-                    Some(p.version.clone())
-                };
-                (Some(p.registry_id.clone()), version)
-            })
+            .map(|p| (Some(p.registry_id.clone()), p.version.clone()))
             .unwrap_or((None, None));
 
         entries.insert(
@@ -142,9 +135,13 @@ mod tests {
             path: PathBuf::from(format!("/tmp/{name}")),
             source_name: source.to_string(),
             managed: provenance.is_some(),
-            provenance: provenance.map(|(reg, ver)| SkillProvenance {
+            provenance: provenance.map(|(reg, ver): (&str, &str)| SkillProvenance {
                 registry_id: reg.to_string(),
-                version: ver.to_string(),
+                version: if ver.is_empty() {
+                    None
+                } else {
+                    Some(ver.to_string())
+                },
             }),
         }
     }

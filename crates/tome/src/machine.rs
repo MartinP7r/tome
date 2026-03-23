@@ -19,11 +19,11 @@ use crate::discover::SkillName;
 pub struct MachinePrefs {
     /// Skills that should not be distributed to targets on this machine.
     #[serde(default)]
-    pub disabled: BTreeSet<SkillName>,
+    pub(crate) disabled: BTreeSet<SkillName>,
 
     /// Targets to skip on this machine (e.g. machine A doesn't have a certain tool installed).
     #[serde(default)]
-    pub disabled_targets: BTreeSet<TargetName>,
+    pub(crate) disabled_targets: BTreeSet<TargetName>,
 }
 
 impl MachinePrefs {
