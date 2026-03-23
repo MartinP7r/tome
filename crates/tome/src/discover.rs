@@ -34,19 +34,7 @@ impl SkillName {
     /// ```
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        anyhow::ensure!(!name.is_empty(), "skill name cannot be empty");
-        anyhow::ensure!(
-            name != "." && name != "..",
-            "skill name cannot be '.' or '..'"
-        );
-        anyhow::ensure!(
-            !name.chars().all(|c| c.is_whitespace()) && name.trim() == name,
-            "skill name cannot be whitespace-only or have leading/trailing whitespace: '{name}'"
-        );
-        anyhow::ensure!(
-            !name.contains('/') && !name.contains('\\'),
-            "skill name contains path separator: '{name}'"
-        );
+        crate::validation::validate_identifier(&name, "skill name")?;
         Ok(Self(name))
     }
 
@@ -122,8 +110,8 @@ impl<'de> serde::Deserialize<'de> for SkillName {
 pub struct SkillProvenance {
     /// Registry identifier (e.g. "my-plugin@npm")
     pub registry_id: String,
-    /// Version string (e.g. "1.2.0")
-    pub version: String,
+    /// Version string (e.g. "1.2.0"). `None` when not available.
+    pub version: Option<String>,
 }
 
 /// A discovered skill with its metadata.
@@ -309,8 +297,8 @@ fn scan_install_records(
                     let version = record
                         .get("version")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.to_string());
                     let prov = SkillProvenance {
                         registry_id: reg_id.to_string(),
                         version,
@@ -618,7 +606,7 @@ mod tests {
             .as_ref()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "swift-skill@swift-registry");
-        assert_eq!(prov.version, "1.0.0");
+        assert_eq!(prov.version.as_deref(), Some("1.0.0"));
 
         let rust_s = skills.iter().find(|s| s.name == "rust-skill").unwrap();
         let prov = rust_s
@@ -626,7 +614,7 @@ mod tests {
             .as_ref()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "rust-skill@rust-registry");
-        assert_eq!(prov.version, "2.0.0");
+        assert_eq!(prov.version.as_deref(), Some("2.0.0"));
     }
 
     #[test]

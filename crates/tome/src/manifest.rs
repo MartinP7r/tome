@@ -54,13 +54,13 @@ impl Manifest {
     }
 
     /// Returns true if the manifest has no entries.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
     }
 
     /// Returns the number of entries in the manifest.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.skills.len()
     }
@@ -170,7 +170,7 @@ pub fn hash_directory(dir: &Path) -> Result<String> {
 }
 
 /// Get the current timestamp as an ISO 8601 string (UTC, second precision).
-pub fn now_iso8601() -> String {
+pub(crate) fn now_iso8601() -> String {
     // Use std::time for a simple UTC timestamp without pulling in chrono
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -20,19 +20,7 @@ impl TargetName {
     /// Rejects empty names and names containing path separators (`/` or `\`).
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        anyhow::ensure!(!name.is_empty(), "target name cannot be empty");
-        anyhow::ensure!(
-            name != "." && name != "..",
-            "target name cannot be '.' or '..'"
-        );
-        anyhow::ensure!(
-            !name.chars().all(|c| c.is_whitespace()) && name.trim() == name,
-            "target name cannot be whitespace-only or have leading/trailing whitespace: '{name}'"
-        );
-        anyhow::ensure!(
-            !name.contains('/') && !name.contains('\\'),
-            "target name contains path separator: '{name}'"
-        );
+        crate::validation::validate_identifier(&name, "target name")?;
         Ok(Self(name))
     }
 
