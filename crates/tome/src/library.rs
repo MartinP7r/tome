@@ -294,7 +294,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
     for entry in walkdir::WalkDir::new(src).follow_links(false).into_iter() {
         let entry = entry.with_context(|| format!("failed to walk directory {}", src.display()))?;
-        let rel = entry.path().strip_prefix(src).unwrap_or(entry.path());
+        let rel = entry.path().strip_prefix(src).with_context(|| {
+            format!(
+                "BUG: WalkDir yielded path {} not under root {}",
+                entry.path().display(),
+                src.display()
+            )
+        })?;
         let target = dst.join(rel);
 
         if entry.file_type().is_dir() {
@@ -1266,5 +1272,67 @@ mod tests {
             !content.contains("tome.lock.tmp"),
             "lockfile tmp files now live at tome home, not in library"
         );
+    }
+
+    #[test]
+    fn consolidate_managed_replaces_local_dir_with_symlink() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        // Create a real skill directory in the library (simulating a previously-local skill)
+        let dest = library.path().join("skill-a");
+        std::fs::create_dir_all(&dest).unwrap();
+        std::fs::write(dest.join("SKILL.md"), "# local version").unwrap();
+        assert!(dest.is_dir() && !dest.is_symlink());
+
+        // Add a manifest entry for skill-a with managed: false
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("skill-a").unwrap(),
+            SkillEntry {
+                source_path: std::path::PathBuf::from("/tmp/old-source/skill-a"),
+                source_name: "old-source".to_string(),
+                content_hash: "stale-hash".to_string(),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+
+        // Create a source directory with the skill
+        let source_skill = source.path().join("skill-a");
+        std::fs::create_dir_all(&source_skill).unwrap();
+        std::fs::write(source_skill.join("SKILL.md"), "# managed version").unwrap();
+
+        // Build a DiscoveredSkill with managed: true
+        let skill = DiscoveredSkill {
+            name: crate::discover::SkillName::new("skill-a").unwrap(),
+            path: source_skill.clone(),
+            source_name: "plugins".into(),
+            managed: true,
+            provenance: None,
+        };
+
+        // Call consolidate_managed directly
+        let mut result = ConsolidateResult::default();
+        consolidate_managed(&skill, &dest, &mut manifest, &mut result, false, false).unwrap();
+
+        // Assert: the real directory was replaced with a symlink pointing to the source
+        assert!(
+            dest.is_symlink(),
+            "real directory should be replaced with a symlink"
+        );
+        let target = std::fs::read_link(&dest).unwrap();
+        assert_eq!(
+            target, source_skill,
+            "symlink should point to the source skill dir"
+        );
+
+        // Assert: the manifest entry is now managed: true
+        let entry = manifest.get("skill-a").expect("manifest should have entry");
+        assert!(
+            entry.managed,
+            "manifest entry should be updated to managed: true"
+        );
+        assert_eq!(result.updated, 1);
     }
 }

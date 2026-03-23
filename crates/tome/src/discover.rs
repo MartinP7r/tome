@@ -34,19 +34,7 @@ impl SkillName {
     /// ```
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        anyhow::ensure!(!name.is_empty(), "skill name cannot be empty");
-        anyhow::ensure!(
-            name != "." && name != "..",
-            "skill name cannot be '.' or '..'"
-        );
-        anyhow::ensure!(
-            !name.chars().all(|c| c.is_whitespace()) && name.trim() == name,
-            "skill name cannot be whitespace-only or have leading/trailing whitespace: '{name}'"
-        );
-        anyhow::ensure!(
-            !name.contains('/') && !name.contains('\\'),
-            "skill name contains path separator: '{name}'"
-        );
+        crate::validation::validate_identifier(&name, "skill name")?;
         Ok(Self(name))
     }
 
@@ -122,8 +110,8 @@ impl<'de> serde::Deserialize<'de> for SkillName {
 pub struct SkillProvenance {
     /// Registry identifier (e.g. "my-plugin@npm")
     pub registry_id: String,
-    /// Version string (e.g. "1.2.0")
-    pub version: String,
+    /// Version string (e.g. "1.2.0"). `None` when not available.
+    pub version: Option<String>,
 }
 
 /// A discovered skill with its metadata.
@@ -214,14 +202,10 @@ fn discover_claude_plugins(
     // Look for installed_plugins.json in multiple locations:
     // 1. Directly in source.path (e.g. ~/.claude/plugins/)
     // 2. Parent directory (when source.path points to cache subdir, e.g. ~/.claude/plugins/cache/)
-    let candidates = [
-        source.path.join("installed_plugins.json"),
-        source
-            .path
-            .parent()
-            .map(|p| p.join("installed_plugins.json"))
-            .unwrap_or_default(),
-    ];
+    let mut candidates = vec![source.path.join("installed_plugins.json")];
+    if let Some(parent) = source.path.parent() {
+        candidates.push(parent.join("installed_plugins.json"));
+    }
 
     for candidate in &candidates {
         if candidate.exists() {
@@ -309,8 +293,8 @@ fn scan_install_records(
                     let version = record
                         .get("version")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string();
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.to_string());
                     let prov = SkillProvenance {
                         registry_id: reg_id.to_string(),
                         version,
@@ -386,7 +370,7 @@ fn scan_for_skills(
     }
 
     for entry in entries {
-        let entry = entry.unwrap();
+        let entry = entry.expect("BUG: entries vec was filtered to Ok variants by partition above");
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()
             && let Some(skill_dir) = entry.path().parent()
@@ -618,7 +602,7 @@ mod tests {
             .as_ref()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "swift-skill@swift-registry");
-        assert_eq!(prov.version, "1.0.0");
+        assert_eq!(prov.version.as_deref(), Some("1.0.0"));
 
         let rust_s = skills.iter().find(|s| s.name == "rust-skill").unwrap();
         let prov = rust_s
@@ -626,7 +610,7 @@ mod tests {
             .as_ref()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "rust-skill@rust-registry");
-        assert_eq!(prov.version, "2.0.0");
+        assert_eq!(prov.version.as_deref(), Some("2.0.0"));
     }
 
     #[test]
@@ -774,6 +758,40 @@ mod tests {
         assert!(SkillName::new("my-skill-123").unwrap().is_conventional());
         assert!(!SkillName::new("My_Skill").unwrap().is_conventional());
         assert!(!SkillName::new("UPPER").unwrap().is_conventional());
+    }
+
+    #[test]
+    fn discover_claude_plugins_parent_path_json() {
+        let tmp = TempDir::new().unwrap();
+
+        // source.path points to a cache/ subdirectory
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // installed_plugins.json is in the PARENT directory (not in cache/)
+        let plugin_dir = tmp.path().join("my-plugin");
+        create_skill(&plugin_dir.join("skills"), "parent-skill");
+
+        let json = serde_json::json!([
+            { "installPath": plugin_dir.to_str().unwrap() }
+        ]);
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        // Verify the JSON is NOT in the cache dir itself
+        assert!(!cache_dir.join("installed_plugins.json").exists());
+
+        let source = Source {
+            name: "plugins".into(),
+            path: cache_dir,
+            source_type: SourceType::ClaudePlugins,
+        };
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "parent-skill");
     }
 
     #[test]

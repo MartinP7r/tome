@@ -136,7 +136,7 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source), broken symlinks from targets, and disabled skill symlinks from target directories. Interactive in TTY mode; auto-removes with warning otherwise.
 
 **Other modules:**
-- `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`).
+- `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (see `KNOWN_SOURCES` in `wizard.rs` for the full list).
 - `config.rs` — TOML config at `~/.tome/tome.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
 - `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing source paths; optionally repairs.
@@ -169,7 +169,7 @@ Releases are managed by [cargo-dist](https://opensource.axo.dev/cargo-dist/). Th
 
 **Important:** When bumping `cargo-dist-version` in `Cargo.toml`, always run `cargo dist init` afterwards to regenerate `release.yml`. We use `allow-dirty = ["ci"]` to tolerate Dependabot action bumps, but cargo-dist upgrades may require real workflow changes that won't be applied automatically.
 
-<!-- BEGIN BEADS INTEGRATION profile:full hash:d4f96305 -->
+<!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:f65d5d33 -->
 ## Issue Tracking with bd (beads)
 
 **IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
@@ -234,6 +234,16 @@ bd close bd-42 --reason "Completed" --json
    - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
 5. **Complete**: `bd close <id> --reason "Done"`
 
+### Quality
+- Use `--acceptance` and `--design` fields when creating issues
+- Use `--validate` to check description completeness
+
+### Lifecycle
+- `bd defer <id>` / `bd supersede <id>` for issue management
+- `bd stale` / `bd orphans` / `bd lint` for hygiene
+- `bd human <id>` to flag for human decisions
+- `bd formula list` / `bd mol pour <name>` for structured workflows
+
 ### Auto-Sync
 
 bd automatically syncs via Dolt:
@@ -244,17 +254,17 @@ bd automatically syncs via Dolt:
 
 ### Important Rules
 
-- Use bd for ALL task tracking
-- Always use `--json` flag for programmatic use
-- Link discovered work with `discovered-from` dependencies
-- Check `bd ready` before asking "what should I work on?"
-- Do NOT create markdown TODO lists
-- Do NOT use external issue trackers
-- Do NOT duplicate tracking systems
+- ✅ Use bd for ALL task tracking
+- ✅ Always use `--json` flag for programmatic use
+- ✅ Link discovered work with `discovered-from` dependencies
+- ✅ Check `bd ready` before asking "what should I work on?"
+- ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT use external issue trackers
+- ❌ Do NOT duplicate tracking systems
 
 For more details, see README.md and docs/QUICKSTART.md.
 
-## Landing the Plane (Session Completion)
+## Session Completion
 
 **When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
 

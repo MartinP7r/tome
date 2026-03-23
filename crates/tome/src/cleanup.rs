@@ -84,7 +84,7 @@ pub fn cleanup_library(
         result.removed_from_library += 1;
     }
 
-    // Also clean up any leftover broken symlinks from v0.1.x
+    // Also remove broken symlinks in the library (managed skill whose source was deleted, or orphan from a previous layout)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 
@@ -124,7 +124,7 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
     // We keep both forms so we can match symlinks created with either path variant.
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
         eprintln!(
-            "warning: could not canonicalize library path {}: {}",
+            "warning: could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
             library_dir.display(),
             e
         );
@@ -319,6 +319,32 @@ mod tests {
         assert_eq!(removed, 1);
         assert!(!target.path().join("library-link").exists());
         assert!(target.path().join("external-link").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_dry_run_preserves_managed_symlink() {
+        let library = TempDir::new().unwrap();
+
+        // Create a broken symlink simulating a managed skill whose source was removed
+        unix_fs::symlink("/nonexistent", library.path().join("stale-skill")).unwrap();
+        assert!(library.path().join("stale-skill").is_symlink());
+
+        // Manifest has NO entry for stale-skill — it is stale
+        let mut manifest = Manifest::default();
+        let discovered: HashSet<String> = HashSet::new();
+
+        let result =
+            cleanup_library(library.path(), &discovered, &mut manifest, true, false).unwrap();
+
+        // Dry-run should report it would clean up but not actually remove
+        assert!(
+            result.removed_from_library > 0,
+            "dry-run should count the stale symlink as would-be-removed"
+        );
+        assert!(
+            library.path().join("stale-skill").is_symlink(),
+            "dry-run should preserve the symlink on disk"
+        );
     }
 
     #[test]

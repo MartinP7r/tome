@@ -4,6 +4,7 @@
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::Confirm;
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cleanup;
@@ -127,10 +128,15 @@ pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()>
         );
 
         if !dry_run {
-            let confirmed = Confirm::new()
-                .with_prompt("Repair these issues?")
-                .default(true)
-                .interact()?;
+            let confirmed = if std::io::stdin().is_terminal() {
+                Confirm::new()
+                    .with_prompt("Repair these issues?")
+                    .default(true)
+                    .interact()?
+            } else {
+                eprintln!("info: non-interactive mode — skipping repair prompt");
+                false
+            };
 
             if confirmed {
                 println!();
@@ -254,7 +260,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             });
         }
 
-        // Check for broken symlinks — either managed skills or legacy v0.1.x
+        // Check for broken symlinks — managed skill whose source was deleted, or orphan from a previous layout
         if path.is_symlink() && !path.exists() {
             let is_managed = m.get(&name).is_some_and(|e| e.managed);
             if !is_managed {
@@ -351,7 +357,10 @@ fn repair_library(paths: &TomePaths) -> Result<()> {
     let library_dir = paths.library_dir();
     let tome_home = paths.tome_home();
     let mut m = manifest::load(tome_home).with_context(|| {
-        "cannot repair: manifest is unreadable. Back up .tome-manifest.json and run sync --force"
+        format!(
+            "cannot repair: manifest is unreadable. Back up {} and run sync --force",
+            crate::manifest::MANIFEST_FILENAME
+        )
     })?;
     let mut fixed = 0;
 

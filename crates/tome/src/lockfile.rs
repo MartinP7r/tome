@@ -53,14 +53,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
         let (registry_id, version) = skill_map
             .get(name.as_str())
             .and_then(|s| s.provenance.as_ref())
-            .map(|p| {
-                let version = if p.version.is_empty() {
-                    None
-                } else {
-                    Some(p.version.clone())
-                };
-                (Some(p.registry_id.clone()), version)
-            })
+            .map(|p| (Some(p.registry_id.clone()), p.version.clone()))
             .unwrap_or((None, None));
 
         entries.insert(
@@ -142,9 +135,13 @@ mod tests {
             path: PathBuf::from(format!("/tmp/{name}")),
             source_name: source.to_string(),
             managed: provenance.is_some(),
-            provenance: provenance.map(|(reg, ver)| SkillProvenance {
+            provenance: provenance.map(|(reg, ver): (&str, &str)| SkillProvenance {
                 registry_id: reg.to_string(),
-                version: ver.to_string(),
+                version: if ver.is_empty() {
+                    None
+                } else {
+                    Some(ver.to_string())
+                },
             }),
         }
     }
@@ -275,6 +272,34 @@ mod tests {
 
         let loaded = load(tmp.path()).unwrap().expect("should be Some");
         assert_eq!(loaded, lockfile);
+    }
+
+    #[test]
+    fn load_accepts_unknown_version() {
+        // Documents current behavior: Lockfile::load() silently accepts
+        // a version number it doesn't know about. The `version` field is
+        // deserialized but not validated, so version 999 loads without error.
+        let tmp = TempDir::new().unwrap();
+        let json = serde_json::json!({
+            "version": 999,
+            "skills": {
+                "some-skill": {
+                    "source_name": "test",
+                    "content_hash": "abc123"
+                }
+            }
+        });
+        std::fs::write(
+            tmp.path().join("tome.lock"),
+            serde_json::to_string_pretty(&json).unwrap(),
+        )
+        .unwrap();
+
+        let result = load(tmp.path()).unwrap();
+        let lockfile = result.expect("should load successfully despite unknown version");
+        assert_eq!(lockfile.version, 999);
+        assert_eq!(lockfile.skills.len(), 1);
+        assert!(lockfile.skills.contains_key("some-skill"));
     }
 
     #[test]

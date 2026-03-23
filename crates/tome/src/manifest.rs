@@ -54,13 +54,13 @@ impl Manifest {
     }
 
     /// Returns true if the manifest has no entries.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
     }
 
     /// Returns the number of entries in the manifest.
-    #[cfg(test)]
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.skills.len()
     }
@@ -147,7 +147,13 @@ pub fn hash_directory(dir: &Path) -> Result<String> {
             let rel = entry
                 .path()
                 .strip_prefix(dir)
-                .unwrap_or(entry.path())
+                .with_context(|| {
+                    format!(
+                        "BUG: WalkDir yielded path {} not under root {}",
+                        entry.path().display(),
+                        dir.display()
+                    )
+                })?
                 .to_string_lossy()
                 .to_string();
             entries.push((rel, entry.path().to_path_buf()));
@@ -170,11 +176,14 @@ pub fn hash_directory(dir: &Path) -> Result<String> {
 }
 
 /// Get the current timestamp as an ISO 8601 string (UTC, second precision).
-pub fn now_iso8601() -> String {
+pub(crate) fn now_iso8601() -> String {
     // Use std::time for a simple UTC timestamp without pulling in chrono
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+        .unwrap_or_else(|e| {
+            eprintln!("warning: system clock appears to be set before Unix epoch: {e}");
+            std::time::Duration::ZERO
+        });
     let secs = duration.as_secs();
 
     // Manual UTC formatting: YYYY-MM-DDTHH:MM:SSZ
@@ -304,5 +313,46 @@ mod tests {
         assert_eq!(ts.len(), 20);
         assert_eq!(&ts[4..5], "-");
         assert_eq!(&ts[10..11], "T");
+    }
+
+    #[test]
+    fn days_to_ymd_epoch() {
+        // Day 0 = Jan 1, 1970
+        let (y, m, d) = days_to_ymd(0);
+        assert_eq!((y, m, d), (1970, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_leap_year_century_exception() {
+        // Feb 29, 2000 — leap year AND century exception (divisible by 400)
+        // 2000-02-29 is day 11016 since epoch
+        let (y, m, d) = days_to_ymd(11016);
+        assert_eq!((y, m, d), (2000, 2, 29));
+    }
+
+    #[test]
+    fn days_to_ymd_end_of_first_year() {
+        // Dec 31, 1970 = day 364
+        let (y, m, d) = days_to_ymd(364);
+        assert_eq!((y, m, d), (1970, 12, 31));
+    }
+
+    #[test]
+    fn days_to_ymd_start_of_2024() {
+        // Jan 1, 2024 = day 19723
+        let (y, m, d) = days_to_ymd(19723);
+        assert_eq!((y, m, d), (2024, 1, 1));
+    }
+
+    #[test]
+    fn now_iso8601_returns_plausible_current_date() {
+        // Verify that the year from now_iso8601 is 2025 or later,
+        // confirming days_to_ymd works for dates beyond 2024.
+        let ts = now_iso8601();
+        let year: u64 = ts[..4].parse().expect("year should be numeric");
+        assert!(
+            year >= 2025,
+            "expected current year >= 2025, got {year} from timestamp '{ts}'"
+        );
     }
 }

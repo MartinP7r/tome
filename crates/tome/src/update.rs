@@ -253,6 +253,55 @@ mod tests {
     }
 
     #[test]
+    fn diff_returns_structured_changes() {
+        // Verify the structure of UpdateDiff returned by diff():
+        // each change type carries the expected LockEntry data.
+        //
+        // Note: present_changes() in quiet/non-TTY mode is exercised by
+        // integration tests (crates/tome/tests/cli.rs) because it relies on
+        // dialoguer which requires a real TTY for interactive prompts.
+        let old = lockfile(vec![
+            ("kept", entry("src", "aaa")),
+            ("updated", entry("src", "old-hash")),
+            ("deleted", managed_entry("plugins", "ccc", "pkg@npm")),
+        ]);
+        let new = lockfile(vec![
+            ("kept", entry("src", "aaa")),
+            ("updated", entry("src", "new-hash")),
+            ("fresh", managed_entry("plugins", "ddd", "new-pkg@npm")),
+        ]);
+
+        let d = diff(&old, &new);
+        assert_eq!(d.changes.len(), 3, "should have 3 changes (no unchanged)");
+        assert!(!d.is_empty());
+
+        // Verify Added carries the new entry
+        if let SkillChange::Added(ref e) = d.changes["fresh"] {
+            assert_eq!(e.source_name, "plugins");
+            assert_eq!(e.content_hash, "ddd");
+            assert_eq!(e.registry_id.as_deref(), Some("new-pkg@npm"));
+        } else {
+            panic!("expected Added for 'fresh'");
+        }
+
+        // Verify Changed carries both old and new entries
+        if let SkillChange::Changed { ref old, ref new } = d.changes["updated"] {
+            assert_eq!(old.content_hash, "old-hash");
+            assert_eq!(new.content_hash, "new-hash");
+        } else {
+            panic!("expected Changed for 'updated'");
+        }
+
+        // Verify Removed carries the old entry
+        if let SkillChange::Removed(ref e) = d.changes["deleted"] {
+            assert_eq!(e.content_hash, "ccc");
+            assert_eq!(e.registry_id.as_deref(), Some("pkg@npm"));
+        } else {
+            panic!("expected Removed for 'deleted'");
+        }
+    }
+
+    #[test]
     fn diff_same_hash_different_source_is_unchanged() {
         // Source name change alone doesn't trigger a diff (hash is what matters)
         let old = lockfile(vec![("skill-a", entry("old-source", "same-hash"))]);
