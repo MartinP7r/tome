@@ -57,16 +57,19 @@ jobs:
       - name: Check unused dependencies
         run: cargo machete
 
-  semver:
-    name: Semver check
-    if: >-
-      github.event_name == 'pull_request' &&
-      (startsWith(github.head_ref, 'chore/release') ||
-       startsWith(github.head_ref, 'release/') ||
-       contains(github.event.pull_request.title, 'Bump version'))
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-      - uses: obi1kenobi/cargo-semver-checks-action@v2
+  # semver check disabled — tome is a CLI binary, not published to crates.io,
+  # so there is no baseline to compare against. Re-enable if the crate is ever
+  # published as a library.
+  # semver:
+  #   name: Semver check
+  #   if: >-
+  #     github.event_name == 'pull_request' &&
+  #     (startsWith(github.head_ref, 'chore/release') ||
+  #      startsWith(github.head_ref, 'release/') ||
+  #      contains(github.event.pull_request.title, 'Bump version'))
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         fetch-depth: 0
+  #     - uses: obi1kenobi/cargo-semver-checks-action@v2
