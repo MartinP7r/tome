@@ -4,13 +4,13 @@ use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
-use crate::config::{TargetConfig, TargetMethod};
+use crate::config::{TargetConfig, TargetMethod, TargetName};
 use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
 use crate::paths::symlink_points_to;
 
 /// Result of distributing skills to a single target.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DistributeResult {
     pub changed: usize,
     pub unchanged: usize,
@@ -18,7 +18,7 @@ pub struct DistributeResult {
     pub skipped: usize,
     /// Skills skipped because they are disabled in machine preferences.
     pub disabled: usize,
-    pub target_name: String,
+    pub target_name: TargetName,
 }
 
 /// Distribute skills from the library to a target tool.
@@ -36,8 +36,11 @@ pub fn distribute_to_target(
 ) -> Result<DistributeResult> {
     if !target.enabled {
         return Ok(DistributeResult {
-            target_name: target_name.to_string(),
-            ..Default::default()
+            target_name: TargetName::new(target_name)?,
+            changed: 0,
+            unchanged: 0,
+            skipped: 0,
+            disabled: 0,
         });
     }
 
@@ -70,8 +73,11 @@ fn distribute_symlinks(
     }
 
     let mut result = DistributeResult {
-        target_name: target_name.to_string(),
-        ..Default::default()
+        target_name: TargetName::new(target_name)?,
+        changed: 0,
+        unchanged: 0,
+        skipped: 0,
+        disabled: 0,
     };
 
     // Library may not exist yet on a first dry-run (consolidate skips creating it).

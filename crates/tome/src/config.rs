@@ -88,32 +88,32 @@ impl<'de> serde::Deserialize<'de> for TargetName {
 pub struct Config {
     /// Where the consolidated skill library lives
     #[serde(default = "defaults::library_dir")]
-    pub library_dir: PathBuf,
+    pub(crate) library_dir: PathBuf,
 
     /// Skills to exclude by name
     #[serde(default)]
-    pub exclude: BTreeSet<SkillName>,
+    pub(crate) exclude: BTreeSet<SkillName>,
 
     /// Skill sources — order determines priority for duplicates
     #[serde(default)]
-    pub sources: Vec<Source>,
+    pub(crate) sources: Vec<Source>,
 
     /// Distribution targets — keyed by tool name (e.g. "claude", "antigravity")
     #[serde(default, deserialize_with = "deserialize_targets")]
-    pub targets: BTreeMap<TargetName, TargetConfig>,
+    pub(crate) targets: BTreeMap<TargetName, TargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Source {
     /// Display name for this source
-    pub name: String,
+    pub(crate) name: String,
 
     /// Path to the source directory
-    pub path: PathBuf,
+    pub(crate) path: PathBuf,
 
     /// How to discover skills in this source
     #[serde(rename = "type")]
-    pub source_type: SourceType,
+    pub(crate) source_type: SourceType,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

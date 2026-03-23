@@ -406,11 +406,12 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(!report.configured);
     }
 
     #[test]
@@ -427,11 +428,13 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(report.configured);
+        assert_eq!(report.sources.len(), 1);
     }
 
     #[test]
@@ -472,11 +475,14 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(report.configured);
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.targets.len(), 1);
     }
 
     // -- count_entries --
