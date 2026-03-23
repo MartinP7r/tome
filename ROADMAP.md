@@ -227,3 +227,4 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Plugin output generation**: Package the skill library as a distributable Claude plugin, Cursor plugin, etc.
 - **Publish on crates.io**: Make `tome` installable via `cargo install tome` from the crates.io registry
 - **Improve doc comments for `cargo doc`**: Module-level `//!` coverage is uneven across modules; no `# Examples` sections. Low priority polish.
+- **Syntax highlighting in browse preview**: Render SKILL.md with markdown/YAML syntax highlighting in the `tome browse` detail panel (e.g. via `syntect` or `tree-sitter-highlight`). Low priority polish.
