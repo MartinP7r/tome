@@ -124,7 +124,7 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
     // We keep both forms so we can match symlinks created with either path variant.
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
         eprintln!(
-            "warning: could not canonicalize library path {}: {}",
+            "warning: could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
             library_dir.display(),
             e
         );

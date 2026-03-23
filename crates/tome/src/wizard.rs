@@ -133,12 +133,12 @@ pub fn run(dry_run: bool) -> Result<Config> {
                 .interact()?
         {
             std::fs::create_dir_all(&config.library_dir)?;
-            let status = std::process::Command::new("git")
+            let output = std::process::Command::new("git")
                 .args(["init"])
                 .current_dir(&config.library_dir)
-                .status()
+                .output()
                 .context("failed to run git init")?;
-            if status.success() {
+            if output.status.success() {
                 println!(
                     "  {} Initialized git repo in {}",
                     style("✓").green(),
@@ -147,8 +147,12 @@ pub fn run(dry_run: bool) -> Result<Config> {
             } else {
                 eprintln!(
                     "warning: git init failed (exit code {})",
-                    status.code().unwrap_or(-1)
+                    output.status.code().unwrap_or(-1)
                 );
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                if !stderr.trim().is_empty() {
+                    eprintln!("  git said: {}", stderr.trim());
+                }
             }
         }
     }

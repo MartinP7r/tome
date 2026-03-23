@@ -4,6 +4,7 @@
 use anyhow::{Context, Result};
 use console::style;
 use dialoguer::Confirm;
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cleanup;
@@ -127,10 +128,15 @@ pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()>
         );
 
         if !dry_run {
-            let confirmed = Confirm::new()
-                .with_prompt("Repair these issues?")
-                .default(true)
-                .interact()?;
+            let confirmed = if std::io::stdin().is_terminal() {
+                Confirm::new()
+                    .with_prompt("Repair these issues?")
+                    .default(true)
+                    .interact()?
+            } else {
+                eprintln!("info: non-interactive mode — skipping repair prompt");
+                false
+            };
 
             if confirmed {
                 println!();

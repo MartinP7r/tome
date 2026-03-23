@@ -575,7 +575,7 @@ fn cleanup_disabled_from_target(
 
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
         eprintln!(
-            "warning: could not canonicalize library path {}: {}",
+            "warning: could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
             library_dir.display(),
             e
         );
@@ -790,17 +790,21 @@ fn offer_git_commit(
         }
     }
 
-    let add_status = GitCommand::new("git")
+    let add_output = GitCommand::new("git")
         .arg("add")
         .arg("--")
         .args(&paths)
         .current_dir(library_dir)
-        .status()?;
-    if !add_status.success() {
+        .output()?;
+    if !add_output.status.success() {
         eprintln!(
             "warning: git add failed (exit code {:?})",
-            add_status.code()
+            add_output.status.code()
         );
+        let stderr = String::from_utf8_lossy(&add_output.stderr);
+        if !stderr.trim().is_empty() {
+            eprintln!("  git said: {}", stderr.trim());
+        }
         return Ok(());
     }
 
@@ -809,24 +813,32 @@ fn offer_git_commit(
         .args(["add", "--update", "--"])
         .args(&paths)
         .current_dir(library_dir)
-        .status()?;
-    if !stage_deleted.success() {
+        .output()?;
+    if !stage_deleted.status.success() {
         eprintln!(
             "warning: git add --update failed (exit code {:?})",
-            stage_deleted.code()
+            stage_deleted.status.code()
         );
+        let stderr = String::from_utf8_lossy(&stage_deleted.stderr);
+        if !stderr.trim().is_empty() {
+            eprintln!("  git said: {}", stderr.trim());
+        }
         return Ok(());
     }
 
-    let commit_status = GitCommand::new("git")
+    let commit_output = GitCommand::new("git")
         .args(["commit", "-m", &msg])
         .current_dir(library_dir)
-        .status()?;
-    if !commit_status.success() {
+        .output()?;
+    if !commit_output.status.success() {
         eprintln!(
             "warning: git commit failed (exit code {:?})",
-            commit_status.code()
+            commit_output.status.code()
         );
+        let stderr = String::from_utf8_lossy(&commit_output.stderr);
+        if !stderr.trim().is_empty() {
+            eprintln!("  git said: {}", stderr.trim());
+        }
         return Ok(());
     }
 
