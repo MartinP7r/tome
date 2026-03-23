@@ -294,7 +294,13 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
     for entry in walkdir::WalkDir::new(src).follow_links(false).into_iter() {
         let entry = entry.with_context(|| format!("failed to walk directory {}", src.display()))?;
-        let rel = entry.path().strip_prefix(src).unwrap_or(entry.path());
+        let rel = entry.path().strip_prefix(src).with_context(|| {
+            format!(
+                "BUG: WalkDir yielded path {} not under root {}",
+                entry.path().display(),
+                src.display()
+            )
+        })?;
         let target = dst.join(rel);
 
         if entry.file_type().is_dir() {

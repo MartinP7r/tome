@@ -92,10 +92,26 @@ pub fn symlink_points_to(link_path: &Path, expected_target: &Path) -> bool {
         Err(_) => return false,
     };
 
-    let resolved = std::fs::canonicalize(link_path)
-        .unwrap_or_else(|_| resolve_symlink_target(link_path, &raw_target));
-    let expected =
-        std::fs::canonicalize(expected_target).unwrap_or_else(|_| expected_target.to_path_buf());
+    let resolved = std::fs::canonicalize(link_path).unwrap_or_else(|e| {
+        if link_path.exists() {
+            eprintln!(
+                "warning: could not canonicalize {}: {}",
+                link_path.display(),
+                e
+            );
+        }
+        resolve_symlink_target(link_path, &raw_target)
+    });
+    let expected = std::fs::canonicalize(expected_target).unwrap_or_else(|e| {
+        if expected_target.exists() {
+            eprintln!(
+                "warning: could not canonicalize {}: {}",
+                expected_target.display(),
+                e
+            );
+        }
+        expected_target.to_path_buf()
+    });
 
     resolved == expected
 }
