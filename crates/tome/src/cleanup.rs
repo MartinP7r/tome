@@ -84,7 +84,7 @@ pub fn cleanup_library(
         result.removed_from_library += 1;
     }
 
-    // Also clean up any leftover broken symlinks from v0.1.x
+    // Also remove broken symlinks in the library (managed skill whose source was deleted, or orphan from a previous layout)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 

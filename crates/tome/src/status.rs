@@ -256,7 +256,7 @@ fn count_health_issues(dir: &Path, tome_home: &Path) -> Result<usize> {
         }
     }
 
-    // Single pass: orphans + broken symlinks
+    // Second pass: orphan directories and broken symlinks
     for entry in std::fs::read_dir(dir)
         .with_context(|| format!("failed to read directory {}", dir.display()))?
     {

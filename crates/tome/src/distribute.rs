@@ -79,7 +79,7 @@ fn distribute_symlinks(
         return Ok(result);
     }
 
-    // Read all entries in library (these are now real directories, not symlinks)
+    // Read all entries in library (may be real directories for local skills or symlinks for managed skills)
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 

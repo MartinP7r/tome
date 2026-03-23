@@ -288,6 +288,8 @@ const KNOWN_TARGETS: &[KnownTarget] = &[
         default_path: ".gemini/antigravity/skills",
         path_prompt: "Antigravity skills directory",
     },
+    // Codex reads skills from .agents/skills (the agent runtime directory),
+    // while the source is .codex/skills (where the user/package manager stores them)
     KnownTarget {
         name: "codex",
         display: "Codex",

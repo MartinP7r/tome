@@ -260,7 +260,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             });
         }
 
-        // Check for broken symlinks — either managed skills or legacy v0.1.x
+        // Check for broken symlinks — managed skill whose source was deleted, or orphan from a previous layout
         if path.is_symlink() && !path.exists() {
             let is_managed = m.get(&name).is_some_and(|e| e.managed);
             if !is_managed {

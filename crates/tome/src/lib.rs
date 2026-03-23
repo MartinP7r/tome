@@ -17,6 +17,8 @@
 //! - [`config`] — TOML configuration loading and validation
 //! - [`cli`] — command-line argument parsing (clap)
 //! - [`run()`] — entry point that dispatches CLI commands
+//! - [`TomePaths`] — bundled home/library paths
+//! - [`SyncReport`] — sync operation results
 
 pub(crate) mod browse;
 pub(crate) mod cleanup;
