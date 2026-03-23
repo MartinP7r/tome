@@ -59,7 +59,7 @@ fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_
             skill.path.clone(),
             skill.source_name.clone(),
             content_hash,
-            skill.managed,
+            skill.origin.is_managed(),
         ),
     );
 }
@@ -103,7 +103,7 @@ pub fn consolidate(
     for skill in skills {
         let dest = library_dir.join(skill.name.as_str());
 
-        if skill.managed {
+        if skill.origin.is_managed() {
             consolidate_managed(skill, &dest, &mut manifest, &mut result, dry_run, force)?;
         } else {
             consolidate_local(
@@ -378,14 +378,22 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_skill(dir: &Path, name: &str) -> DiscoveredSkill {
-        make_skill_with_managed(dir, name, false)
+        make_skill_with_origin(dir, name, crate::discover::SkillOrigin::Local)
     }
 
     fn make_managed_skill(dir: &Path, name: &str) -> DiscoveredSkill {
-        make_skill_with_managed(dir, name, true)
+        make_skill_with_origin(
+            dir,
+            name,
+            crate::discover::SkillOrigin::Managed { provenance: None },
+        )
     }
 
-    fn make_skill_with_managed(dir: &Path, name: &str, managed: bool) -> DiscoveredSkill {
+    fn make_skill_with_origin(
+        dir: &Path,
+        name: &str,
+        origin: crate::discover::SkillOrigin,
+    ) -> DiscoveredSkill {
         let skill_dir = dir.join(name);
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(skill_dir.join("SKILL.md"), "# test").unwrap();
@@ -393,8 +401,7 @@ mod tests {
             name: crate::discover::SkillName::new(name).unwrap(),
             path: skill_dir,
             source_name: "test".into(),
-            managed,
-            provenance: None,
+            origin,
         }
     }
 
@@ -624,8 +631,7 @@ mod tests {
             name: crate::discover::SkillName::new("my-skill").unwrap(),
             path: skill2_dir,
             source_name: "test2".into(),
-            managed: false,
-            provenance: None,
+            origin: crate::discover::SkillOrigin::Local,
         };
 
         let (result, _manifest) = consolidate(
@@ -706,8 +712,7 @@ mod tests {
             name: crate::discover::SkillName::new("deep-skill").unwrap(),
             path: skill_dir,
             source_name: "test".into(),
-            managed: false,
-            provenance: None,
+            origin: crate::discover::SkillOrigin::Local,
         };
 
         let (result, _) = consolidate(
@@ -1303,13 +1308,12 @@ mod tests {
         std::fs::create_dir_all(&source_skill).unwrap();
         std::fs::write(source_skill.join("SKILL.md"), "# managed version").unwrap();
 
-        // Build a DiscoveredSkill with managed: true
+        // Build a DiscoveredSkill with Managed origin
         let skill = DiscoveredSkill {
             name: crate::discover::SkillName::new("skill-a").unwrap(),
             path: source_skill.clone(),
             source_name: "plugins".into(),
-            managed: true,
-            provenance: None,
+            origin: crate::discover::SkillOrigin::Managed { provenance: None },
         };
 
         // Call consolidate_managed directly

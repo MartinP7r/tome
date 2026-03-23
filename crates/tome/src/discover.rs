@@ -114,6 +114,28 @@ pub struct SkillProvenance {
     pub version: Option<String>,
 }
 
+/// How a skill was sourced — determines consolidation strategy.
+#[derive(Debug, Clone)]
+pub enum SkillOrigin {
+    /// Managed by a package manager; library entry is a symlink to source dir.
+    Managed { provenance: Option<SkillProvenance> },
+    /// Local skill; library entry is a copy of the source.
+    Local,
+}
+
+impl SkillOrigin {
+    pub fn is_managed(&self) -> bool {
+        matches!(self, Self::Managed { .. })
+    }
+
+    pub fn provenance(&self) -> Option<&SkillProvenance> {
+        match self {
+            Self::Managed { provenance } => provenance.as_ref(),
+            Self::Local => None,
+        }
+    }
+}
+
 /// A discovered skill with its metadata.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
@@ -123,11 +145,8 @@ pub struct DiscoveredSkill {
     pub path: PathBuf,
     /// Which source this skill came from
     pub source_name: String,
-    /// Whether this skill is managed by a package manager (symlinked, not copied).
-    /// `true` for `ClaudePlugins` sources, `false` for `Directory` sources.
-    pub managed: bool,
-    /// Provenance from package manager (v2 `installed_plugins.json`). `None` for local skills.
-    pub provenance: Option<SkillProvenance>,
+    /// How this skill was sourced (managed vs local), with optional provenance metadata.
+    pub origin: SkillOrigin,
 }
 
 /// Discover all skills from configured sources.
@@ -288,21 +307,19 @@ fn scan_install_records(
         if let Some(install_path) = record.get("installPath").and_then(|v| v.as_str()) {
             let skills_dir = PathBuf::from(install_path).join("skills");
             if skills_dir.is_dir() {
-                let mut found = scan_for_skills(&skills_dir, source_name, true, warnings)?;
-                if let Some(reg_id) = registry_id {
+                let provenance = registry_id.map(|reg_id| {
                     let version = record
                         .get("version")
                         .and_then(|v| v.as_str())
                         .filter(|v| !v.is_empty())
                         .map(|v| v.to_string());
-                    let prov = SkillProvenance {
+                    SkillProvenance {
                         registry_id: reg_id.to_string(),
                         version,
-                    };
-                    for skill in &mut found {
-                        skill.provenance = Some(prov.clone());
                     }
-                }
+                });
+                let mut found =
+                    scan_for_skills(&skills_dir, source_name, Some(provenance), warnings)?;
                 skills.append(&mut found);
             }
         }
@@ -330,14 +347,18 @@ fn discover_directory(source: &Source, warnings: &mut Vec<String>) -> Result<Vec
         return Ok(Vec::new());
     }
 
-    scan_for_skills(&source.path, &source.name, false, warnings)
+    scan_for_skills(&source.path, &source.name, None, warnings)
 }
 
 /// Scan a directory for skill subdirectories containing SKILL.md.
+///
+/// When `managed_provenance` is `Some`, skills are marked as `Managed` with the
+/// given provenance (which itself may be `None` for v1 plugins). When
+/// `managed_provenance` is `None`, skills are marked as `Local`.
 fn scan_for_skills(
     dir: &Path,
     source_name: &str,
-    managed: bool,
+    managed_provenance: Option<Option<SkillProvenance>>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
     let mut skills = Vec::new();
@@ -379,12 +400,17 @@ fn scan_for_skills(
         {
             match SkillName::new(name_str) {
                 Ok(name) => {
+                    let origin = match &managed_provenance {
+                        Some(prov) => SkillOrigin::Managed {
+                            provenance: prov.clone(),
+                        },
+                        None => SkillOrigin::Local,
+                    };
                     skills.push(DiscoveredSkill {
                         name,
                         path: skill_dir.to_path_buf(),
                         source_name: source_name.to_string(),
-                        managed,
-                        provenance: None,
+                        origin,
                     });
                 }
                 Err(e) => {
@@ -598,16 +624,16 @@ mod tests {
         // v2 format should capture provenance metadata
         let swift = skills.iter().find(|s| s.name == "swift-skill").unwrap();
         let prov = swift
-            .provenance
-            .as_ref()
+            .origin
+            .provenance()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "swift-skill@swift-registry");
         assert_eq!(prov.version.as_deref(), Some("1.0.0"));
 
         let rust_s = skills.iter().find(|s| s.name == "rust-skill").unwrap();
         let prov = rust_s
-            .provenance
-            .as_ref()
+            .origin
+            .provenance()
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "rust-skill@rust-registry");
         assert_eq!(prov.version.as_deref(), Some("2.0.0"));
@@ -636,7 +662,7 @@ mod tests {
         let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
-            skills[0].provenance.is_none(),
+            skills[0].origin.provenance().is_none(),
             "v1 format should not have provenance"
         );
     }
