@@ -422,7 +422,15 @@ fn configure_exclusions(
 
     let exclude = selections
         .iter()
-        .filter_map(|&i| crate::discover::SkillName::new(labels[i].clone()).ok())
+        .filter_map(
+            |&i| match crate::discover::SkillName::new(labels[i].clone()) {
+                Ok(name) => Some(name),
+                Err(e) => {
+                    eprintln!("warning: could not parse skill name '{}': {e}", labels[i]);
+                    None
+                }
+            },
+        )
         .collect();
     println!();
     Ok(exclude)

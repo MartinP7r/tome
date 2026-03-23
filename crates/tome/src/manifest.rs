@@ -147,7 +147,13 @@ pub fn hash_directory(dir: &Path) -> Result<String> {
             let rel = entry
                 .path()
                 .strip_prefix(dir)
-                .unwrap_or(entry.path())
+                .with_context(|| {
+                    format!(
+                        "BUG: WalkDir yielded path {} not under root {}",
+                        entry.path().display(),
+                        dir.display()
+                    )
+                })?
                 .to_string_lossy()
                 .to_string();
             entries.push((rel, entry.path().to_path_buf()));
@@ -174,7 +180,10 @@ pub fn now_iso8601() -> String {
     // Use std::time for a simple UTC timestamp without pulling in chrono
     let duration = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
+        .unwrap_or_else(|e| {
+            eprintln!("warning: system clock appears to be set before Unix epoch: {e}");
+            std::time::Duration::ZERO
+        });
     let secs = duration.as_secs();
 
     // Manual UTC formatting: YYYY-MM-DDTHH:MM:SSZ

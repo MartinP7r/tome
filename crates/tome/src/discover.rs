@@ -214,14 +214,10 @@ fn discover_claude_plugins(
     // Look for installed_plugins.json in multiple locations:
     // 1. Directly in source.path (e.g. ~/.claude/plugins/)
     // 2. Parent directory (when source.path points to cache subdir, e.g. ~/.claude/plugins/cache/)
-    let candidates = [
-        source.path.join("installed_plugins.json"),
-        source
-            .path
-            .parent()
-            .map(|p| p.join("installed_plugins.json"))
-            .unwrap_or_default(),
-    ];
+    let mut candidates = vec![source.path.join("installed_plugins.json")];
+    if let Some(parent) = source.path.parent() {
+        candidates.push(parent.join("installed_plugins.json"));
+    }
 
     for candidate in &candidates {
         if candidate.exists() {
@@ -386,7 +382,7 @@ fn scan_for_skills(
     }
 
     for entry in entries {
-        let entry = entry.unwrap();
+        let entry = entry.expect("BUG: entries vec was filtered to Ok variants by partition above");
         if entry.file_name() == "SKILL.md"
             && entry.file_type().is_file()
             && let Some(skill_dir) = entry.path().parent()
