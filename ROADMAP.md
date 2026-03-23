@@ -173,7 +173,8 @@ Convenient UX for managing which skills are active per target, and whether per-t
   - Central (`~/.tome/tome.toml`): single source of truth, easy to version-control, but needs namespacing for per-target overrides
   - Local (e.g. `~/.claude/tome.toml`): self-contained per tool, discoverable where the tool lives, but scattered across filesystem
   - Hybrid: local overrides central if present — local file wins for that target's skill selection, central file is the default. Central config would need a `[targets.<name>.skills]` section or similar namespacing.
-  - Questions to resolve: How does this interact with `machine.toml` per-machine preferences? Should local config *replace* or *merge* with central config?
+  - **Current leaning: local replaces central** for simplicity — if a local `tome.toml` exists in the target folder, it fully owns that target's skill selection. No merge semantics to reason about.
+  - Remaining question: How does this interact with `machine.toml` per-machine preferences?
 
 ## Tentative — Format Transforms
 
