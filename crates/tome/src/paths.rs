@@ -43,6 +43,15 @@ impl TomePaths {
             "library_dir must be an absolute path: {}",
             library_dir.display()
         );
+        // Soft invariant: library_dir is typically under tome_home.
+        // Not enforced as a hard error because users may intentionally separate them.
+        if !library_dir.starts_with(&tome_home) {
+            eprintln!(
+                "warning: library_dir ({}) is not under tome_home ({}) — this is unusual but allowed",
+                library_dir.display(),
+                tome_home.display()
+            );
+        }
         Ok(Self {
             tome_home,
             library_dir,

@@ -406,11 +406,12 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(!report.configured);
     }
 
     #[test]
@@ -427,11 +428,13 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(report.configured);
+        assert_eq!(report.sources.len(), 1);
     }
 
     #[test]
@@ -472,11 +475,14 @@ mod tests {
             ..Config::default()
         };
 
-        let result = show(
+        let report = gather(
             &config,
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        );
-        assert!(result.is_ok());
+        )
+        .unwrap();
+        assert!(report.configured);
+        assert_eq!(report.sources.len(), 1);
+        assert_eq!(report.targets.len(), 1);
     }
 
     // -- count_entries --
@@ -539,7 +545,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: "test".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -578,7 +584,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: "test".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -611,7 +617,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: "plugins".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
             },
