@@ -10,8 +10,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::discover::DiscoveredSkill;
+use crate::discover::{DiscoveredSkill, SkillName};
 use crate::manifest::Manifest;
+use crate::validation::ContentHash;
 
 pub(crate) const LOCKFILE_NAME: &str = "tome.lock";
 
@@ -21,7 +22,7 @@ pub struct Lockfile {
     /// Schema version (currently 1).
     pub version: u32,
     /// One entry per skill, keyed by skill name.
-    pub skills: BTreeMap<String, LockEntry>,
+    pub skills: BTreeMap<SkillName, LockEntry>,
 }
 
 /// A single skill entry in the lockfile.
@@ -30,7 +31,7 @@ pub struct LockEntry {
     /// Config source name (maps to a `[[sources]]` entry in `tome.toml`).
     pub source_name: String,
     /// SHA-256 content hash of the skill directory.
-    pub content_hash: String,
+    pub content_hash: ContentHash,
     /// Registry identifier (e.g. "my-plugin@npm"). Present for managed plugins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub registry_id: Option<String>,
@@ -57,7 +58,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
             .unwrap_or((None, None));
 
         entries.insert(
-            name.to_string(),
+            name.clone(),
             LockEntry {
                 source_name: entry.source_name.clone(),
                 content_hash: entry.content_hash.clone(),
@@ -106,18 +107,19 @@ mod tests {
     use super::*;
     use crate::discover::SkillName;
     use crate::manifest::SkillEntry;
+    use crate::validation::test_hash;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
     fn make_manifest(entries: &[(&str, &str, &str, bool)]) -> Manifest {
         let mut manifest = Manifest::default();
-        for &(name, source, hash, managed) in entries {
+        for &(name, source, hash_seed, managed) in entries {
             manifest.insert(
                 SkillName::new(name).unwrap(),
                 SkillEntry::new(
                     PathBuf::from(format!("/tmp/{name}")),
                     source.to_string(),
-                    hash.to_string(),
+                    test_hash(hash_seed),
                     managed,
                 ),
             );
@@ -161,9 +163,10 @@ mod tests {
         assert_eq!(lockfile.version, 1);
         assert_eq!(lockfile.skills.len(), 1);
 
-        let entry = &lockfile.skills["my-skill"];
+        let key = SkillName::new("my-skill").unwrap();
+        let entry = &lockfile.skills[&key];
         assert_eq!(entry.source_name, "standalone");
-        assert_eq!(entry.content_hash, "abc123");
+        assert_eq!(entry.content_hash, test_hash("abc123"));
         assert!(entry.registry_id.is_none());
         assert!(entry.version.is_none());
     }
@@ -178,7 +181,8 @@ mod tests {
         )];
 
         let lockfile = generate(&manifest, &skills);
-        let entry = &lockfile.skills["swift-format"];
+        let key = SkillName::new("swift-format").unwrap();
+        let entry = &lockfile.skills[&key];
         assert_eq!(entry.registry_id.as_deref(), Some("swift-format@npm"));
         assert_eq!(entry.version.as_deref(), Some("1.2.0"));
     }
@@ -196,9 +200,11 @@ mod tests {
 
         let lockfile = generate(&manifest, &skills);
         assert_eq!(lockfile.skills.len(), 2);
-        assert!(lockfile.skills["local-skill"].registry_id.is_none());
+        let local_key = SkillName::new("local-skill").unwrap();
+        let managed_key = SkillName::new("managed-skill").unwrap();
+        assert!(lockfile.skills[&local_key].registry_id.is_none());
         assert_eq!(
-            lockfile.skills["managed-skill"].registry_id.as_deref(),
+            lockfile.skills[&managed_key].registry_id.as_deref(),
             Some("pkg@npm")
         );
     }
@@ -265,10 +271,10 @@ mod tests {
         let lockfile = Lockfile {
             version: 1,
             skills: BTreeMap::from([(
-                "my-skill".to_string(),
+                SkillName::new("my-skill").unwrap(),
                 LockEntry {
                     source_name: "test".to_string(),
-                    content_hash: "abc123".to_string(),
+                    content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
                 },
@@ -286,12 +292,13 @@ mod tests {
         // a version number it doesn't know about. The `version` field is
         // deserialized but not validated, so version 999 loads without error.
         let tmp = TempDir::new().unwrap();
+        let valid_hash = "a".repeat(64);
         let json = serde_json::json!({
             "version": 999,
             "skills": {
                 "some-skill": {
                     "source_name": "test",
-                    "content_hash": "abc123"
+                    "content_hash": valid_hash
                 }
             }
         });
@@ -305,7 +312,8 @@ mod tests {
         let lockfile = result.expect("should load successfully despite unknown version");
         assert_eq!(lockfile.version, 999);
         assert_eq!(lockfile.skills.len(), 1);
-        assert!(lockfile.skills.contains_key("some-skill"));
+        let key = SkillName::new("some-skill").unwrap();
+        assert!(lockfile.skills.contains_key(&key));
     }
 
     #[test]
@@ -335,7 +343,7 @@ mod tests {
 
         // BTreeMap guarantees alphabetical order
         let lockfile = generate(&manifest, &skills);
-        let keys: Vec<&String> = lockfile.skills.keys().collect();
+        let keys: Vec<&str> = lockfile.skills.keys().map(|k| k.as_str()).collect();
         assert_eq!(keys, vec!["a-skill", "m-skill", "z-skill"]);
     }
 
@@ -350,13 +358,15 @@ mod tests {
         let lockfile = generate(&manifest, &skills);
         assert_eq!(lockfile.skills.len(), 2);
 
-        let a = &lockfile.skills["a-skill"];
+        let a_key = SkillName::new("a-skill").unwrap();
+        let a = &lockfile.skills[&a_key];
         assert_eq!(a.source_name, "src");
-        assert_eq!(a.content_hash, "hash_a");
+        assert_eq!(a.content_hash, test_hash("hash_a"));
 
-        let b = &lockfile.skills["b-skill"];
+        let b_key = SkillName::new("b-skill").unwrap();
+        let b = &lockfile.skills[&b_key];
         assert_eq!(b.source_name, "src");
-        assert_eq!(b.content_hash, "hash_b");
+        assert_eq!(b.content_hash, test_hash("hash_b"));
         assert!(b.registry_id.is_none());
         assert!(b.version.is_none());
     }
@@ -381,9 +391,11 @@ mod tests {
 
         let lockfile = generate(&manifest, &skills);
         assert_eq!(lockfile.skills.len(), 1);
-        assert!(lockfile.skills.contains_key("a-skill"));
+        let a_key = SkillName::new("a-skill").unwrap();
+        let extra_key = SkillName::new("extra-skill").unwrap();
+        assert!(lockfile.skills.contains_key(&a_key));
         assert!(
-            !lockfile.skills.contains_key("extra-skill"),
+            !lockfile.skills.contains_key(&extra_key),
             "skills not in manifest should not appear in lockfile"
         );
     }
@@ -398,7 +410,8 @@ mod tests {
         )];
 
         let lockfile = generate(&manifest, &skills);
-        let entry = &lockfile.skills["my-plugin"];
+        let key = SkillName::new("my-plugin").unwrap();
+        let entry = &lockfile.skills[&key];
         assert_eq!(entry.registry_id.as_deref(), Some("my-plugin@npm"));
         assert!(
             entry.version.is_none(),
@@ -430,13 +443,13 @@ mod tests {
         // Check the skill entry doesn't contain a "version" key.
         // The top-level "version": 1 is expected, so we check within the skill object.
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        let skill = &parsed["skills"]["my-skill"];
+        let my_skill = &parsed["skills"]["my-skill"];
         assert!(
-            skill.get("registry_id").is_none(),
+            my_skill.get("registry_id").is_none(),
             "should omit null registry_id in JSON"
         );
         assert!(
-            skill.get("version").is_none(),
+            my_skill.get("version").is_none(),
             "should omit null version in JSON"
         );
     }
