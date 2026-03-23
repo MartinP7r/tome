@@ -52,7 +52,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
     for (name, entry) in manifest.iter() {
         let (registry_id, version) = skill_map
             .get(name.as_str())
-            .and_then(|s| s.provenance.as_ref())
+            .and_then(|s| s.origin.provenance())
             .map(|p| (Some(p.registry_id.clone()), p.version.clone()))
             .unwrap_or((None, None));
 
@@ -104,7 +104,7 @@ pub fn save(lockfile: &Lockfile, tome_home: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::discover::{SkillName, SkillProvenance};
+    use crate::discover::SkillName;
     use crate::manifest::SkillEntry;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -130,19 +130,25 @@ mod tests {
         source: &str,
         provenance: Option<(&str, &str)>,
     ) -> DiscoveredSkill {
+        use crate::discover::{SkillOrigin, SkillProvenance};
+        let origin = match provenance {
+            Some((reg, ver)) => SkillOrigin::Managed {
+                provenance: Some(SkillProvenance {
+                    registry_id: reg.to_string(),
+                    version: if ver.is_empty() {
+                        None
+                    } else {
+                        Some(ver.to_string())
+                    },
+                }),
+            },
+            None => SkillOrigin::Local,
+        };
         DiscoveredSkill {
             name: SkillName::new(name).unwrap(),
             path: PathBuf::from(format!("/tmp/{name}")),
             source_name: source.to_string(),
-            managed: provenance.is_some(),
-            provenance: provenance.map(|(reg, ver): (&str, &str)| SkillProvenance {
-                registry_id: reg.to_string(),
-                version: if ver.is_empty() {
-                    None
-                } else {
-                    Some(ver.to_string())
-                },
-            }),
+            origin,
         }
     }
 
