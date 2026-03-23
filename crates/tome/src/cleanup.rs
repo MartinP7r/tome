@@ -322,6 +322,32 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_dry_run_preserves_managed_symlink() {
+        let library = TempDir::new().unwrap();
+
+        // Create a broken symlink simulating a managed skill whose source was removed
+        unix_fs::symlink("/nonexistent", library.path().join("stale-skill")).unwrap();
+        assert!(library.path().join("stale-skill").is_symlink());
+
+        // Manifest has NO entry for stale-skill — it is stale
+        let mut manifest = Manifest::default();
+        let discovered: HashSet<String> = HashSet::new();
+
+        let result =
+            cleanup_library(library.path(), &discovered, &mut manifest, true, false).unwrap();
+
+        // Dry-run should report it would clean up but not actually remove
+        assert!(
+            result.removed_from_library > 0,
+            "dry-run should count the stale symlink as would-be-removed"
+        );
+        assert!(
+            library.path().join("stale-skill").is_symlink(),
+            "dry-run should preserve the symlink on disk"
+        );
+    }
+
+    #[test]
     fn cleanup_removes_managed_symlink() {
         let library = TempDir::new().unwrap();
         let source = tempfile::TempDir::new().unwrap();
