@@ -52,7 +52,11 @@ fn create_symlink(src: &Path, dest: &Path) -> Result<()> {
 }
 
 /// Record a skill in the manifest after consolidation.
-fn record_in_manifest(manifest: &mut Manifest, skill: &DiscoveredSkill, content_hash: String) {
+fn record_in_manifest(
+    manifest: &mut Manifest,
+    skill: &DiscoveredSkill,
+    content_hash: crate::validation::ContentHash,
+) {
     manifest.insert(
         skill.name.clone(),
         SkillEntry::new(
@@ -658,7 +662,7 @@ mod tests {
         assert_eq!(manifest.len(), 1);
         assert!(manifest.contains_key("my-skill"));
         let entry = manifest.get("my-skill").unwrap();
-        assert!(!entry.content_hash.is_empty());
+        assert_eq!(entry.content_hash.as_str().len(), 64);
         assert!(!entry.synced_at.is_empty());
     }
 
@@ -980,7 +984,7 @@ mod tests {
         .unwrap();
         let entry = manifest.get("plugin-skill").unwrap();
         assert!(entry.managed);
-        assert!(!entry.content_hash.is_empty());
+        assert_eq!(entry.content_hash.as_str().len(), 64);
     }
 
     // -- .gitignore generation tests --
@@ -1292,7 +1296,7 @@ mod tests {
             SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/old-source/skill-a"),
                 source_name: "old-source".to_string(),
-                content_hash: "stale-hash".to_string(),
+                content_hash: crate::validation::test_hash("stale-hash"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },

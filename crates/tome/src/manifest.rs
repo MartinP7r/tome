@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 use crate::discover::SkillName;
+use crate::validation::ContentHash;
 
 pub(crate) const MANIFEST_FILENAME: &str = ".tome-manifest.json";
 
@@ -74,7 +75,7 @@ pub struct SkillEntry {
     /// Which source config entry contributed this skill.
     pub source_name: String,
     /// SHA-256 hex digest of the directory contents.
-    pub content_hash: String,
+    pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
     pub synced_at: String,
     /// Whether this skill is managed by a package manager (symlinked, not copied).
@@ -88,7 +89,7 @@ impl SkillEntry {
     pub fn new(
         source_path: PathBuf,
         source_name: String,
-        content_hash: String,
+        content_hash: ContentHash,
         managed: bool,
     ) -> Self {
         Self {
@@ -138,7 +139,7 @@ pub fn save(manifest: &Manifest, tome_home: &Path) -> Result<()> {
 ///
 /// Walks all files in sorted order by relative path, hashing each file's
 /// relative path and content into a single digest.
-pub fn hash_directory(dir: &Path) -> Result<String> {
+pub fn hash_directory(dir: &Path) -> Result<ContentHash> {
     let mut entries: Vec<(String, PathBuf)> = Vec::new();
 
     for entry in WalkDir::new(dir).follow_links(false).into_iter() {
@@ -172,7 +173,8 @@ pub fn hash_directory(dir: &Path) -> Result<String> {
         hasher.update(&content);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(ContentHash::new(format!("{:x}", hasher.finalize()))
+        .expect("SHA-256 always produces 64 valid hex characters"))
 }
 
 /// Get the current timestamp as an ISO 8601 string (UTC, second precision).
@@ -220,6 +222,7 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::validation::test_hash;
     use tempfile::TempDir;
 
     #[test]
@@ -251,7 +254,7 @@ mod tests {
         std::fs::write(tmp.path().join("sub/nested.txt"), "deep").unwrap();
 
         let h1 = hash_directory(tmp.path()).unwrap();
-        assert!(!h1.is_empty());
+        assert_eq!(h1.as_str().len(), 64);
     }
 
     #[test]
@@ -259,12 +262,13 @@ mod tests {
         let tmp = TempDir::new().unwrap();
 
         let mut manifest = Manifest::default();
+        let hash = test_hash("my-skill");
         manifest.insert(
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: "test".to_string(),
-                content_hash: "abc123".to_string(),
+                content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -273,7 +277,7 @@ mod tests {
         save(&manifest, tmp.path()).unwrap();
         let loaded = load(tmp.path()).unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded.get("my-skill").unwrap().content_hash, "abc123");
+        assert_eq!(loaded.get("my-skill").unwrap().content_hash, hash);
     }
 
     #[test]

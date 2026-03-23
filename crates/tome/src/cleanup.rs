@@ -185,7 +185,7 @@ mod tests {
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/old-skill"),
                 source_name: "test".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -214,7 +214,7 @@ mod tests {
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/keep-me"),
                 source_name: "test".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -241,7 +241,7 @@ mod tests {
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/stale"),
                 source_name: "test".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
             },
@@ -364,7 +364,7 @@ mod tests {
             crate::manifest::SkillEntry {
                 source_path: skill_source,
                 source_name: "plugins".to_string(),
-                content_hash: "abc".to_string(),
+                content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
             },

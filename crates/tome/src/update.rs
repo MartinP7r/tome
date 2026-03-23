@@ -24,7 +24,7 @@ pub enum SkillChange {
 /// The diff between two lockfile versions.
 #[derive(Debug)]
 pub struct UpdateDiff {
-    pub changes: BTreeMap<String, SkillChange>,
+    pub changes: BTreeMap<SkillName, SkillChange>,
 }
 
 impl UpdateDiff {
@@ -77,7 +77,7 @@ pub fn present_changes(
 ) -> Result<Vec<SkillName>> {
     let interactive = std::io::stdin().is_terminal() && !quiet;
 
-    let mut added_names: Vec<String> = Vec::new();
+    let mut added_names: Vec<SkillName> = Vec::new();
 
     for (name, change) in &diff.changes {
         match change {
@@ -124,14 +124,15 @@ pub fn present_changes(
     // Only offer to disable added skills interactively
     if interactive && !added_names.is_empty() {
         println!();
+        let display_names: Vec<&str> = added_names.iter().map(|n| n.as_str()).collect();
         let selections = dialoguer::MultiSelect::new()
             .with_prompt("Disable any of these new skills on this machine?")
-            .items(&added_names)
+            .items(&display_names)
             .interact_opt()?;
 
         if let Some(indices) = selections {
             for idx in indices {
-                let name = SkillName::new(&added_names[idx])?;
+                let name = added_names[idx].clone();
                 machine_prefs.disable(name.clone());
                 newly_disabled.push(name);
             }
@@ -145,20 +146,21 @@ pub fn present_changes(
 mod tests {
     use super::*;
     use crate::lockfile::LockEntry;
+    use crate::validation::test_hash;
 
-    fn entry(source: &str, hash: &str) -> LockEntry {
+    fn entry(source: &str, hash_seed: &str) -> LockEntry {
         LockEntry {
             source_name: source.to_string(),
-            content_hash: hash.to_string(),
+            content_hash: test_hash(hash_seed),
             registry_id: None,
             version: None,
         }
     }
 
-    fn managed_entry(source: &str, hash: &str, registry_id: &str) -> LockEntry {
+    fn managed_entry(source: &str, hash_seed: &str, registry_id: &str) -> LockEntry {
         LockEntry {
             source_name: source.to_string(),
-            content_hash: hash.to_string(),
+            content_hash: test_hash(hash_seed),
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),
         }
@@ -169,7 +171,7 @@ mod tests {
             version: 1,
             skills: entries
                 .into_iter()
-                .map(|(k, v)| (k.to_string(), v))
+                .map(|(k, v)| (SkillName::new(k).unwrap(), v))
                 .collect(),
         }
     }
@@ -278,7 +280,7 @@ mod tests {
         // Verify Added carries the new entry
         if let SkillChange::Added(ref e) = d.changes["fresh"] {
             assert_eq!(e.source_name, "plugins");
-            assert_eq!(e.content_hash, "ddd");
+            assert_eq!(e.content_hash, test_hash("ddd"));
             assert_eq!(e.registry_id.as_deref(), Some("new-pkg@npm"));
         } else {
             panic!("expected Added for 'fresh'");
@@ -286,15 +288,15 @@ mod tests {
 
         // Verify Changed carries both old and new entries
         if let SkillChange::Changed { ref old, ref new } = d.changes["updated"] {
-            assert_eq!(old.content_hash, "old-hash");
-            assert_eq!(new.content_hash, "new-hash");
+            assert_eq!(old.content_hash, test_hash("old-hash"));
+            assert_eq!(new.content_hash, test_hash("new-hash"));
         } else {
             panic!("expected Changed for 'updated'");
         }
 
         // Verify Removed carries the old entry
         if let SkillChange::Removed(ref e) = d.changes["deleted"] {
-            assert_eq!(e.content_hash, "ccc");
+            assert_eq!(e.content_hash, test_hash("ccc"));
             assert_eq!(e.registry_id.as_deref(), Some("pkg@npm"));
         } else {
             panic!("expected Removed for 'deleted'");
