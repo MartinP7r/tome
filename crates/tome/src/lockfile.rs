@@ -275,6 +275,34 @@ mod tests {
     }
 
     #[test]
+    fn load_accepts_unknown_version() {
+        // Documents current behavior: Lockfile::load() silently accepts
+        // a version number it doesn't know about. The `version` field is
+        // deserialized but not validated, so version 999 loads without error.
+        let tmp = TempDir::new().unwrap();
+        let json = serde_json::json!({
+            "version": 999,
+            "skills": {
+                "some-skill": {
+                    "source_name": "test",
+                    "content_hash": "abc123"
+                }
+            }
+        });
+        std::fs::write(
+            tmp.path().join("tome.lock"),
+            serde_json::to_string_pretty(&json).unwrap(),
+        )
+        .unwrap();
+
+        let result = load(tmp.path()).unwrap();
+        let lockfile = result.expect("should load successfully despite unknown version");
+        assert_eq!(lockfile.version, 999);
+        assert_eq!(lockfile.skills.len(), 1);
+        assert!(lockfile.skills.contains_key("some-skill"));
+    }
+
+    #[test]
     fn load_corrupt_file_returns_error() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("tome.lock"), "not valid json {{{").unwrap();

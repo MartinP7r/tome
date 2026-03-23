@@ -761,6 +761,40 @@ mod tests {
     }
 
     #[test]
+    fn discover_claude_plugins_parent_path_json() {
+        let tmp = TempDir::new().unwrap();
+
+        // source.path points to a cache/ subdirectory
+        let cache_dir = tmp.path().join("cache");
+        std::fs::create_dir_all(&cache_dir).unwrap();
+
+        // installed_plugins.json is in the PARENT directory (not in cache/)
+        let plugin_dir = tmp.path().join("my-plugin");
+        create_skill(&plugin_dir.join("skills"), "parent-skill");
+
+        let json = serde_json::json!([
+            { "installPath": plugin_dir.to_str().unwrap() }
+        ]);
+        std::fs::write(
+            tmp.path().join("installed_plugins.json"),
+            serde_json::to_string(&json).unwrap(),
+        )
+        .unwrap();
+
+        // Verify the JSON is NOT in the cache dir itself
+        assert!(!cache_dir.join("installed_plugins.json").exists());
+
+        let source = Source {
+            name: "plugins".into(),
+            path: cache_dir,
+            source_type: SourceType::ClaudePlugins,
+        };
+        let skills = discover_claude_plugins(&source, &mut Vec::new()).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "parent-skill");
+    }
+
+    #[test]
     fn discover_all_collects_naming_warnings() {
         let tmp = TempDir::new().unwrap();
         create_skill(tmp.path(), "My_Unconventional");
