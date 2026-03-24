@@ -27,6 +27,7 @@ pub mod config;
 pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
+pub(crate) mod eject;
 pub(crate) mod library;
 pub(crate) mod lockfile;
 pub(crate) mod machine;
@@ -174,6 +175,38 @@ pub fn run(cli: Cli) -> Result<()> {
                 return Ok(());
             }
             browse::browse(skills)?;
+        }
+        Command::Eject => {
+            let plan = eject::plan(&config, &paths)?;
+            eject::render_plan(&plan);
+
+            if plan.total_symlinks == 0 {
+                return Ok(());
+            }
+
+            if cli.dry_run {
+                println!("\n{}", style("Dry run — no changes made.").yellow());
+                return Ok(());
+            }
+
+            if std::io::stdin().is_terminal() {
+                let confirmed = dialoguer::Confirm::new()
+                    .with_prompt("Remove these symlinks?")
+                    .default(true)
+                    .interact()?;
+                if !confirmed {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            }
+
+            let removed = eject::execute(&plan, false)?;
+            println!(
+                "\n{} Removed {} symlink(s). Run {} to re-distribute.",
+                style("✓").green(),
+                removed,
+                style("tome sync").cyan()
+            );
         }
         Command::Version => unreachable!(),
         Command::List { json } => list(&config, cli.quiet, json)?,
@@ -352,6 +385,17 @@ fn sync(
 
     if !quiet {
         render_sync_report(&report);
+    }
+
+    // Post-sync health check
+    if !dry_run && !quiet {
+        let doctor_report = doctor::check(config, paths)?;
+        if doctor_report.total_issues() > 0 {
+            eprintln!(
+                "warning: {} issue(s) detected after sync — run `tome doctor` for details",
+                doctor_report.total_issues()
+            );
+        }
     }
 
     // Offer git commit if the library dir is a git repo with changes

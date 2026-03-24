@@ -67,6 +67,9 @@ pub enum Command {
     /// Interactively browse discovered skills
     Browse,
 
+    /// Remove tome's symlinks from all target tool directories (reversible via `tome sync`)
+    Eject,
+
     /// Print version information
     Version,
 
