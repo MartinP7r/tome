@@ -146,13 +146,9 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let body_chunks = Layout::horizontal([
-        Constraint::Percentage(45),
-        Constraint::Length(1), // left padding
-        Constraint::Length(1), // right padding
-        Constraint::Percentage(55),
-    ])
-    .split(chunks[0]);
+    let body_chunks =
+        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(chunks[0]);
 
     // -- Left side: metadata + action list --
     let left_chunks = Layout::vertical([
@@ -208,7 +204,7 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
         ]),
         Line::from(vec![
             Span::styled("Path:     ", Style::default().fg(Color::DarkGray)),
-            Span::raw(path),
+            Span::raw(crate::paths::collapse_home(std::path::Path::new(path))),
         ]),
         Line::from(vec![
             Span::styled("Synced:   ", Style::default().fg(Color::DarkGray)),
