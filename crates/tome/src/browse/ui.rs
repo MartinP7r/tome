@@ -26,9 +26,8 @@ fn render_normal(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let body_chunks =
-        Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
-            .split(chunks[2]);
+    let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(chunks[2]);
 
     // Update visible_height so App can compute scroll distances
     app.visible_height = body_chunks[0].height as usize;
@@ -146,9 +145,8 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let body_chunks =
-        Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
-            .split(chunks[0]);
+    let body_chunks = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+        .split(chunks[0]);
 
     // -- Left side: metadata + action list --
     let left_chunks = Layout::vertical([
