@@ -28,7 +28,8 @@ fn render_normal(frame: &mut Frame, app: &mut App) {
 
     let body_chunks = Layout::horizontal([
         Constraint::Percentage(45),
-        Constraint::Length(1), // divider padding
+        Constraint::Length(1), // left padding
+        Constraint::Length(1), // right padding
         Constraint::Percentage(55),
     ])
     .split(chunks[2]);
@@ -71,7 +72,7 @@ fn render_normal(frame: &mut Frame, app: &mut App) {
                 .borders(Borders::LEFT),
         )
         .wrap(Wrap { trim: false });
-    frame.render_widget(preview, body_chunks[2]);
+    frame.render_widget(preview, body_chunks[3]);
 
     // -- Status bar --
     render_status_bar(frame, app, area.width, chunks[3]);
@@ -249,7 +250,7 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
                 .borders(Borders::LEFT),
         )
         .wrap(Wrap { trim: false });
-    frame.render_widget(preview, body_chunks[2]);
+    frame.render_widget(preview, body_chunks[3]);
 
     // -- Status bar for Detail mode --
     let status = Line::from(vec![
