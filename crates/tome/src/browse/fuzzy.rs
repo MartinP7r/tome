@@ -26,7 +26,7 @@ pub fn filter_rows(query: &str, rows: &[SkillRow]) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(i, row)| {
-            let haystack = format!("{} {} {}", row.name, row.source, row.path);
+            let haystack = format!("{} {}", row.name, row.source);
             let haystack_utf32 = Utf32Str::new(&haystack, &mut buf);
             pattern
                 .score(haystack_utf32, &mut matcher)
