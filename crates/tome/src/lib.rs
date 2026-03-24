@@ -245,6 +245,10 @@ pub fn run(cli: Cli) -> Result<()> {
             relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
         }
         Command::Version => unreachable!(),
+        Command::Completions { shell } => {
+            let mut cmd = <cli::Cli as clap::CommandFactory>::command();
+            clap_complete::generate(shell, &mut cmd, "tome", &mut std::io::stdout());
+        }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
     }
@@ -408,7 +412,9 @@ fn sync(
     // Generate lockfile for reproducibility
     if !dry_run && paths.tome_home().is_dir() {
         let lf = lockfile::generate(&manifest, &skills);
-        lockfile::save(&lf, paths.tome_home())?;
+        if let Err(e) = lockfile::save(&lf, paths.tome_home()) {
+            eprintln!("warning: could not save lockfile: {e}");
+        }
     }
 
     let report = SyncReport {
@@ -609,7 +615,9 @@ fn update_cmd(
         if paths.library_dir().is_dir() {
             library::generate_gitignore(paths.library_dir(), &manifest)?;
         }
-        lockfile::save(&new_lockfile, paths.tome_home())?;
+        if let Err(e) = lockfile::save(&new_lockfile, paths.tome_home()) {
+            eprintln!("warning: could not save lockfile: {e}");
+        }
     }
 
     let report = SyncReport {
