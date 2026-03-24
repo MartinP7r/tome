@@ -127,13 +127,19 @@ pub fn symlink_points_to(link_path: &Path, expected_target: &Path) -> bool {
 
 /// Collapse the user's home directory prefix to `~/` for display.
 pub(crate) fn collapse_home(path: &Path) -> String {
+    collapse_home_path(path).display().to_string()
+}
+
+/// Collapse the user's home directory prefix to `~/`, returning a PathBuf.
+/// Used to write portable paths in config files.
+pub(crate) fn collapse_home_path(path: &Path) -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         let home_path = Path::new(&home);
         if let Ok(rel) = path.strip_prefix(home_path) {
-            return format!("~/{}", rel.display());
+            return PathBuf::from("~").join(rel);
         }
     }
-    path.display().to_string()
+    path.to_path_buf()
 }
 
 #[cfg(test)]

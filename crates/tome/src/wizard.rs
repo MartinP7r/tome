@@ -233,7 +233,7 @@ fn configure_sources() -> Result<Vec<Source>> {
 
         sources.push(Source {
             name,
-            path: expand_tilde(&PathBuf::from(&custom))?,
+            path: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(&custom))?),
             source_type: SourceType::Directory,
         });
     }
@@ -245,9 +245,7 @@ fn configure_sources() -> Result<Vec<Source>> {
 fn configure_library() -> Result<PathBuf> {
     step_divider("Step 2: Library location");
 
-    let default = dirs::home_dir()
-        .context("could not determine home directory")?
-        .join(".tome/skills");
+    let default = PathBuf::from("~/.tome/skills");
 
     let options = vec![
         format!("{} (default)", default.display()),
@@ -264,7 +262,7 @@ fn configure_library() -> Result<PathBuf> {
         default
     } else {
         let custom: String = Input::new().with_prompt("Library path").interact_text()?;
-        expand_tilde(&PathBuf::from(custom))?
+        crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(custom))?)
     };
 
     println!();
@@ -342,8 +340,6 @@ const KNOWN_TARGETS: &[KnownTarget] = &[
 fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
     step_divider("Step 3: Distribution targets");
 
-    let home = dirs::home_dir().context("could not determine home directory")?;
-
     let labels: Vec<String> = KNOWN_TARGETS
         .iter()
         .map(|t| format!("{} (~/{}/)", t.display, t.default_path))
@@ -362,10 +358,10 @@ fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
 
     for idx in selections {
         let known = &KNOWN_TARGETS[idx];
-        let default_path = home.join(known.default_path);
+        let default_path = format!("~/{}", known.default_path);
         let path: String = Input::new()
             .with_prompt(known.path_prompt)
-            .default(default_path.display().to_string())
+            .default(default_path)
             .interact_text()?;
 
         targets.insert(
@@ -373,7 +369,9 @@ fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
-                    skills_dir: expand_tilde(&PathBuf::from(path))?,
+                    skills_dir: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(
+                        path,
+                    ))?),
                 },
             },
         );
@@ -400,7 +398,9 @@ fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
             TargetConfig {
                 enabled: true,
                 method: TargetMethod::Symlink {
-                    skills_dir: expand_tilde(&PathBuf::from(path))?,
+                    skills_dir: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(
+                        path,
+                    ))?),
                 },
             },
         );
@@ -518,19 +518,19 @@ fn find_known_sources_in(home: &Path) -> Result<Vec<Source>> {
     let mut sources = Vec::new();
 
     for (name, rel_path, source_type) in KNOWN_SOURCES {
-        let path = home.join(rel_path);
-        match std::fs::metadata(&path) {
+        let abs_path = home.join(rel_path);
+        match std::fs::metadata(&abs_path) {
             Ok(meta) if meta.is_dir() => {
                 sources.push(Source {
                     name: (*name).into(),
-                    path,
+                    path: PathBuf::from("~").join(rel_path),
                     source_type: source_type.clone(),
                 });
             }
             Ok(_) => {} // exists but not a directory — skip
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // expected — skip
             Err(e) => {
-                eprintln!("warning: could not check {}: {}", path.display(), e);
+                eprintln!("warning: could not check {}: {}", abs_path.display(), e);
             }
         }
     }
@@ -562,7 +562,7 @@ mod tests {
         let sources = find_known_sources_in(tmp.path()).unwrap();
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].name, "claude-skills");
-        assert_eq!(sources[0].path, skills_dir);
+        assert_eq!(sources[0].path, PathBuf::from("~/.claude/skills"));
         assert_eq!(sources[0].source_type, SourceType::Directory);
     }
 
