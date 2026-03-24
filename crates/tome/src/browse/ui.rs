@@ -26,8 +26,12 @@ fn render_normal(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
-        .split(chunks[2]);
+    let body_chunks = Layout::horizontal([
+        Constraint::Percentage(45),
+        Constraint::Length(1), // divider padding
+        Constraint::Percentage(55),
+    ])
+    .split(chunks[2]);
 
     // Update visible_height so App can compute scroll distances
     app.visible_height = body_chunks[0].height as usize;
@@ -67,7 +71,7 @@ fn render_normal(frame: &mut Frame, app: &mut App) {
                 .borders(Borders::LEFT),
         )
         .wrap(Wrap { trim: false });
-    frame.render_widget(preview, body_chunks[1]);
+    frame.render_widget(preview, body_chunks[2]);
 
     // -- Status bar --
     render_status_bar(frame, app, area.width, chunks[3]);
@@ -245,7 +249,7 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
                 .borders(Borders::LEFT),
         )
         .wrap(Wrap { trim: false });
-    frame.render_widget(preview, body_chunks[1]);
+    frame.render_widget(preview, body_chunks[2]);
 
     // -- Status bar for Detail mode --
     let status = Line::from(vec![
