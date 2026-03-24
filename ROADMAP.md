@@ -7,7 +7,7 @@
 | **v0.2.1** | Output Layer           | Data struct extraction, warning collection, `--json` for list           | ✓ |
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
-| **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions   |        |
+| **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions   | ✓ |
 | **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |        |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
@@ -86,13 +86,13 @@ Full-screen interactive skill browser using **ratatui** for rendering and **nucl
 
 - [x] **Basic list with fuzzy search** ([#164](https://github.com/MartinP7r/tome/issues/164)): fzf-style interactive filtering of library skills
 - [x] **Preview panel** ([#165](https://github.com/MartinP7r/tome/issues/165)): Split-pane layout showing SKILL.md content alongside the list
-- [ ] **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
-- [ ] **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
+- [x] **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
+- [x] **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (view source, copy path, disable/enable)
 
 ### Other v0.4.1 Items
 
-- [ ] **Enhance `tome status` display** ([#168](https://github.com/MartinP7r/tome/issues/168)): Better hierarchy, inline health indicators, `--compact`/`--detailed` flags
-- [ ] **Clarify plugin cache source wording** ([#312](https://github.com/MartinP7r/tome/issues/312)): Make it clearer that `~/.claude/plugins/cache` refers to *active* installed marketplace plugins
+- [x] **Enhance `tome status` display** ([#168](https://github.com/MartinP7r/tome/issues/168)): Health indicators (✓/✗/⚠), tilde-collapsed paths
+- [x] **Clarify plugin cache source wording** ([#312](https://github.com/MartinP7r/tome/issues/312)): Clarified as "active plugins installed from Claude Code marketplace"
 
 ## v0.4.2 — Skill Validation & Linting
 
