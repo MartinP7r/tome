@@ -3,7 +3,7 @@ source: crates/tome/tests/cli.rs
 expression: stdout
 ---
 Library: [TMPDIR]/library
-  0 skills consolidated
+  ✓ 0 skills consolidated
 
 Sources:
   (none configured)
@@ -11,4 +11,4 @@ Sources:
 Targets:
   (none configured)
 
-Health: All good
+Health: ✓ All good
