@@ -173,6 +173,7 @@ Dependencies: v0.5 (managed sources for marketplace access), v0.6 (git sources f
 Convenient UX for managing which skills are active per target, and whether per-target config should live centrally or locally. Builds on [#253](https://github.com/MartinP7r/tome/issues/253) (per-target skill selection in `machine.toml`).
 
 - [ ] **Target skill management commands**: Convenient CLI for adding/removing active skills per target without editing TOML by hand. E.g. `tome target claude enable my-skill`, `tome target codex disable my-skill`, or interactive via `tome browse` actions.
+- [ ] **Package-level toggling**: Enable/disable all skills from a package at once (e.g. `tome target codex disable --package axiom-ios-skills`). Requires the package/repo label from `SkillProvenance.registry_id`. Also support glob patterns (e.g. `asc-*`). In `machine.toml`, this could be `disabled_packages = [...]` alongside the existing `disabled` skill set.
 - [ ] **Local per-target config**: Investigate whether per-target config should live *in* the target folder itself (e.g. `~/.claude/tome.toml`) instead of only centrally. Trade-offs:
   - Central (`~/.tome/tome.toml`): single source of truth, easy to version-control, but needs namespacing for per-target overrides
   - Local (e.g. `~/.claude/tome.toml`): self-contained per tool, discoverable where the tool lives, but scattered across filesystem
