@@ -153,8 +153,9 @@ Auto-install managed plugins and backup the library. Builds on the portable libr
 
 ## v0.6 — Git Sources
 
-- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Add `type = "git"` source for remote skill repositories with clone/pull on sync, caching, branch/tag/SHA pinning, and private repo support via SSH keys or token auth
+- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Add `type = "git"` source for remote skill repositories with clone/pull on sync, caching, branch/tag/SHA pinning, and private repo support via SSH keys or token auth. Store `source_url`, `git_ref`, `git_commit`, `skill_path_in_repo` in manifest/lockfile.
 - [ ] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import standalone SKILL.md from arbitrary GitHub repos without requiring plugin.json
+- [ ] **Update skill source after the fact**: Allow changing a skill's source (e.g. from local directory to git repo) without removing and re-adding. Use case: "I started with a local copy, now I want to track their git repo instead."
 
 ## v0.7 — Skill Composition ("Wolpertinger")
 
