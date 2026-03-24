@@ -150,8 +150,13 @@ fn render_detail(frame: &mut Frame, app: &mut App) {
     ])
     .split(area);
 
-    let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
-        .split(chunks[0]);
+    let body_chunks = Layout::horizontal([
+        Constraint::Percentage(45),
+        Constraint::Length(1), // left padding
+        Constraint::Length(1), // right padding
+        Constraint::Percentage(55),
+    ])
+    .split(chunks[0]);
 
     // -- Left side: metadata + action list --
     let left_chunks = Layout::vertical([
