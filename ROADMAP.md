@@ -18,7 +18,7 @@
 ## v0.1.x — Polish & UX
 
 - [x] **Wizard interaction hints**: Show keybinding hints in MultiSelect prompts (space to toggle, enter to confirm) — embedded in prompt text to work around `dialoguer`'s limitation.
-- [ ] **Clarify plugin cache source**: Make it clearer that `~/.claude/plugins/cache` refers to *active* plugins installed from the Claude Code marketplace, not arbitrary cached files. Tracked in v0.4.1.
+- [x] **Clarify plugin cache source**: Clarified in v0.4.1 (#312).
 - [x] **Wizard visual polish**: Color, section dividers, and summary output via `console::style()` — implemented in `wizard.rs`.
 - [x] **Modern TUI with welcome ASCII art**: Evaluate `ratatui` vs `console` + `indicatif` before committing to a framework. → Decision: ratatui + nucleo for interactive commands (`tome browse`), plain text for non-interactive commands. See v0.2.1 and v0.4.1.
 - [x] **Progress spinners for sync** (`indicatif`): Spinners during discover → consolidate → distribute → cleanup steps, implemented in `lib.rs`.
@@ -147,7 +147,7 @@ Auto-install managed plugins and backup the library. Builds on the portable libr
 - [ ] **`tome update` auto-install**: Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
 - [ ] **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
 - [ ] **Git-backed backup & restore** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Includes `tome restore <git-url>` for bootstrapping a new machine from a git-backed library.
-- [ ] **Portable config paths**: Wizard should write `~/`-prefixed paths in `tome.toml` instead of absolute paths, so config is portable across machines with different usernames/OS.
+- [x] **Portable config paths**: Wizard writes `~/`-prefixed paths in `tome.toml` for portability across machines.
 - [ ] **Git repo scope for library**: Design decision needed — should the git repo be scoped to just the library, or to a broader "tome home" that also tracks hooks, commands, agents, and other AI tool config? The broader scope is more useful for portable machine setup (backup everything, not just skills), but complicates `tome sync` git operations which currently assume library-only changes. Options: (a) git root = `~/.tome/` (includes skills + config), (b) git root = library only (skills), (c) let the user decide and scope git operations accordingly.
 - [ ] **Remote library sync**: `tome pull` / `tome push` for syncing the git-backed library with a remote. Handle merge conflicts in skill files — detect conflicts after pull, offer `tome doctor` to verify integrity. `tome update` lockfile diffing should account for remote changes to the lockfile.
 - [ ] **Shell completions** ([#208](https://github.com/MartinP7r/tome/issues/208)): `clap_complete` for bash, zsh, fish, PowerShell

@@ -2436,3 +2436,35 @@ fn eject_nothing_to_eject() {
         .success()
         .stdout(predicate::str::contains("Nothing to eject"));
 }
+
+#[test]
+fn completions_fish_outputs_valid_completions() {
+    tome()
+        .args(["completions", "fish"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("complete -c tome"));
+}
+
+#[test]
+fn completions_bash_outputs_valid_completions() {
+    tome()
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("tome"));
+}
+
+#[test]
+fn completions_zsh_outputs_valid_completions() {
+    tome()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef tome"));
+}
+
+#[test]
+fn completions_invalid_shell_fails() {
+    tome().args(["completions", "invalid"]).assert().failure();
+}

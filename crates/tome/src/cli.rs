@@ -77,6 +77,13 @@ pub enum Command {
         new_path: PathBuf,
     },
 
+    /// Generate shell completions for bash, zsh, fish, or powershell
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
+
     /// Print version information
     Version,
 
