@@ -175,7 +175,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("No skills found. Run `tome init` to configure sources.");
                 return Ok(());
             }
-            browse::browse(skills)?;
+            let manifest = manifest::load(paths.tome_home())?;
+            browse::browse(skills, &manifest)?;
         }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;

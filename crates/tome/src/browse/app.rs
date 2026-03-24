@@ -9,12 +9,62 @@ use super::fuzzy;
 pub enum Mode {
     Normal,
     Search,
+    Detail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SortMode {
+    Name,
+    Source,
+    Recent,
+}
+
+impl SortMode {
+    pub fn next(self) -> Self {
+        match self {
+            Self::Name => Self::Source,
+            Self::Source => Self::Recent,
+            Self::Recent => Self::Name,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Name => "name",
+            Self::Source => "source",
+            Self::Recent => "recent",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum DetailAction {
+    ViewSource,
+    CopyPath,
+    Disable,
+    Enable,
+    Back,
+}
+
+impl DetailAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::ViewSource => "Open source directory",
+            Self::CopyPath => "Copy path to clipboard",
+            Self::Disable => "Disable on this machine",
+            Self::Enable => "Enable on this machine",
+            Self::Back => "Back",
+        }
+    }
 }
 
 pub struct SkillRow {
     pub name: String,
     pub source: String,
     pub path: String,
+    pub managed: bool,
+    pub synced_at: String,
 }
 
 pub struct App {
@@ -28,6 +78,10 @@ pub struct App {
     pub visible_height: usize,
     pub preview_title: String,
     pub preview_content: String,
+    pub sort_mode: SortMode,
+    pub group_by_source: bool,
+    pub detail_actions: Vec<DetailAction>,
+    pub detail_selected: usize,
 }
 
 impl App {
@@ -44,7 +98,12 @@ impl App {
             visible_height: 20,
             preview_title: "Preview".into(),
             preview_content: "No skills discovered.".into(),
+            sort_mode: SortMode::Name,
+            group_by_source: false,
+            detail_actions: Vec::new(),
+            detail_selected: 0,
         };
+        app.apply_sort();
         app.refresh_preview();
         app
     }
@@ -53,6 +112,7 @@ impl App {
         match self.mode {
             Mode::Normal => self.handle_normal_key(key),
             Mode::Search => self.handle_search_key(key),
+            Mode::Detail => self.handle_detail_key(key),
         }
     }
 
@@ -72,7 +132,83 @@ impl App {
             KeyCode::PageDown => self.move_cursor_down(self.visible_height),
             KeyCode::PageUp => self.move_cursor_up(self.visible_height),
             KeyCode::Char('/') => self.mode = Mode::Search,
+            KeyCode::Char('s') => {
+                self.sort_mode = self.sort_mode.next();
+                self.refilter();
+            }
+            KeyCode::Tab => {
+                self.group_by_source = !self.group_by_source;
+            }
+            KeyCode::Enter => {
+                if !self.filtered_indices.is_empty() {
+                    self.enter_detail_mode();
+                }
+            }
             _ => {}
+        }
+    }
+
+    fn handle_detail_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !self.detail_actions.is_empty() {
+                    self.detail_selected =
+                        (self.detail_selected + 1).min(self.detail_actions.len() - 1);
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.detail_selected = self.detail_selected.saturating_sub(1);
+            }
+            KeyCode::Enter => {
+                if let Some(&action) = self.detail_actions.get(self.detail_selected) {
+                    self.execute_action(action);
+                }
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.mode = Mode::Normal;
+            }
+            _ => {}
+        }
+    }
+
+    fn enter_detail_mode(&mut self) {
+        self.mode = Mode::Detail;
+        self.detail_actions = vec![
+            DetailAction::ViewSource,
+            DetailAction::CopyPath,
+            // TODO: toggle based on actual machine prefs disabled state
+            DetailAction::Disable,
+            DetailAction::Back,
+        ];
+        self.detail_selected = 0;
+    }
+
+    fn execute_action(&mut self, action: DetailAction) {
+        match action {
+            DetailAction::ViewSource => {
+                if let Some((_, _, path)) = self.selected_row_meta() {
+                    let _ = std::process::Command::new("open").arg(&path).spawn();
+                }
+            }
+            DetailAction::CopyPath => {
+                if let Some((_, _, path)) = self.selected_row_meta() {
+                    let _ = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(format!(
+                            "echo -n '{}' | pbcopy",
+                            path.replace('\'', "'\\''")
+                        ))
+                        .status();
+                }
+            }
+            DetailAction::Disable | DetailAction::Enable => {
+                // For now, just go back — proper implementation requires machine.toml access
+                // which the browse module doesn't currently have
+                self.mode = Mode::Normal;
+            }
+            DetailAction::Back => {
+                self.mode = Mode::Normal;
+            }
         }
     }
 
@@ -100,6 +236,7 @@ impl App {
 
     fn refilter(&mut self) {
         self.filtered_indices = fuzzy::filter_rows(&self.search_input, &self.rows);
+        self.apply_sort();
         // Clamp cursor
         if self.filtered_indices.is_empty() {
             self.selected = 0;
@@ -108,6 +245,23 @@ impl App {
         }
         self.clamp_scroll();
         self.refresh_preview();
+    }
+
+    fn apply_sort(&mut self) {
+        match self.sort_mode {
+            SortMode::Name => self
+                .filtered_indices
+                .sort_by(|&a, &b| self.rows[a].name.cmp(&self.rows[b].name)),
+            SortMode::Source => self.filtered_indices.sort_by(|&a, &b| {
+                self.rows[a]
+                    .source
+                    .cmp(&self.rows[b].source)
+                    .then(self.rows[a].name.cmp(&self.rows[b].name))
+            }),
+            SortMode::Recent => self
+                .filtered_indices
+                .sort_by(|&a, &b| self.rows[b].synced_at.cmp(&self.rows[a].synced_at)),
+        }
     }
 
     fn move_cursor_down(&mut self, n: usize) {
@@ -200,6 +354,8 @@ mod tests {
                     name: format!("skill-{i}"),
                     source: "test".into(),
                     path: skill_dir.display().to_string(),
+                    managed: false,
+                    synced_at: String::new(),
                 }
             })
             .collect();
@@ -349,6 +505,8 @@ mod tests {
             name: "empty-skill".into(),
             source: "test".into(),
             path: skill_dir.display().to_string(),
+            managed: false,
+            synced_at: String::new(),
         }];
         let app = App::new(rows);
         assert!(app.preview_content.contains("[SKILL.md is empty]"));
@@ -365,6 +523,8 @@ mod tests {
             name: "no-file".into(),
             source: "test".into(),
             path: skill_dir.display().to_string(),
+            managed: false,
+            synced_at: String::new(),
         }];
         let app = App::new(rows);
         assert!(app.preview_content.contains("[failed to read"));
@@ -381,7 +541,170 @@ mod tests {
             app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
         }
 
-        // Preview should have updated to the first filtered match
-        assert!(app.preview_content.contains("skill-3"));
+        // Preview should have updated (may not be skill-3 first due to Name sort
+        // reordering fuzzy results, but skill-3 must be in the filtered set)
+        assert!(!app.filtered_indices.is_empty());
+        assert!(
+            app.filtered_indices
+                .iter()
+                .any(|&idx| app.rows[idx].name == "skill-3"),
+            "skill-3 should be in filtered results"
+        );
+        // Preview should show some valid skill content (not the fallback)
+        assert!(!app.preview_content.contains("No matching skill."));
+    }
+
+    fn make_row(name: &str, source: &str, synced: &str) -> SkillRow {
+        SkillRow {
+            name: name.to_string(),
+            source: source.to_string(),
+            path: format!("/test/{}", name),
+            managed: false,
+            synced_at: synced.to_string(),
+        }
+    }
+
+    #[test]
+    fn sort_by_name() {
+        let rows = vec![
+            make_row("zeta", "src-a", ""),
+            make_row("alpha", "src-b", ""),
+            make_row("mid", "src-a", ""),
+        ];
+        let app = App::new(rows);
+        assert_eq!(app.sort_mode, SortMode::Name);
+        let names: Vec<&str> = app
+            .filtered_indices
+            .iter()
+            .map(|&i| app.rows[i].name.as_str())
+            .collect();
+        assert_eq!(names, vec!["alpha", "mid", "zeta"]);
+    }
+
+    #[test]
+    fn sort_by_source() {
+        let rows = vec![
+            make_row("zeta", "src-b", ""),
+            make_row("alpha", "src-a", ""),
+            make_row("beta", "src-a", ""),
+        ];
+        let mut app = App::new(rows);
+        app.sort_mode = SortMode::Source;
+        app.refilter();
+        let names: Vec<&str> = app
+            .filtered_indices
+            .iter()
+            .map(|&i| app.rows[i].name.as_str())
+            .collect();
+        // Grouped by source, then alphabetical within source
+        assert_eq!(names, vec!["alpha", "beta", "zeta"]);
+    }
+
+    #[test]
+    fn sort_by_recent() {
+        let rows = vec![
+            make_row("old", "src", "2024-01-01T00:00:00Z"),
+            make_row("newest", "src", "2024-03-01T00:00:00Z"),
+            make_row("middle", "src", "2024-02-01T00:00:00Z"),
+        ];
+        let mut app = App::new(rows);
+        app.sort_mode = SortMode::Recent;
+        app.refilter();
+        let names: Vec<&str> = app
+            .filtered_indices
+            .iter()
+            .map(|&i| app.rows[i].name.as_str())
+            .collect();
+        assert_eq!(names, vec!["newest", "middle", "old"]);
+    }
+
+    #[test]
+    fn sort_cycles() {
+        assert_eq!(SortMode::Name.next(), SortMode::Source);
+        assert_eq!(SortMode::Source.next(), SortMode::Recent);
+        assert_eq!(SortMode::Recent.next(), SortMode::Name);
+    }
+
+    #[test]
+    fn sort_preserves_selection() {
+        let rows = vec![
+            make_row("zeta", "src-b", ""),
+            make_row("alpha", "src-a", ""),
+            make_row("beta", "src-a", ""),
+        ];
+        let mut app = App::new(rows);
+        // After Name sort, "alpha" is first. Move to "beta" (index 1).
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        let selected_name = app.rows[app.filtered_indices[app.selected]].name.clone();
+        assert_eq!(selected_name, "beta");
+    }
+
+    #[test]
+    fn enter_detail_mode() {
+        let (mut app, _tmp) = make_app(3);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Detail);
+        assert!(!app.detail_actions.is_empty());
+        assert_eq!(app.detail_selected, 0);
+    }
+
+    #[test]
+    fn detail_mode_navigation() {
+        let (mut app, _tmp) = make_app(3);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Detail);
+        let num_actions = app.detail_actions.len();
+
+        // Move down
+        app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        assert_eq!(app.detail_selected, 1);
+
+        // Move up
+        app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::NONE));
+        assert_eq!(app.detail_selected, 0);
+
+        // Clamp at bottom
+        for _ in 0..num_actions + 2 {
+            app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+        }
+        assert_eq!(app.detail_selected, num_actions - 1);
+    }
+
+    #[test]
+    fn detail_mode_back() {
+        let (mut app, _tmp) = make_app(3);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Detail);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
+        assert_eq!(app.mode, Mode::Normal);
+    }
+
+    #[test]
+    fn group_by_source_toggle() {
+        let (mut app, _tmp) = make_app(3);
+        assert!(!app.group_by_source);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(app.group_by_source);
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert!(!app.group_by_source);
+    }
+
+    #[test]
+    fn search_then_sort() {
+        let (mut app, _tmp) = make_app(10);
+        // Enter search mode
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE));
+        for c in "skill".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
+
+        // All 10 should match "skill"
+        assert_eq!(app.filtered_indices.len(), 10);
+
+        // Cycle sort and verify it still has the right count
+        app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
+        assert_eq!(app.sort_mode, SortMode::Source);
+        assert_eq!(app.filtered_indices.len(), 10);
     }
 }

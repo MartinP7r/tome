@@ -11,13 +11,23 @@ use crate::discover::DiscoveredSkill;
 use app::{App, SkillRow};
 
 /// Launch the interactive skill browser.
-pub fn browse(skills: Vec<DiscoveredSkill>) -> Result<()> {
+pub fn browse(skills: Vec<DiscoveredSkill>, manifest: &crate::manifest::Manifest) -> Result<()> {
     let rows: Vec<SkillRow> = skills
         .into_iter()
-        .map(|s| SkillRow {
-            name: s.name.to_string(),
-            source: s.source_name,
-            path: s.path.display().to_string(),
+        .map(|s| {
+            let skill_name = s.name.to_string();
+            let synced_at = manifest
+                .get(&skill_name)
+                .map(|e| e.synced_at.clone())
+                .unwrap_or_default();
+            let managed = s.origin.is_managed();
+            SkillRow {
+                name: skill_name,
+                source: s.source_name,
+                path: s.path.display().to_string(),
+                managed,
+                synced_at,
+            }
         })
         .collect();
 
