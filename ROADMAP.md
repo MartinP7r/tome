@@ -89,6 +89,11 @@ Full-screen interactive skill browser using **ratatui** for rendering and **nucl
 - [ ] **Sorting and grouping** ([#166](https://github.com/MartinP7r/tome/issues/166)): Sort by name/source/last synced, group by source
 - [ ] **Detail screen with actions** ([#169](https://github.com/MartinP7r/tome/issues/169)): Per-skill actions (remove, edit targets, view source, re-sync)
 
+### Other v0.4.1 Items
+
+- [ ] **Enhance `tome status` display** ([#168](https://github.com/MartinP7r/tome/issues/168)): Better hierarchy, inline health indicators, `--compact`/`--detailed` flags
+- [ ] **Clarify plugin cache source wording** ([#312](https://github.com/MartinP7r/tome/issues/312)): Make it clearer that `~/.claude/plugins/cache` refers to *active* installed marketplace plugins
+
 ## v0.4.2 — Skill Validation & Linting
 
 YAML frontmatter parsing and a `tome lint` command that catches cross-tool compatibility issues. See [Frontmatter Compatibility](docs/src/frontmatter-compatibility.md) for the full spec comparison. Tracked in [#47](https://github.com/MartinP7r/tome/issues/47) and [#176](https://github.com/MartinP7r/tome/issues/176).
@@ -139,27 +144,25 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 
 Auto-install managed plugins and backup the library. Builds on the portable library foundation from v0.3.x.
 
-- [x] **`tome.lock`** ([#38](https://github.com/MartinP7r/tome/issues/38)): Shipped early (PR #220)
-- [x] **Per-machine preferences** ([#39](https://github.com/MartinP7r/tome/issues/39)): Moved to v0.3.x
-- [x] **`tome update` (notification-only)** ([#40](https://github.com/MartinP7r/tome/issues/40)): Moved to v0.3.x
 - [ ] **`tome update` auto-install**: Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
 - [ ] **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): First managed source targeting the Claude plugin marketplace. Version pinning via version string or git commit SHA.
 - [ ] **Git-backed backup** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup` subcommand for snapshots, restore, and diff of library state. Optional automatic pre-sync snapshots (`auto_snapshot = true`). Respects user-managed git repos — can either manage its own commits or defer to the user's workflow.
+- [ ] **Shell completions** ([#208](https://github.com/MartinP7r/tome/issues/208)): `clap_complete` for bash, zsh, fish, PowerShell
+- [ ] **Demote lockfile write failure to warning** ([#224](https://github.com/MartinP7r/tome/issues/224)): Lockfile write failures should not abort sync
+- [ ] **Skill lifecycle** ([#252](https://github.com/MartinP7r/tome/issues/252)): Forking, evaluation, and publishing workflow
 
 ## v0.6 — Git Sources
 
-- [ ] Add `type = "git"` source for remote skill repositories
-- [ ] Clone/pull on sync with caching
-- [ ] Pin to branch, tag, or commit SHA
-- [ ] Support private repos via SSH keys or token auth
+- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Add `type = "git"` source for remote skill repositories with clone/pull on sync, caching, branch/tag/SHA pinning, and private repo support via SSH keys or token auth
+- [ ] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import standalone SKILL.md from arbitrary GitHub repos without requiring plugin.json
 
 ## v0.7 — Skill Composition ("Wolpertinger")
 
 Highly experimental. Generate custom skills by combining or synthesizing content from multiple skill authors/sources.
 
-- [ ] **Multi-source skill synthesis**: Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
+- [ ] **Multi-source skill synthesis** ([#267](https://github.com/MartinP7r/tome/issues/267)): Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
 - [ ] **ACP-based authentication**: LLM calls go through an Agent Communication Protocol (ACP) flow — authenticate via existing CLIs the user already has (codex-cli, claude-code, gemini CLI) rather than requiring a separate OAuth/API-key setup
-- [ ] **Skill evaluation/creation skill** (SKILL.md): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
+- [ ] **Skill evaluation/creation skill** ([#268](https://github.com/MartinP7r/tome/issues/268)): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
 - [ ] **`tome lint` standard validation** (extension): Extend `tome lint` (v0.4.1) to validate against the emerging agent skills standard, not just cross-tool frontmatter compat
 
 Dependencies: v0.5 (managed sources for marketplace access), v0.6 (git sources for GitHub repos), v0.4.1 (lint infrastructure)
@@ -228,6 +231,6 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Publish on crates.io**: Make `tome` installable via `cargo install tome` from the crates.io registry
 - **Improve doc comments for `cargo doc`**: Module-level `//!` coverage is uneven across modules; no `# Examples` sections. Low priority polish.
 - **Syntax highlighting in browse preview**: Render SKILL.md with markdown/YAML syntax highlighting in the `tome browse` detail panel (e.g. via `syntect` or `tree-sitter-highlight`). Low priority polish.
-- **`tome relocate <new-path>`**: Move the library to a new location in one command — moves the directory, updates `tome.toml`, and re-creates all target symlinks. Currently requires manual edit + move + `tome sync --force`.
-- **`tome eject` / `tome uninstall`**: Undo tome's setup — copy skills back to their original source locations (or a specified directory), remove target symlinks, and optionally clean up `tome.toml`. Lower priority if complex; the simple version just removes symlinks and leaves skills in the library.
-- **Library inside a parent git repo**: `offer_git_commit()` currently checks `library_dir.join(".git").exists()`, which fails when the library is a sub-directory of a larger repo (e.g. `~/dotfiles/tome-skills/`). Fix: use `git rev-parse --is-inside-work-tree` instead, and adjust `git add`/`git commit` paths to work relative to the repo root.
+- **`tome relocate <new-path>`** ([#333](https://github.com/MartinP7r/tome/issues/333)): Move the library to a new location in one command — moves the directory, updates `tome.toml`, and re-creates all target symlinks. Currently requires manual edit + move + `tome sync --force`.
+- **`tome eject` / `tome uninstall`** ([#334](https://github.com/MartinP7r/tome/issues/334)): Undo tome's setup — copy skills back to their original source locations (or a specified directory), remove target symlinks, and optionally clean up `tome.toml`. Lower priority if complex; the simple version just removes symlinks and leaves skills in the library.
+- **Library inside a parent git repo**: `offer_git_commit()` currently checks `library_dir.join(".git").exists()`, which fails when the library is a sub-directory of a larger repo (e.g. `~/dotfiles/tome-skills/`). Fix: use `git rev-parse --is-inside-work-tree` instead, and adjust `git add`/`git commit` paths to work relative to the repo root. Subtle implication: dirty-state detection (`git status --porcelain`) and commits must be scoped to the library subdirectory only — unrelated changes in the parent repo should not be counted or committed. Use `git status --porcelain -- <library-subdir>` and `git add -- <library-subdir>/` to scope operations.

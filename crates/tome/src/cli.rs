@@ -67,6 +67,16 @@ pub enum Command {
     /// Interactively browse discovered skills
     Browse,
 
+    /// Remove tome's symlinks from all target tool directories (reversible via `tome sync`)
+    Eject,
+
+    /// Move the skill library to a new location safely
+    Relocate {
+        /// New library directory path
+        #[arg(value_name = "NEW_PATH")]
+        new_path: PathBuf,
+    },
+
     /// Print version information
     Version,
 
