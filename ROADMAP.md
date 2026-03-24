@@ -150,8 +150,8 @@ Auto-install managed plugins and backup the library. Builds on the portable libr
 - [x] **Portable config paths**: Wizard writes `~/`-prefixed paths in `tome.toml` for portability across machines.
 - [ ] **Git repo scope for library**: Design decision needed — should the git repo be scoped to just the library, or to a broader "tome home" that also tracks hooks, commands, agents, and other AI tool config? The broader scope is more useful for portable machine setup (backup everything, not just skills), but complicates `tome sync` git operations which currently assume library-only changes. Options: (a) git root = `~/.tome/` (includes skills + config), (b) git root = library only (skills), (c) let the user decide and scope git operations accordingly.
 - [ ] **Remote library sync**: `tome pull` / `tome push` for syncing the git-backed library with a remote. Handle merge conflicts in skill files — detect conflicts after pull, offer `tome doctor` to verify integrity. `tome update` lockfile diffing should account for remote changes to the lockfile.
-- [ ] **Shell completions** ([#208](https://github.com/MartinP7r/tome/issues/208)): `clap_complete` for bash, zsh, fish, PowerShell
-- [ ] **Demote lockfile write failure to warning** ([#224](https://github.com/MartinP7r/tome/issues/224)): Lockfile write failures should not abort sync
+- [x] **Shell completions** ([#208](https://github.com/MartinP7r/tome/issues/208)): `tome completions <shell>` for bash, zsh, fish, PowerShell via `clap_complete`
+- [x] **Demote lockfile write failure to warning** ([#224](https://github.com/MartinP7r/tome/issues/224)): Lockfile write failures demoted to warning
 - [ ] **Skill lifecycle** ([#252](https://github.com/MartinP7r/tome/issues/252)): Forking, evaluation, and publishing workflow
 
 ## v0.6 — Git Sources
@@ -226,7 +226,7 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 
 - **Plugin registry**: Browse and install community skill packs (precursor to v0.7 Wolpertinger)
 - **Conflict resolution UI**: Interactive merge when skills collide
-- **Shell completions**: Generate completions for bash, zsh, fish
+- ~~**Shell completions**~~: Shipped in v0.4.1 (#208)
 - **Homebrew formula**: `brew install tome`
 - **Backup snapshots**: Moved to v0.5 as git-backed backup (#94)
 - **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
@@ -237,6 +237,10 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 - **Improve doc comments for `cargo doc`**: Module-level `//!` coverage is uneven across modules; no `# Examples` sections. Low priority polish.
 - **Syntax highlighting in browse preview**: Render SKILL.md with markdown/YAML syntax highlighting in the `tome browse` detail panel (e.g. via `syntect` or `tree-sitter-highlight`). Low priority polish.
 - **Package/repo label for skills**: Surface the plugin name (e.g. `martinp7r/axiom-ios-skills`) or git repo slug as a searchable `package` field in browse. Currently `SkillProvenance.registry_id` stores this for marketplace skills but it doesn't reach the browse UI or fuzzy search. Would also enable "group by package" in browse.
-- **`tome relocate <new-path>`** ([#333](https://github.com/MartinP7r/tome/issues/333)): Move the library to a new location in one command — moves the directory, updates `tome.toml`, and re-creates all target symlinks. Currently requires manual edit + move + `tome sync --force`.
-- **`tome eject` / `tome uninstall`** ([#334](https://github.com/MartinP7r/tome/issues/334)): Undo tome's setup — copy skills back to their original source locations (or a specified directory), remove target symlinks, and optionally clean up `tome.toml`. Lower priority if complex; the simple version just removes symlinks and leaves skills in the library.
-- **Library inside a parent git repo**: Superseded by the "library git root enforcement" item in v0.5. Current leaning: enforce that the library IS the git root, not a subdirectory. Users who want the library in a dotfiles repo should use a git submodule. This avoids the complexity of scoping git operations to a subdirectory.
+- ~~**`tome relocate`** ([#333](https://github.com/MartinP7r/tome/issues/333))~~: Shipped in v0.3.7
+- ~~**`tome eject`** ([#334](https://github.com/MartinP7r/tome/issues/334))~~: Shipped in v0.3.7
+- **Library inside a parent git repo**: Superseded by the "git repo scope" item in v0.5. Open design question: scope git to just skills, or broader `~/.tome/` home including hooks/commands/agents.
+- **Plugin marketplace discovery** ([#309](https://github.com/MartinP7r/tome/issues/309)): Make tome skills discoverable in the Claude Code marketplace
+- **Vercel skills.sh format compatibility** ([#304](https://github.com/MartinP7r/tome/issues/304)): Evaluate mapping tome lockfile to/from Vercel's `skills-lock.json` for cross-ecosystem compatibility
+- **Central library architecture** ([#306](https://github.com/MartinP7r/tome/issues/306)): Source skills should not be used directly — always go through the library as single source of truth
+- **Skill-scribe extraction** ([#307](https://github.com/MartinP7r/tome/issues/307)): Extract format conversion into a standalone `skill-scribe` package. See also format transform pipeline ([#57](https://github.com/MartinP7r/tome/issues/57))
