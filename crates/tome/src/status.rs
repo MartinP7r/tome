@@ -122,16 +122,20 @@ fn render_status(report: &StatusReport) {
     println!(
         "{} {}",
         style("Library:").bold(),
-        report.library_dir.display()
+        crate::paths::collapse_home(&report.library_dir)
     );
-    let lib_count = match &report.library_count {
-        Ok(n) => format!("{}", n),
+    let (lib_count, lib_indicator) = match &report.library_count {
+        Ok(n) => (format!("{}", n), style("✓").green()),
         Err(e) => {
             eprintln!("warning: could not read library: {}", e);
-            "?".to_string()
+            ("?".to_string(), style("✗").red())
         }
     };
-    println!("  {} skills consolidated", style(lib_count).cyan());
+    println!(
+        "  {} {} skills consolidated",
+        lib_indicator,
+        style(lib_count).cyan()
+    );
     println!();
 
     // Sources
@@ -148,19 +152,19 @@ fn render_status(report: &StatusReport) {
         ]);
         for source in &report.sources {
             let count = match &source.skill_count {
-                Ok(n) => format!("{}", n),
+                Ok(n) => format!("✓ {}", n),
                 Err(e) => {
                     eprintln!(
                         "warning: could not discover skills from '{}': {}",
                         source.name, e
                     );
-                    "?".to_string()
+                    "✗ ?".to_string()
                 }
             };
             rows.push([
                 source.name.clone(),
                 source.source_type.clone(),
-                source.path.clone(),
+                crate::paths::collapse_home(std::path::Path::new(&source.path)),
                 count,
             ]);
         }
@@ -214,11 +218,15 @@ fn render_status(report: &StatusReport) {
 
     // Health
     let health = match &report.health {
-        Ok(0) => format!("{}", style("All good").green()),
-        Ok(n) => format!("{}", style(format!("{} issue(s)", n)).red()),
+        Ok(0) => format!("{} {}", style("✓").green(), style("All good").green()),
+        Ok(n) => format!(
+            "{} {}",
+            style("⚠").yellow(),
+            style(format!("{} issue(s) — run `tome doctor` for details", n)).yellow()
+        ),
         Err(e) => {
             eprintln!("warning: could not check library health: {}", e);
-            format!("{}", style("unknown").yellow())
+            format!("{} {}", style("✗").red(), style("unknown").red())
         }
     };
     println!("{} {}", style("Health:").bold(), health);

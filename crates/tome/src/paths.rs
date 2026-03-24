@@ -125,6 +125,17 @@ pub fn symlink_points_to(link_path: &Path, expected_target: &Path) -> bool {
     resolved == expected
 }
 
+/// Collapse the user's home directory prefix to `~/` for display.
+pub(crate) fn collapse_home(path: &Path) -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let home_path = Path::new(&home);
+        if let Ok(rel) = path.strip_prefix(home_path) {
+            return format!("~/{}", rel.display());
+        }
+    }
+    path.display().to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

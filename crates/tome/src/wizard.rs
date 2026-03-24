@@ -21,7 +21,9 @@ pub fn run(dry_run: bool) -> Result<Config> {
 
     println!("{}", style("How it works:").bold());
     println!("  Tome copies your local skills into a central library for safekeeping.");
-    println!("  Managed skills (e.g. installed plugins) are symlinked there instead.");
+    println!(
+        "  Managed skills (e.g. plugins installed from the Claude Code marketplace) are symlinked there instead."
+    );
     println!("  Each target tool receives symlinks into the library — your originals");
     println!("  are never touched. Removing tome leaves all source files untouched.");
     println!();
@@ -178,7 +180,10 @@ fn configure_sources() -> Result<Vec<Source>> {
             .iter()
             .map(|s| match s.source_type {
                 SourceType::ClaudePlugins => {
-                    format!("{} — installed marketplace plugins", s.path.display())
+                    format!(
+                        "{} — active plugins installed from Claude Code marketplace",
+                        s.path.display()
+                    )
                 }
                 SourceType::Directory => {
                     format!("{} ({})", s.path.display(), s.source_type)
