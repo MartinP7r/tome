@@ -33,6 +33,7 @@ pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
 pub(crate) mod paths;
+pub(crate) mod relocate;
 pub(crate) mod status;
 pub(crate) mod update;
 pub(crate) mod validation;
@@ -207,6 +208,40 @@ pub fn run(cli: Cli) -> Result<()> {
                 removed,
                 style("tome sync").cyan()
             );
+        }
+        Command::Relocate { new_path } => {
+            let config_path = cli
+                .config
+                .clone()
+                .unwrap_or_else(|| paths.tome_home().join("tome.toml"));
+
+            let plan = relocate::plan(&config, &paths, &new_path, &config_path)?;
+            relocate::render_plan(&plan);
+
+            if cli.dry_run {
+                println!("\n{}", style("Dry run -- no changes made.").yellow());
+                return Ok(());
+            }
+
+            if std::io::stdin().is_terminal() {
+                let confirmed = dialoguer::Confirm::new()
+                    .with_prompt("Proceed with relocation?")
+                    .default(false)
+                    .interact()?;
+                if !confirmed {
+                    println!("Aborted.");
+                    return Ok(());
+                }
+            } else {
+                anyhow::bail!(
+                    "tome relocate requires interactive confirmation -- refusing in non-interactive mode"
+                );
+            }
+
+            relocate::execute(&plan, false)?;
+
+            let new_config = Config::load(&config_path)?;
+            relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
         }
         Command::Version => unreachable!(),
         Command::List { json } => list(&config, cli.quiet, json)?,
