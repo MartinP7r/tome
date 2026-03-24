@@ -48,16 +48,22 @@ mod tests {
                 name: "pdf-extract".into(),
                 source: "claude-plugins".into(),
                 path: "~/.claude/plugins/pdf-extract".into(),
+                managed: false,
+                synced_at: String::new(),
             },
             SkillRow {
                 name: "git-commit".into(),
                 source: "claude-skills".into(),
                 path: "~/.claude/skills/git-commit".into(),
+                managed: false,
+                synced_at: String::new(),
             },
             SkillRow {
                 name: "rust-clippy".into(),
                 source: "agents-skills".into(),
                 path: "~/.agents/skills/rust-clippy".into(),
+                managed: false,
+                synced_at: String::new(),
             },
         ]
     }
