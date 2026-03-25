@@ -29,11 +29,13 @@ pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod eject;
 pub(crate) mod library;
+pub(crate) mod lint;
 pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
 pub(crate) mod paths;
 pub(crate) mod relocate;
+pub(crate) mod skill;
 pub(crate) mod status;
 pub(crate) mod update;
 pub(crate) mod validation;
@@ -163,6 +165,26 @@ pub fn run(cli: Cli) -> Result<()> {
         )?,
         Command::Status => status::show(&config, &paths)?,
         Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run)?,
+        Command::Lint { path, format } => {
+            let report = match path {
+                Some(p) => {
+                    let dir_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                    let issues = lint::lint_skill(dir_name, &p);
+                    lint::LintReport {
+                        results: vec![(dir_name.to_string(), issues)],
+                        skills_checked: 1,
+                    }
+                }
+                None => lint::lint_library(paths.library_dir()),
+            };
+            match format {
+                cli::LintFormat::Text => lint::render_text(&report),
+                cli::LintFormat::Json => lint::render_json(&report),
+            }
+            if report.has_errors() {
+                std::process::exit(1);
+            }
+        }
         Command::Browse => {
             let mut warnings = Vec::new();
             let skills = discover::discover_all(&config, &mut warnings)?;
