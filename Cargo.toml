@@ -24,6 +24,7 @@ tabled = "0.20"
 toml = "1"
 sha2 = "0.10"
 walkdir = "2"
+serde_yaml = "0.9"
 
 # TUI
 ratatui = "0.30"

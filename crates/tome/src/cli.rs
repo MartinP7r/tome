@@ -35,6 +35,12 @@ pub struct Cli {
     pub machine: Option<PathBuf>,
 }
 
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum LintFormat {
+    Text,
+    Json,
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Interactive wizard to configure sources and targets
@@ -62,6 +68,16 @@ pub enum Command {
         /// Output as JSON
         #[arg(long)]
         json: bool,
+    },
+
+    /// Validate skill frontmatter and report issues
+    Lint {
+        /// Specific skill directory to lint (default: entire library)
+        #[arg(value_name = "PATH")]
+        path: Option<PathBuf>,
+        /// Output format
+        #[arg(long, value_enum, default_value = "text")]
+        format: LintFormat,
     },
 
     /// Interactively browse discovered skills
