@@ -8,7 +8,7 @@
 | **v0.3**   | Connector Architecture | `BTreeMap` targets, `KnownTarget` registry, npm skill source research  | ✓ |
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓ |
 | **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions   | ✓ |
-| **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       |        |
+| **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       | ✓ |
 | **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
@@ -100,33 +100,21 @@ YAML frontmatter parsing and a `tome lint` command that catches cross-tool compa
 
 ### Frontmatter Parsing
 
-- [ ] Add `serde_yaml` dependency
-- [ ] Create a `Skill` struct with typed fields for the base standard (name, description, license, compatibility, metadata, allowed-tools)
-- [ ] Parse frontmatter during discovery (enrich `DiscoveredSkill`)
-- [ ] Store parsed metadata for validation and status display
+- [x] Add `serde_yaml` dependency
+- [x] Create `SkillFrontmatter` struct with typed fields (name, description, license, compatibility, metadata, allowed-tools, Claude Code extensions)
+- [x] `skill.rs` module: extract and parse YAML frontmatter from `---` delimiters, capture unknown fields via `#[serde(flatten)]`
+- [ ] Parse frontmatter during discovery (enrich `DiscoveredSkill`) — deferred to follow-up
+- [ ] Store parsed metadata for status display — deferred to follow-up
 
 ### `tome lint` Command
 
-Validation checks ordered by severity:
-
-**Errors** (skill will break on one or more targets):
-- Missing required `name` field
-- Missing required `description` field
-- `name` doesn't match containing directory name
-- `name` exceeds 64 chars or uses invalid characters (must be lowercase letters, numbers, hyphens)
-- `description` exceeds 1024 chars
-
-**Warnings** (cross-platform compatibility issues):
-- Non-standard fields (`version`, `category`, `tags`, `last-updated`) — suggest moving to `metadata`
-- Platform-specific fields used (`disable-model-invocation`, `excludeAgent`, etc.) — note which target they're for
-- Multiline YAML description without block scalar indicator (`|`) — will break on Claude Code
-- `description` exceeds 500 chars (Copilot limit)
-- Body exceeds 6000 chars (Windsurf limit)
-- **Hidden Unicode Tag codepoint scanning**: Detect U+E0001–U+E007F tag characters that can smuggle invisible instructions (security)
-
-**Info** (best practices):
-- `allowed-tools` used (experimental, may not be supported everywhere)
-- Body exceeds ~5000 tokens (general recommendation)
+- [x] `lint.rs` module with tiered validation (error/warning/info)
+- [x] `tome lint` CLI command with `--format text|json` and optional `PATH` argument
+- [x] Exits with code 1 on errors (CI-friendly)
+- [x] Missing `name` is a **warning** (Claude Code infers from directory), name mismatch is an **error**
+- [x] Unicode Tag codepoint scanning (U+E0001–U+E007F)
+- [x] Non-standard field detection (version, category, tags, etc.)
+- [x] Platform limit warnings (description >500 chars for Copilot, body >6000 chars for Windsurf)
 
 ### Enhance Existing Commands
 
