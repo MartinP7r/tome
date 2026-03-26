@@ -38,6 +38,9 @@ pub struct LockEntry {
     /// Version string (e.g. "1.2.0"). Present for managed plugins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+    /// Git commit SHA for exact version pinning. Present for managed plugins.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit_sha: Option<String>,
 }
 
 /// Generate a lockfile from the manifest and discovered skills.
@@ -51,11 +54,17 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
     let mut entries = BTreeMap::new();
 
     for (name, entry) in manifest.iter() {
-        let (registry_id, version) = skill_map
+        let (registry_id, version, git_commit_sha) = skill_map
             .get(name.as_str())
             .and_then(|s| s.origin.provenance())
-            .map(|p| (Some(p.registry_id.clone()), p.version.clone()))
-            .unwrap_or((None, None));
+            .map(|p| {
+                (
+                    Some(p.registry_id.clone()),
+                    p.version.clone(),
+                    p.git_commit_sha.clone(),
+                )
+            })
+            .unwrap_or((None, None, None));
 
         entries.insert(
             name.clone(),
@@ -64,6 +73,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
                 content_hash: entry.content_hash.clone(),
                 registry_id,
                 version,
+                git_commit_sha,
             },
         );
     }
@@ -142,6 +152,7 @@ mod tests {
                     } else {
                         Some(ver.to_string())
                     },
+                    git_commit_sha: None,
                 }),
             },
             None => SkillOrigin::Local,
@@ -277,6 +288,7 @@ mod tests {
                     content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
+                    git_commit_sha: None,
                 },
             )]),
         };

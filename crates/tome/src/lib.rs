@@ -838,11 +838,22 @@ fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
         let rows: Vec<serde_json::Value> = skills
             .iter()
             .map(|s| {
-                serde_json::json!({
+                let mut row = serde_json::json!({
                     "name": s.name,
                     "source": s.source_name,
                     "path": s.path,
-                })
+                    "managed": s.origin.is_managed(),
+                });
+                if let Some(p) = s.origin.provenance() {
+                    row["registry_id"] = serde_json::json!(p.registry_id);
+                    if let Some(v) = &p.version {
+                        row["version"] = serde_json::json!(v);
+                    }
+                    if let Some(sha) = &p.git_commit_sha {
+                        row["git_commit_sha"] = serde_json::json!(sha);
+                    }
+                }
+                row
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -860,16 +871,24 @@ fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
 
     use tabled::settings::{Modify, Style, object::Rows};
 
-    let mut rows: Vec<[String; 3]> = Vec::with_capacity(skills.len() + 1);
+    let mut rows: Vec<[String; 4]> = Vec::with_capacity(skills.len() + 1);
     rows.push([
         "SKILL".to_string(),
         "SOURCE".to_string(),
+        "VERSION".to_string(),
         "PATH".to_string(),
     ]);
     for s in &skills {
+        let version = s
+            .origin
+            .provenance()
+            .and_then(|p| p.version.as_deref())
+            .unwrap_or("")
+            .to_string();
         rows.push([
             s.name.to_string(),
             s.source_name.clone(),
+            version,
             s.path.display().to_string(),
         ]);
     }

@@ -4,11 +4,13 @@ expression: redacted
 ---
 [
   {
+    "managed": false,
     "name": "alpha-skill",
     "path": "[TMPDIR]",
     "source": "test-src"
   },
   {
+    "managed": false,
     "name": "beta-skill",
     "path": "[TMPDIR]",
     "source": "test-src"
