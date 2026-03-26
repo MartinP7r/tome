@@ -109,4 +109,43 @@ pub enum Command {
         #[arg(long)]
         path: bool,
     },
+
+    /// Git-backed backup and restore for the skill library
+    Backup {
+        #[command(subcommand)]
+        sub: BackupCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum BackupCommand {
+    /// Initialize git repo in the library for backup tracking
+    Init,
+    /// Create a snapshot of the current library state
+    Snapshot {
+        /// Custom commit message
+        #[arg(short, long)]
+        message: Option<String>,
+    },
+    /// Show backup history
+    List {
+        /// Number of entries to show
+        #[arg(short = 'n', long, default_value = "10")]
+        count: usize,
+    },
+    /// Restore library to a previous snapshot
+    Restore {
+        /// Git ref to restore to (commit hash, HEAD~1, etc.)
+        #[arg(default_value = "HEAD~1")]
+        target: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+    /// Show changes since last backup
+    Diff {
+        /// Compare against specific ref (default: last commit)
+        #[arg(default_value = "HEAD")]
+        target: String,
+    },
 }

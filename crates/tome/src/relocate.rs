@@ -490,6 +490,7 @@ mod tests {
             exclude: Default::default(),
             sources: Vec::new(),
             targets,
+            ..Default::default()
         }
     }
 

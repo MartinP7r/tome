@@ -75,6 +75,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
         exclude,
         sources,
         targets,
+        ..Default::default()
     };
 
     // Summary
