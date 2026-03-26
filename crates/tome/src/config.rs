@@ -83,6 +83,23 @@ impl<'de> serde::Deserialize<'de> for TargetName {
     }
 }
 
+/// Backup configuration — controls git-backed snapshots of the skill library.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BackupConfig {
+    pub(crate) enabled: bool,
+    pub(crate) auto_snapshot: bool,
+}
+
+impl Default for BackupConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_snapshot: false,
+        }
+    }
+}
+
 /// Top-level configuration for tome.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -101,6 +118,10 @@ pub struct Config {
     /// Distribution targets — keyed by tool name (e.g. "claude", "antigravity")
     #[serde(default, deserialize_with = "deserialize_targets")]
     pub(crate) targets: BTreeMap<TargetName, TargetConfig>,
+
+    /// Backup settings
+    #[serde(default)]
+    pub(crate) backup: BackupConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -348,6 +369,7 @@ impl Default for Config {
             exclude: BTreeSet::new(),
             sources: Vec::new(),
             targets: BTreeMap::new(),
+            backup: BackupConfig::default(),
         }
     }
 }
@@ -452,6 +474,7 @@ mod tests {
                 source_type: SourceType::Directory,
             }],
             targets: BTreeMap::new(),
+            ..Default::default()
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
@@ -488,6 +511,7 @@ mod tests {
                     },
                 },
             )]),
+            ..Default::default()
         };
         config.validate().unwrap();
     }
@@ -649,6 +673,7 @@ skills_dir = "~/.gemini/antigravity/skills"
                     },
                 },
             )]),
+            ..Default::default()
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();

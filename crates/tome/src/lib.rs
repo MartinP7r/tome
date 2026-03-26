@@ -20,6 +20,7 @@
 //! - [`TomePaths`] — bundled home/library paths
 //! - [`SyncReport`] — sync operation results
 
+pub(crate) mod backup;
 pub(crate) mod browse;
 pub(crate) mod cleanup;
 pub mod cli;
@@ -273,6 +274,48 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
+        Command::Backup { sub } => match sub {
+            cli::BackupCommand::Init => {
+                backup::init(paths.library_dir(), cli.dry_run)?;
+            }
+            cli::BackupCommand::Snapshot { message } => {
+                backup::snapshot(paths.library_dir(), message.as_deref(), cli.dry_run)?;
+            }
+            cli::BackupCommand::List { count } => {
+                let entries = backup::list(paths.library_dir(), count)?;
+                backup::render_list(&entries);
+            }
+            cli::BackupCommand::Restore { target, force } => {
+                if !force {
+                    if std::io::stdin().is_terminal() {
+                        let confirmed = dialoguer::Confirm::new()
+                            .with_prompt(format!(
+                                "Restore library to {}? This will overwrite current state",
+                                target
+                            ))
+                            .default(false)
+                            .interact()?;
+                        if !confirmed {
+                            println!("Aborted.");
+                            return Ok(());
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "tome backup restore requires confirmation — use --force in non-interactive mode"
+                        );
+                    }
+                }
+                backup::restore(paths.library_dir(), &target, cli.dry_run)?;
+            }
+            cli::BackupCommand::Diff { target } => {
+                let diff = backup::diff(paths.library_dir(), &target)?;
+                if diff.is_empty() {
+                    println!("No changes since {}", target);
+                } else {
+                    println!("{}", diff);
+                }
+            }
+        },
     }
 
     Ok(())
@@ -309,6 +352,23 @@ fn sync(
     }
 
     let show_progress = !quiet && !verbose;
+
+    // Pre-sync auto-snapshot if configured
+    if !dry_run
+        && config.backup.enabled
+        && config.backup.auto_snapshot
+        && backup::has_repo(paths.library_dir())
+    {
+        match backup::snapshot(paths.library_dir(), Some("pre-sync auto-snapshot"), false) {
+            Ok(true) => {
+                if !quiet {
+                    eprintln!("info: pre-sync snapshot created");
+                }
+            }
+            Ok(false) => {} // nothing to snapshot
+            Err(e) => eprintln!("warning: auto-snapshot failed: {e}"),
+        }
+    }
 
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
