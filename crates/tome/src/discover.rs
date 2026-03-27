@@ -112,6 +112,8 @@ pub struct SkillProvenance {
     pub registry_id: String,
     /// Version string (e.g. "1.2.0"). `None` when not available.
     pub version: Option<String>,
+    /// Git commit SHA for exact version pinning. `None` when not available.
+    pub git_commit_sha: Option<String>,
 }
 
 /// How a skill was sourced — determines consolidation strategy.
@@ -313,9 +315,15 @@ fn scan_install_records(
                         .and_then(|v| v.as_str())
                         .filter(|v| !v.is_empty())
                         .map(|v| v.to_string());
+                    let git_commit_sha = record
+                        .get("gitCommitSha")
+                        .and_then(|v| v.as_str())
+                        .filter(|v| !v.is_empty())
+                        .map(|v| v.to_string());
                     SkillProvenance {
                         registry_id: reg_id.to_string(),
                         version,
+                        git_commit_sha,
                     }
                 });
                 let mut found =
@@ -590,7 +598,8 @@ mod tests {
                         "scope": "user",
                         "installPath": plugin_a_dir.to_str().unwrap(),
                         "version": "1.0.0",
-                        "installedAt": "2025-12-15T02:47:14.944Z"
+                        "installedAt": "2025-12-15T02:47:14.944Z",
+                        "gitCommitSha": "eb872450105745e9489c6f6d73fa2fb4ff5a1e9a"
                     }
                 ],
                 "rust-skill@rust-registry": [
@@ -629,6 +638,10 @@ mod tests {
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "swift-skill@swift-registry");
         assert_eq!(prov.version.as_deref(), Some("1.0.0"));
+        assert_eq!(
+            prov.git_commit_sha.as_deref(),
+            Some("eb872450105745e9489c6f6d73fa2fb4ff5a1e9a")
+        );
 
         let rust_s = skills.iter().find(|s| s.name == "rust-skill").unwrap();
         let prov = rust_s
@@ -637,6 +650,8 @@ mod tests {
             .expect("v2 should have provenance");
         assert_eq!(prov.registry_id, "rust-skill@rust-registry");
         assert_eq!(prov.version.as_deref(), Some("2.0.0"));
+        // rust-skill has no gitCommitSha in the fixture
+        assert!(prov.git_commit_sha.is_none());
     }
 
     #[test]

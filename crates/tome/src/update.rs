@@ -154,6 +154,7 @@ mod tests {
             content_hash: test_hash(hash_seed),
             registry_id: None,
             version: None,
+            git_commit_sha: None,
         }
     }
 
@@ -163,6 +164,7 @@ mod tests {
             content_hash: test_hash(hash_seed),
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),
+            git_commit_sha: None,
         }
     }
 
