@@ -1,25 +1,26 @@
-//! Git-backed backup and restore for the skill library.
+//! Git-backed backup and restore for the tome home directory (`~/.tome/`).
 //!
-//! Provides snapshot, restore, list, and diff operations using git as the
-//! underlying version control system. All git operations use `std::process::Command`.
+//! The git repo is scoped to `~/.tome/` (not just the library subdirectory),
+//! so it tracks skills, `tome.toml`, `tome.lock`, and any future config.
+//! All git operations use `std::process::Command`.
 
 use std::path::Path;
 
 use anyhow::{Context, Result};
 
 /// Run a git command in the given directory, returning its raw output.
-fn git(library_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
+fn git(repo_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let output = std::process::Command::new("git")
         .args(args)
-        .current_dir(library_dir)
+        .current_dir(repo_dir)
         .output()
         .with_context(|| format!("failed to run git {}", args.join(" ")))?;
     Ok(output)
 }
 
 /// Run a git command and bail if it fails.
-fn git_success(library_dir: &Path, args: &[&str]) -> Result<()> {
-    let output = git(library_dir, args)?;
+fn git_success(repo_dir: &Path, args: &[&str]) -> Result<()> {
+    let output = git(repo_dir, args)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
@@ -28,8 +29,8 @@ fn git_success(library_dir: &Path, args: &[&str]) -> Result<()> {
 }
 
 /// Run a git command and return its stdout as a trimmed string.
-fn git_stdout(library_dir: &Path, args: &[&str]) -> Result<String> {
-    let output = git(library_dir, args)?;
+fn git_stdout(repo_dir: &Path, args: &[&str]) -> Result<String> {
+    let output = git(repo_dir, args)?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
@@ -39,63 +40,63 @@ fn git_stdout(library_dir: &Path, args: &[&str]) -> Result<String> {
 
 /// Ensure the git repo has a user identity configured (needed for commits).
 /// Sets a local fallback if neither local nor global identity exists.
-fn ensure_git_identity(library_dir: &Path) -> Result<()> {
-    let has_name = git(library_dir, &["config", "user.name"])
+fn ensure_git_identity(repo_dir: &Path) -> Result<()> {
+    let has_name = git(repo_dir, &["config", "user.name"])
         .map(|o| o.status.success())
         .unwrap_or(false);
-    let has_email = git(library_dir, &["config", "user.email"])
+    let has_email = git(repo_dir, &["config", "user.email"])
         .map(|o| o.status.success())
         .unwrap_or(false);
     if !has_name {
-        git_success(library_dir, &["config", "user.name", "tome"])?;
+        git_success(repo_dir, &["config", "user.name", "tome"])?;
     }
     if !has_email {
-        git_success(library_dir, &["config", "user.email", "tome@localhost"])?;
+        git_success(repo_dir, &["config", "user.email", "tome@localhost"])?;
     }
     Ok(())
 }
 
-/// Check whether the library directory contains a git repository.
-pub(crate) fn has_repo(library_dir: &Path) -> bool {
-    library_dir.join(".git").exists()
+/// Check whether the tome home directory contains a git repository.
+pub(crate) fn has_repo(repo_dir: &Path) -> bool {
+    repo_dir.join(".git").exists()
 }
 
-/// Initialize a git repository in the library directory.
-pub(crate) fn init(library_dir: &Path, dry_run: bool) -> Result<()> {
-    if has_repo(library_dir) {
-        println!("Git repo already exists in {}", library_dir.display());
+/// Initialize a git repository in the tome home directory.
+pub(crate) fn init(repo_dir: &Path, dry_run: bool) -> Result<()> {
+    if has_repo(repo_dir) {
+        println!("Git repo already exists in {}", repo_dir.display());
         return Ok(());
     }
     if dry_run {
-        println!("Would initialize git repo in {}", library_dir.display());
+        println!("Would initialize git repo in {}", repo_dir.display());
         return Ok(());
     }
-    std::fs::create_dir_all(library_dir)?;
-    git_success(library_dir, &["init"])?;
+    std::fs::create_dir_all(repo_dir)?;
+    git_success(repo_dir, &["init"])?;
     // Set fallback git identity if none configured (CI, fresh machines)
-    ensure_git_identity(library_dir)?;
+    ensure_git_identity(repo_dir)?;
     // Initial commit
-    git_success(library_dir, &["add", "-A"])?;
-    let output = git(library_dir, &["status", "--porcelain"])?;
+    git_success(repo_dir, &["add", "-A"])?;
+    let output = git(repo_dir, &["status", "--porcelain"])?;
     let status = String::from_utf8_lossy(&output.stdout);
     if !status.trim().is_empty() {
-        git_success(library_dir, &["commit", "-m", "Initial tome backup"])?;
+        git_success(repo_dir, &["commit", "-m", "Initial tome backup"])?;
     }
     println!("{} Initialized backup repo", console::style("✓").green());
     Ok(())
 }
 
-/// Create a snapshot (git commit) of the current library state.
+/// Create a snapshot (git commit) of the current tome home state.
 ///
 /// Returns `true` if a commit was created, `false` if there was nothing to commit.
-pub(crate) fn snapshot(library_dir: &Path, message: Option<&str>, dry_run: bool) -> Result<bool> {
-    if !has_repo(library_dir) {
+pub(crate) fn snapshot(repo_dir: &Path, message: Option<&str>, dry_run: bool) -> Result<bool> {
+    if !has_repo(repo_dir) {
         anyhow::bail!("no git repo in library — run `tome backup init` first");
     }
     // Stage all changes (gitignore handles managed skill exclusion)
-    git_success(library_dir, &["add", "-A"])?;
+    git_success(repo_dir, &["add", "-A"])?;
     // Check if there's anything to commit
-    let output = git(library_dir, &["status", "--porcelain"])?;
+    let output = git(repo_dir, &["status", "--porcelain"])?;
     let status = String::from_utf8_lossy(&output.stdout);
     if status.trim().is_empty() {
         if !dry_run {
@@ -108,7 +109,7 @@ pub(crate) fn snapshot(library_dir: &Path, message: Option<&str>, dry_run: bool)
         return Ok(true);
     }
     let msg = message.unwrap_or("tome backup snapshot");
-    git_success(library_dir, &["commit", "-m", msg])?;
+    git_success(repo_dir, &["commit", "-m", msg])?;
     println!("{} Snapshot created: {}", console::style("✓").green(), msg);
     Ok(true)
 }
@@ -121,13 +122,13 @@ pub(crate) struct BackupEntry {
 }
 
 /// List the most recent backup entries.
-pub(crate) fn list(library_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
-    if !has_repo(library_dir) {
+pub(crate) fn list(repo_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
+    if !has_repo(repo_dir) {
         anyhow::bail!("no git repo in library — run `tome backup init` first");
     }
     let format = "--format=%h\t%ci\t%s";
     let count_arg = format!("-{}", count);
-    let stdout = git_stdout(library_dir, &["log", &count_arg, format])?;
+    let stdout = git_stdout(repo_dir, &["log", &count_arg, format])?;
     let entries = stdout
         .lines()
         .filter(|l| !l.is_empty())
@@ -143,12 +144,12 @@ pub(crate) fn list(library_dir: &Path, count: usize) -> Result<Vec<BackupEntry>>
     Ok(entries)
 }
 
-/// Restore the library to a previous snapshot.
+/// Restore the tome home to a previous snapshot.
 ///
 /// Automatically creates a pre-restore snapshot of the current state before
 /// checking out files from the target ref.
-pub(crate) fn restore(library_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
-    if !has_repo(library_dir) {
+pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
+    if !has_repo(repo_dir) {
         anyhow::bail!("no git repo in library — run `tome backup init` first");
     }
     if dry_run {
@@ -156,9 +157,9 @@ pub(crate) fn restore(library_dir: &Path, target: &str, dry_run: bool) -> Result
         return Ok(());
     }
     // Auto-snapshot current state before restoring
-    let _ = snapshot(library_dir, Some("pre-restore auto-snapshot"), false);
+    let _ = snapshot(repo_dir, Some("pre-restore auto-snapshot"), false);
     // Restore files from target ref
-    git_success(library_dir, &["checkout", target, "--", "."])?;
+    git_success(repo_dir, &["checkout", target, "--", "."])?;
     println!(
         "{} Restored to {}. Run {} to re-distribute.",
         console::style("✓").green(),
@@ -169,12 +170,12 @@ pub(crate) fn restore(library_dir: &Path, target: &str, dry_run: bool) -> Result
 }
 
 /// Show a diff stat of the working tree against a target ref.
-pub(crate) fn diff(library_dir: &Path, target: &str) -> Result<String> {
-    if !has_repo(library_dir) {
+pub(crate) fn diff(repo_dir: &Path, target: &str) -> Result<String> {
+    if !has_repo(repo_dir) {
         anyhow::bail!("no git repo in library — run `tome backup init` first");
     }
     // Show diff of working tree against target
-    let stdout = git_stdout(library_dir, &["diff", target, "--stat"])?;
+    let stdout = git_stdout(repo_dir, &["diff", target, "--stat"])?;
     Ok(stdout)
 }
 

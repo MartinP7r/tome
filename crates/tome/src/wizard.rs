@@ -128,34 +128,18 @@ pub fn run(dry_run: bool) -> Result<Config> {
         config.save(&config_path)?;
         println!("{} Config saved!", style("done").green());
 
-        // Offer to git-init the library directory for change tracking
-        if !config.library_dir.join(".git").exists()
-            && Confirm::new()
-                .with_prompt("Initialize a git repo in the library directory for change tracking?")
+        // Offer to git-init the tome home directory for backup tracking
+        let tome_home = config_path
+            .parent()
+            .expect("config path should have a parent");
+        if !tome_home.join(".git").exists() {
+            let do_init = Confirm::new()
+                .with_prompt("Initialize a git repo for backup tracking?")
                 .default(false)
-                .interact()?
-        {
-            std::fs::create_dir_all(&config.library_dir)?;
-            let output = std::process::Command::new("git")
-                .args(["init"])
-                .current_dir(&config.library_dir)
-                .output()
-                .context("failed to run git init")?;
-            if output.status.success() {
-                println!(
-                    "  {} Initialized git repo in {}",
-                    style("✓").green(),
-                    config.library_dir.display()
-                );
-            } else {
-                eprintln!(
-                    "warning: git init failed (exit code {})",
-                    output.status.code().unwrap_or(-1)
-                );
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                if !stderr.trim().is_empty() {
-                    eprintln!("  git said: {}", stderr.trim());
-                }
+                .interact()?;
+            if do_init {
+                crate::backup::init(tome_home, false)
+                    .unwrap_or_else(|e| eprintln!("warning: backup init failed: {e}"));
             }
         }
     }
