@@ -37,6 +37,24 @@ fn git_stdout(library_dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// Ensure the git repo has a user identity configured (needed for commits).
+/// Sets a local fallback if neither local nor global identity exists.
+fn ensure_git_identity(library_dir: &Path) -> Result<()> {
+    let has_name = git(library_dir, &["config", "user.name"])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    let has_email = git(library_dir, &["config", "user.email"])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !has_name {
+        git_success(library_dir, &["config", "user.name", "tome"])?;
+    }
+    if !has_email {
+        git_success(library_dir, &["config", "user.email", "tome@localhost"])?;
+    }
+    Ok(())
+}
+
 /// Check whether the library directory contains a git repository.
 pub(crate) fn has_repo(library_dir: &Path) -> bool {
     library_dir.join(".git").exists()
@@ -54,6 +72,8 @@ pub(crate) fn init(library_dir: &Path, dry_run: bool) -> Result<()> {
     }
     std::fs::create_dir_all(library_dir)?;
     git_success(library_dir, &["init"])?;
+    // Set fallback git identity if none configured (CI, fresh machines)
+    ensure_git_identity(library_dir)?;
     // Initial commit
     git_success(library_dir, &["add", "-A"])?;
     let output = git(library_dir, &["status", "--porcelain"])?;

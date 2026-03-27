@@ -2564,17 +2564,6 @@ fn lint_single_skill_path_with_errors() {
 
 // === Backup tests ===
 
-fn setup_git_config(dir: &Path) {
-    let _ = StdCommand::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(dir)
-        .output();
-    let _ = StdCommand::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir)
-        .output();
-}
-
 #[test]
 fn backup_init_and_snapshot() {
     let env = TestEnvBuilder::new()
@@ -2599,8 +2588,6 @@ fn backup_init_and_snapshot() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Initialized backup repo"));
-
-    setup_git_config(&env.library_dir);
 
     // Add a new file to the library so there's something to snapshot
     std::fs::write(env.library_dir.join("extra.txt"), "new content").unwrap();
@@ -2643,8 +2630,6 @@ fn backup_list_shows_history() {
         ])
         .assert()
         .success();
-
-    setup_git_config(&env.library_dir);
 
     // Add a file and create a snapshot
     std::fs::write(env.library_dir.join("extra.txt"), "new content").unwrap();
