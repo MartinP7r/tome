@@ -1318,7 +1318,7 @@ fn update_with_no_lockfile_works_gracefully() {
 
     // First run with no prior lockfile — should work like a normal sync
     tome()
-        .args(["--config", config.to_str().unwrap(), "update"])
+        .args(["--config", config.to_str().unwrap(), "sync"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No previous lockfile"))
@@ -1362,7 +1362,7 @@ fn update_shows_new_skills() {
 
     // Update should detect the new skill
     tome()
-        .args(["--config", config_str, "--quiet", "update"])
+        .args(["--config", config_str, "--quiet", "sync"])
         .assert()
         .success();
 
@@ -1401,7 +1401,7 @@ fn update_dry_run_makes_no_changes() {
 
     // Dry-run update
     tome()
-        .args(["--config", config_str, "--dry-run", "update"])
+        .args(["--config", config_str, "--dry-run", "sync"])
         .assert()
         .success()
         .stderr(predicate::str::contains("dry-run"));
@@ -1514,7 +1514,7 @@ fn update_disable_removes_symlink() {
             "--machine",
             machine_str,
             "--quiet",
-            "update",
+            "sync",
         ])
         .assert()
         .success();
@@ -1673,7 +1673,7 @@ fn update_warns_unknown_disabled_targets() {
             config.to_str().unwrap(),
             "--machine",
             machine_path.to_str().unwrap(),
-            "update",
+            "sync",
         ])
         .assert()
         .success()
@@ -2030,7 +2030,7 @@ fn edge_corrupted_lockfile() {
     std::fs::write(env.lockfile_path(), "this is garbage").unwrap();
 
     // Update should fail with a parse error
-    let output = env.cmd().args(["update", "--quiet"]).output().unwrap();
+    let output = env.cmd().args(["sync", "--quiet"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -2206,7 +2206,7 @@ fn lifecycle_update_with_lockfile_diff() {
     env.add_skill("skill-c", "local");
 
     // Update should detect the new skill
-    env.cmd().args(["update", "--quiet"]).assert().success();
+    env.cmd().args(["sync", "--quiet"]).assert().success();
 
     // Verify new skill is in library and target
     assert!(
