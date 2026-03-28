@@ -327,7 +327,7 @@ Tests status gathering and health checks.
 
 ### `update.rs` — 8 tests
 
-Tests lockfile diffing for the `tome update` command.
+Tests lockfile diffing and triage logic used by `tome sync`.
 
 | Test | What it verifies |
 |------|-----------------|

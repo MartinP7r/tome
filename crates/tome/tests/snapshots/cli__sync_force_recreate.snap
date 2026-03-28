@@ -2,5 +2,6 @@
 source: crates/tome/tests/cli.rs
 expression: stdout
 ---
+No changes since last sync.
 Sync complete
   Library: 0 created, 0 unchanged, 1 updated

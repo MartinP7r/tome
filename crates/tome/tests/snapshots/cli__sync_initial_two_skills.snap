@@ -2,5 +2,6 @@
 source: crates/tome/tests/cli.rs
 expression: stdout
 ---
+No previous lockfile — performing initial sync.
 Sync complete
   Library: 2 created, 0 unchanged, 0 updated

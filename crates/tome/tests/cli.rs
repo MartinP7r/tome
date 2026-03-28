@@ -1297,10 +1297,49 @@ type = "directory"
     );
 }
 
-// -- Update command --
+// -- Triage (formerly update) --
 
 #[test]
-fn update_with_no_lockfile_works_gracefully() {
+fn sync_no_triage_skips_diff_output() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("my-skill", "local")
+        .build();
+
+    // First sync to create lockfile
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "sync",
+            "--no-triage",
+        ])
+        .assert()
+        .success();
+
+    // Second sync with --no-triage should not show diff summary
+    let output = tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "sync",
+            "--no-triage",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("changes"),
+        "--no-triage should suppress diff summary, got: {stdout}"
+    );
+    assert!(
+        !stdout.contains("No previous lockfile"),
+        "--no-triage should suppress lockfile messages, got: {stdout}"
+    );
+}
+
+#[test]
+fn sync_with_no_lockfile_works_gracefully() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "my-skill");
@@ -1318,7 +1357,7 @@ fn update_with_no_lockfile_works_gracefully() {
 
     // First run with no prior lockfile — should work like a normal sync
     tome()
-        .args(["--config", config.to_str().unwrap(), "update"])
+        .args(["--config", config.to_str().unwrap(), "sync"])
         .assert()
         .success()
         .stdout(predicate::str::contains("No previous lockfile"))
@@ -1333,7 +1372,7 @@ fn update_with_no_lockfile_works_gracefully() {
 }
 
 #[test]
-fn update_shows_new_skills() {
+fn sync_triage_shows_new_skills() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "existing-skill");
@@ -1362,7 +1401,7 @@ fn update_shows_new_skills() {
 
     // Update should detect the new skill
     tome()
-        .args(["--config", config_str, "--quiet", "update"])
+        .args(["--config", config_str, "--quiet", "sync"])
         .assert()
         .success();
 
@@ -1372,7 +1411,7 @@ fn update_shows_new_skills() {
 }
 
 #[test]
-fn update_dry_run_makes_no_changes() {
+fn sync_triage_dry_run_makes_no_changes() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "my-skill");
@@ -1401,7 +1440,7 @@ fn update_dry_run_makes_no_changes() {
 
     // Dry-run update
     tome()
-        .args(["--config", config_str, "--dry-run", "update"])
+        .args(["--config", config_str, "--dry-run", "sync"])
         .assert()
         .success()
         .stderr(predicate::str::contains("dry-run"));
@@ -1468,7 +1507,7 @@ fn sync_respects_machine_disabled() {
 }
 
 #[test]
-fn update_disable_removes_symlink() {
+fn sync_triage_disable_removes_symlink() {
     // Test that disabling a skill and re-running update removes its symlink from targets.
     // Since we can't interact with the TTY in tests, we simulate the effect:
     // 1. Sync normally (both skills distributed)
@@ -1514,7 +1553,7 @@ fn update_disable_removes_symlink() {
             "--machine",
             machine_str,
             "--quiet",
-            "update",
+            "sync",
         ])
         .assert()
         .success();
@@ -1635,7 +1674,7 @@ skills_dir = "{}"
 }
 
 #[test]
-fn update_warns_unknown_disabled_targets() {
+fn sync_warns_unknown_disabled_targets() {
     // Test that `tome update` warns about disabled_targets in machine.toml
     // that don't match any configured target.
     let tmp = TempDir::new().unwrap();
@@ -1673,7 +1712,7 @@ fn update_warns_unknown_disabled_targets() {
             config.to_str().unwrap(),
             "--machine",
             machine_path.to_str().unwrap(),
-            "update",
+            "sync",
         ])
         .assert()
         .success()
@@ -2030,7 +2069,7 @@ fn edge_corrupted_lockfile() {
     std::fs::write(env.lockfile_path(), "this is garbage").unwrap();
 
     // Update should fail with a parse error
-    let output = env.cmd().args(["update", "--quiet"]).output().unwrap();
+    let output = env.cmd().args(["sync", "--quiet"]).output().unwrap();
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
@@ -2206,7 +2245,7 @@ fn lifecycle_update_with_lockfile_diff() {
     env.add_skill("skill-c", "local");
 
     // Update should detect the new skill
-    env.cmd().args(["update", "--quiet"]).assert().success();
+    env.cmd().args(["sync", "--quiet"]).assert().success();
 
     // Verify new skill is in library and target
     assert!(

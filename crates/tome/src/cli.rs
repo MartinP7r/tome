@@ -51,10 +51,10 @@ pub enum Command {
         /// Recreate all symlinks even if they appear up-to-date
         #[arg(short, long)]
         force: bool,
+        /// Skip interactive triage of new/changed skills
+        #[arg(long)]
+        no_triage: bool,
     },
-
-    /// Review library changes and sync with interactive triage
-    Update,
 
     /// Show library, sources, targets, and health summary
     Status,

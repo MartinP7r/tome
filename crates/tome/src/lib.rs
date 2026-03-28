@@ -8,9 +8,11 @@
 //! The `sync` function drives the main workflow:
 //!
 //! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — copy or symlink discovered skills into the library (managed skills are symlinked; local skills are copied)
-//! 3. **Distribute** — push library skills to target tools via symlinks
-//! 4. **Cleanup** — remove stale entries no longer in any source
+//! 2. **Consolidate** — copy or symlink discovered skills into the library
+//! 3. **Triage** — diff lockfile, surface changes, let user disable new skills
+//! 4. **Distribute** — push library skills to target tools via symlinks
+//! 5. **Cleanup** — remove stale entries no longer in any source
+//! 6. **Save** — persist manifest, lockfile, and `.gitignore`
 //!
 //! # Public API
 //!
@@ -130,11 +132,14 @@ pub fn run(cli: Cli) -> Result<()> {
             sync(
                 &config,
                 &paths,
-                cli.dry_run,
-                false,
-                cli.verbose,
-                cli.quiet,
-                cli.machine.as_deref(),
+                SyncOptions {
+                    dry_run: cli.dry_run,
+                    force: false,
+                    no_triage: true, // skip on initial sync after init
+                    verbose: cli.verbose,
+                    quiet: cli.quiet,
+                    machine_override: cli.machine.as_deref(),
+                },
             )?;
         }
         return Ok(());
@@ -147,22 +152,17 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
-        Command::Sync { force } => sync(
+        Command::Sync { force, no_triage } => sync(
             &config,
             &paths,
-            cli.dry_run,
-            force,
-            cli.verbose,
-            cli.quiet,
-            cli.machine.as_deref(),
-        )?,
-        Command::Update => update_cmd(
-            &config,
-            &paths,
-            cli.dry_run,
-            cli.verbose,
-            cli.quiet,
-            cli.machine.as_deref(),
+            SyncOptions {
+                dry_run: cli.dry_run,
+                force,
+                no_triage,
+                verbose: cli.verbose,
+                quiet: cli.quiet,
+                machine_override: cli.machine.as_deref(),
+            },
         )?,
         Command::Status => status::show(&config, &paths)?,
         Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run)?,
@@ -334,16 +334,26 @@ fn warn_unknown_disabled_targets(machine_prefs: &machine::MachinePrefs, config: 
     }
 }
 
-/// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(
-    config: &Config,
-    paths: &TomePaths,
+/// Options for the sync pipeline.
+struct SyncOptions<'a> {
     dry_run: bool,
     force: bool,
+    no_triage: bool,
     verbose: bool,
     quiet: bool,
-    machine_override: Option<&Path>,
-) -> Result<()> {
+    machine_override: Option<&'a Path>,
+}
+
+/// The core sync pipeline: discover → consolidate → distribute → cleanup.
+fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
+    let SyncOptions {
+        dry_run,
+        force,
+        no_triage,
+        verbose,
+        quiet,
+        machine_override,
+    } = opts;
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -369,6 +379,13 @@ fn sync(
             Err(e) => eprintln!("warning: auto-snapshot failed: {e}"),
         }
     }
+
+    // Load per-machine preferences (disabled skills and targets)
+    let machine_path = resolve_machine_path(machine_override)?;
+    let mut machine_prefs = machine::load(&machine_path)?;
+
+    // Load existing lockfile for diffing
+    let old_lockfile = lockfile::load(paths.tome_home())?;
 
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
@@ -408,19 +425,42 @@ fn sync(
         sp.finish_and_clear();
     }
 
+    // 3. Diff lockfile and triage changes
+    let new_lockfile = lockfile::generate(&manifest, &skills);
+    if !no_triage && !quiet {
+        if let Some(ref old) = old_lockfile {
+            let d = update::diff(old, &new_lockfile);
+            if !d.is_empty() {
+                println!("{}", style("Library changes detected:").bold());
+                let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
+                if !newly_disabled.is_empty() && !dry_run {
+                    machine::save(&machine_prefs, &machine_path)?;
+                    println!(
+                        "  {} skill(s) disabled in {}",
+                        newly_disabled.len(),
+                        machine_path.display()
+                    );
+                }
+            } else {
+                println!("{}", style("No changes since last sync.").dim());
+            }
+        } else {
+            println!(
+                "{}",
+                style("No previous lockfile — performing initial sync.").dim()
+            );
+        }
+    }
+
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
-
-    // Load per-machine preferences (disabled skills and targets)
-    let machine_path = resolve_machine_path(machine_override)?;
-    let machine_prefs = machine::load(&machine_path)?;
 
     // Warn about disabled_targets that don't match any configured target
     if !quiet {
         warn_unknown_disabled_targets(&machine_prefs, config);
     }
 
-    // 3. Distribute to targets
+    // 4. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
         if machine_prefs.is_target_disabled(name.as_str()) {
@@ -455,7 +495,7 @@ fn sync(
         }
     }
 
-    // 4. Cleanup stale entries
+    // 5. Cleanup stale entries
     let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
     if verbose {
         eprintln!("{}", style("Cleaning up stale entries...").dim());
@@ -481,24 +521,17 @@ fn sync(
         removed_from_targets +=
             cleanup_disabled_from_target(skills_dir, paths.library_dir(), &machine_prefs, dry_run)?;
     }
-    // Save manifest after cleanup (may have removed entries)
+
+    // 6. Save manifest, gitignore, and lockfile
     if !dry_run && paths.tome_home().is_dir() {
         manifest::save(&manifest, paths.tome_home())?;
     }
-
-    // Generate .gitignore files after cleanup so stale entries are excluded
     if !dry_run && paths.library_dir().is_dir() {
         library::generate_gitignore(paths.library_dir(), &manifest)?;
     }
-    // Generate top-level .gitignore at tome home (excludes internal files)
     if !dry_run && paths.tome_home().is_dir() {
         generate_tome_home_gitignore(paths.tome_home())?;
-    }
-
-    // Generate lockfile for reproducibility
-    if !dry_run && paths.tome_home().is_dir() {
-        let lf = lockfile::generate(&manifest, &skills);
-        if let Err(e) = lockfile::save(&lf, paths.tome_home()) {
+        if let Err(e) = lockfile::save(&new_lockfile, paths.tome_home()) {
             eprintln!("warning: could not save lockfile: {e}");
         }
     }
@@ -524,197 +557,6 @@ fn sync(
                 doctor_report.total_issues()
             );
         }
-    }
-
-    // Offer git commit if tome home is a git repo with changes
-    if !dry_run && !quiet {
-        offer_git_commit(
-            paths.tome_home(),
-            report.consolidate.created,
-            report.consolidate.updated,
-            report.cleanup.removed_from_library,
-        )?;
-    }
-
-    Ok(())
-}
-
-/// The update command: diff-then-distribute with interactive triage.
-fn update_cmd(
-    config: &Config,
-    paths: &TomePaths,
-    dry_run: bool,
-    verbose: bool,
-    quiet: bool,
-    machine_override: Option<&Path>,
-) -> Result<()> {
-    if dry_run && !quiet {
-        eprintln!(
-            "{}",
-            style("[dry-run] No changes will be made").yellow().bold()
-        );
-    }
-
-    let show_progress = !quiet && !verbose;
-
-    // Load per-machine preferences
-    let machine_path = resolve_machine_path(machine_override)?;
-    let mut machine_prefs = machine::load(&machine_path)?;
-
-    // Warn about disabled_targets that don't match any configured target
-    if !quiet {
-        warn_unknown_disabled_targets(&machine_prefs, config);
-    }
-
-    // 1. Load existing lockfile (may be committed by another machine)
-    let old_lockfile = lockfile::load(paths.tome_home())?;
-
-    // 2. Discover
-    let sp = show_progress.then(|| spinner("Discovering skills..."));
-    if verbose {
-        eprintln!("{}", style("Discovering skills...").dim());
-    }
-    let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &mut warnings)?;
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
-    if !quiet {
-        for w in &warnings {
-            eprintln!("warning: {}", w);
-        }
-    }
-
-    if skills.is_empty() {
-        if !quiet {
-            println!("No skills found. Run `tome init` to configure sources.");
-        }
-        return Ok(());
-    }
-
-    // 3. Consolidate into library
-    let sp = show_progress.then(|| spinner("Consolidating to library..."));
-    if verbose {
-        eprintln!("{}", style("Consolidating to library...").dim());
-    }
-    let (consolidate_result, mut manifest) = library::consolidate(&skills, paths, dry_run, false)?;
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
-
-    // 4. Generate new lockfile and diff against old
-    let new_lockfile = lockfile::generate(&manifest, &skills);
-    if let Some(ref old) = old_lockfile {
-        let d = update::diff(old, &new_lockfile);
-        if !d.is_empty() {
-            if !quiet {
-                println!("{}", style("Library changes detected:").bold());
-            }
-            let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
-            if !newly_disabled.is_empty() && !dry_run {
-                machine::save(&machine_prefs, &machine_path)?;
-                if !quiet {
-                    println!(
-                        "  {} skill(s) disabled in {}",
-                        newly_disabled.len(),
-                        machine_path.display()
-                    );
-                }
-            }
-        } else if !quiet {
-            println!("{}", style("No library changes since last sync.").dim());
-        }
-    } else if !quiet {
-        println!(
-            "{}",
-            style("No previous lockfile found — performing initial sync.").dim()
-        );
-    }
-
-    let discovered_names: HashSet<String> =
-        skills.iter().map(|s| s.name.as_str().to_string()).collect();
-
-    // 5. Distribute (respects machine_prefs including just-disabled skills)
-    let mut distribute_results = Vec::new();
-    for (name, target) in config.targets.iter() {
-        if machine_prefs.is_target_disabled(name.as_str()) {
-            if verbose {
-                eprintln!(
-                    "{}",
-                    style(format!(
-                        "Skipping target '{}' (disabled in machine preferences)",
-                        name
-                    ))
-                    .dim()
-                );
-            }
-            continue;
-        }
-        let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
-        if verbose {
-            eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
-        }
-        let result = distribute::distribute_to_target(
-            paths.library_dir(),
-            name.as_str(),
-            target,
-            &manifest,
-            &machine_prefs,
-            dry_run,
-            false,
-        )?;
-        distribute_results.push(result);
-        if let Some(sp) = sp {
-            sp.finish_and_clear();
-        }
-    }
-
-    // 6. Cleanup stale entries + disabled skill symlinks
-    let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
-    if verbose {
-        eprintln!("{}", style("Cleaning up stale entries...").dim());
-    }
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
-    let cleanup_result = cleanup::cleanup_library(
-        paths.library_dir(),
-        &discovered_names,
-        &mut manifest,
-        dry_run,
-        quiet,
-    )?;
-
-    let mut removed_from_targets = 0usize;
-    for (_name, target) in config.targets.iter() {
-        let skills_dir = target.skills_dir();
-        removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
-        // Also clean up symlinks for disabled skills
-        removed_from_targets +=
-            cleanup_disabled_from_target(skills_dir, paths.library_dir(), &machine_prefs, dry_run)?;
-    }
-
-    // 7. Save lockfile + manifest
-    if !dry_run && paths.tome_home().is_dir() {
-        manifest::save(&manifest, paths.tome_home())?;
-        if paths.library_dir().is_dir() {
-            library::generate_gitignore(paths.library_dir(), &manifest)?;
-        }
-        if let Err(e) = lockfile::save(&new_lockfile, paths.tome_home()) {
-            eprintln!("warning: could not save lockfile: {e}");
-        }
-    }
-
-    let report = SyncReport {
-        consolidate: consolidate_result,
-        distributions: distribute_results,
-        cleanup: cleanup_result,
-        removed_from_targets,
-        warnings,
-    };
-
-    if !quiet {
-        render_sync_report(&report);
     }
 
     // Offer git commit if tome home is a git repo with changes
