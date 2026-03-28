@@ -179,6 +179,96 @@ pub(crate) fn diff(repo_dir: &Path, target: &str) -> Result<String> {
     Ok(stdout)
 }
 
+/// Check whether the repo has a remote named "origin" configured.
+pub(crate) fn has_remote(repo_dir: &Path) -> bool {
+    git(repo_dir, &["remote", "get-url", "origin"])
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Pull from remote (fast-forward only).
+///
+/// Returns `Ok(true)` if changes were pulled, `Ok(false)` if already up-to-date.
+/// Bails on diverged histories — the user must resolve manually.
+pub(crate) fn pull(repo_dir: &Path) -> Result<bool> {
+    git_success(repo_dir, &["fetch", "origin"])?;
+
+    // Determine the remote branch: use whatever origin/HEAD points to,
+    // falling back to origin/main then origin/master.
+    let remote_ref = detect_remote_branch(repo_dir)?;
+
+    let local = git_stdout(repo_dir, &["rev-parse", "HEAD"])?;
+    let remote = git_stdout(repo_dir, &["rev-parse", &remote_ref])?;
+
+    if local == remote {
+        return Ok(false);
+    }
+
+    let output = git(repo_dir, &["merge", "--ff-only", &remote_ref])?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "remote has diverged — resolve manually with `cd {} && git pull`",
+            repo_dir.display()
+        );
+    }
+    Ok(true)
+}
+
+/// Push the current branch to origin.
+pub(crate) fn push(repo_dir: &Path) -> Result<()> {
+    let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let output = git(repo_dir, &["push", "origin", &branch])?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git push failed: {}", stderr.trim());
+    }
+    Ok(())
+}
+
+/// Add a remote named "origin" to the repo.
+pub(crate) fn add_remote(repo_dir: &Path, url: &str) -> Result<()> {
+    git_success(repo_dir, &["remote", "add", "origin", url])
+}
+
+/// Verify the remote is reachable.
+///
+/// Accepts exit code 0 (refs found) and 2 (connected but empty repo).
+pub(crate) fn verify_remote(repo_dir: &Path) -> Result<()> {
+    let output = git(repo_dir, &["ls-remote", "--exit-code", "origin"])?;
+    let code = output.status.code().unwrap_or(-1);
+    // 0 = success, 2 = connected but no matching refs (empty repo)
+    if code != 0 && code != 2 {
+        anyhow::bail!("could not connect to remote — check the URL and your credentials");
+    }
+    Ok(())
+}
+
+/// Push the current branch to origin for the first time, setting up tracking.
+pub(crate) fn push_initial(repo_dir: &Path) -> Result<()> {
+    let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    git_success(repo_dir, &["push", "-u", "origin", &branch])
+}
+
+/// Detect the remote branch to merge from.
+///
+/// Tries `origin/main`, then `origin/master`, then `origin/<current-branch>`.
+/// Bails if none of the candidates exist on the remote.
+fn detect_remote_branch(repo_dir: &Path) -> Result<String> {
+    let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let candidates = [
+        "origin/main".to_string(),
+        "origin/master".to_string(),
+        format!("origin/{branch}"),
+    ];
+    for candidate in &candidates {
+        let output = git(repo_dir, &["rev-parse", "--verify", candidate])?;
+        if output.status.success() {
+            return Ok(candidate.clone());
+        }
+    }
+    anyhow::bail!("no remote branch found — tried {}", candidates.join(", "));
+}
+
 /// Render backup entries to stdout.
 pub(crate) fn render_list(entries: &[BackupEntry]) {
     if entries.is_empty() {
@@ -354,5 +444,78 @@ mod tests {
         let log = git_stdout(&lib_dir, &["log", "--oneline"]).unwrap();
         let commit_count = log.lines().count();
         assert_eq!(commit_count, 1, "dry run should not create a commit");
+    }
+
+    #[test]
+    fn has_remote_false_without_remote() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        init_test_repo(&dir);
+        assert!(!has_remote(&dir));
+    }
+
+    #[test]
+    fn has_remote_true_with_remote() {
+        let tmp = TempDir::new().unwrap();
+        let dir = tmp.path().join("repo");
+        std::fs::create_dir_all(&dir).unwrap();
+        init_test_repo(&dir);
+
+        // Create a bare remote from existing repo
+        let remote_dir = tmp.path().join("remote.git");
+        git_success(
+            &dir,
+            &["clone", "--bare", ".", remote_dir.to_str().unwrap()],
+        )
+        .unwrap();
+
+        add_remote(&dir, remote_dir.to_str().unwrap()).unwrap();
+        assert!(has_remote(&dir));
+    }
+
+    #[test]
+    fn push_and_pull_roundtrip() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create repo A first (so we have commits to push)
+        let repo_a = tmp.path().join("repo_a");
+        std::fs::create_dir_all(&repo_a).unwrap();
+        init_test_repo(&repo_a);
+
+        // Create a bare remote from repo A
+        let remote_dir = tmp.path().join("remote.git");
+        git_success(
+            &repo_a,
+            &["clone", "--bare", ".", remote_dir.to_str().unwrap()],
+        )
+        .unwrap();
+        add_remote(&repo_a, remote_dir.to_str().unwrap()).unwrap();
+
+        // Clone into repo B
+        let repo_b = tmp.path().join("repo_b");
+        git_success(
+            tmp.path(),
+            &["clone", remote_dir.to_str().unwrap(), "repo_b"],
+        )
+        .unwrap();
+        setup_git_config(&repo_b);
+
+        // Add a file in repo A and push
+        std::fs::write(repo_a.join("new-skill.md"), "# Skill").unwrap();
+        snapshot(&repo_a, Some("add skill"), false).unwrap();
+        push(&repo_a).unwrap();
+
+        // Pull in repo B — should get the new file
+        let pulled = pull(&repo_b).unwrap();
+        assert!(pulled, "should have pulled changes");
+        assert!(
+            repo_b.join("new-skill.md").exists(),
+            "pulled file should exist"
+        );
+
+        // Pull again — should be up-to-date
+        let pulled_again = pull(&repo_b).unwrap();
+        assert!(!pulled_again, "should be up-to-date");
     }
 }

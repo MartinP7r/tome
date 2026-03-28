@@ -277,6 +277,13 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Backup { sub } => match sub {
             cli::BackupCommand::Init => {
                 backup::init(paths.tome_home(), cli.dry_run)?;
+                // Offer remote setup after successful init (interactive only)
+                if !cli.dry_run
+                    && std::io::stdin().is_terminal()
+                    && !backup::has_remote(paths.tome_home())
+                {
+                    offer_remote_setup(paths.tome_home())?;
+                }
             }
             cli::BackupCommand::Snapshot { message } => {
                 backup::snapshot(paths.tome_home(), message.as_deref(), cli.dry_run)?;
@@ -363,12 +370,28 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     let show_progress = !quiet && !verbose;
 
+    // Cache git state to avoid repeated subprocess calls
+    let has_backup_repo = backup::has_repo(paths.tome_home());
+    let has_remote = has_backup_repo && backup::has_remote(paths.tome_home());
+
+    // Pull from remote before anything else (if configured)
+    if !dry_run && has_remote {
+        match backup::pull(paths.tome_home()) {
+            Ok(true) => {
+                if !quiet {
+                    println!(
+                        "  {} Pulled changes from remote",
+                        console::style("↓").cyan()
+                    );
+                }
+            }
+            Ok(false) => {} // up to date
+            Err(e) => eprintln!("warning: remote pull failed: {e}"),
+        }
+    }
+
     // Pre-sync auto-snapshot if configured
-    if !dry_run
-        && config.backup.enabled
-        && config.backup.auto_snapshot
-        && backup::has_repo(paths.tome_home())
-    {
+    if !dry_run && config.backup.enabled && config.backup.auto_snapshot && has_backup_repo {
         match backup::snapshot(paths.tome_home(), Some("pre-sync auto-snapshot"), false) {
             Ok(true) => {
                 if !quiet {
@@ -560,13 +583,27 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     }
 
     // Offer git commit if tome home is a git repo with changes
-    if !dry_run && !quiet {
+    let committed = if !dry_run && !quiet {
         offer_git_commit(
             paths.tome_home(),
             report.consolidate.created,
             report.consolidate.updated,
             report.cleanup.removed_from_library,
-        )?;
+        )?
+    } else {
+        false
+    };
+
+    // Push to remote after commit (only if something was committed)
+    if committed && has_remote {
+        match backup::push(paths.tome_home()) {
+            Ok(()) => {
+                if !quiet {
+                    println!("  {} Pushed to remote", console::style("↑").cyan());
+                }
+            }
+            Err(e) => eprintln!("warning: remote push failed: {e}"),
+        }
     }
 
     Ok(())
@@ -796,14 +833,16 @@ fn generate_tome_home_gitignore(tome_home: &Path) -> Result<()> {
 }
 
 /// If tome home is a git repo with uncommitted changes, prompt the user to commit.
+///
+/// Returns `true` if a commit was created, `false` otherwise.
 fn offer_git_commit(
     tome_home: &Path,
     created: usize,
     updated: usize,
     removed: usize,
-) -> Result<()> {
+) -> Result<bool> {
     if !tome_home.join(".git").exists() || !std::io::stdin().is_terminal() {
-        return Ok(());
+        return Ok(false);
     }
 
     let output = match GitCommand::new("git")
@@ -814,7 +853,7 @@ fn offer_git_commit(
         Ok(o) => o,
         Err(e) => {
             eprintln!("warning: could not run git status: {e}");
-            return Ok(());
+            return Ok(false);
         }
     };
 
@@ -823,10 +862,10 @@ fn offer_git_commit(
             "warning: git status returned non-zero exit code {:?}",
             output.status.code()
         );
-        return Ok(());
+        return Ok(false);
     }
     if output.stdout.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
 
     let msg = sync_commit_message(created, updated, removed);
@@ -837,7 +876,7 @@ fn offer_git_commit(
         .interact_opt()?;
 
     if confirm != Some(true) {
-        return Ok(());
+        return Ok(false);
     }
 
     // Stage all tracked files — .gitignore handles exclusions.
@@ -855,7 +894,7 @@ fn offer_git_commit(
         if !stderr.trim().is_empty() {
             eprintln!("  git said: {}", stderr.trim());
         }
-        return Ok(());
+        return Ok(false);
     }
 
     let commit_output = GitCommand::new("git")
@@ -871,10 +910,10 @@ fn offer_git_commit(
         if !stderr.trim().is_empty() {
             eprintln!("  git said: {}", stderr.trim());
         }
-        return Ok(());
+        return Ok(false);
     }
 
-    Ok(())
+    Ok(true)
 }
 
 /// Build a commit message summarizing sync changes.
@@ -903,6 +942,54 @@ fn show_config(config: &Config, path_only: bool) -> Result<()> {
         let toml_str = toml::to_string_pretty(config)?;
         println!("{}", toml_str);
     }
+    Ok(())
+}
+
+/// Interactive prompt to add a remote for cross-machine sync after `tome backup init`.
+fn offer_remote_setup(tome_home: &Path) -> Result<()> {
+    let add_remote = dialoguer::Confirm::new()
+        .with_prompt("Add a remote for cross-machine sync?")
+        .default(false)
+        .interact()?;
+
+    if !add_remote {
+        return Ok(());
+    }
+
+    let url: String = dialoguer::Input::new()
+        .with_prompt("Remote URL (e.g. git@github.com:user/tome-home.git)")
+        .interact_text()?;
+
+    backup::add_remote(tome_home, &url)?;
+
+    print!("Verifying connection... ");
+    match backup::verify_remote(tome_home) {
+        Ok(()) => {
+            println!("{}", console::style("ok").green());
+        }
+        Err(e) => {
+            println!("{}", console::style("failed").red());
+            eprintln!("warning: {e}");
+            eprintln!(
+                "The remote was added but could not be reached. Fix the URL or credentials, then run `tome sync`."
+            );
+            return Ok(());
+        }
+    }
+
+    match backup::push_initial(tome_home) {
+        Ok(()) => {
+            println!(
+                "{} Remote configured and initial push complete",
+                console::style("✓").green()
+            );
+        }
+        Err(e) => {
+            eprintln!("warning: initial push failed: {e}");
+            eprintln!("The remote was added. Push will be retried on next `tome sync`.");
+        }
+    }
+
     Ok(())
 }
 
