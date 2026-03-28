@@ -215,16 +215,14 @@ pub(crate) fn pull(repo_dir: &Path) -> Result<bool> {
 }
 
 /// Push the current branch to origin.
-///
-/// Returns `Ok(true)` if commits were pushed, `Ok(false)` if already up-to-date.
-pub(crate) fn push(repo_dir: &Path) -> Result<bool> {
+pub(crate) fn push(repo_dir: &Path) -> Result<()> {
     let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     let output = git(repo_dir, &["push", "origin", &branch])?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow::bail!("git push failed: {}", stderr.trim());
     }
-    Ok(true)
+    Ok(())
 }
 
 /// Add a remote named "origin" to the repo.
@@ -233,9 +231,13 @@ pub(crate) fn add_remote(repo_dir: &Path, url: &str) -> Result<()> {
 }
 
 /// Verify the remote is reachable.
+///
+/// Accepts exit code 0 (refs found) and 2 (connected but empty repo).
 pub(crate) fn verify_remote(repo_dir: &Path) -> Result<()> {
     let output = git(repo_dir, &["ls-remote", "--exit-code", "origin"])?;
-    if !output.status.success() {
+    let code = output.status.code().unwrap_or(-1);
+    // 0 = success, 2 = connected but no matching refs (empty repo)
+    if code != 0 && code != 2 {
         anyhow::bail!("could not connect to remote — check the URL and your credentials");
     }
     Ok(())
@@ -249,17 +251,22 @@ pub(crate) fn push_initial(repo_dir: &Path) -> Result<()> {
 
 /// Detect the remote branch to merge from.
 ///
-/// Tries `origin/main`, then `origin/master`, then the current branch on origin.
+/// Tries `origin/main`, then `origin/master`, then `origin/<current-branch>`.
+/// Bails if none of the candidates exist on the remote.
 fn detect_remote_branch(repo_dir: &Path) -> Result<String> {
-    for candidate in &["origin/main", "origin/master"] {
+    let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let candidates = [
+        "origin/main".to_string(),
+        "origin/master".to_string(),
+        format!("origin/{branch}"),
+    ];
+    for candidate in &candidates {
         let output = git(repo_dir, &["rev-parse", "--verify", candidate])?;
         if output.status.success() {
-            return Ok(candidate.to_string());
+            return Ok(candidate.clone());
         }
     }
-    // Fall back to origin/<current-branch>
-    let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    Ok(format!("origin/{branch}"))
+    anyhow::bail!("no remote branch found — tried {}", candidates.join(", "));
 }
 
 /// Render backup entries to stdout.
