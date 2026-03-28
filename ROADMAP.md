@@ -9,7 +9,7 @@
 | **v0.3.x** | Portable Library (MVP) | Per-machine preferences, `tome update`, lockfile                        | ✓      |
 | **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions    | ✓      |
 | **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       | ✓      |
-| **v0.5**   | Managed Sources        | Claude marketplace auto-install, git-backed backup                      |        |
+| **v0.5**   | Managed Sources        | Auto-install, remote sync, unified `tome sync`                          | ✓      |
 | **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
 | **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
 
@@ -128,19 +128,20 @@ Requires the v0.3 connector architecture. When distributing to specific targets,
 - Description length exceeding target's limit
 - Body syntax incompatible with target (e.g., XML tags, `!command`, `$ARGUMENTS`)
 
-## v0.5 — Managed Sources
+## v0.5 — Managed Sources ✓
 
-Auto-install managed plugins and backup the library. Builds on the portable library foundation from v0.3.x.
+Auto-install managed plugins, remote sync, and unified `tome sync` flow. Builds on the portable library foundation from v0.3.x.
 
-- [ ] **`tome update` auto-install** ([#347](https://github.com/MartinP7r/tome/issues/347)): Extend `tome update` to actively run `claude plugin install <name@registry>` for approved managed plugins, upgrading from notification-only to full reconciliation.
-- [x] **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): Managed source targeting the Claude plugin marketplace. Version pinning via version string and git commit SHA (`gitCommitSha`). Lockfile records `registry_id`, `version`, and `git_commit_sha` for full reproducibility. `tome list` shows VERSION column and `--json` includes provenance metadata.
-- [x] **Git-backed backup & restore** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup init/snapshot/list/restore/diff` with optional `auto_snapshot` pre-sync snapshots via `[backup]` config section. `tome restore <git-url>` for bootstrapping deferred to follow-up.
+- [x] **Auto-install managed plugins** ([#347](https://github.com/MartinP7r/tome/issues/347), [#355](https://github.com/MartinP7r/tome/pull/355)): `tome sync` detects missing managed plugins from the lockfile, prompts to install via `claude plugin install <registry_id>`. Runs before discovery so newly installed plugins are found immediately.
+- [x] **Git repo scope to `~/.tome/`** ([#348](https://github.com/MartinP7r/tome/issues/348), [#350](https://github.com/MartinP7r/tome/pull/350)): Backup git repo moved from `~/.tome/skills/` to `~/.tome/`, tracking skills, `tome.toml`, `tome.lock`, and future config. Top-level `.gitignore` excludes `.tome-manifest.json`.
+- [x] **Remote sync in `tome sync`** ([#349](https://github.com/MartinP7r/tome/issues/349), [#353](https://github.com/MartinP7r/tome/pull/353)): Pull from remote before sync, push after commit. Fast-forward-only merges — diverged histories bail with actionable error. `tome backup init` offers remote setup wizard.
+- [x] **Collapse `tome sync` and `tome update`** ([#352](https://github.com/MartinP7r/tome/pull/352)): `tome update` removed (breaking). `tome sync` now includes lockfile diffing and interactive triage. `--no-triage` flag for CI/scripts.
+- [x] **Claude marketplace first** ([#41](https://github.com/MartinP7r/tome/issues/41)): Managed source targeting the Claude plugin marketplace. Version pinning via version string and git commit SHA (`gitCommitSha`). Lockfile records `registry_id`, `version`, and `git_commit_sha` for full reproducibility.
+- [x] **Git-backed backup & restore** ([#94](https://github.com/MartinP7r/tome/issues/94)): `tome backup init/snapshot/list/restore/diff` with optional `auto_snapshot` pre-sync snapshots via `[backup]` config section.
 - [x] **Portable config paths**: Wizard writes `~/`-prefixed paths in `tome.toml` for portability across machines.
-- [ ] **Git repo scope for library** ([#348](https://github.com/MartinP7r/tome/issues/348)): Design decision needed — should the git repo be scoped to just the library, or to a broader "tome home" that also tracks hooks, commands, agents, and other AI tool config? The broader scope is more useful for portable machine setup (backup everything, not just skills), but complicates `tome sync` git operations which currently assume library-only changes. Options: (a) git root = `~/.tome/` (includes skills + config), (b) git root = library only (skills), (c) let the user decide and scope git operations accordingly.
-- [ ] **Remote library sync** ([#349](https://github.com/MartinP7r/tome/issues/349)): `tome pull` / `tome push` for syncing the git-backed library with a remote. Handle merge conflicts in skill files — detect conflicts after pull, offer `tome doctor` to verify integrity. `tome update` lockfile diffing should account for remote changes to the lockfile.
 - [x] **Shell completions** ([#208](https://github.com/MartinP7r/tome/issues/208)): `tome completions <shell>` for bash, zsh, fish, PowerShell via `clap_complete`
 - [x] **Demote lockfile write failure to warning** ([#224](https://github.com/MartinP7r/tome/issues/224)): Lockfile write failures demoted to warning
-- [ ] **Skill lifecycle** ([#252](https://github.com/MartinP7r/tome/issues/252)): Forking, evaluation, and publishing workflow — unscoped, needs design
+- [ ] **Skill lifecycle** ([#252](https://github.com/MartinP7r/tome/issues/252)): Forking, evaluation, and publishing workflow — unscoped, deferred
 
 ## v0.6 — Git Sources
 
