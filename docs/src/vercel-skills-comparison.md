@@ -35,7 +35,7 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **Copy fallback**             | ❌                | ✅                       | Vercel falls back to copy when symlinks fail                                        |
 | **Lockfile**                  | ✅ `tome.lock`    | ✅ `.skill-lock.json` v3 | Both track content hashes and provenance                                            |
 | **Per-machine preferences**   | ✅ `machine.toml` | ❌                       | Tome can disable skills per machine                                                 |
-| **Multi-machine sync**        | ✅ `tome update`  | ❌                       | Lockfile diffing with interactive triage                                            |
+| **Multi-machine sync**        | ✅ `tome sync`    | ❌                       | Lockfile diffing with interactive triage                                            |
 | **Library consolidation**     | ✅                | ❌                       | Tome's two-tier model; Vercel installs directly                                     |
 | **Interactive browse**        | ✅ `tome browse`  | ❌                       | TUI with fuzzy search (ratatui + nucleo)                                            |
 | **Skill scaffolding**         | ❌                | ✅ `skills init`         | Generates SKILL.md template                                                         |
@@ -97,7 +97,7 @@ The registry at skills.sh acts as a public directory of community skills. This c
 
 `skills check` POSTs to a backend API with current lockfile state, compares GitHub tree SHAs to detect available updates. `skills update` then fetches and replaces.
 
-**Tome status:** `tome update` exists but only diffs the local lockfile against the current discovery state. It doesn't check remote sources for newer versions. Once git sources land (v0.6), remote update checking should follow naturally.
+**Tome status:** `tome sync` exists but only diffs the local lockfile against the current discovery state. It doesn't check remote sources for newer versions. Once git sources land (v0.6), remote update checking should follow naturally.
 
 ### 3.5 Well-Known Providers
 
@@ -233,7 +233,7 @@ Vercel's `sanitizeName()` prevents directory traversal via skill names, and `isS
 | **Canonical location** | Library dir (`~/.tome/skills/`)                  | Agent skills dirs (`.agents/skills/`)      |
 | **Multi-machine**      | Lockfile + per-machine prefs                     | Single-machine only                        |
 | **Offline support**    | Full (library is local)                          | Partial (needs network for remote sources) |
-| **Update model**       | Diff-based triage (`tome update`)                | Replace-based (`skills update`)            |
+| **Update model**       | Diff-based triage (`tome sync`)                | Replace-based (`skills update`)            |
 | **Cleanup**            | Automated stale removal with interactive confirm | Manual `skills remove`                     |
 | **Diagnostics**        | `tome doctor` with repair                        | None                                       |
 
@@ -259,7 +259,7 @@ Prioritized by effort-to-value ratio, mapped to existing roadmap items where app
 
 5. **Source parser for git remotes** — Study Vercel's shorthand syntax (`owner/repo`, `@skill-name`, `/tree/branch`) when designing `tome add`. *(Informs v0.6: Git Sources, #58)*
 
-6. **Remote update checking** — Extend `tome update` to check remote sources, not just local lockfile diffs. *(After v0.6)*
+6. **Remote update checking** — Extend `tome sync` to check remote sources, not just local lockfile diffs. *(After v0.6)*
 
 7. **Agent auto-detection** — Upgrade wizard to detect installed agents dynamically rather than just checking path existence. *(Enhancement to wizard)*
 

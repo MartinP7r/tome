@@ -57,8 +57,7 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | Command       | Description                                              |
 | ------------- | -------------------------------------------------------- |
 | `tome init`   | Interactive wizard to configure sources and targets      |
-| `tome sync`   | Discover, consolidate, and distribute skills             |
-| `tome update` | Review library changes and sync with interactive triage  |
+| `tome sync`   | Discover, consolidate, triage changes, and distribute    |
 | `tome status` | Show library, sources, targets, and health               |
 | `tome list`   | List all discovered skills with sources                  |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues     |
@@ -132,7 +131,7 @@ disabled = ["noisy-skill", "work-only-skill"]
 disabled_targets = ["openclaw"]
 ```
 
-Disabled skills stay in the library but are skipped during distribution. Use `tome update` to interactively review new or changed skills and disable unwanted ones.
+Disabled skills stay in the library but are skipped during distribution. `tome sync` automatically diffs the lockfile and offers interactive triage when new or changed skills are detected.
 
 ## License
 
