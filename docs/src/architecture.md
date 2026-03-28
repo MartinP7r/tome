@@ -16,7 +16,7 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 2. **Consolidate** (`library.rs`) — Two strategies based on source type: **managed** skills (ClaudePlugins) are symlinked from library → source dir (package manager owns the files); **local** skills (Directory) are copied into the library (library is the canonical home). A manifest (`.tome-manifest.json`) tracks SHA-256 content hashes for idempotent updates: unchanged skills are skipped, changed skills are re-copied or re-linked. Stale directory state (e.g., a plain directory where a symlink should be) is automatically repaired.
 3. **Distribute** (`distribute.rs`) — Push library skills to target tools via symlinks in each target's skills directory. Skills disabled in machine preferences are skipped.
 4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source), broken symlinks from targets, and disabled skill symlinks from target directories. Verifies symlinks point into the library before removing.
-5. **Lockfile** (`lockfile.rs`) — Generate `tome.lock` capturing a reproducible snapshot of the library state for diffing in `tome update`.
+5. **Lockfile** (`lockfile.rs`) — Generate `tome.lock` capturing a reproducible snapshot of the library state for diffing during `tome sync`.
 
 ### Other Modules
 
@@ -27,7 +27,7 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
 - `lockfile.rs` — Generates and loads `tome.lock` files. Each entry records skill name, content hash, source, and provenance metadata. Uses atomic temp+rename writes to prevent corruption.
 - `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks a `disabled` set of skill names and a `disabled_targets` set of target names. Uses atomic temp+rename writes. Loaded during sync to filter skills.
-- `update.rs` — Implements `tome update`: loads the previous lockfile, diffs against current state, presents added/changed/removed skills interactively, and offers to disable unwanted new skills.
+- `update.rs` — Lockfile diffing and interactive triage logic, invoked by `tome sync` to surface added/changed/removed skills and offer to disable unwanted new skills.
 - `paths.rs` — Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination.
 
 ## Key Patterns

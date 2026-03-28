@@ -64,13 +64,13 @@ Disabled skills remain in the library but are skipped during distribution.
 
 This allows sharing a single library (e.g., via git) across machines while customizing which skills are active on each one.
 
-Use `tome update` to interactively review new or changed skills and disable unwanted ones. The `--machine <path>` global flag overrides the default machine preferences path.
+`tome sync` automatically diffs the lockfile and offers interactive triage when new or changed skills are detected. The `--machine <path>` global flag overrides the default machine preferences path.
 
 ## Lockfile
 
-`tome sync` generates a `tome.lock` file in the tome home directory (`~/.tome/tome.lock`). This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. It is used by `tome update` to diff against the current state and surface changes.
+`tome sync` generates a `tome.lock` file in the tome home directory (`~/.tome/tome.lock`). This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. Each sync diffs the new lockfile against the previous one and surfaces changes interactively.
 
-The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome update` on a new machine can detect what changed since the last sync.
+The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome sync` on a new machine can detect what changed since the last sync.
 
 ## Library `.gitignore`
 

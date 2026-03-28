@@ -25,11 +25,8 @@ brew install MartinP7r/tap/tome
 # Interactive setup — discovers sources, configures targets
 tome init
 
-# Sync skills to all configured targets
+# Sync skills to all configured targets (with interactive triage)
 tome sync
-
-# Review new/changed skills interactively
-tome update
 
 # Check what's configured
 tome status
