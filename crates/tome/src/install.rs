@@ -47,12 +47,20 @@ pub(crate) fn find_missing(
 
 /// Install a plugin via `claude plugin install <registry_id>`.
 ///
-/// Returns `Ok(true)` on success, `Ok(false)` if the command wasn't found.
+/// Returns `Ok(true)` on success, `Ok(false)` if the `claude` CLI wasn't found.
 pub(crate) fn install_plugin(registry_id: &str) -> Result<bool> {
-    let output = std::process::Command::new("claude")
+    let output = match std::process::Command::new("claude")
         .args(["plugin", "install", registry_id])
         .output()
-        .with_context(|| format!("failed to run `claude plugin install {registry_id}`"))?;
+    {
+        Ok(output) => output,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(e) => {
+            return Err(anyhow::anyhow!(e).context(format!(
+                "failed to run `claude plugin install {registry_id}`"
+            )));
+        }
+    };
 
     if output.status.success() {
         Ok(true)
@@ -175,14 +183,10 @@ pub(crate) fn find_installed_plugins_json(config: &Config) -> Option<std::path::
             continue;
         }
         // Same search logic as discover_claude_plugins
-        let candidates = [
-            source.path.join("installed_plugins.json"),
-            source
-                .path
-                .parent()
-                .map(|p| p.join("installed_plugins.json"))
-                .unwrap_or_default(),
-        ];
+        let mut candidates = vec![source.path.join("installed_plugins.json")];
+        if let Some(parent) = source.path.parent() {
+            candidates.push(parent.join("installed_plugins.json"));
+        }
         for candidate in &candidates {
             if candidate.exists() {
                 return Some(candidate.clone());
