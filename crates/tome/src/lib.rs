@@ -31,6 +31,7 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod eject;
+pub(crate) mod install;
 pub(crate) mod library;
 pub(crate) mod lint;
 pub(crate) mod lockfile;
@@ -407,8 +408,13 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let machine_path = resolve_machine_path(machine_override)?;
     let mut machine_prefs = machine::load(&machine_path)?;
 
-    // Load existing lockfile for diffing
+    // Load existing lockfile for diffing and auto-install
     let old_lockfile = lockfile::load(paths.tome_home())?;
+
+    // Auto-install missing managed plugins (before discovery so they're found)
+    if !dry_run && !no_triage {
+        reconcile_managed_plugins(&old_lockfile, config, quiet)?;
+    }
 
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
@@ -941,6 +947,31 @@ fn show_config(config: &Config, path_only: bool) -> Result<()> {
     } else {
         let toml_str = toml::to_string_pretty(config)?;
         println!("{}", toml_str);
+    }
+    Ok(())
+}
+
+/// Auto-install managed plugins that are in the lockfile but not installed locally.
+fn reconcile_managed_plugins(
+    old_lockfile: &Option<lockfile::Lockfile>,
+    config: &config::Config,
+    quiet: bool,
+) -> Result<()> {
+    let Some(lf) = old_lockfile else {
+        return Ok(());
+    };
+    let Some(json_path) = install::find_installed_plugins_json(config) else {
+        return Ok(());
+    };
+    match install::reconcile(lf, &json_path, false, quiet) {
+        Ok(n) if n > 0 && !quiet => {
+            println!(
+                "  {} Installed {n} managed plugin(s)",
+                console::style("✓").green()
+            );
+        }
+        Ok(_) => {}
+        Err(e) => eprintln!("warning: plugin auto-install failed: {e}"),
     }
     Ok(())
 }
