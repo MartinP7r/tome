@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-28
+
 ### Added
+- **Auto-install missing managed plugins** during `tome sync` (#347, #355): detects plugins in the lockfile that aren't installed locally, prompts to install via `claude plugin install`
+- **Remote sync** integrated into `tome sync` (#349, #353): pull from remote before sync, push after commit. Fast-forward-only merges with actionable error on divergence
+- **Remote setup wizard** in `tome backup init`: offers to add a remote URL, verifies connectivity, pushes initial commit
+- `--no-triage` flag for `tome sync` to skip interactive prompts (for CI/scripts)
 - `tome version` subcommand and `-V` short flag (#298)
 - `typos-cli`, `cargo-machete`, and `cargo-semver-checks` CI checks (#297)
 - `TomePaths` struct bundles `tome_home` and `library_dir` to prevent parameter swaps (#287)
@@ -18,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Test to verify `tome_home` / `library_dir` separation (#279)
 
 ### Changed
+- **BREAKING: `tome update` removed** (#352): functionality merged into `tome sync`, which now includes lockfile diffing and interactive triage
+- **Git repo root moved** from `~/.tome/skills/` to `~/.tome/` (#348, #350): backup repo now tracks skills, `tome.toml`, `tome.lock`, and future config
 - Restructured tome home directory to `~/.tome/` (#271)
 
 ### Fixed
