@@ -928,7 +928,6 @@ fn disabled_note(count: usize) -> String {
     }
 }
 
-/// If the library directory is a git repo with uncommitted changes, prompt the user to commit.
 /// Generate a top-level `.gitignore` at `~/.tome/` to exclude internal files.
 ///
 /// The manifest is internal bookkeeping and should not be version-controlled.
@@ -954,6 +953,7 @@ fn generate_tome_home_gitignore(tome_home: &Path) -> Result<()> {
     Ok(())
 }
 
+/// If tome home is a git repo with uncommitted changes, prompt the user to commit.
 fn offer_git_commit(
     tome_home: &Path,
     created: usize,

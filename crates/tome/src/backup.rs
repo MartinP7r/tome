@@ -91,7 +91,7 @@ pub(crate) fn init(repo_dir: &Path, dry_run: bool) -> Result<()> {
 /// Returns `true` if a commit was created, `false` if there was nothing to commit.
 pub(crate) fn snapshot(repo_dir: &Path, message: Option<&str>, dry_run: bool) -> Result<bool> {
     if !has_repo(repo_dir) {
-        anyhow::bail!("no git repo in library — run `tome backup init` first");
+        anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
     // Stage all changes (gitignore handles managed skill exclusion)
     git_success(repo_dir, &["add", "-A"])?;
@@ -124,7 +124,7 @@ pub(crate) struct BackupEntry {
 /// List the most recent backup entries.
 pub(crate) fn list(repo_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
     if !has_repo(repo_dir) {
-        anyhow::bail!("no git repo in library — run `tome backup init` first");
+        anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
     let format = "--format=%h\t%ci\t%s";
     let count_arg = format!("-{}", count);
@@ -150,7 +150,7 @@ pub(crate) fn list(repo_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
 /// checking out files from the target ref.
 pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
     if !has_repo(repo_dir) {
-        anyhow::bail!("no git repo in library — run `tome backup init` first");
+        anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
     if dry_run {
         println!("Would restore library to {}", target);
@@ -172,7 +172,7 @@ pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()
 /// Show a diff stat of the working tree against a target ref.
 pub(crate) fn diff(repo_dir: &Path, target: &str) -> Result<String> {
     if !has_repo(repo_dir) {
-        anyhow::bail!("no git repo in library — run `tome backup init` first");
+        anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
     // Show diff of working tree against target
     let stdout = git_stdout(repo_dir, &["diff", target, "--stat"])?;
