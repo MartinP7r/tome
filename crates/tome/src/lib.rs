@@ -454,11 +454,11 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         sp.finish_and_clear();
     }
 
-    // 3. Diff lockfile and triage changes
-    let new_lockfile = lockfile::generate(&manifest, &skills);
+    // 3. Diff lockfile and triage changes (pre-cleanup snapshot for diffing)
+    let pre_cleanup_lockfile = lockfile::generate(&manifest, &skills);
     if !no_triage && !quiet {
         if let Some(ref old) = old_lockfile {
-            let d = update::diff(old, &new_lockfile);
+            let d = update::diff(old, &pre_cleanup_lockfile);
             if !d.is_empty() {
                 println!("{}", style("Library changes detected:").bold());
                 let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
@@ -489,7 +489,24 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         warn_unknown_disabled_targets(&machine_prefs, config);
     }
 
-    // 4. Distribute to targets
+    // 4. Cleanup stale library entries (before distribute so counts are accurate)
+    // Clear the spinner before cleanup_library runs: cleanup may show interactive
+    // dialoguer prompts, and a live spinner overwrites them, causing an apparent hang.
+    if verbose {
+        eprintln!("{}", style("Cleaning up stale entries...").dim());
+    }
+    let cleanup_result = cleanup::cleanup_library(
+        paths.library_dir(),
+        &discovered_names,
+        &mut manifest,
+        dry_run,
+        quiet,
+    )?;
+
+    // Regenerate lockfile after cleanup so it reflects removals
+    let new_lockfile = lockfile::generate(&manifest, &skills);
+
+    // 5. Distribute to targets
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
         if machine_prefs.is_target_disabled(name.as_str()) {
@@ -524,24 +541,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // 5. Cleanup stale entries
-    let sp = show_progress.then(|| spinner("Cleaning up stale entries..."));
-    if verbose {
-        eprintln!("{}", style("Cleaning up stale entries...").dim());
-    }
-    // Clear the spinner before cleanup_library runs: cleanup may show interactive
-    // dialoguer prompts, and a live spinner overwrites them, causing an apparent hang.
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
-    let cleanup_result = cleanup::cleanup_library(
-        paths.library_dir(),
-        &discovered_names,
-        &mut manifest,
-        dry_run,
-        quiet,
-    )?;
-
+    // 6. Cleanup stale symlinks from targets
     let mut removed_from_targets = 0usize;
     for (_name, target) in config.targets.iter() {
         let skills_dir = target.skills_dir();
@@ -551,7 +551,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             cleanup_disabled_from_target(skills_dir, paths.library_dir(), &machine_prefs, dry_run)?;
     }
 
-    // 6. Save manifest, gitignore, and lockfile
+    // 7. Save manifest, gitignore, and lockfile
     if !dry_run && paths.tome_home().is_dir() {
         manifest::save(&manifest, paths.tome_home())?;
     }
