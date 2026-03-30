@@ -270,8 +270,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::Version => unreachable!(),
         Command::Completions { shell } => {
-            let mut cmd = <cli::Cli as clap::CommandFactory>::command();
-            clap_complete::generate(shell, &mut cmd, "tome", &mut std::io::stdout());
+            install_completions(shell)?;
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
@@ -938,6 +937,48 @@ fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String
         return "tome sync".to_string();
     }
     format!("tome sync: {}", parts.join(", "))
+}
+
+/// Install shell completions to the standard location for the given shell.
+fn install_completions(shell: clap_complete::Shell) -> Result<()> {
+    use clap_complete::Shell;
+
+    let home = dirs::home_dir().context("Could not determine home directory")?;
+    let dest = match shell {
+        Shell::Fish => home.join(".config/fish/completions/tome.fish"),
+        Shell::Bash => home.join(".local/share/bash-completion/completions/tome"),
+        Shell::Zsh => home.join(".zfunc/_tome"),
+        Shell::PowerShell => {
+            anyhow::bail!(
+                "Automatic installation not supported for PowerShell.\n\
+                 Generate manually: tome completions powershell > tome.ps1\n\
+                 Then source it from your PowerShell profile."
+            );
+        }
+        _ => {
+            anyhow::bail!("Unknown shell — cannot determine completions path");
+        }
+    };
+
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Could not create {}", parent.display()))?;
+    }
+
+    let mut cmd = <cli::Cli as clap::CommandFactory>::command();
+    let mut buf = Vec::new();
+    clap_complete::generate(shell, &mut cmd, "tome", &mut buf);
+    std::fs::write(&dest, &buf).with_context(|| format!("Could not write {}", dest.display()))?;
+
+    println!("Installed {} completions to {}", shell, dest.display());
+    if shell == Shell::Zsh {
+        println!(
+            "Ensure ~/.zfunc is in your fpath. Add to .zshrc:\n  \
+             fpath=(~/.zfunc $fpath)\n  \
+             autoload -Uz compinit && compinit"
+        );
+    }
+    Ok(())
 }
 
 /// Show or print config information.

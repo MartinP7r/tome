@@ -2477,30 +2477,50 @@ fn eject_nothing_to_eject() {
 }
 
 #[test]
-fn completions_fish_outputs_valid_completions() {
+fn completions_fish_installs_to_file() {
+    let home = TempDir::new().unwrap();
     tome()
+        .env("HOME", home.path())
         .args(["completions", "fish"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("complete -c tome"));
+        .stdout(predicate::str::contains("Installed fish completions"));
+    let completions_file = home.path().join(".config/fish/completions/tome.fish");
+    assert!(completions_file.exists());
+    let content = std::fs::read_to_string(&completions_file).unwrap();
+    assert!(content.contains("complete -c tome"));
 }
 
 #[test]
-fn completions_bash_outputs_valid_completions() {
+fn completions_bash_installs_to_file() {
+    let home = TempDir::new().unwrap();
     tome()
+        .env("HOME", home.path())
         .args(["completions", "bash"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("tome"));
+        .stdout(predicate::str::contains("Installed bash completions"));
+    let completions_file = home
+        .path()
+        .join(".local/share/bash-completion/completions/tome");
+    assert!(completions_file.exists());
+    let content = std::fs::read_to_string(&completions_file).unwrap();
+    assert!(content.contains("tome"));
 }
 
 #[test]
-fn completions_zsh_outputs_valid_completions() {
+fn completions_zsh_installs_to_file() {
+    let home = TempDir::new().unwrap();
     tome()
+        .env("HOME", home.path())
         .args(["completions", "zsh"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("#compdef tome"));
+        .stdout(predicate::str::contains("Installed zsh completions"));
+    let completions_file = home.path().join(".zfunc/_tome");
+    assert!(completions_file.exists());
+    let content = std::fs::read_to_string(&completions_file).unwrap();
+    assert!(content.contains("#compdef tome"));
 }
 
 #[test]
