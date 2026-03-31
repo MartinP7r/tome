@@ -63,7 +63,10 @@ impl<'de> serde::Deserialize<'de> for ContentHash {
 #[cfg(test)]
 pub fn test_hash(seed: &str) -> ContentHash {
     use sha2::{Digest, Sha256};
-    let hash = format!("{:x}", Sha256::digest(seed.as_bytes()));
+    let hash = Sha256::digest(seed.as_bytes())
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect::<String>();
     ContentHash::new(hash).unwrap()
 }
 
