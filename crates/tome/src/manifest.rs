@@ -173,8 +173,14 @@ pub fn hash_directory(dir: &Path) -> Result<ContentHash> {
         hasher.update(&content);
     }
 
-    Ok(ContentHash::new(format!("{:x}", hasher.finalize()))
-        .expect("SHA-256 always produces 64 valid hex characters"))
+    Ok(ContentHash::new(
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>(),
+    )
+    .expect("SHA-256 always produces 64 valid hex characters"))
 }
 
 /// Get the current timestamp as an ISO 8601 string (UTC, second precision).
