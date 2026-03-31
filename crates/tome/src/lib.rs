@@ -269,8 +269,12 @@ pub fn run(cli: Cli) -> Result<()> {
             relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
         }
         Command::Version => unreachable!(),
-        Command::Completions { shell } => {
-            install_completions(shell)?;
+        Command::Completions { shell, print } => {
+            if print {
+                print_completions(shell);
+            } else {
+                install_completions(shell)?;
+            }
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
         Command::Config { path } => show_config(&config, path)?,
@@ -939,19 +943,34 @@ fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String
     format!("tome sync: {}", parts.join(", "))
 }
 
+/// Print shell completions to stdout.
+fn print_completions(shell: clap_complete::Shell) {
+    let mut cmd = <cli::Cli as clap::CommandFactory>::command();
+    clap_complete::generate(shell, &mut cmd, "tome", &mut std::io::stdout());
+}
+
 /// Install shell completions to the standard location for the given shell.
-fn install_completions(shell: clap_complete::Shell) -> Result<()> {
+pub(crate) fn install_completions(shell: clap_complete::Shell) -> Result<()> {
     use clap_complete::Shell;
 
     let home = dirs::home_dir().context("Could not determine home directory")?;
+    // Fish and Bash follow XDG conventions on all platforms (including macOS),
+    // so we use XDG env vars with standard fallbacks rather than dirs::config_dir()
+    // which returns ~/Library/Application Support on macOS.
+    let xdg_config = std::env::var("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join(".config"));
+    let xdg_data = std::env::var("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| home.join(".local/share"));
     let dest = match shell {
-        Shell::Fish => home.join(".config/fish/completions/tome.fish"),
-        Shell::Bash => home.join(".local/share/bash-completion/completions/tome"),
+        Shell::Fish => xdg_config.join("fish/completions/tome.fish"),
+        Shell::Bash => xdg_data.join("bash-completion/completions/tome"),
         Shell::Zsh => home.join(".zfunc/_tome"),
         Shell::PowerShell => {
             anyhow::bail!(
                 "Automatic installation not supported for PowerShell.\n\
-                 Generate manually: tome completions powershell > tome.ps1\n\
+                 Generate manually: tome completions powershell --print > tome.ps1\n\
                  Then source it from your PowerShell profile."
             );
         }

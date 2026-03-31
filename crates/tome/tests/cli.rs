@@ -2528,6 +2528,27 @@ fn completions_invalid_shell_fails() {
     tome().args(["completions", "invalid"]).assert().failure();
 }
 
+#[test]
+fn completions_powershell_errors_with_instructions() {
+    tome()
+        .args(["completions", "powershell"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "Automatic installation not supported",
+        ))
+        .stderr(predicate::str::contains("--print"));
+}
+
+#[test]
+fn completions_print_outputs_to_stdout() {
+    tome()
+        .args(["completions", "fish", "--print"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("complete -c tome"));
+}
+
 // === Lint tests ===
 
 #[test]

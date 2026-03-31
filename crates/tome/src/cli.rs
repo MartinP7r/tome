@@ -98,6 +98,9 @@ pub enum Command {
         /// Shell to install completions for
         #[arg(value_enum)]
         shell: clap_complete::Shell,
+        /// Print completions to stdout instead of installing
+        #[arg(long)]
+        print: bool,
     },
 
     /// Print version information
