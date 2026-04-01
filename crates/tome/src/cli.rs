@@ -18,6 +18,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub config: Option<PathBuf>,
 
+    /// Override tome home directory (default: ~/.tome/, or TOME_HOME env var)
+    #[arg(long, global = true)]
+    pub tome_home: Option<PathBuf>,
+
     /// Preview changes without modifying filesystem
     #[arg(long, global = true)]
     pub dry_run: bool,

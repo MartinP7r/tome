@@ -385,8 +385,20 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Default tome home directory: ~/.tome/
+/// Default tome home directory.
+///
+/// Resolution order:
+/// 1. `TOME_HOME` environment variable (if set and non-empty)
+/// 2. `~/.tome/`
 pub fn default_tome_home() -> Result<PathBuf> {
+    match std::env::var("TOME_HOME") {
+        Ok(val) if !val.is_empty() => return expand_tilde(Path::new(&val)),
+        Ok(_) => {}                               // empty string, fall through
+        Err(std::env::VarError::NotPresent) => {} // not set, fall through
+        Err(std::env::VarError::NotUnicode(_)) => {
+            anyhow::bail!("TOME_HOME environment variable contains invalid Unicode");
+        }
+    }
     Ok(dirs::home_dir()
         .context("could not determine home directory")?
         .join(".tome"))
@@ -774,4 +786,8 @@ skills_dir = "~/.amp/skills"
         let result: std::result::Result<TargetName, _> = serde_json::from_str(r#""""#);
         assert!(result.is_err());
     }
+
+    // TOME_HOME env var tests are covered by integration tests in cli.rs,
+    // since set_var/remove_var are unsafe in Rust 2024 edition and env var
+    // mutation in unit tests causes data races with parallel test execution.
 }

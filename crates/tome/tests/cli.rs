@@ -1890,6 +1890,99 @@ fn symlink_chain_broken_after_source_removal() {
     assert!(target_content.contains("keep-me"));
 }
 
+// === TOME_HOME tests ===
+
+#[test]
+fn tome_home_flag_overrides_default() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("my-skill", "local")
+        .build();
+
+    // The --tome-home flag should be accepted and tome should use that directory
+    // for manifest storage. We verify by syncing and checking that the manifest
+    // ends up in the custom tome home, not the default.
+    let custom_home = env.tmp.path().join("custom-tome-home");
+    std::fs::create_dir_all(&custom_home).unwrap();
+
+    // Copy config into the custom home so tome can find it
+    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+
+    tome()
+        .arg("--tome-home")
+        .arg(&custom_home)
+        .arg("sync")
+        .assert()
+        .success();
+
+    // Manifest should be in custom home, not default
+    assert!(
+        custom_home.join(".tome-manifest.json").exists(),
+        "manifest should be in custom tome home"
+    );
+}
+
+#[test]
+fn tome_home_env_var_overrides_default() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("env-skill", "local")
+        .build();
+
+    let custom_home = env.tmp.path().join("env-tome-home");
+    std::fs::create_dir_all(&custom_home).unwrap();
+    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+
+    tome()
+        .env("TOME_HOME", &custom_home)
+        .arg("sync")
+        .assert()
+        .success();
+
+    assert!(
+        custom_home.join(".tome-manifest.json").exists(),
+        "manifest should be in TOME_HOME directory"
+    );
+}
+
+#[test]
+fn tome_home_flag_takes_precedence_over_env() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("prio-skill", "local")
+        .build();
+
+    let env_home = env.tmp.path().join("env-home");
+    let flag_home = env.tmp.path().join("flag-home");
+    std::fs::create_dir_all(&env_home).unwrap();
+    std::fs::create_dir_all(&flag_home).unwrap();
+
+    // Copy config to both locations
+    std::fs::copy(&env.config_path, env_home.join("tome.toml")).unwrap();
+    std::fs::copy(&env.config_path, flag_home.join("tome.toml")).unwrap();
+
+    tome()
+        .env("TOME_HOME", &env_home)
+        .arg("--tome-home")
+        .arg(&flag_home)
+        .arg("sync")
+        .assert()
+        .success();
+
+    // Flag should win over env var
+    assert!(
+        flag_home.join(".tome-manifest.json").exists(),
+        "manifest should be in --tome-home path, not TOME_HOME env"
+    );
+    assert!(
+        !env_home.join(".tome-manifest.json").exists(),
+        "manifest should NOT be in TOME_HOME env path"
+    );
+}
+
 // === Edge Case Tests ===
 
 #[test]
