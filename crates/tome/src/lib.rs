@@ -104,7 +104,13 @@ fn resolve_tome_home(
     cli_config: Option<&Path>,
 ) -> Result<std::path::PathBuf> {
     if let Some(p) = cli_tome_home {
-        return config::expand_tilde(p);
+        let expanded = config::expand_tilde(p)?;
+        anyhow::ensure!(
+            expanded.is_absolute(),
+            "--tome-home path '{}' must be an absolute path",
+            p.display()
+        );
+        return Ok(expanded);
     }
     match cli_config {
         Some(p) => {
@@ -126,8 +132,8 @@ fn resolve_tome_home(
 /// If `--tome-home` is given (or TOME_HOME env var), derive config as `<tome_home>/tome.toml`.
 /// Otherwise, fall back to `default_config_path()` (which also reads TOME_HOME).
 fn resolve_config_path(
-    cli_config: Option<&Path>,
     cli_tome_home: Option<&Path>,
+    cli_config: Option<&Path>,
 ) -> Result<Option<std::path::PathBuf>> {
     if cli_config.is_some() {
         return Ok(cli_config.map(|p| p.to_path_buf()));
@@ -146,7 +152,7 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    let effective_config = resolve_config_path(cli.config.as_deref(), cli.tome_home.as_deref())?;
+    let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
         if let Err(e) = Config::load_or_default(effective_config.as_deref()) {
@@ -1059,6 +1065,7 @@ mod tests {
     use super::*;
     use crate::discover::SkillName;
     use std::os::unix::fs as unix_fs;
+    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
@@ -1227,5 +1234,48 @@ mod tests {
         let result = resolve_tome_home(Some(Path::new("~/my-skills/.tome")), None).unwrap();
         let home = dirs::home_dir().unwrap();
         assert_eq!(result, home.join("my-skills/.tome"));
+    }
+
+    #[test]
+    fn resolve_tome_home_relative_tome_home_returns_error() {
+        let result = resolve_tome_home(Some(Path::new("relative/path")), None);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("must be an absolute path")
+        );
+    }
+
+    // --- resolve_config_path tests ---
+
+    #[test]
+    fn resolve_config_path_cli_config_takes_priority() {
+        let result = resolve_config_path(
+            Some(Path::new("/custom/home")),
+            Some(Path::new("/explicit/config.toml")),
+        )
+        .unwrap();
+        assert_eq!(result, Some(PathBuf::from("/explicit/config.toml")));
+    }
+
+    #[test]
+    fn resolve_config_path_derives_from_tome_home() {
+        let result = resolve_config_path(Some(Path::new("/my/tome-home")), None).unwrap();
+        assert_eq!(result, Some(PathBuf::from("/my/tome-home/tome.toml")));
+    }
+
+    #[test]
+    fn resolve_config_path_tilde_expansion() {
+        let result = resolve_config_path(Some(Path::new("~/my-repo/.tome")), None).unwrap();
+        let home = dirs::home_dir().unwrap();
+        assert_eq!(result, Some(home.join("my-repo/.tome/tome.toml")));
+    }
+
+    #[test]
+    fn resolve_config_path_none_returns_none() {
+        let result = resolve_config_path(None, None).unwrap();
+        assert_eq!(result, None);
     }
 }
