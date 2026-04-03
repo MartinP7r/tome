@@ -88,7 +88,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         .collect();
 
     let health = if paths.library_dir().is_dir() {
-        count_health_issues(paths.library_dir(), paths.tome_home()).map_err(|e| e.to_string())
+        count_health_issues(paths.library_dir(), paths.config_dir()).map_err(|e| e.to_string())
     } else {
         Ok(0)
     };

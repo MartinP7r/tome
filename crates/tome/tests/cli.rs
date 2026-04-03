@@ -1983,6 +1983,140 @@ fn tome_home_flag_takes_precedence_over_env() {
     );
 }
 
+// --- Smart config detection tests ---
+
+#[test]
+fn tome_home_finds_config_in_dotdir() {
+    // When config is at TOME_HOME/.tome/tome.toml, tome should find it
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("dotdir-skill", "local")
+        .build();
+
+    let repo_root = env.tmp.path().join("my-repo");
+    let dotdir = repo_root.join(".tome");
+    std::fs::create_dir_all(&dotdir).unwrap();
+    std::fs::copy(&env.config_path, dotdir.join("tome.toml")).unwrap();
+
+    tome()
+        .arg("--tome-home")
+        .arg(&repo_root)
+        .arg("sync")
+        .assert()
+        .success();
+
+    // Manifest and lockfile should be in .tome/ subdir, not repo root
+    assert!(
+        dotdir.join(".tome-manifest.json").exists(),
+        "manifest should be in .tome/ subdir"
+    );
+    assert!(
+        dotdir.join("tome.lock").exists(),
+        "lockfile should be in .tome/ subdir"
+    );
+    assert!(
+        !repo_root.join(".tome-manifest.json").exists(),
+        "manifest should NOT be at repo root"
+    );
+}
+
+#[test]
+fn tome_home_falls_back_to_root_config() {
+    // When config is at TOME_HOME/tome.toml (no .tome/ subdir), tome should use root
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("root-skill", "local")
+        .build();
+
+    let custom_home = env.tmp.path().join("root-config-home");
+    std::fs::create_dir_all(&custom_home).unwrap();
+    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+
+    tome()
+        .arg("--tome-home")
+        .arg(&custom_home)
+        .arg("sync")
+        .assert()
+        .success();
+
+    // Manifest and lockfile should be at root (backwards compat)
+    assert!(
+        custom_home.join(".tome-manifest.json").exists(),
+        "manifest should be at tome home root"
+    );
+    assert!(
+        custom_home.join("tome.lock").exists(),
+        "lockfile should be at tome home root"
+    );
+}
+
+#[test]
+fn tome_home_dotdir_wins_over_root() {
+    // When both TOME_HOME/.tome/tome.toml and TOME_HOME/tome.toml exist,
+    // .tome/ subdir should win
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("priority-skill", "local")
+        .build();
+
+    let repo_root = env.tmp.path().join("both-configs");
+    let dotdir = repo_root.join(".tome");
+    std::fs::create_dir_all(&dotdir).unwrap();
+
+    // Put config in both locations
+    std::fs::copy(&env.config_path, dotdir.join("tome.toml")).unwrap();
+    std::fs::copy(&env.config_path, repo_root.join("tome.toml")).unwrap();
+
+    tome()
+        .arg("--tome-home")
+        .arg(&repo_root)
+        .arg("sync")
+        .assert()
+        .success();
+
+    // .tome/ subdir should win — manifest goes there
+    assert!(
+        dotdir.join(".tome-manifest.json").exists(),
+        "manifest should be in .tome/ subdir (wins over root)"
+    );
+    assert!(
+        !repo_root.join(".tome-manifest.json").exists(),
+        "manifest should NOT be at root when .tome/ exists"
+    );
+}
+
+#[test]
+fn config_path_shows_correct_location_for_dotdir() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("cfg-skill", "local")
+        .build();
+
+    let repo_root = env.tmp.path().join("config-path-test");
+    let dotdir = repo_root.join(".tome");
+    std::fs::create_dir_all(&dotdir).unwrap();
+    std::fs::copy(&env.config_path, dotdir.join("tome.toml")).unwrap();
+
+    let output = tome()
+        .arg("--tome-home")
+        .arg(&repo_root)
+        .args(["config", "--path"])
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let expected = dotdir.join("tome.toml");
+    assert!(
+        stdout.trim().ends_with(".tome/tome.toml"),
+        "config --path should show .tome/tome.toml, got: {}",
+        stdout.trim()
+    );
+    assert_eq!(stdout.trim(), expected.display().to_string());
+}
+
 // === Edge Case Tests ===
 
 #[test]
@@ -2572,13 +2706,15 @@ fn eject_nothing_to_eject() {
 #[test]
 fn completions_fish_installs_to_file() {
     let home = TempDir::new().unwrap();
+    let xdg_config = home.path().join(".config");
     tome()
         .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", &xdg_config)
         .args(["completions", "fish"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Installed fish completions"));
-    let completions_file = home.path().join(".config/fish/completions/tome.fish");
+    let completions_file = xdg_config.join("fish/completions/tome.fish");
     assert!(completions_file.exists());
     let content = std::fs::read_to_string(&completions_file).unwrap();
     assert!(content.contains("complete -c tome"));
@@ -2587,15 +2723,15 @@ fn completions_fish_installs_to_file() {
 #[test]
 fn completions_bash_installs_to_file() {
     let home = TempDir::new().unwrap();
+    let xdg_data = home.path().join(".local/share");
     tome()
         .env("HOME", home.path())
+        .env("XDG_DATA_HOME", &xdg_data)
         .args(["completions", "bash"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Installed bash completions"));
-    let completions_file = home
-        .path()
-        .join(".local/share/bash-completion/completions/tome");
+    let completions_file = xdg_data.join("bash-completion/completions/tome");
     assert!(completions_file.exists());
     let content = std::fs::read_to_string(&completions_file).unwrap();
     assert!(content.contains("tome"));

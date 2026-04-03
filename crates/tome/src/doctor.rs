@@ -198,7 +198,7 @@ fn render_issues_for_target(name: &str, issues: &[DiagnosticIssue]) {
 
 fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     let library_dir = paths.library_dir();
-    let tome_home = paths.tome_home();
+    let config_dir = paths.config_dir();
     let mut issues = Vec::new();
 
     if !library_dir.is_dir() {
@@ -209,7 +209,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         return Ok(issues);
     }
 
-    let m = match manifest::load(tome_home) {
+    let m = match manifest::load(config_dir) {
         Ok(m) => m,
         Err(e) => {
             issues.push(DiagnosticIssue {
@@ -355,8 +355,8 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
 /// Repair library issues: remove orphan manifest entries and broken symlinks.
 fn repair_library(paths: &TomePaths) -> Result<()> {
     let library_dir = paths.library_dir();
-    let tome_home = paths.tome_home();
-    let mut m = manifest::load(tome_home).with_context(|| {
+    let config_dir = paths.config_dir();
+    let mut m = manifest::load(config_dir).with_context(|| {
         format!(
             "cannot repair: manifest is unreadable. Back up {} and run sync --force",
             crate::manifest::MANIFEST_FILENAME
@@ -409,7 +409,7 @@ fn repair_library(paths: &TomePaths) -> Result<()> {
     }
 
     if fixed > 0 {
-        manifest::save(&m, tome_home)?;
+        manifest::save(&m, config_dir)?;
     }
 
     Ok(())

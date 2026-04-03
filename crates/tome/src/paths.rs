@@ -10,17 +10,22 @@ use anyhow::Result;
 
 /// Resolved filesystem paths for a tome instance.
 ///
-/// Groups `tome_home` (metadata directory, `~/.tome/`) and `library_dir`
-/// (skill storage, typically `~/.tome/skills/`) into a single value to
-/// prevent accidental parameter swaps.
+/// Groups `tome_home` (root of managed content), `library_dir` (skill storage),
+/// and `config_dir` (where tome.toml, tome.lock, and .tome-manifest.json live)
+/// into a single value to prevent accidental parameter swaps.
+///
+/// Config files may live at `tome_home` directly (default layout) or in a
+/// `.tome/` subdirectory (custom repo layout). Smart detection picks the right
+/// one based on which `tome.toml` exists.
 #[derive(Debug, Clone)]
 pub struct TomePaths {
-    /// Top-level directory for metadata (manifest, lockfile, config).
-    /// Typically `~/.tome/`.
+    /// Root of everything tome manages. Typically `~/.tome/` or a custom repo root.
     tome_home: PathBuf,
-    /// Directory where skill contents are stored.
-    /// Typically `~/.tome/skills/`.
+    /// Directory where skill contents are stored. Typically `<tome_home>/skills/`.
     library_dir: PathBuf,
+    /// Directory where config files live (tome.toml, tome.lock, .tome-manifest.json).
+    /// Either `tome_home` itself (default) or `tome_home/.tome/` (custom repo).
+    config_dir: PathBuf,
 }
 
 impl TomePaths {
@@ -43,22 +48,15 @@ impl TomePaths {
             "library_dir must be an absolute path: {}",
             library_dir.display()
         );
-        // Soft invariant: library_dir is typically under tome_home.
-        // Not enforced as a hard error because users may intentionally separate them.
-        if !library_dir.starts_with(&tome_home) {
-            eprintln!(
-                "warning: library_dir ({}) is not under tome_home ({}) — this is unusual but allowed",
-                library_dir.display(),
-                tome_home.display()
-            );
-        }
+        let config_dir = crate::config::resolve_config_dir(&tome_home);
         Ok(Self {
             tome_home,
             library_dir,
+            config_dir,
         })
     }
 
-    /// Returns the tome home directory path.
+    /// Returns the tome home directory path (root of managed content).
     pub fn tome_home(&self) -> &Path {
         &self.tome_home
     }
@@ -68,14 +66,24 @@ impl TomePaths {
         &self.library_dir
     }
 
+    /// Returns the config directory path (where tome.toml, lockfile, manifest live).
+    pub fn config_dir(&self) -> &Path {
+        &self.config_dir
+    }
+
+    /// Path to the config file.
+    pub fn config_path(&self) -> PathBuf {
+        self.config_dir.join("tome.toml")
+    }
+
     /// Path to the manifest file.
     pub fn manifest_path(&self) -> PathBuf {
-        self.tome_home.join(crate::manifest::MANIFEST_FILENAME)
+        self.config_dir.join(crate::manifest::MANIFEST_FILENAME)
     }
 
     /// Path to the lockfile.
     pub fn lockfile_path(&self) -> PathBuf {
-        self.tome_home.join(crate::lockfile::LOCKFILE_NAME)
+        self.config_dir.join(crate::lockfile::LOCKFILE_NAME)
     }
 }
 

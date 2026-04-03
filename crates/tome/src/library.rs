@@ -89,15 +89,15 @@ pub fn consolidate(
     force: bool,
 ) -> Result<(ConsolidateResult, Manifest)> {
     let library_dir = paths.library_dir();
-    let tome_home = paths.tome_home();
+    let config_dir = paths.config_dir();
 
     if !dry_run {
         std::fs::create_dir_all(library_dir)
             .with_context(|| format!("failed to create library dir {}", library_dir.display()))?;
     }
 
-    let mut manifest = if tome_home.is_dir() {
-        manifest::load(tome_home)?
+    let mut manifest = if config_dir.is_dir() {
+        manifest::load(config_dir)?
     } else {
         Manifest::default()
     };
