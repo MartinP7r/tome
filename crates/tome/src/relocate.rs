@@ -83,7 +83,7 @@ pub(crate) fn plan(
     }
 
     // Load manifest to enumerate skills
-    let manifest = manifest::load(paths.tome_home())?;
+    let manifest = manifest::load(paths.config_dir())?;
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
         let source_path = if entry.managed {

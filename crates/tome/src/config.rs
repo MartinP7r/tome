@@ -404,9 +404,27 @@ pub fn default_tome_home() -> Result<PathBuf> {
         .join(".tome"))
 }
 
-/// Default config file path: ~/.tome/tome.toml
+/// Resolve the config directory for a given tome home.
+///
+/// Uses smart detection: if `tome_home/.tome/tome.toml` exists, config lives
+/// in the `.tome/` subdirectory (custom repo layout). Otherwise, config lives
+/// at the tome_home root (default layout).
+pub fn resolve_config_dir(tome_home: &Path) -> PathBuf {
+    let subdir = tome_home.join(".tome");
+    if subdir.join("tome.toml").exists() {
+        subdir
+    } else {
+        tome_home.to_path_buf()
+    }
+}
+
+/// Default config file path, using smart detection.
+///
+/// For default `~/.tome/`: returns `~/.tome/tome.toml` (backwards compatible).
+/// For custom repos with `.tome/` subdir: returns `<tome_home>/.tome/tome.toml`.
 pub fn default_config_path() -> Result<PathBuf> {
-    Ok(default_tome_home()?.join("tome.toml"))
+    let home = default_tome_home()?;
+    Ok(resolve_config_dir(&home).join("tome.toml"))
 }
 
 mod defaults {

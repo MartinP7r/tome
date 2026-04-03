@@ -129,8 +129,8 @@ fn resolve_tome_home(
 /// Derive the effective config file path.
 ///
 /// If `--config` is given, use that directly.
-/// If `--tome-home` is given (or TOME_HOME env var), derive config as `<tome_home>/tome.toml`.
-/// Otherwise, fall back to `default_config_path()` (which also reads TOME_HOME).
+/// If `--tome-home` is given, use smart detection (`.tome/tome.toml` if exists, else `tome.toml`).
+/// Otherwise, fall back to `default_config_path()` (which also reads TOME_HOME + smart detection).
 fn resolve_config_path(
     cli_tome_home: Option<&Path>,
     cli_config: Option<&Path>,
@@ -140,7 +140,9 @@ fn resolve_config_path(
     }
     if let Some(th) = cli_tome_home {
         let expanded = config::expand_tilde(th)?;
-        return Ok(Some(expanded.join("tome.toml")));
+        return Ok(Some(
+            config::resolve_config_dir(&expanded).join("tome.toml"),
+        ));
     }
     Ok(None)
 }
@@ -235,7 +237,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 println!("No skills found. Run `tome init` to configure sources.");
                 return Ok(());
             }
-            let manifest = manifest::load(paths.tome_home())?;
+            let manifest = manifest::load(paths.config_dir())?;
             browse::browse(skills, &manifest)?;
         }
         Command::Eject => {
@@ -271,10 +273,7 @@ pub fn run(cli: Cli) -> Result<()> {
             );
         }
         Command::Relocate { new_path } => {
-            let config_path = cli
-                .config
-                .clone()
-                .unwrap_or_else(|| paths.tome_home().join("tome.toml"));
+            let config_path = cli.config.clone().unwrap_or_else(|| paths.config_path());
 
             let plan = relocate::plan(&config, &paths, &new_path, &config_path)?;
             relocate::render_plan(&plan);
@@ -313,7 +312,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::List { json } => list(&config, cli.quiet, json)?,
-        Command::Config { path } => show_config(&config, path)?,
+        Command::Config { path } => show_config(&config, path, &paths.config_path())?,
         Command::Backup { sub } => match sub {
             cli::BackupCommand::Init => {
                 backup::init(paths.tome_home(), cli.dry_run)?;
@@ -448,7 +447,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let mut machine_prefs = machine::load(&machine_path)?;
 
     // Load existing lockfile for diffing and auto-install
-    let old_lockfile = lockfile::load(paths.tome_home())?;
+    let old_lockfile = lockfile::load(paths.config_dir())?;
 
     // Auto-install missing managed plugins (before discovery so they're found)
     if !dry_run && !no_triage {
@@ -591,15 +590,15 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     }
 
     // 7. Save manifest, gitignore, and lockfile
-    if !dry_run && paths.tome_home().is_dir() {
-        manifest::save(&manifest, paths.tome_home())?;
+    if !dry_run && paths.config_dir().is_dir() {
+        manifest::save(&manifest, paths.config_dir())?;
     }
     if !dry_run && paths.library_dir().is_dir() {
         library::generate_gitignore(paths.library_dir(), &manifest)?;
     }
-    if !dry_run && paths.tome_home().is_dir() {
-        generate_tome_home_gitignore(paths.tome_home())?;
-        if let Err(e) = lockfile::save(&new_lockfile, paths.tome_home()) {
+    if !dry_run && paths.config_dir().is_dir() {
+        generate_tome_home_gitignore(paths.config_dir())?;
+        if let Err(e) = lockfile::save(&new_lockfile, paths.config_dir()) {
             eprintln!("warning: could not save lockfile: {e}");
         }
     }
@@ -1037,9 +1036,9 @@ pub(crate) fn install_completions(shell: clap_complete::Shell) -> Result<()> {
 }
 
 /// Show or print config information.
-fn show_config(config: &Config, path_only: bool) -> Result<()> {
+fn show_config(config: &Config, path_only: bool, config_path: &Path) -> Result<()> {
     if path_only {
-        println!("{}", config::default_config_path()?.display());
+        println!("{}", config_path.display());
     } else {
         let toml_str = toml::to_string_pretty(config)?;
         println!("{}", toml_str);
