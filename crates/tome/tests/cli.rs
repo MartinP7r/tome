@@ -2706,13 +2706,15 @@ fn eject_nothing_to_eject() {
 #[test]
 fn completions_fish_installs_to_file() {
     let home = TempDir::new().unwrap();
+    let xdg_config = home.path().join(".config");
     tome()
         .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", &xdg_config)
         .args(["completions", "fish"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Installed fish completions"));
-    let completions_file = home.path().join(".config/fish/completions/tome.fish");
+    let completions_file = xdg_config.join("fish/completions/tome.fish");
     assert!(completions_file.exists());
     let content = std::fs::read_to_string(&completions_file).unwrap();
     assert!(content.contains("complete -c tome"));
@@ -2721,15 +2723,15 @@ fn completions_fish_installs_to_file() {
 #[test]
 fn completions_bash_installs_to_file() {
     let home = TempDir::new().unwrap();
+    let xdg_data = home.path().join(".local/share");
     tome()
         .env("HOME", home.path())
+        .env("XDG_DATA_HOME", &xdg_data)
         .args(["completions", "bash"])
         .assert()
         .success()
         .stdout(predicate::str::contains("Installed bash completions"));
-    let completions_file = home
-        .path()
-        .join(".local/share/bash-completion/completions/tome");
+    let completions_file = xdg_data.join("bash-completion/completions/tome");
     assert!(completions_file.exists());
     let content = std::fs::read_to_string(&completions_file).unwrap();
     assert!(content.contains("tome"));
