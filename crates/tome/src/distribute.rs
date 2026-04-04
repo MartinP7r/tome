@@ -57,6 +57,46 @@ pub fn distribute_to_target(
     }
 }
 
+/// Check if two paths share a tool root directory (e.g., both under `~/.claude/`).
+///
+/// Finds the first "tool-like" dotfile directory in each path (directories
+/// starting with `.` that match known AI tool patterns) and checks if they're
+/// the same. This detects that `~/.claude/plugins/cache/foo` and `~/.claude/skills`
+/// belong to the same tool.
+fn shares_tool_root(source: &Path, target: &Path) -> bool {
+    find_tool_dir(source) == find_tool_dir(target) && find_tool_dir(source).is_some()
+}
+
+/// Find the tool directory component in a path.
+///
+/// Looks for known tool directory names (`.claude`, `.gemini`, `.agents`, `.codex`,
+/// `.cursor`, `.copilot`, etc.) in the path components.
+fn find_tool_dir(path: &Path) -> Option<String> {
+    use std::path::Component;
+
+    const TOOL_DIRS: &[&str] = &[
+        ".claude",
+        ".gemini",
+        ".agents",
+        ".codex",
+        ".cursor",
+        ".copilot",
+        ".openclaw",
+        ".windsurf",
+        ".amp",
+    ];
+
+    for component in path.components() {
+        if let Component::Normal(name) = component
+            && let Some(name_str) = name.to_str()
+            && TOOL_DIRS.contains(&name_str)
+        {
+            return Some(name_str.to_string());
+        }
+    }
+    None
+}
+
 /// Distribute via directory-level symlinks.
 fn distribute_symlinks(
     library_dir: &Path,
@@ -108,23 +148,30 @@ fn distribute_symlinks(
             continue;
         }
 
-        // Skip skills whose original source is already inside this target dir.
-        // This prevents circular symlinks when a directory is both a source and target
-        // (e.g. ~/.claude/skills used as both).
+        // Skip skills that originate from the same tool as this target.
+        // This prevents:
+        // 1. Circular symlinks when a directory is both a source and target
+        //    (e.g. ~/.claude/skills used as both).
+        // 2. Managed plugin skills being distributed back to their own tool
+        //    (e.g. skills from ~/.claude/plugins distributed to ~/.claude/skills,
+        //    which causes duplicates since the tool already discovers them).
         if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref()) {
-            match (
+            let skip = match (
                 manifest_entry.source_path.canonicalize(),
                 skills_dir.canonicalize(),
             ) {
-                (Ok(source), Ok(target)) if source.starts_with(&target) => {
-                    result.unchanged += 1;
-                    continue;
+                (Ok(source), Ok(target)) => {
+                    // Direct circular: source is inside the target dir
+                    source.starts_with(&target)
+                    // Same tool: managed skill whose source shares a tool root
+                    // with the target (e.g. both under ~/.claude/)
+                    || (manifest_entry.managed && shares_tool_root(&source, &target))
                 }
-                // If either path can't be canonicalized (e.g. target dir doesn't
-                // exist yet in dry-run mode), they can't be the same physical
-                // directory — no circular symlink risk.
-                (Err(_), _) | (_, Err(_)) => {}
-                _ => {}
+                _ => false,
+            };
+            if skip {
+                result.unchanged += 1;
+                continue;
             }
         }
 
@@ -585,6 +632,121 @@ mod tests {
         assert_eq!(result.unchanged, 1);
         assert_eq!(result.skipped, 0);
         assert_eq!(result.changed, 0);
+    }
+
+    #[test]
+    fn distribute_skips_managed_skills_from_same_tool() {
+        // Simulate: managed skill from ~/.claude/plugins/cache/foo
+        // should NOT be distributed to ~/.claude/skills/
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+
+        // Create a fake home dir structure
+        let plugin_cache = home.join(".claude/plugins/cache/my-plugin/skills/my-skill");
+        std::fs::create_dir_all(&plugin_cache).unwrap();
+        std::fs::write(plugin_cache.join("SKILL.md"), "# managed").unwrap();
+
+        let library = home.join("library");
+        let lib_skill = library.join("my-skill");
+        std::fs::create_dir_all(&lib_skill).unwrap();
+        // Library entry is a symlink to the plugin cache (managed skill)
+        std::fs::write(lib_skill.join("SKILL.md"), "# managed").unwrap();
+
+        let target_dir = home.join(".claude/skills");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        // Manifest records this as a managed skill from the plugin cache
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            SkillEntry {
+                source_path: plugin_cache.clone(),
+                source_name: "claude-plugins".to_string(),
+                content_hash: crate::validation::test_hash("managed"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.clone(),
+            },
+        };
+
+        let result = distribute_to_target(
+            &library,
+            "claude",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        // Should be skipped (counted as unchanged), not distributed
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.changed, 0);
+        assert!(
+            !target_dir.join("my-skill").exists(),
+            "managed skill should NOT be symlinked to its own tool's skills dir"
+        );
+    }
+
+    #[test]
+    fn distribute_allows_managed_skills_to_different_tool() {
+        // Managed skill from ~/.claude/plugins SHOULD be distributed to ~/.gemini/skills
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+
+        let plugin_cache = home.join(".claude/plugins/cache/my-plugin/skills/my-skill");
+        std::fs::create_dir_all(&plugin_cache).unwrap();
+
+        let library = home.join("library");
+        let lib_skill = library.join("my-skill");
+        std::fs::create_dir_all(&lib_skill).unwrap();
+        std::fs::write(lib_skill.join("SKILL.md"), "# managed").unwrap();
+
+        let target_dir = home.join(".gemini/antigravity/skills");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            SkillEntry {
+                source_path: plugin_cache,
+                source_name: "claude-plugins".to_string(),
+                content_hash: crate::validation::test_hash("managed"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+
+        let target = TargetConfig {
+            enabled: true,
+            method: TargetMethod::Symlink {
+                skills_dir: target_dir.clone(),
+            },
+        };
+
+        let result = distribute_to_target(
+            &library,
+            "antigravity",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 1);
+        assert!(
+            target_dir.join("my-skill").is_symlink(),
+            "managed skill SHOULD be distributed to a different tool"
+        );
     }
 
     #[test]
