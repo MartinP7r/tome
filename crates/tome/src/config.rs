@@ -433,9 +433,13 @@ mod defaults {
     pub fn library_dir() -> PathBuf {
         // Best-effort default for serde; expand_tildes() and validate() will
         // surface a proper error if home is unavailable.
-        dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("~"))
-            .join(".tome")
+        // Uses TOME_HOME if set, otherwise ~/.tome/
+        super::default_tome_home()
+            .unwrap_or_else(|_| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("~"))
+                    .join(".tome")
+            })
             .join("skills")
     }
 }
