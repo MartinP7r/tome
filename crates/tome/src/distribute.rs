@@ -170,6 +170,11 @@ fn distribute_symlinks(
                 _ => false,
             };
             if skip {
+                // Remove any existing symlink from a previous sync that
+                // didn't have this check (cleans up legacy duplicates).
+                if !dry_run && target_link.is_symlink() {
+                    let _ = std::fs::remove_file(&target_link);
+                }
                 result.unchanged += 1;
                 continue;
             }
@@ -692,6 +697,26 @@ mod tests {
         assert!(
             !target_dir.join("my-skill").exists(),
             "managed skill should NOT be symlinked to its own tool's skills dir"
+        );
+
+        // Also verify: if a legacy symlink existed, it gets cleaned up
+        unix_fs::symlink(lib_skill, target_dir.join("my-skill")).unwrap();
+        assert!(target_dir.join("my-skill").is_symlink());
+
+        let result2 = distribute_to_target(
+            &library,
+            "claude",
+            &target,
+            &manifest,
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(result2.unchanged, 1);
+        assert!(
+            !target_dir.join("my-skill").exists(),
+            "legacy symlink should be removed on re-sync"
         );
     }
 
