@@ -157,6 +157,9 @@ pub fn run(cli: Cli) -> Result<()> {
     let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
+        if cli.no_input {
+            anyhow::bail!("tome init requires interactive input — cannot use --no-input");
+        }
         if let Err(e) = Config::load_or_default(effective_config.as_deref()) {
             eprintln!(
                 "warning: existing config is malformed ({}), the wizard will create a new one",
@@ -206,7 +209,7 @@ pub fn run(cli: Cli) -> Result<()> {
             },
         )?,
         Command::Status => status::show(&config, &paths)?,
-        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run)?,
+        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input)?,
         Command::Lint { path, format } => {
             let report = match path {
                 Some(p) => {

@@ -3008,6 +3008,34 @@ fn no_input_flag_skips_all_prompts() {
 }
 
 #[test]
+fn init_with_no_input_fails() {
+    tome()
+        .args(["--no-input", "init"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot use --no-input"));
+}
+
+#[test]
+fn doctor_with_no_input_skips_repair() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    // Doctor with --no-input should not hang on prompts
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "--no-input",
+            "doctor",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn no_color_env_suppresses_ansi_escapes() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
