@@ -162,6 +162,7 @@ mod tests {
             path: PathBuf::from(format!("/tmp/{name}")),
             source_name: source.to_string(),
             origin,
+            frontmatter: None,
         }
     }
 

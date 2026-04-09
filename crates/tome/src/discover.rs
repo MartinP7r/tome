@@ -149,6 +149,9 @@ pub struct DiscoveredSkill {
     pub source_name: String,
     /// How this skill was sourced (managed vs local), with optional provenance metadata.
     pub origin: SkillOrigin,
+    /// Parsed frontmatter from SKILL.md (None if parsing failed).
+    #[allow(dead_code)]
+    pub frontmatter: Option<crate::skill::SkillFrontmatter>,
 }
 
 /// Discover all skills from configured sources.
@@ -414,11 +417,18 @@ fn scan_for_skills(
                         },
                         None => SkillOrigin::Local,
                     };
+                    // Parse frontmatter if SKILL.md exists and is readable
+                    let frontmatter = std::fs::read_to_string(skill_dir.join("SKILL.md"))
+                        .ok()
+                        .and_then(|content| crate::skill::parse(&content).ok())
+                        .map(|(fm, _body)| fm);
+
                     skills.push(DiscoveredSkill {
                         name,
                         path: skill_dir.to_path_buf(),
                         source_name: source_name.to_string(),
                         origin,
+                        frontmatter,
                     });
                 }
                 Err(e) => {
