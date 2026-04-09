@@ -208,8 +208,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 machine_override: cli.machine.as_deref(),
             },
         )?,
-        Command::Status => status::show(&config, &paths)?,
-        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input)?,
+        Command::Status { json } => status::show(&config, &paths, json)?,
+        Command::Doctor { json } => {
+            doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input, json)?;
+        }
         Command::Lint { path, format } => {
             let report = match path {
                 Some(p) => {

@@ -13,6 +13,7 @@ use crate::paths::TomePaths;
 // -- Data structs --
 
 /// Status of a single configured source.
+#[derive(serde::Serialize)]
 pub struct SourceStatus {
     pub name: String,
     pub source_type: String,
@@ -24,6 +25,7 @@ pub struct SourceStatus {
 }
 
 /// Status of a single configured target.
+#[derive(serde::Serialize)]
 pub struct TargetStatus {
     pub name: String,
     pub enabled: bool,
@@ -31,6 +33,7 @@ pub struct TargetStatus {
 }
 
 /// Complete status report for the tome system.
+#[derive(serde::Serialize)]
 pub struct StatusReport {
     pub configured: bool,
     pub library_dir: PathBuf,
@@ -106,9 +109,13 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
 // -- Rendering --
 
 /// Display the current status of the tome system.
-pub fn show(config: &Config, paths: &TomePaths) -> Result<()> {
+pub fn show(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
     let report = gather(config, paths)?;
-    render_status(&report);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        render_status(&report);
+    }
     Ok(())
 }
 

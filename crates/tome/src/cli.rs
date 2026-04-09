@@ -69,12 +69,22 @@ pub enum Command {
     },
 
     /// Show library, sources, targets, and health summary
-    #[command(after_help = "Examples:\n  tome status")]
-    Status,
+    #[command(after_help = "Examples:\n  tome status\n  tome status --json")]
+    Status {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
 
     /// Diagnose and repair broken symlinks or config issues
-    #[command(after_help = "Examples:\n  tome doctor\n  tome doctor --dry-run")]
-    Doctor,
+    #[command(
+        after_help = "Examples:\n  tome doctor\n  tome doctor --dry-run\n  tome doctor --json"
+    )]
+    Doctor {
+        /// Output as JSON (skips repair)
+        #[arg(long)]
+        json: bool,
+    },
 
     /// List all discovered skills with their sources
     #[command(
