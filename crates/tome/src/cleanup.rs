@@ -45,28 +45,68 @@ pub fn cleanup_library(
         .cloned()
         .collect();
 
-    for name in stale {
-        let entry_path = library_dir.join(name.as_str());
+    // Group stale skills by their previous source for better messaging
+    let mut stale_by_source: std::collections::BTreeMap<String, Vec<SkillName>> =
+        std::collections::BTreeMap::new();
+    for name in &stale {
+        let source = manifest
+            .get(name.as_str())
+            .map(|e| e.source_name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
+        stale_by_source
+            .entry(source)
+            .or_default()
+            .push(name.clone());
+    }
 
-        if interactive {
-            let prompt = format!(
-                "Skill '{}' was removed from sources. Delete from library?",
-                name
+    // In interactive mode, show grouped summary and batch-confirm
+    let skills_to_remove: Vec<SkillName> = if interactive && !stale.is_empty() {
+        println!(
+            "{}",
+            console::style(format!(
+                "{} skill(s) from sources no longer configured:",
+                stale.len()
+            ))
+            .yellow()
+            .bold()
+        );
+        for (source, names) in &stale_by_source {
+            println!(
+                "  {} (from '{}'):",
+                console::style(format!("{} skill(s)", names.len())).dim(),
+                source
             );
-            let confirmed = dialoguer::Confirm::new()
-                .with_prompt(prompt)
-                .default(false)
-                .interact_opt()?;
-
-            if confirmed != Some(true) {
-                continue;
+            for name in names {
+                println!("    {}", name);
             }
-        } else {
-            eprintln!(
-                "warning: skill '{}' no longer in any source, removing from library",
-                name
-            );
         }
+        println!();
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt("Delete these skills from library?")
+            .default(false)
+            .interact_opt()?;
+        if confirmed == Some(true) {
+            stale.clone()
+        } else {
+            Vec::new()
+        }
+    } else if !stale.is_empty() {
+        // Non-interactive: warn and auto-remove
+        for (source, names) in &stale_by_source {
+            for name in names {
+                eprintln!(
+                    "warning: skill '{}' (from '{}') no longer in any source, removing from library",
+                    name, source
+                );
+            }
+        }
+        stale.clone()
+    } else {
+        Vec::new()
+    };
+
+    for name in skills_to_remove {
+        let entry_path = library_dir.join(name.as_str());
 
         if !dry_run {
             if entry_path.is_symlink() {
