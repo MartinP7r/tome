@@ -126,7 +126,7 @@ pub fn present_changes(
         println!();
         let display_names: Vec<&str> = added_names.iter().map(|n| n.as_str()).collect();
         let selections = dialoguer::MultiSelect::new()
-            .with_prompt("Disable any of these new skills on this machine?")
+            .with_prompt("Disable any of these new skills on this machine?\n  (space to toggle, enter to confirm)")
             .items(&display_names)
             .interact_opt()?;
 

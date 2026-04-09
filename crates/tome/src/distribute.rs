@@ -18,6 +18,8 @@ pub struct DistributeResult {
     pub skipped: usize,
     /// Skills skipped because they are disabled in machine preferences.
     pub disabled: usize,
+    /// Managed skills skipped because they originate from the same tool as the target.
+    pub skipped_managed: usize,
     pub target_name: TargetName,
 }
 
@@ -41,6 +43,7 @@ pub fn distribute_to_target(
             unchanged: 0,
             skipped: 0,
             disabled: 0,
+            skipped_managed: 0,
         });
     }
 
@@ -118,6 +121,7 @@ fn distribute_symlinks(
         unchanged: 0,
         skipped: 0,
         disabled: 0,
+        skipped_managed: 0,
     };
 
     // Library may not exist yet on a first dry-run (consolidate skips creating it).
@@ -175,7 +179,11 @@ fn distribute_symlinks(
                 if !dry_run && target_link.is_symlink() {
                     let _ = std::fs::remove_file(&target_link);
                 }
-                result.unchanged += 1;
+                if manifest_entry.managed {
+                    result.skipped_managed += 1;
+                } else {
+                    result.unchanged += 1;
+                }
                 continue;
             }
         }
@@ -691,8 +699,9 @@ mod tests {
         )
         .unwrap();
 
-        // Should be skipped (counted as unchanged), not distributed
-        assert_eq!(result.unchanged, 1);
+        // Should be skipped as managed, not distributed
+        assert_eq!(result.skipped_managed, 1);
+        assert_eq!(result.unchanged, 0);
         assert_eq!(result.changed, 0);
         assert!(
             !target_dir.join("my-skill").exists(),
@@ -713,7 +722,7 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(result2.unchanged, 1);
+        assert_eq!(result2.skipped_managed, 1);
         assert!(
             !target_dir.join("my-skill").exists(),
             "legacy symlink should be removed on re-sync"

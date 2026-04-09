@@ -729,12 +729,13 @@ fn render_sync_report(report: &SyncReport) {
 
     for dr in &report.distributions {
         println!(
-            "  {}: {} linked, {} unchanged{}{}",
+            "  {}: {} linked, {} unchanged{}{}{}",
             style(&dr.target_name).bold(),
             style(dr.changed).cyan(),
             dr.unchanged,
             skipped_note(dr.skipped),
-            disabled_note(dr.disabled)
+            disabled_note(dr.disabled),
+            managed_note(dr.skipped_managed)
         );
     }
 
@@ -853,6 +854,14 @@ fn disabled_note(count: usize) -> String {
         String::new()
     } else {
         format!(", {} disabled (machine prefs)", style(count).dim())
+    }
+}
+
+fn managed_note(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(", {} skipped (managed)", style(count).dim())
     }
 }
 
