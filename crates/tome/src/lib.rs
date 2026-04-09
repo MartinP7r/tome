@@ -157,6 +157,9 @@ pub fn run(cli: Cli) -> Result<()> {
     let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
+        if cli.no_input {
+            anyhow::bail!("tome init requires interactive input — cannot use --no-input");
+        }
         if let Err(e) = Config::load_or_default(effective_config.as_deref()) {
             eprintln!(
                 "warning: existing config is malformed ({}), the wizard will create a new one",
@@ -175,6 +178,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     dry_run: cli.dry_run,
                     force: false,
                     no_triage: true, // skip on initial sync after init
+                    no_input: cli.no_input,
                     verbose: cli.verbose,
                     quiet: cli.quiet,
                     machine_override: cli.machine.as_deref(),
@@ -197,14 +201,15 @@ pub fn run(cli: Cli) -> Result<()> {
             SyncOptions {
                 dry_run: cli.dry_run,
                 force,
-                no_triage,
+                no_triage: no_triage || cli.no_input,
+                no_input: cli.no_input,
                 verbose: cli.verbose,
                 quiet: cli.quiet,
                 machine_override: cli.machine.as_deref(),
             },
         )?,
         Command::Status => status::show(&config, &paths)?,
-        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run)?,
+        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input)?,
         Command::Lint { path, format } => {
             let report = match path {
                 Some(p) => {
@@ -385,6 +390,7 @@ struct SyncOptions<'a> {
     dry_run: bool,
     force: bool,
     no_triage: bool,
+    no_input: bool,
     verbose: bool,
     quiet: bool,
     machine_override: Option<&'a Path>,
@@ -396,6 +402,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         dry_run,
         force,
         no_triage,
+        no_input,
         verbose,
         quiet,
         machine_override,
@@ -449,9 +456,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Load existing lockfile for diffing and auto-install
     let old_lockfile = lockfile::load(paths.config_dir())?;
 
-    // Auto-install missing managed plugins (before discovery so they're found)
-    if !dry_run && !no_triage {
-        reconcile_managed_plugins(&old_lockfile, config, quiet)?;
+    // Auto-install missing managed plugins (before discovery so they're found).
+    // Run even with --no-input so users get the info message about missing plugins.
+    if !dry_run {
+        reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
     }
 
     // 1. Discover
@@ -539,6 +547,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         &mut manifest,
         dry_run,
         quiet,
+        no_input,
     )?;
 
     // Regenerate lockfile after cleanup so it reflects removals
@@ -724,12 +733,13 @@ fn render_sync_report(report: &SyncReport) {
 
     for dr in &report.distributions {
         println!(
-            "  {}: {} linked, {} unchanged{}{}",
+            "  {}: {} linked, {} unchanged{}{}{}",
             style(&dr.target_name).bold(),
             style(dr.changed).cyan(),
             dr.unchanged,
             skipped_note(dr.skipped),
-            disabled_note(dr.disabled)
+            disabled_note(dr.disabled),
+            managed_note(dr.skipped_managed)
         );
     }
 
@@ -848,6 +858,14 @@ fn disabled_note(count: usize) -> String {
         String::new()
     } else {
         format!(", {} disabled (machine prefs)", style(count).dim())
+    }
+}
+
+fn managed_note(count: usize) -> String {
+    if count == 0 {
+        String::new()
+    } else {
+        format!(", {} skipped (managed)", style(count).dim())
     }
 }
 
@@ -1051,6 +1069,7 @@ fn reconcile_managed_plugins(
     old_lockfile: &Option<lockfile::Lockfile>,
     config: &config::Config,
     quiet: bool,
+    no_input: bool,
 ) -> Result<()> {
     let Some(lf) = old_lockfile else {
         return Ok(());
@@ -1058,7 +1077,7 @@ fn reconcile_managed_plugins(
     let Some(json_path) = install::find_installed_plugins_json(config) else {
         return Ok(());
     };
-    match install::reconcile(lf, &json_path, false, quiet) {
+    match install::reconcile(lf, &json_path, false, quiet, no_input) {
         Ok(n) if n > 0 && !quiet => {
             println!(
                 "  {} Installed {n} managed plugin(s)",

@@ -54,16 +54,22 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 
 ## Commands
 
-| Command       | Description                                              |
-| ------------- | -------------------------------------------------------- |
-| `tome init`   | Interactive wizard to configure sources and targets      |
-| `tome sync`   | Discover, consolidate, triage changes, and distribute    |
-| `tome status` | Show library, sources, targets, and health               |
-| `tome list`   | List all discovered skills with sources                  |
-| `tome doctor` | Diagnose and repair broken symlinks or config issues     |
-| `tome config` | Show current configuration                               |
+| Command            | Description                                              |
+| ------------------ | -------------------------------------------------------- |
+| `tome init`        | Interactive wizard to configure sources and targets      |
+| `tome sync`        | Discover, consolidate, triage changes, and distribute    |
+| `tome status`      | Show library, sources, targets, and health               |
+| `tome list`        | List all discovered skills with sources                  |
+| `tome browse`      | Interactively browse discovered skills (fuzzy search)    |
+| `tome doctor`      | Diagnose and repair broken symlinks or config issues     |
+| `tome lint`        | Validate skill frontmatter and report issues             |
+| `tome config`      | Show current configuration                               |
+| `tome backup`      | Git-backed backup and restore for the skill library      |
+| `tome eject`       | Remove tome's symlinks from all targets (reversible)     |
+| `tome relocate`    | Move the skill library to a new location                 |
+| `tome completions` | Install shell completions (bash, zsh, fish, powershell)  |
 
-All commands support `--dry-run`, `--verbose`, `--quiet`, `--config <path>`, and `--machine <path>`.
+All commands support `--dry-run`, `--verbose`, `--quiet`, `--no-input`, `--config <path>`, and `--machine <path>`.
 
 ## How It Works
 

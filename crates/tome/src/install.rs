@@ -81,6 +81,7 @@ pub(crate) fn reconcile(
     installed_plugins_path: &Path,
     dry_run: bool,
     quiet: bool,
+    no_input: bool,
 ) -> Result<usize> {
     let missing = find_missing(lockfile, installed_plugins_path)?;
     if missing.is_empty() {
@@ -125,8 +126,8 @@ pub(crate) fn reconcile(
         return Ok(unique.len());
     }
 
-    // Prompt for confirmation (TTY only)
-    if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+    // Prompt for confirmation (TTY only, unless --no-input)
+    if !no_input && std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         let confirm = dialoguer::Confirm::new()
             .with_prompt(format!("Install {} plugin(s)?", unique.len()))
             .default(true)
@@ -134,8 +135,17 @@ pub(crate) fn reconcile(
         if !confirm {
             return Ok(0);
         }
+    } else if no_input {
+        if !quiet {
+            eprintln!(
+                "info: {} missing plugin(s) detected — skipped due to --no-input. \
+                 Run `tome sync` without --no-input to install interactively.",
+                unique.len()
+            );
+        }
+        return Ok(0);
     } else {
-        // Non-interactive: skip installation
+        // Genuine non-TTY
         if !quiet {
             eprintln!(
                 "info: {} missing plugin(s) detected — run `tome sync` interactively to install",
@@ -295,7 +305,7 @@ mod tests {
             skills: std::collections::BTreeMap::new(),
         };
 
-        let count = reconcile(&lockfile, &json, true, true).unwrap();
+        let count = reconcile(&lockfile, &json, true, true, false).unwrap();
         assert_eq!(count, 0);
     }
 }

@@ -89,7 +89,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
 // -- Rendering + control flow --
 
 /// Diagnose and optionally repair issues.
-pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()> {
+pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool, no_input: bool) -> Result<()> {
     let report = check(config, paths)?;
 
     if !report.configured {
@@ -128,7 +128,7 @@ pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()>
         );
 
         if !dry_run {
-            let confirmed = if std::io::stdin().is_terminal() {
+            let confirmed = if !no_input && std::io::stdin().is_terminal() {
                 Confirm::new()
                     .with_prompt("Repair these issues?")
                     .default(true)
@@ -691,6 +691,7 @@ mod tests {
         let result = diagnose(
             &config,
             &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()).unwrap(),
+            true,
             true,
         );
         assert!(result.is_ok());

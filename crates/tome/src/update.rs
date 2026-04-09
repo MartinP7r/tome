@@ -79,41 +79,65 @@ pub fn present_changes(
 
     let mut added_names: Vec<SkillName> = Vec::new();
 
+    // Group changes by source for cleaner output
+    let mut by_source: BTreeMap<String, Vec<(&SkillName, &SkillChange)>> = BTreeMap::new();
     for (name, change) in &diff.changes {
-        match change {
-            SkillChange::Added(entry) => {
-                let msg = if entry.registry_id.is_some() {
-                    format!(
-                        "New managed skill '{}' from source '{}' is now available.",
-                        name, entry.source_name
-                    )
-                } else {
-                    format!(
-                        "New skill '{}' from source '{}' is now available.",
-                        name, entry.source_name
-                    )
-                };
-                if interactive {
-                    println!("  {}", msg);
-                } else if !quiet {
-                    eprintln!("info: {}", msg);
+        let source = match change {
+            SkillChange::Added(e) => &e.source_name,
+            SkillChange::Changed { new, .. } => &new.source_name,
+            SkillChange::Removed(e) => &e.source_name,
+        };
+        by_source
+            .entry(source.clone())
+            .or_default()
+            .push((name, change));
+    }
+
+    for (source, changes) in &by_source {
+        if interactive {
+            println!(
+                "{}",
+                console::style(format!(
+                    "  {} ({} change{}):",
+                    source,
+                    changes.len(),
+                    if changes.len() == 1 { "" } else { "s" }
+                ))
+                .bold()
+            );
+        }
+
+        for (name, change) in changes {
+            match change {
+                SkillChange::Added(entry) => {
+                    let kind = if entry.registry_id.is_some() {
+                        "new managed"
+                    } else {
+                        "new"
+                    };
+                    if interactive {
+                        println!("    {} {}", console::style("+").green(), name);
+                    } else if !quiet {
+                        eprintln!(
+                            "info: {} skill '{}' from '{}' is now available.",
+                            kind, name, source
+                        );
+                    }
+                    added_names.push((*name).clone());
                 }
-                added_names.push(name.clone());
-            }
-            SkillChange::Changed { .. } => {
-                let msg = format!("Skill '{}' was updated (hash changed).", name);
-                if interactive {
-                    println!("  {}", msg);
-                } else if !quiet {
-                    eprintln!("info: {}", msg);
+                SkillChange::Changed { .. } => {
+                    if interactive {
+                        println!("    {} {} (updated)", console::style("~").yellow(), name);
+                    } else if !quiet {
+                        eprintln!("info: Skill '{}' was updated (hash changed).", name);
+                    }
                 }
-            }
-            SkillChange::Removed(_) => {
-                let msg = format!("Skill '{}' was removed from the library.", name);
-                if interactive {
-                    println!("  {}", msg);
-                } else if !quiet {
-                    eprintln!("info: {}", msg);
+                SkillChange::Removed(_) => {
+                    if interactive {
+                        println!("    {} {} (removed)", console::style("-").red(), name);
+                    } else if !quiet {
+                        eprintln!("info: Skill '{}' was removed from the library.", name);
+                    }
                 }
             }
         }
@@ -126,7 +150,7 @@ pub fn present_changes(
         println!();
         let display_names: Vec<&str> = added_names.iter().map(|n| n.as_str()).collect();
         let selections = dialoguer::MultiSelect::new()
-            .with_prompt("Disable any of these new skills on this machine?")
+            .with_prompt("Disable any of these new skills on this machine?\n  (space to toggle, enter to confirm)")
             .items(&display_names)
             .interact_opt()?;
 

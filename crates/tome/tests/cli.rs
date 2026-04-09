@@ -2967,3 +2967,102 @@ fn backup_list_shows_history() {
         .stdout(predicate::str::contains("first snapshot"))
         .stdout(predicate::str::contains("Initial tome backup"));
 }
+
+#[test]
+fn exit_code_2_for_invalid_args() {
+    // Clap returns exit code 2 for usage errors (invalid flags)
+    tome().arg("--nonexistent-flag").assert().code(2);
+}
+
+#[test]
+fn exit_code_1_for_runtime_errors() {
+    // Runtime errors (missing config) return exit code 1
+    tome()
+        .args(["--config", "/nonexistent/path.toml", "status"])
+        .assert()
+        .code(1);
+}
+
+#[test]
+fn no_input_flag_skips_all_prompts() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("skill-a", "local")
+        .build();
+
+    // Sync with --no-input should succeed without hanging on prompts
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "--no-input",
+            "sync",
+        ])
+        .assert()
+        .success();
+
+    // Verify skill was distributed to default target
+    let target_dir = &env.target_dirs[0].1;
+    assert!(target_dir.join("skill-a").is_symlink());
+}
+
+#[test]
+fn init_with_no_input_fails() {
+    tome()
+        .args(["--no-input", "init"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("cannot use --no-input"));
+}
+
+#[test]
+fn doctor_with_no_input_skips_repair() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    // Doctor with --no-input should not hang on prompts
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "--no-input",
+            "doctor",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
+fn no_color_env_suppresses_ansi_escapes() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    // Sync first to populate library
+    tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+        .assert()
+        .success();
+
+    // Run status with NO_COLOR=1 — output must not contain ANSI escape sequences
+    let output = tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("failed to run tome status");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("\x1b["),
+        "stdout should not contain ANSI escapes with NO_COLOR=1, got: {stdout}"
+    );
+    assert!(
+        !stderr.contains("\x1b["),
+        "stderr should not contain ANSI escapes with NO_COLOR=1, got: {stderr}"
+    );
+}
