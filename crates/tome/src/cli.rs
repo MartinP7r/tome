@@ -37,6 +37,10 @@ pub struct Cli {
     /// Path to machine preferences file (default: ~/.config/tome/machine.toml)
     #[arg(long, global = true)]
     pub machine: Option<PathBuf>,
+
+    /// Disable all interactive prompts (implies --no-triage for sync)
+    #[arg(long, global = true)]
+    pub no_input: bool,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]

@@ -28,6 +28,7 @@ pub fn cleanup_library(
     manifest: &mut Manifest,
     dry_run: bool,
     quiet: bool,
+    no_input: bool,
 ) -> Result<CleanupResult> {
     let mut result = CleanupResult::default();
 
@@ -35,7 +36,7 @@ pub fn cleanup_library(
         return Ok(result);
     }
 
-    let interactive = std::io::stdin().is_terminal() && !quiet;
+    let interactive = !no_input && std::io::stdin().is_terminal() && !quiet;
 
     // Find manifest entries not in discovered_names
     let stale: Vec<SkillName> = manifest
@@ -193,8 +194,15 @@ mod tests {
 
         // "old-skill" is NOT in discovered names — should be removed (non-interactive)
         let discovered: HashSet<String> = HashSet::new();
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, false, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(result.removed_from_library, 1);
         assert!(!library.path().join("old-skill").exists());
@@ -221,8 +229,15 @@ mod tests {
         );
 
         let discovered: HashSet<String> = ["keep-me".to_string()].into();
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, false, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(result.removed_from_library, 0);
         assert!(library.path().join("keep-me").exists());
@@ -248,8 +263,15 @@ mod tests {
         );
 
         let discovered: HashSet<String> = HashSet::new();
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, true, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            true,
+            false,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(result.removed_from_library, 1);
         // Should still exist in dry run
@@ -267,8 +289,15 @@ mod tests {
 
         let mut manifest = Manifest::default();
         let discovered: HashSet<String> = HashSet::new();
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, false, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(result.removed_from_library, 1);
         assert!(!library.path().join("broken").exists());
@@ -333,8 +362,15 @@ mod tests {
         let mut manifest = Manifest::default();
         let discovered: HashSet<String> = HashSet::new();
 
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, true, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            true,
+            false,
+            true,
+        )
+        .unwrap();
 
         // Dry-run should report it would clean up but not actually remove
         assert!(
@@ -372,8 +408,15 @@ mod tests {
 
         // Skill not in discovered names — should be removed
         let discovered: HashSet<String> = HashSet::new();
-        let result =
-            cleanup_library(library.path(), &discovered, &mut manifest, false, false).unwrap();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
 
         assert_eq!(result.removed_from_library, 1);
         assert!(

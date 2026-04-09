@@ -175,6 +175,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     dry_run: cli.dry_run,
                     force: false,
                     no_triage: true, // skip on initial sync after init
+                    no_input: cli.no_input,
                     verbose: cli.verbose,
                     quiet: cli.quiet,
                     machine_override: cli.machine.as_deref(),
@@ -197,7 +198,8 @@ pub fn run(cli: Cli) -> Result<()> {
             SyncOptions {
                 dry_run: cli.dry_run,
                 force,
-                no_triage,
+                no_triage: no_triage || cli.no_input,
+                no_input: cli.no_input,
                 verbose: cli.verbose,
                 quiet: cli.quiet,
                 machine_override: cli.machine.as_deref(),
@@ -385,6 +387,7 @@ struct SyncOptions<'a> {
     dry_run: bool,
     force: bool,
     no_triage: bool,
+    no_input: bool,
     verbose: bool,
     quiet: bool,
     machine_override: Option<&'a Path>,
@@ -396,6 +399,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         dry_run,
         force,
         no_triage,
+        no_input,
         verbose,
         quiet,
         machine_override,
@@ -451,7 +455,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // Auto-install missing managed plugins (before discovery so they're found)
     if !dry_run && !no_triage {
-        reconcile_managed_plugins(&old_lockfile, config, quiet)?;
+        reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
     }
 
     // 1. Discover
@@ -539,6 +543,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         &mut manifest,
         dry_run,
         quiet,
+        no_input,
     )?;
 
     // Regenerate lockfile after cleanup so it reflects removals
@@ -1051,6 +1056,7 @@ fn reconcile_managed_plugins(
     old_lockfile: &Option<lockfile::Lockfile>,
     config: &config::Config,
     quiet: bool,
+    no_input: bool,
 ) -> Result<()> {
     let Some(lf) = old_lockfile else {
         return Ok(());
@@ -1058,7 +1064,7 @@ fn reconcile_managed_plugins(
     let Some(json_path) = install::find_installed_plugins_json(config) else {
         return Ok(());
     };
-    match install::reconcile(lf, &json_path, false, quiet) {
+    match install::reconcile(lf, &json_path, false, quiet, no_input) {
         Ok(n) if n > 0 && !quiet => {
             println!(
                 "  {} Installed {n} managed plugin(s)",
