@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::config::{TargetConfig, TargetMethod, TargetName};
 use crate::machine::MachinePrefs;
@@ -27,12 +27,14 @@ pub struct DistributeResult {
 /// When `force` is true, all symlinks are recreated even if they already point to the correct target.
 /// The `manifest` is used to check whether a skill's source originated from the target dir
 /// (to prevent circular symlinks when a directory is both a source and target).
+#[allow(clippy::too_many_arguments)]
 pub fn distribute_to_target(
     library_dir: &Path,
     target_name: &str,
     target: &TargetConfig,
     manifest: &Manifest,
     machine_prefs: &MachinePrefs,
+    source_paths: &[PathBuf],
     dry_run: bool,
     force: bool,
 ) -> Result<DistributeResult> {
@@ -54,59 +56,61 @@ pub fn distribute_to_target(
             skills_dir,
             manifest,
             machine_prefs,
+            source_paths,
             dry_run,
             force,
         ),
     }
 }
 
-/// Check if two paths share a tool root directory (e.g., both under `~/.claude/`).
+/// Check if a managed skill's source and a target belong to the same tool.
 ///
-/// Finds the first "tool-like" dotfile directory in each path (directories
-/// starting with `.` that match known AI tool patterns) and checks if they're
-/// the same. This detects that `~/.claude/plugins/cache/foo` and `~/.claude/skills`
-/// belong to the same tool.
-fn shares_tool_root(source: &Path, target: &Path) -> bool {
-    find_tool_dir(source) == find_tool_dir(target) && find_tool_dir(source).is_some()
-}
-
-/// Find the tool directory component in a path.
+/// For each configured source, checks if the skill's source_path is under that
+/// source AND the configured source and target share a direct parent directory.
 ///
-/// Looks for known tool directory names (`.claude`, `.gemini`, `.agents`, `.codex`,
-/// `.cursor`, `.copilot`, etc.) in the path components.
-fn find_tool_dir(path: &Path) -> Option<String> {
-    use std::path::Component;
+/// Example: configured source `~/.claude/plugins` and target `~/.claude/skills`
+/// → both are children of `~/.claude/`, so they're the same tool. A managed skill
+/// from `~/.claude/plugins/cache/...` is under that source, so it's skipped.
+///
+/// Counter-example: `~/.claude/plugins` and `~/.gemini/antigravity/skills`
+/// → parents are `~/.claude/` and `~/.gemini/antigravity/`, no match.
+fn shares_tool_root(source: &Path, target: &Path, source_paths: &[PathBuf]) -> bool {
+    for configured_source in source_paths {
+        let Ok(configured) = configured_source.canonicalize() else {
+            continue;
+        };
 
-    const TOOL_DIRS: &[&str] = &[
-        ".claude",
-        ".gemini",
-        ".agents",
-        ".codex",
-        ".cursor",
-        ".copilot",
-        ".openclaw",
-        ".windsurf",
-        ".amp",
-    ];
+        // Check if the skill's source_path is under this configured source
+        if !source.starts_with(&configured) {
+            continue;
+        }
 
-    for component in path.components() {
-        if let Component::Normal(name) = component
-            && let Some(name_str) = name.to_str()
-            && TOOL_DIRS.contains(&name_str)
+        // Check if the configured source is under the target's parent, or vice versa.
+        // This catches: ~/.claude/plugins (source) under ~/.claude/ (target parent)
+        // and also: ~/.claude/skills (target) under ~/.claude/ (source parent)
+        if let Some(configured_parent) = configured.parent()
+            && target.starts_with(configured_parent)
         {
-            return Some(name_str.to_string());
+            return true;
+        }
+        if let Some(target_parent) = target.parent()
+            && configured.starts_with(target_parent)
+        {
+            return true;
         }
     }
-    None
+    false
 }
 
 /// Distribute via directory-level symlinks.
+#[allow(clippy::too_many_arguments)]
 fn distribute_symlinks(
     library_dir: &Path,
     target_name: &str,
     skills_dir: &Path,
     manifest: &Manifest,
     machine_prefs: &MachinePrefs,
+    source_paths: &[PathBuf],
     dry_run: bool,
     force: bool,
 ) -> Result<DistributeResult> {
@@ -169,7 +173,8 @@ fn distribute_symlinks(
                     source.starts_with(&target)
                     // Same tool: managed skill whose source shares a tool root
                     // with the target (e.g. both under ~/.claude/)
-                    || (manifest_entry.managed && shares_tool_root(&source, &target))
+                    || (manifest_entry.managed
+                        && shares_tool_root(&source, &target, source_paths))
                 }
                 _ => false,
             };
@@ -270,6 +275,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -299,6 +305,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -309,6 +316,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -337,6 +345,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -347,6 +356,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             true,
         )
@@ -389,6 +399,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -421,6 +432,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -439,6 +451,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -468,6 +481,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -495,6 +509,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             true,
             false,
         )
@@ -524,6 +539,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             true,
             false,
         )
@@ -554,6 +570,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -587,6 +604,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -645,6 +663,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &[],
             false,
             false,
         )
@@ -695,12 +714,16 @@ mod tests {
             },
         };
 
+        // Source paths from config — the plugin cache is under .claude/
+        let source_paths = vec![home.join(".claude/plugins")];
+
         let result = distribute_to_target(
             &library,
             "claude",
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &source_paths,
             false,
             false,
         )
@@ -725,6 +748,7 @@ mod tests {
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &source_paths,
             false,
             false,
         )
@@ -772,12 +796,16 @@ mod tests {
             },
         };
 
+        // Source paths: claude plugins is under .claude/, target is under .gemini/
+        let source_paths = vec![home.join(".claude/plugins")];
+
         let result = distribute_to_target(
             &library,
             "antigravity",
             &target,
             &manifest,
             &MachinePrefs::default(),
+            &source_paths,
             false,
             false,
         )
@@ -813,6 +841,7 @@ mod tests {
             &target,
             &manifest,
             &prefs,
+            &[],
             false,
             false,
         )
