@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.3] - 2026-04-09
+
+### Added
+- **`--no-input` global flag** (#376): Suppresses all interactive prompts (cleanup, triage, install, doctor). Implies `--no-triage` for sync. Errors on `tome init`.
+- **Managed skill counts in sync output** (#389): Per-target output shows `skipped (managed)` count for skills not distributed to their own tool
+- **Group triage output by source** (#380): Changes grouped under source headers with `+`/`~`/`-` indicators instead of flat list
+- **Batch stale cleanup prompt** (#382): Shows all stale skills grouped by previous source, confirms once instead of per-skill
+- **Keybinding hints on triage** (#381): "(space to toggle, enter to confirm)" on MultiSelect prompt
+- **Subcommand help examples** (#378): Every subcommand `--help` includes usage examples
+- **Updated docs** (#368): README command table and `docs/src/commands.md` updated with all commands and new flags (`--no-input`, `--tome-home`)
+
+### Fixed
+- **NO_COLOR support verified** (#371): `console` crate already respects `NO_COLOR` env var; added integration test
+- **Semantic exit codes verified** (#375): clap returns exit code 2 for invalid arguments; runtime errors return 1; added integration tests
+- **`--no-input` threaded through doctor** — `tome doctor --no-input` skips repair prompt
+- **Legacy symlink removal warns on failure** instead of silently discarding errors
+- **Plugin reconciliation runs with `--no-input`** — users get info message about missing plugins instead of silent skip
+
+## [0.5.2] - 2026-04-05
+
+### Fixed
+- **Legacy managed symlink cleanup** during sync: removes stale symlinks from targets on first run after v0.5.1 upgrade
+
+## [0.5.1] - 2026-04-05
+
+### Fixed
+- **Default `library_dir` from TOME_HOME** (#383): defaults to `TOME_HOME/skills` instead of hardcoded `~/.tome/skills`
+- **Skip managed skills to own tool** (#385): managed plugin skills no longer distributed to their source tool's skills directory, preventing duplicates
+
 ## [0.5.0] - 2026-03-28
 
 ### Added

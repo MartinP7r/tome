@@ -10,7 +10,11 @@
 | **v0.4.1** | Browse                 | `tome browse` (ratatui+nucleo): fuzzy search, preview, sort, actions    | ✓      |
 | **v0.4.2** | Skill Validation       | `tome lint`, frontmatter parsing, cross-tool compatibility checks       | ✓      |
 | **v0.5**   | Managed Sources        | Auto-install, remote sync, unified `tome sync`                          | ✓      |
-| **v0.6**   | Git Sources            | Remote skill repos, branch/tag/SHA pinning, private repo support        |        |
+| **v0.5.1** | Bugfix                 | Default `library_dir` from TOME_HOME, skip managed skills to own tool   | ✓      |
+| **v0.5.2** | Bugfix                 | Legacy managed symlink cleanup during sync                              | ✓      |
+| **v0.5.3** | UX & CLI Polish        | NO_COLOR, `--no-input`, grouped triage, batch cleanup, docs update      | ✓      |
+| **v0.5.4** | Infrastructure         | Merge lockfile/manifest, frontmatter in discovery, signal handling      |        |
+| **v0.6**   | Unified Directory Model | Bidirectional directories, git sources, per-target skill selection     |        |
 | **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
 
 ---
@@ -143,11 +147,49 @@ Auto-install managed plugins, remote sync, and unified `tome sync` flow. Builds 
 - [x] **Demote lockfile write failure to warning** ([#224](https://github.com/MartinP7r/tome/issues/224)): Lockfile write failures demoted to warning
 - [ ] **Skill lifecycle** ([#252](https://github.com/MartinP7r/tome/issues/252)): Forking, evaluation, and publishing workflow — unscoped, deferred
 
-## v0.6 — Git Sources
+## v0.5.1 — Bugfix ✓
 
-- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Add `type = "git"` source for remote skill repositories with clone/pull on sync, caching, branch/tag/SHA pinning, and private repo support via SSH keys or token auth. Store `source_url`, `git_ref`, `git_commit`, `skill_path_in_repo` in manifest/lockfile.
-- [ ] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import standalone SKILL.md from arbitrary GitHub repos without requiring plugin.json
-- [ ] **Update skill source after the fact**: Allow changing a skill's source (e.g. from local directory to git repo) without removing and re-adding. Use case: "I started with a local copy, now I want to track their git repo instead."
+- [x] **Default `library_dir` from TOME_HOME** ([#383](https://github.com/MartinP7r/tome/pull/383)): `library_dir` defaults to `TOME_HOME/skills` instead of hardcoded `~/.tome/skills`
+- [x] **Skip managed skills to own tool** ([#385](https://github.com/MartinP7r/tome/pull/385)): Managed plugin skills (e.g., from `~/.claude/plugins`) are no longer distributed to their own tool's skills directory, preventing duplicates
+
+## v0.5.2 — Bugfix ✓
+
+- [x] **Legacy symlink cleanup** ([#385](https://github.com/MartinP7r/tome/pull/385)): `tome sync` removes legacy managed skill symlinks from targets on first run after upgrading
+
+## v0.5.3 — UX & CLI Polish ✓
+
+- [x] **NO_COLOR support** ([#371](https://github.com/MartinP7r/tome/issues/371)): `console` crate respects `NO_COLOR` env var — colors disabled in non-TTY and when `NO_COLOR=1`
+- [x] **Semantic exit codes** ([#375](https://github.com/MartinP7r/tome/issues/375)): Exit code 2 for invalid arguments (via clap), exit code 1 for runtime errors
+- [x] **`--no-input` flag** ([#376](https://github.com/MartinP7r/tome/issues/376)): Global flag to suppress all interactive prompts (cleanup, triage, install, doctor). Implies `--no-triage` for sync. Errors on `tome init`.
+- [x] **Keybinding hints** ([#381](https://github.com/MartinP7r/tome/issues/381)): "(space to toggle, enter to confirm)" on triage MultiSelect prompt
+- [x] **Managed skill counts** ([#389](https://github.com/MartinP7r/tome/issues/389)): Sync output shows `skipped_managed` count per target (e.g., "216 skipped (managed)")
+- [x] **Group triage by source** ([#380](https://github.com/MartinP7r/tome/issues/380)): Changes grouped under source headers with +/~/- indicators
+- [x] **Batch stale messaging** ([#382](https://github.com/MartinP7r/tome/issues/382)): Cleanup shows all stale skills grouped by previous source, confirms once
+- [x] **Subcommand help examples** ([#378](https://github.com/MartinP7r/tome/issues/378)): Every subcommand has usage examples in `--help`
+- [x] **Docs update** ([#368](https://github.com/MartinP7r/tome/issues/368)): README and commands.md updated with all commands and new flags
+
+## v0.5.4 — Infrastructure
+
+- [ ] **Wizard tome_home selection** ([#369](https://github.com/MartinP7r/tome/issues/369)): Config-file-based TOME_HOME override at `~/.config/tome/config.toml`
+- [ ] **Merge lockfile/manifest** ([#370](https://github.com/MartinP7r/tome/issues/370)): Evaluate merging `tome.lock` and `.tome-manifest.json` into a single file
+- [ ] **Init consolidation** ([#362](https://github.com/MartinP7r/tome/issues/362)): Handle duplicate skills from overlapping sources during init
+- [ ] **Signal handling** ([#373](https://github.com/MartinP7r/tome/issues/373)): Graceful Ctrl-C with cleanup of partial state
+- [ ] **`--json` for status/doctor** ([#374](https://github.com/MartinP7r/tome/issues/374)): Structured JSON output for scripting
+- [ ] **Config-based tool root detection** ([#390](https://github.com/MartinP7r/tome/issues/390)): Derive tool root from source/target config paths instead of hardcoded `TOOL_DIRS`
+- [ ] **Frontmatter in discovery** ([#393](https://github.com/MartinP7r/tome/issues/393)): Parse frontmatter during `tome sync` discovery (deferred from v0.4.2)
+- [ ] **Lockfile write = error** ([#394](https://github.com/MartinP7r/tome/issues/394)): Lockfile write failure should block sync, not just warn
+
+## v0.6 — Unified Directory Model
+
+Replaces separate `[[sources]]` / `[targets.*]` config with a unified `[directories.*]` concept. Each directory declares its relationship to tome (managed, synced, library-only, target-only). See [#396](https://github.com/MartinP7r/tome/issues/396) for the full design.
+
+- [ ] **Unified directory config** ([#396](https://github.com/MartinP7r/tome/issues/396)): Replace sources/targets with bidirectional directories
+- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Remote skill repos with clone/pull, branch/tag/SHA pinning, private repo support
+- [ ] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import from arbitrary GitHub repos without plugin.json
+- [ ] **Per-target skill selection** ([#253](https://github.com/MartinP7r/tome/issues/253)): Control which skills are distributed to which targets
+- [ ] **`tome remove`** ([#392](https://github.com/MartinP7r/tome/issues/392)): CLI to remove sources/targets from config
+- [ ] **Change skill source** ([#395](https://github.com/MartinP7r/tome/issues/395)): Switch a skill's source (local → git) without re-adding
+- [ ] **Browse TUI polish** ([#365](https://github.com/MartinP7r/tome/issues/365)): Theming, match highlighting, scrollbar, markdown preview
 
 ## v0.7 — Skill Composition ("Wolpertinger")
 
