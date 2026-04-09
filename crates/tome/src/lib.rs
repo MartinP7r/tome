@@ -456,8 +456,9 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Load existing lockfile for diffing and auto-install
     let old_lockfile = lockfile::load(paths.config_dir())?;
 
-    // Auto-install missing managed plugins (before discovery so they're found)
-    if !dry_run && !no_triage {
+    // Auto-install missing managed plugins (before discovery so they're found).
+    // Run even with --no-input so users get the info message about missing plugins.
+    if !dry_run {
         reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
     }
 

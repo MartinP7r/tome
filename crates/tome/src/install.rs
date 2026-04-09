@@ -135,8 +135,17 @@ pub(crate) fn reconcile(
         if !confirm {
             return Ok(0);
         }
+    } else if no_input {
+        if !quiet {
+            eprintln!(
+                "info: {} missing plugin(s) detected — skipped due to --no-input. \
+                 Run `tome sync` without --no-input to install interactively.",
+                unique.len()
+            );
+        }
+        return Ok(0);
     } else {
-        // Non-interactive: skip installation
+        // Genuine non-TTY
         if !quiet {
             eprintln!(
                 "info: {} missing plugin(s) detected — run `tome sync` interactively to install",

@@ -176,8 +176,15 @@ fn distribute_symlinks(
             if skip {
                 // Remove any existing symlink from a previous sync that
                 // didn't have this check (cleans up legacy duplicates).
-                if !dry_run && target_link.is_symlink() {
-                    let _ = std::fs::remove_file(&target_link);
+                if !dry_run
+                    && target_link.is_symlink()
+                    && let Err(e) = std::fs::remove_file(&target_link)
+                {
+                    eprintln!(
+                        "warning: failed to remove legacy symlink {}: {}",
+                        target_link.display(),
+                        e
+                    );
                 }
                 if manifest_entry.managed {
                     result.skipped_managed += 1;
