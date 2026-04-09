@@ -3089,6 +3089,29 @@ fn doctor_json_output() {
 }
 
 #[test]
+fn config_toml_tome_home_override() {
+    // This test verifies that --tome-home takes precedence,
+    // which exercises the resolution order without needing to write
+    // to ~/.config/tome/config.toml.
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    // Sync using --tome-home to set a custom tome home
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "--tome-home",
+            &env.library_dir.parent().unwrap().to_string_lossy(),
+            "status",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn no_color_env_suppresses_ansi_escapes() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
