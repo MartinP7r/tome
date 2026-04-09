@@ -52,9 +52,13 @@ pub enum LintFormat {
 #[derive(Subcommand)]
 pub enum Command {
     /// Interactive wizard to configure sources and targets
+    #[command(after_help = "Examples:\n  tome init")]
     Init,
 
     /// Discover, consolidate, and distribute skills
+    #[command(
+        after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input"
+    )]
     Sync {
         /// Recreate all symlinks even if they appear up-to-date
         #[arg(short, long)]
@@ -65,13 +69,18 @@ pub enum Command {
     },
 
     /// Show library, sources, targets, and health summary
+    #[command(after_help = "Examples:\n  tome status")]
     Status,
 
     /// Diagnose and repair broken symlinks or config issues
+    #[command(after_help = "Examples:\n  tome doctor\n  tome doctor --dry-run")]
     Doctor,
 
     /// List all discovered skills with their sources
-    #[command(alias = "ls")]
+    #[command(
+        alias = "ls",
+        after_help = "Examples:\n  tome list\n  tome list --json"
+    )]
     List {
         /// Output as JSON
         #[arg(long)]
@@ -79,6 +88,9 @@ pub enum Command {
     },
 
     /// Validate skill frontmatter and report issues
+    #[command(
+        after_help = "Examples:\n  tome lint\n  tome lint path/to/skill\n  tome lint --format json"
+    )]
     Lint {
         /// Specific skill directory to lint (default: entire library)
         #[arg(value_name = "PATH")]
@@ -89,12 +101,15 @@ pub enum Command {
     },
 
     /// Interactively browse discovered skills
+    #[command(after_help = "Examples:\n  tome browse")]
     Browse,
 
     /// Remove tome's symlinks from all target tool directories (reversible via `tome sync`)
+    #[command(after_help = "Examples:\n  tome eject\n  tome eject --dry-run")]
     Eject,
 
     /// Move the skill library to a new location safely
+    #[command(after_help = "Examples:\n  tome relocate ~/new-library")]
     Relocate {
         /// New library directory path
         #[arg(value_name = "NEW_PATH")]
@@ -102,6 +117,7 @@ pub enum Command {
     },
 
     /// Install shell completions for bash, zsh, fish, or powershell
+    #[command(after_help = "Examples:\n  tome completions fish\n  tome completions zsh --print")]
     Completions {
         /// Shell to install completions for
         #[arg(value_enum)]
@@ -115,6 +131,7 @@ pub enum Command {
     Version,
 
     /// Show configuration
+    #[command(after_help = "Examples:\n  tome config\n  tome config --path")]
     Config {
         /// Print config file path only
         #[arg(long)]
@@ -122,6 +139,9 @@ pub enum Command {
     },
 
     /// Git-backed backup and restore for the skill library
+    #[command(
+        after_help = "Examples:\n  tome backup init\n  tome backup snapshot -m 'before update'\n  tome backup list\n  tome backup diff"
+    )]
     Backup {
         #[command(subcommand)]
         sub: BackupCommand,
