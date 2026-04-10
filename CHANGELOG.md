@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.4] - 2026-04-10
+
+### Added
+- **Config-based tool root detection** (#390): `shares_tool_root` now derives tool roots from configured source paths instead of hardcoded directory names. No code changes needed when new tools are added.
+- **`--json` for status and doctor** (#374): `tome status --json` and `tome doctor --json` produce structured JSON. Uses `CountOrError` type for clean API shape (`{"count": 254}` not `{"Ok": 254}`)
+- **Graceful Ctrl-C** (#373): Signal handler prints "interrupted — run `tome sync` to resume" and exits with code 130. Sync pipeline is crash-safe by design.
+- **Frontmatter parsed during discovery** (#393): `DiscoveredSkill` now carries parsed `SkillFrontmatter`. Parse errors reported as warnings instead of silently swallowed.
+- **XDG config for tome_home** (#369): `~/.config/tome/config.toml` with `tome_home` field as alternative to `TOME_HOME` env var. Resolution: CLI flag → env var → config file → default.
+
+### Fixed
+- **Lockfile write failure is now an error** (#394): Previously demoted to warning; now blocks sync with actionable message
+- **Safer managed skill skip default**: When path canonicalization fails for managed skills, default to skip (preventing circular symlinks) instead of distribute
+- **Tighter tool root matching**: Parent directory check guards against matching paths that only share the home directory
+
+### Closed
+- **#370** Merge lockfile/manifest — not planned; separation is by design (internal tracking vs portable snapshot)
+- **#391** Extract TOOL_DIRS — superseded by #390
+
+### Deferred
+- **#362** Init consolidation — moved to v0.6 (unified directory model)
+
 ## [0.5.3] - 2026-04-09
 
 ### Added

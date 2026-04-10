@@ -13,7 +13,7 @@
 | **v0.5.1** | Bugfix                 | Default `library_dir` from TOME_HOME, skip managed skills to own tool   | ✓      |
 | **v0.5.2** | Bugfix                 | Legacy managed symlink cleanup during sync                              | ✓      |
 | **v0.5.3** | UX & CLI Polish        | NO_COLOR, `--no-input`, grouped triage, batch cleanup, docs update      | ✓      |
-| **v0.5.4** | Infrastructure         | Merge lockfile/manifest, frontmatter in discovery, signal handling      |        |
+| **v0.5.4** | Infrastructure         | Config-based tool root, `--json`, signal handling, frontmatter, XDG config | ✓   |
 | **v0.6**   | Unified Directory Model | Bidirectional directories, git sources, per-target skill selection     |        |
 | **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
 
@@ -168,16 +168,16 @@ Auto-install managed plugins, remote sync, and unified `tome sync` flow. Builds 
 - [x] **Subcommand help examples** ([#378](https://github.com/MartinP7r/tome/issues/378)): Every subcommand has usage examples in `--help`
 - [x] **Docs update** ([#368](https://github.com/MartinP7r/tome/issues/368)): README and commands.md updated with all commands and new flags
 
-## v0.5.4 — Infrastructure
+## v0.5.4 — Infrastructure ✓
 
-- [ ] **Wizard tome_home selection** ([#369](https://github.com/MartinP7r/tome/issues/369)): Config-file-based TOME_HOME override at `~/.config/tome/config.toml`
-- [ ] **Merge lockfile/manifest** ([#370](https://github.com/MartinP7r/tome/issues/370)): Evaluate merging `tome.lock` and `.tome-manifest.json` into a single file
-- [ ] **Init consolidation** ([#362](https://github.com/MartinP7r/tome/issues/362)): Handle duplicate skills from overlapping sources during init
-- [ ] **Signal handling** ([#373](https://github.com/MartinP7r/tome/issues/373)): Graceful Ctrl-C with cleanup of partial state
-- [ ] **`--json` for status/doctor** ([#374](https://github.com/MartinP7r/tome/issues/374)): Structured JSON output for scripting
-- [ ] **Config-based tool root detection** ([#390](https://github.com/MartinP7r/tome/issues/390)): Derive tool root from source/target config paths instead of hardcoded `TOOL_DIRS`
-- [ ] **Frontmatter in discovery** ([#393](https://github.com/MartinP7r/tome/issues/393)): Parse frontmatter during `tome sync` discovery (deferred from v0.4.2)
-- [ ] **Lockfile write = error** ([#394](https://github.com/MartinP7r/tome/issues/394)): Lockfile write failure should block sync, not just warn
+- [x] **Config-based tool root detection** ([#390](https://github.com/MartinP7r/tome/issues/390)): Derive tool root from source/target config paths instead of hardcoded `TOOL_DIRS`. Falls back gracefully when paths can't be resolved.
+- [x] **Lockfile write = error** ([#394](https://github.com/MartinP7r/tome/issues/394)): Lockfile write failure now blocks sync instead of just warning
+- [x] **`--json` for status/doctor** ([#374](https://github.com/MartinP7r/tome/issues/374)): Structured JSON output with `CountOrError` type for clean API shape
+- [x] **Signal handling** ([#373](https://github.com/MartinP7r/tome/issues/373)): Graceful Ctrl-C via `ctrlc` crate — clean exit with code 130
+- [x] **Frontmatter in discovery** ([#393](https://github.com/MartinP7r/tome/issues/393)): Parse frontmatter during `tome sync` discovery; warnings on parse failures
+- [x] **XDG config for tome_home** ([#369](https://github.com/MartinP7r/tome/issues/369)): `~/.config/tome/config.toml` with `tome_home` field — no shell env var needed
+- Closed: **Merge lockfile/manifest** ([#370](https://github.com/MartinP7r/tome/issues/370)) — not planned, separation is by design
+- Deferred: **Init consolidation** ([#362](https://github.com/MartinP7r/tome/issues/362)) — moved to v0.6 (unified directory model)
 
 ## v0.6 — Unified Directory Model
 
