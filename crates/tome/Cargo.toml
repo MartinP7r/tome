@@ -16,6 +16,7 @@ anyhow.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 console.workspace = true
+ctrlc.workspace = true
 dialoguer.workspace = true
 dirs.workspace = true
 indicatif.workspace = true

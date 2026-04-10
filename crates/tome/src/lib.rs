@@ -47,7 +47,7 @@ pub(crate) mod wizard;
 
 use std::collections::HashSet;
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as GitCommand;
 
 use anyhow::{Context, Result};
@@ -208,8 +208,10 @@ pub fn run(cli: Cli) -> Result<()> {
                 machine_override: cli.machine.as_deref(),
             },
         )?,
-        Command::Status => status::show(&config, &paths)?,
-        Command::Doctor => doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input)?,
+        Command::Status { json } => status::show(&config, &paths, json)?,
+        Command::Doctor { json } => {
+            doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input, json)?;
+        }
         Command::Lint { path, format } => {
             let report = match path {
                 Some(p) => {
@@ -554,6 +556,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let new_lockfile = lockfile::generate(&manifest, &skills);
 
     // 5. Distribute to targets
+    let source_paths: Vec<PathBuf> = config.sources.iter().map(|s| s.path.clone()).collect();
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
         if machine_prefs.is_target_disabled(name.as_str()) {
@@ -579,6 +582,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             target,
             &manifest,
             &machine_prefs,
+            &source_paths,
             dry_run,
             force,
         )?;
@@ -607,9 +611,8 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     }
     if !dry_run && paths.config_dir().is_dir() {
         generate_tome_home_gitignore(paths.config_dir())?;
-        if let Err(e) = lockfile::save(&new_lockfile, paths.config_dir()) {
-            eprintln!("warning: could not save lockfile: {e}");
-        }
+        lockfile::save(&new_lockfile, paths.config_dir())
+            .context("failed to save lockfile — sync completed but lockfile is stale; re-run `tome sync` to retry")?;
     }
 
     let report = SyncReport {

@@ -406,6 +406,7 @@ mod tests {
             path: skill_dir,
             source_name: "test".into(),
             origin,
+            frontmatter: None,
         }
     }
 
@@ -636,6 +637,7 @@ mod tests {
             path: skill2_dir,
             source_name: "test2".into(),
             origin: crate::discover::SkillOrigin::Local,
+            frontmatter: None,
         };
 
         let (result, _manifest) = consolidate(
@@ -717,6 +719,7 @@ mod tests {
             path: skill_dir,
             source_name: "test".into(),
             origin: crate::discover::SkillOrigin::Local,
+            frontmatter: None,
         };
 
         let (result, _) = consolidate(
@@ -1318,6 +1321,7 @@ mod tests {
             path: source_skill.clone(),
             source_name: "plugins".into(),
             origin: crate::discover::SkillOrigin::Managed { provenance: None },
+            frontmatter: None,
         };
 
         // Call consolidate_managed directly

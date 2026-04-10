@@ -389,8 +389,10 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
 ///
 /// Resolution order:
 /// 1. `TOME_HOME` environment variable (if set and non-empty)
-/// 2. `~/.tome/`
+/// 2. `~/.config/tome/config.toml` → `tome_home` field
+/// 3. `~/.tome/`
 pub fn default_tome_home() -> Result<PathBuf> {
+    // 1. TOME_HOME env var
     match std::env::var("TOME_HOME") {
         Ok(val) if !val.is_empty() => return expand_tilde(Path::new(&val)),
         Ok(_) => {}                               // empty string, fall through
@@ -399,9 +401,37 @@ pub fn default_tome_home() -> Result<PathBuf> {
             anyhow::bail!("TOME_HOME environment variable contains invalid Unicode");
         }
     }
+    // 2. ~/.config/tome/config.toml
+    if let Some(path) = read_config_tome_home()? {
+        return Ok(path);
+    }
+    // 3. Default
     Ok(dirs::home_dir()
         .context("could not determine home directory")?
         .join(".tome"))
+}
+
+/// Read `tome_home` from the machine-level config at `~/.config/tome/config.toml`.
+fn read_config_tome_home() -> Result<Option<PathBuf>> {
+    let config_path = dirs::home_dir()
+        .context("could not determine home directory")?
+        .join(".config/tome/config.toml");
+    if !config_path.is_file() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let table: toml::Table = content
+        .parse()
+        .with_context(|| format!("invalid TOML in {}", config_path.display()))?;
+    match table.get("tome_home") {
+        Some(toml::Value::String(val)) => {
+            let expanded = expand_tilde(Path::new(val))?;
+            Ok(Some(expanded))
+        }
+        Some(_) => anyhow::bail!("tome_home in {} must be a string", config_path.display()),
+        None => Ok(None),
+    }
 }
 
 /// Resolve the config directory for a given tome home.

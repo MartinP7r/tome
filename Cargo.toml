@@ -15,6 +15,7 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 console = "0.16"
+ctrlc = "3"
 dialoguer = "0.12"
 indicatif = "0.18"
 dirs = "6"

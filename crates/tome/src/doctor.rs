@@ -15,7 +15,7 @@ use crate::paths::{TomePaths, resolve_symlink_target};
 // -- Data structs --
 
 /// Severity of a diagnostic issue.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub enum IssueSeverity {
     /// Critical problem (e.g., missing directory, broken symlink).
     Error,
@@ -24,14 +24,14 @@ pub enum IssueSeverity {
 }
 
 /// A single diagnostic issue found during a health check.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct DiagnosticIssue {
     pub severity: IssueSeverity,
     pub message: String,
 }
 
 /// Complete diagnostic report for the tome system.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct DoctorReport {
     pub configured: bool,
     pub library_issues: Vec<DiagnosticIssue>,
@@ -89,8 +89,19 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
 // -- Rendering + control flow --
 
 /// Diagnose and optionally repair issues.
-pub fn diagnose(config: &Config, paths: &TomePaths, dry_run: bool, no_input: bool) -> Result<()> {
+pub fn diagnose(
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    no_input: bool,
+    json: bool,
+) -> Result<()> {
     let report = check(config, paths)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+        return Ok(());
+    }
 
     if !report.configured {
         println!("Not configured yet. Run `tome init` to get started.");
@@ -693,6 +704,7 @@ mod tests {
             &TomePaths::new(tmp.path().to_path_buf(), config.library_dir.clone()).unwrap(),
             true,
             true,
+            false,
         );
         assert!(result.is_ok());
     }

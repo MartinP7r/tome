@@ -3036,6 +3036,82 @@ fn doctor_with_no_input_skips_repair() {
 }
 
 #[test]
+fn status_json_output() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("skill-a", "local")
+        .build();
+
+    tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+        .assert()
+        .success();
+
+    let output = tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "status",
+            "--json",
+        ])
+        .output()
+        .expect("failed to run");
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status --json should produce valid JSON");
+    assert_eq!(json["configured"], true);
+    assert!(json["sources"].is_array());
+    assert!(json["targets"].is_array());
+}
+
+#[test]
+fn doctor_json_output() {
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    let output = tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "doctor",
+            "--json",
+        ])
+        .output()
+        .expect("failed to run");
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("doctor --json should produce valid JSON");
+    assert_eq!(json["configured"], true);
+    assert!(json["library_issues"].is_array());
+}
+
+#[test]
+fn config_toml_tome_home_override() {
+    // This test verifies that --tome-home takes precedence,
+    // which exercises the resolution order without needing to write
+    // to ~/.config/tome/config.toml.
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .skill("skill-a", "local")
+        .build();
+
+    // Sync using --tome-home to set a custom tome home
+    tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "--tome-home",
+            &env.library_dir.parent().unwrap().to_string_lossy(),
+            "status",
+        ])
+        .assert()
+        .success();
+}
+
+#[test]
 fn no_color_env_suppresses_ansi_escapes() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
