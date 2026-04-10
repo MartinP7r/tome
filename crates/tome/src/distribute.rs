@@ -66,7 +66,8 @@ pub fn distribute_to_target(
 /// Check if a managed skill's source and a target belong to the same tool.
 ///
 /// For each configured source, checks if the skill's source_path is under that
-/// source AND the configured source and target share a direct parent directory.
+/// source AND the configured source and target are siblings (share the same
+/// direct parent directory).
 ///
 /// Example: configured source `~/.claude/plugins` and target `~/.claude/skills`
 /// → both are children of `~/.claude/`, so they're the same tool. A managed skill
@@ -74,29 +75,36 @@ pub fn distribute_to_target(
 ///
 /// Counter-example: `~/.claude/plugins` and `~/.gemini/antigravity/skills`
 /// → parents are `~/.claude/` and `~/.gemini/antigravity/`, no match.
+///
+/// Uses already-expanded paths from config (tilde-expanded at load time).
+/// Falls back to canonicalization only when needed for symlink resolution.
 fn shares_tool_root(source: &Path, target: &Path, source_paths: &[PathBuf]) -> bool {
     for configured_source in source_paths {
-        let Ok(configured) = configured_source.canonicalize() else {
-            continue;
-        };
+        // Try canonicalize for symlink resolution, fall back to raw path
+        let configured = configured_source
+            .canonicalize()
+            .unwrap_or_else(|_| configured_source.clone());
 
         // Check if the skill's source_path is under this configured source
         if !source.starts_with(&configured) {
             continue;
         }
 
-        // Check if the configured source is under the target's parent, or vice versa.
-        // This catches: ~/.claude/plugins (source) under ~/.claude/ (target parent)
-        // and also: ~/.claude/skills (target) under ~/.claude/ (source parent)
-        if let Some(configured_parent) = configured.parent()
-            && target.starts_with(configured_parent)
-        {
-            return true;
-        }
-        if let Some(target_parent) = target.parent()
-            && configured.starts_with(target_parent)
-        {
-            return true;
+        // Check if the target is under the configured source's parent directory.
+        // e.g., configured = ~/.claude/plugins, parent = ~/.claude/
+        // target = ~/.claude/skills → starts_with(~/.claude/) → same tool.
+        //
+        // Guard: the parent must be deeper than the home directory to avoid
+        // matching ~/source and ~/.claude/skills as "same tool" just because
+        // both are under ~.
+        if let Some(configured_parent) = configured.parent() {
+            let home = dirs::home_dir();
+            let is_home_or_shallower = home.as_ref().is_some_and(|h| {
+                configured_parent == h.as_path() || h.starts_with(configured_parent)
+            });
+            if !is_home_or_shallower && target.starts_with(configured_parent) {
+                return true;
+            }
         }
     }
     false
