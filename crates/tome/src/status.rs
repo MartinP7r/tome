@@ -12,6 +12,29 @@ use crate::paths::TomePaths;
 
 // -- Data structs --
 
+/// A count that may have failed with an error message.
+#[derive(serde::Serialize)]
+pub struct CountOrError {
+    pub count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl From<Result<usize, String>> for CountOrError {
+    fn from(result: Result<usize, String>) -> Self {
+        match result {
+            Ok(n) => Self {
+                count: Some(n),
+                error: None,
+            },
+            Err(e) => Self {
+                count: None,
+                error: Some(e),
+            },
+        }
+    }
+}
+
 /// Status of a single configured source.
 #[derive(serde::Serialize)]
 pub struct SourceStatus {
@@ -19,7 +42,7 @@ pub struct SourceStatus {
     pub source_type: String,
     pub path: String,
     /// Number of skills discovered, or an error message if discovery failed.
-    pub skill_count: Result<usize, String>,
+    pub skill_count: CountOrError,
     /// Warnings emitted during discovery.
     pub warnings: Vec<String>,
 }
@@ -38,11 +61,11 @@ pub struct StatusReport {
     pub configured: bool,
     pub library_dir: PathBuf,
     /// Number of skills consolidated in the library, or an error message.
-    pub library_count: Result<usize, String>,
+    pub library_count: CountOrError,
     pub sources: Vec<SourceStatus>,
     pub targets: Vec<TargetStatus>,
     /// Number of health issues, or an error message.
-    pub health: Result<usize, String>,
+    pub health: CountOrError,
 }
 
 // -- Data gathering (pure computation, no I/O) --
@@ -69,7 +92,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
                 name: source.name.clone(),
                 source_type: source.source_type.to_string(),
                 path: source.path.display().to_string(),
-                skill_count,
+                skill_count: skill_count.into(),
                 warnings,
             }
         })
@@ -99,10 +122,10 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
     Ok(StatusReport {
         configured,
         library_dir: paths.library_dir().to_path_buf(),
-        library_count,
+        library_count: library_count.into(),
         sources,
         targets,
-        health,
+        health: health.into(),
     })
 }
 
@@ -131,13 +154,15 @@ fn render_status(report: &StatusReport) {
         style("Library:").bold(),
         crate::paths::collapse_home(&report.library_dir)
     );
-    let (lib_count, lib_indicator) = match &report.library_count {
-        Ok(n) => (format!("{}", n), style("✓").green()),
-        Err(e) => {
-            eprintln!("warning: could not read library: {}", e);
-            ("?".to_string(), style("✗").red())
-        }
-    };
+    let (lib_count, lib_indicator) =
+        match (&report.library_count.count, &report.library_count.error) {
+            (Some(n), _) => (format!("{}", n), style("✓").green()),
+            (None, Some(e)) => {
+                eprintln!("warning: could not read library: {}", e);
+                ("?".to_string(), style("✗").red())
+            }
+            (None, None) => ("0".to_string(), style("✓").green()),
+        };
     println!(
         "  {} {} skills consolidated",
         lib_indicator,
@@ -158,15 +183,16 @@ fn render_status(report: &StatusReport) {
             "SKILLS".to_string(),
         ]);
         for source in &report.sources {
-            let count = match &source.skill_count {
-                Ok(n) => format!("✓ {}", n),
-                Err(e) => {
+            let count = match (&source.skill_count.count, &source.skill_count.error) {
+                (Some(n), _) => format!("✓ {}", n),
+                (None, Some(e)) => {
                     eprintln!(
                         "warning: could not discover skills from '{}': {}",
                         source.name, e
                     );
                     "✗ ?".to_string()
                 }
+                (None, None) => "✓ 0".to_string(),
             };
             rows.push([
                 source.name.clone(),
@@ -224,17 +250,18 @@ fn render_status(report: &StatusReport) {
     println!();
 
     // Health
-    let health = match &report.health {
-        Ok(0) => format!("{} {}", style("✓").green(), style("All good").green()),
-        Ok(n) => format!(
+    let health = match (&report.health.count, &report.health.error) {
+        (Some(0), _) => format!("{} {}", style("✓").green(), style("All good").green()),
+        (Some(n), _) => format!(
             "{} {}",
             style("⚠").yellow(),
             style(format!("{} issue(s) — run `tome doctor` for details", n)).yellow()
         ),
-        Err(e) => {
+        (None, Some(e)) => {
             eprintln!("warning: could not check library health: {}", e);
             format!("{} {}", style("✗").red(), style("unknown").red())
         }
+        (None, None) => format!("{} {}", style("✓").green(), style("All good").green()),
     };
     println!("{} {}", style("Health:").bold(), health);
 }
@@ -338,7 +365,7 @@ mod tests {
         assert_eq!(report.sources.len(), 1);
         assert_eq!(report.sources[0].name, "test");
         // Source path doesn't exist — discover_source returns Ok(empty) with a warning
-        assert_eq!(report.sources[0].skill_count.as_ref().copied().unwrap(), 0);
+        assert_eq!(report.sources[0].skill_count.count, Some(0));
     }
 
     #[test]
@@ -358,7 +385,7 @@ mod tests {
         )
         .unwrap();
         assert!(report.configured);
-        assert_eq!(report.library_count.unwrap(), 2);
+        assert_eq!(report.library_count.count, Some(2));
     }
 
     #[test]
@@ -409,7 +436,7 @@ mod tests {
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
-        assert_eq!(report.health.unwrap(), 1);
+        assert_eq!(report.health.count, Some(1));
     }
 
     // -- Legacy tests (now calling show(), which delegates to gather() + render) --

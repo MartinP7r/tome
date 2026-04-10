@@ -612,7 +612,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     if !dry_run && paths.config_dir().is_dir() {
         generate_tome_home_gitignore(paths.config_dir())?;
         lockfile::save(&new_lockfile, paths.config_dir())
-            .context("failed to save lockfile — library state may be out of sync")?;
+            .context("failed to save lockfile — sync completed but lockfile is stale; re-run `tome sync` to retry")?;
     }
 
     let report = SyncReport {

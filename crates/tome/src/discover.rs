@@ -418,10 +418,20 @@ fn scan_for_skills(
                         None => SkillOrigin::Local,
                     };
                     // Parse frontmatter if SKILL.md exists and is readable
-                    let frontmatter = std::fs::read_to_string(skill_dir.join("SKILL.md"))
-                        .ok()
-                        .and_then(|content| crate::skill::parse(&content).ok())
-                        .map(|(fm, _body)| fm);
+                    let frontmatter = match std::fs::read_to_string(skill_dir.join("SKILL.md")) {
+                        Ok(content) => match crate::skill::parse(&content) {
+                            Ok((fm, _body)) => Some(fm),
+                            Err(e) => {
+                                warnings.push(format!(
+                                    "could not parse frontmatter in {}/SKILL.md: {}",
+                                    skill_dir.display(),
+                                    e
+                                ));
+                                None
+                            }
+                        },
+                        Err(_) => None, // File not readable — already validated by scan
+                    };
 
                     skills.push(DiscoveredSkill {
                         name,

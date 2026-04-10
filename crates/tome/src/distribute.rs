@@ -184,7 +184,9 @@ fn distribute_symlinks(
                     || (manifest_entry.managed
                         && shares_tool_root(&source, &target, source_paths))
                 }
-                _ => false,
+                // If canonicalization fails for a managed skill, skip to be safe —
+                // creating circular symlinks is worse than missing a distribution.
+                _ => manifest_entry.managed,
             };
             if skip {
                 // Remove any existing symlink from a previous sync that
