@@ -144,10 +144,10 @@ Deferred to future releases. Tracked but not in current roadmap.
 | BROWSE-04 | Phase 3 | Pending |
 
 **Coverage:**
-- v1 requirements: 31 total
-- Mapped to phases: 31
+- v1 requirements: 39 total
+- Mapped to phases: 39
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-10*
-*Last updated: 2026-04-11 after initial definition*
+*Last updated: 2026-04-10 after roadmap creation*
