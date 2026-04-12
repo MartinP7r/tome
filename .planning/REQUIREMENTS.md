@@ -9,12 +9,12 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Config Model
 
-- [ ] **CFG-01**: Config uses `[directories.*]` BTreeMap replacing `[[sources]]` + `[targets.*]`
-- [ ] **CFG-02**: Each directory entry has `path`, `type` (claude-plugins/directory/git), and `role` (managed/synced/source/target)
-- [ ] **CFG-03**: Default roles inferred from type: ClaudePlugins→Managed, Directory→Synced, Git→Source
-- [ ] **CFG-04**: Config validation rejects invalid combos (managed only with claude-plugins, target incompatible with git, git fields only with git type)
-- [ ] **CFG-05**: `deny_unknown_fields` or equivalent catches old-format config files with clear error
-- [ ] **CFG-06**: Empty directories map triggers safety guard in cleanup (prevents library deletion)
+- [x] **CFG-01**: Config uses `[directories.*]` BTreeMap replacing `[[sources]]` + `[targets.*]`
+- [x] **CFG-02**: Each directory entry has `path`, `type` (claude-plugins/directory/git), and `role` (managed/synced/source/target)
+- [x] **CFG-03**: Default roles inferred from type: ClaudePlugins→Managed, Directory→Synced, Git→Source
+- [x] **CFG-04**: Config validation rejects invalid combos (managed only with claude-plugins, target incompatible with git, git fields only with git type)
+- [x] **CFG-05**: `deny_unknown_fields` or equivalent catches old-format config files with clear error
+- [x] **CFG-06**: Empty directories map triggers safety guard in cleanup (prevents library deletion)
 
 ### Pipeline
 
@@ -103,12 +103,12 @@ Deferred to future releases. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CFG-01 | Phase 1 | Pending |
-| CFG-02 | Phase 1 | Pending |
-| CFG-03 | Phase 1 | Pending |
-| CFG-04 | Phase 1 | Pending |
-| CFG-05 | Phase 1 | Pending |
-| CFG-06 | Phase 1 | Pending |
+| CFG-01 | Phase 1 | Complete |
+| CFG-02 | Phase 1 | Complete |
+| CFG-03 | Phase 1 | Complete |
+| CFG-04 | Phase 1 | Complete |
+| CFG-05 | Phase 1 | Complete |
+| CFG-06 | Phase 1 | Complete |
 | PIPE-01 | Phase 1 | Pending |
 | PIPE-02 | Phase 1 | Pending |
 | PIPE-03 | Phase 1 | Pending |

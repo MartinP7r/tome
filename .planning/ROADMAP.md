@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 5 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — Config type system (DirectoryName, DirectoryType, DirectoryRole, DirectoryConfig, Config rewrite)
+- [x] 01-01-PLAN.md — Config type system (DirectoryName, DirectoryType, DirectoryRole, DirectoryConfig, Config rewrite)
 - [ ] 01-02-PLAN.md — Pipeline core (discover, library, distribute, cleanup)
 - [ ] 01-03-PLAN.md — State schema (manifest, lockfile, machine, status, doctor)
 - [ ] 01-04-PLAN.md — Wizard rewrite (KNOWN_DIRECTORIES, auto-role, summary table)
