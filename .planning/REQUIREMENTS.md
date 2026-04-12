@@ -18,11 +18,11 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Pipeline
 
-- [ ] **PIPE-01**: Discovery iterates `discovery_dirs()` (managed/synced/source roles)
-- [ ] **PIPE-02**: Distribution iterates `distribution_dirs()` (synced/target roles)
-- [ ] **PIPE-03**: Circular symlink prevention uses manifest-based origin check (skip distributing skill to its discovery directory) replacing `shares_tool_root()` path heuristic
-- [ ] **PIPE-04**: Consolidation strategy determined by role: managed→symlink, synced/source→copy
-- [ ] **PIPE-05**: Duplicate skill resolution uses alphabetical directory name order (BTreeMap)
+- [x] **PIPE-01**: Discovery iterates `discovery_dirs()` (managed/synced/source roles)
+- [x] **PIPE-02**: Distribution iterates `distribution_dirs()` (synced/target roles)
+- [x] **PIPE-03**: Circular symlink prevention uses manifest-based origin check (skip distributing skill to its discovery directory) replacing `shares_tool_root()` path heuristic
+- [x] **PIPE-04**: Consolidation strategy determined by role: managed→symlink, synced/source→copy
+- [x] **PIPE-05**: Duplicate skill resolution uses alphabetical directory name order (BTreeMap)
 
 ### Wizard
 
@@ -109,11 +109,11 @@ Deferred to future releases. Tracked but not in current roadmap.
 | CFG-04 | Phase 1 | Complete |
 | CFG-05 | Phase 1 | Complete |
 | CFG-06 | Phase 1 | Complete |
-| PIPE-01 | Phase 1 | Pending |
-| PIPE-02 | Phase 1 | Pending |
-| PIPE-03 | Phase 1 | Pending |
-| PIPE-04 | Phase 1 | Pending |
-| PIPE-05 | Phase 1 | Pending |
+| PIPE-01 | Phase 1 | Complete |
+| PIPE-02 | Phase 1 | Complete |
+| PIPE-03 | Phase 1 | Complete |
+| PIPE-04 | Phase 1 | Complete |
+| PIPE-05 | Phase 1 | Complete |
 | WIZ-01 | Phase 1 | Pending |
 | WIZ-02 | Phase 1 | Pending |
 | WIZ-03 | Phase 1 | Pending |

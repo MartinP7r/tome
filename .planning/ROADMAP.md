@@ -28,11 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Old-format `tome.toml` files fail to parse with a clear error message (not silent empty config)
   4. `tome status` and `tome doctor` report directories with their roles instead of separate source/target sections
   5. Cleanup with an empty directories map does not delete the library (safety guard fires)
-**Plans:** 2/5 plans executed
+**Plans:** 3/5 plans executed
 
 Plans:
 - [x] 01-01-PLAN.md — Config type system (DirectoryName, DirectoryType, DirectoryRole, DirectoryConfig, Config rewrite)
-- [ ] 01-02-PLAN.md — Pipeline core (discover, library, distribute, cleanup)
+- [x] 01-02-PLAN.md — Pipeline core (discover, library, distribute, cleanup)
 - [x] 01-03-PLAN.md — State schema (manifest, lockfile, machine, status, doctor)
 - [ ] 01-04-PLAN.md — Wizard rewrite (KNOWN_DIRECTORIES, auto-role, summary table)
 - [ ] 01-05-PLAN.md — Integration wiring (lib.rs sync, remaining modules, integration tests, CHANGELOG)
