@@ -374,13 +374,13 @@ pub fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// Warn about `disabled_targets` entries in machine.toml that don't match any
-/// configured target name. Helps catch typos and stale entries.
-fn warn_unknown_disabled_targets(machine_prefs: &machine::MachinePrefs, config: &Config) {
-    for name in &machine_prefs.disabled_targets {
+/// Warn about `disabled_directories` entries in machine.toml that don't match any
+/// configured directory name. Helps catch typos and stale entries.
+fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
+    for name in &machine_prefs.disabled_directories {
         if !config.targets.contains_key(name.as_str()) {
             eprintln!(
-                "warning: disabled target '{}' in machine.toml does not match any configured target",
+                "warning: disabled directory '{}' in machine.toml does not match any configured directory",
                 name
             );
         }
@@ -532,9 +532,9 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
-    // Warn about disabled_targets that don't match any configured target
+    // Warn about disabled_directories that don't match any configured directory
     if !quiet {
-        warn_unknown_disabled_targets(&machine_prefs, config);
+        warn_unknown_disabled_directories(&machine_prefs, config);
     }
 
     // 4. Cleanup stale library entries (before distribute so counts are accurate)
@@ -559,7 +559,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let source_paths: Vec<PathBuf> = config.sources.iter().map(|s| s.path.clone()).collect();
     let mut distribute_results = Vec::new();
     for (name, target) in config.targets.iter() {
-        if machine_prefs.is_target_disabled(name.as_str()) {
+        if machine_prefs.is_directory_disabled(name.as_str()) {
             if verbose {
                 eprintln!(
                     "{}",

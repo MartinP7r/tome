@@ -1,7 +1,7 @@
 //! Library manifest — tracks provenance and content hashes for each skill in the library.
 //!
-//! The manifest file (`.tome-manifest.json`) lives at the tome home directory (`~/.tome/`) and records where each
-//! skill was copied from, its content hash, and when it was last synced. This enables idempotent
+//! The manifest file (`.tome-manifest.json`) lives at the tome home directory (`~/.tome/`) and records which
+//! directory each skill came from, its content hash, and when it was last synced. This enables idempotent
 //! copy-based consolidation: unchanged skills are skipped, modified skills are re-copied.
 
 use std::collections::BTreeMap;
@@ -72,7 +72,8 @@ impl Manifest {
 pub struct SkillEntry {
     /// Where this skill was originally copied from.
     pub source_path: PathBuf,
-    /// Which source config entry contributed this skill.
+    /// Which directory config entry contributed this skill.
+    /// In v0.6+, this is the directory name from `[directories.*]` in `tome.toml`.
     pub source_name: String,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
