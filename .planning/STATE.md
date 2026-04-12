@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.6
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-04-12T08:16:50Z"
-last_activity: 2026-04-12 — Plan 01-01 complete
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-04-12T08:36:29.171Z"
+last_activity: 2026-04-12
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 5
-  completed_plans: 1
+  completed_plans: 2
   percent: 7
 ---
 
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 1 of 3 (Unified Directory Foundation)
-Plan: 1 of 5 in current phase
-Status: Executing
-Last activity: 2026-04-12 — Plan 01-01 complete
+Plan: 2 of 5 in current phase
+Status: Ready to execute
+Last activity: 2026-04-12
 
 Progress: [█░░░░░░░░░] 7%
 
@@ -51,6 +51,8 @@ Progress: [█░░░░░░░░░] 7%
 - Last 5 plans: -
 - Trend: -
 
+| Phase 01 P02 | 12min | 2 tasks | 2 files |
+
 ## Accumulated Context
 
 ### Decisions
@@ -62,6 +64,8 @@ Recent decisions affecting current work:
 - One atomic PR for foundation (config + wizard + pipeline)
 - BTreeMap alphabetical order for duplicate priority
 - Deprecated compat shims for old types (Source, SourceType, TargetConfig, TargetMethod, TargetName) to keep crate compilable during migration
+- [Phase 01]: Manifest-based source_name == dir_name check replaces shares_tool_root() for circular symlink prevention
+- [Phase 01]: Deprecated compat shims (discover_source, distribute_to_target) bridge unconverted modules
 
 ### Pending Todos
 
@@ -73,6 +77,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-12T08:16:50Z
-Stopped at: Completed 01-01-PLAN.md
-Resume file: .planning/phases/01-unified-directory-foundation/01-01-SUMMARY.md
+Last session: 2026-04-12T08:36:29.166Z
+Stopped at: Completed 01-02-PLAN.md
+Resume file: None
