@@ -270,7 +270,7 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
         for issue in &report.library_issues {
             println!("  {} {}", style("!").yellow(), issue.message);
         }
-        for (name, issues) in &report.target_issues {
+        for (name, issues) in &report.directory_issues {
             for issue in issues {
                 println!("  {} {}: {}", style("!").yellow(), name, issue.message);
             }

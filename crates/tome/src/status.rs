@@ -1,4 +1,4 @@
-//! Read-only summary of the library state, configured sources, targets, and overall health.
+//! Read-only summary of the library state, configured directories, and overall health.
 
 use anyhow::{Context, Result};
 use console::style;
@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::Config;
-use crate::discover;
 use crate::manifest;
 use crate::paths::TomePaths;
 
@@ -35,24 +34,18 @@ impl From<Result<usize, String>> for CountOrError {
     }
 }
 
-/// Status of a single configured source.
+/// Status of a single configured directory.
 #[derive(serde::Serialize)]
-pub struct SourceStatus {
+pub struct DirectoryStatus {
     pub name: String,
-    pub source_type: String,
+    pub directory_type: String,
+    pub role: String,
     pub path: String,
-    /// Number of skills discovered, or an error message if discovery failed.
+    /// Number of skills discovered (for discovery dirs) or symlinks present (for target dirs),
+    /// or an error message if counting failed.
     pub skill_count: CountOrError,
     /// Warnings emitted during discovery.
     pub warnings: Vec<String>,
-}
-
-/// Status of a single configured target.
-#[derive(serde::Serialize)]
-pub struct TargetStatus {
-    pub name: String,
-    pub enabled: bool,
-    pub method: String,
 }
 
 /// Complete status report for the tome system.
@@ -62,8 +55,7 @@ pub struct StatusReport {
     pub library_dir: PathBuf,
     /// Number of skills consolidated in the library, or an error message.
     pub library_count: CountOrError,
-    pub sources: Vec<SourceStatus>,
-    pub targets: Vec<TargetStatus>,
+    pub directories: Vec<DirectoryStatus>,
     /// Number of health issues, or an error message.
     pub health: CountOrError,
 }
@@ -72,7 +64,7 @@ pub struct StatusReport {
 
 /// Gather status data without producing any output.
 pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
-    let configured = paths.library_dir().is_dir() || !config.sources.is_empty();
+    let configured = paths.library_dir().is_dir() || !config.directories.is_empty();
 
     let library_count = if paths.library_dir().is_dir() {
         count_entries(paths.library_dir()).map_err(|e| e.to_string())
@@ -80,35 +72,26 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         Ok(0)
     };
 
-    let sources: Vec<SourceStatus> = config
-        .sources
+    let directories: Vec<DirectoryStatus> = config
+        .directories
         .iter()
-        .map(|source| {
-            let mut warnings = Vec::new();
-            let skill_count = discover::discover_source(source, &mut warnings)
-                .map(|s| s.len())
-                .map_err(|e| e.to_string());
-            SourceStatus {
-                name: source.name.clone(),
-                source_type: source.source_type.to_string(),
-                path: source.path.display().to_string(),
+        .map(|(name, dir_config)| {
+            let role = dir_config.role();
+            let skill_count = if role.is_discovery() {
+                // For discovery directories, count SKILL.md subdirs
+                count_skill_dirs(&dir_config.path).map_err(|e| e.to_string())
+            } else {
+                // For target-only directories, count existing symlinks
+                count_symlinks(&dir_config.path).map_err(|e| e.to_string())
+            };
+            let warnings = Vec::new();
+            DirectoryStatus {
+                name: name.as_str().to_string(),
+                directory_type: dir_config.directory_type.to_string(),
+                role: role.description().to_string(),
+                path: dir_config.path.display().to_string(),
                 skill_count: skill_count.into(),
                 warnings,
-            }
-        })
-        .collect();
-
-    let targets: Vec<TargetStatus> = config
-        .targets
-        .iter()
-        .map(|(name, t)| {
-            let method = match &t.method {
-                crate::config::TargetMethod::Symlink { .. } => "symlink",
-            };
-            TargetStatus {
-                name: name.as_str().to_string(),
-                enabled: t.enabled,
-                method: method.to_string(),
             }
         })
         .collect();
@@ -123,8 +106,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         configured,
         library_dir: paths.library_dir().to_path_buf(),
         library_count: library_count.into(),
-        sources,
-        targets,
+        directories,
         health: health.into(),
     })
 }
@@ -170,34 +152,36 @@ fn render_status(report: &StatusReport) {
     );
     println!();
 
-    // Sources
-    println!("{}", style("Sources:").bold());
-    if report.sources.is_empty() {
+    // Directories
+    println!("{}", style("Directories:").bold());
+    if report.directories.is_empty() {
         println!("  (none configured)");
     } else {
-        let mut rows: Vec<[String; 4]> = Vec::with_capacity(report.sources.len() + 1);
+        let mut rows: Vec<[String; 5]> = Vec::with_capacity(report.directories.len() + 1);
         rows.push([
-            "SOURCE".to_string(),
+            "NAME".to_string(),
             "TYPE".to_string(),
+            "ROLE".to_string(),
             "PATH".to_string(),
             "SKILLS".to_string(),
         ]);
-        for source in &report.sources {
-            let count = match (&source.skill_count.count, &source.skill_count.error) {
+        for dir in &report.directories {
+            let count = match (&dir.skill_count.count, &dir.skill_count.error) {
                 (Some(n), _) => format!("✓ {}", n),
                 (None, Some(e)) => {
                     eprintln!(
-                        "warning: could not discover skills from '{}': {}",
-                        source.name, e
+                        "warning: could not count skills in '{}': {}",
+                        dir.name, e
                     );
                     "✗ ?".to_string()
                 }
                 (None, None) => "✓ 0".to_string(),
             };
             rows.push([
-                source.name.clone(),
-                source.source_type.clone(),
-                crate::paths::collapse_home(std::path::Path::new(&source.path)),
+                dir.name.clone(),
+                dir.directory_type.clone(),
+                dir.role.clone(),
+                crate::paths::collapse_home(std::path::Path::new(&dir.path)),
                 count,
             ]);
         }
@@ -210,42 +194,11 @@ fn render_status(report: &StatusReport) {
             )
             .to_string();
         println!("{table}");
-        for source in &report.sources {
-            for w in &source.warnings {
+        for dir in &report.directories {
+            for w in &dir.warnings {
                 eprintln!("warning: {}", w);
             }
         }
-    }
-    println!();
-
-    // Targets
-    println!("{}", style("Targets:").bold());
-    if report.targets.is_empty() {
-        println!("  (none configured)");
-    } else {
-        let mut rows: Vec<[String; 3]> = Vec::with_capacity(report.targets.len() + 1);
-        rows.push([
-            "TARGET".to_string(),
-            "STATUS".to_string(),
-            "METHOD".to_string(),
-        ]);
-        for target in &report.targets {
-            let status = if target.enabled {
-                style("enabled").green().to_string()
-            } else {
-                style("disabled").dim().to_string()
-            };
-            rows.push([target.name.clone(), status, target.method.clone()]);
-        }
-        let table = tabled::Table::from_iter(rows)
-            .with(Style::blank())
-            .with(
-                Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
-                    style(s).bold().to_string()
-                })),
-            )
-            .to_string();
-        println!("{table}");
     }
     println!();
 
@@ -286,6 +239,46 @@ fn count_entries(dir: &Path) -> Result<usize> {
     Ok(count)
 }
 
+/// Count subdirectories that look like skills (contain SKILL.md or are directories).
+fn count_skill_dirs(dir: &Path) -> Result<usize> {
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+/// Count symlinks in a directory (for target-only directories).
+fn count_symlinks(dir: &Path) -> Result<usize> {
+    if !dir.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0;
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read directory {}", dir.display()))?
+    {
+        let entry = entry.with_context(|| format!("failed to read entry in {}", dir.display()))?;
+        let path = entry.path();
+        if path.is_symlink() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
 /// Count health issues: manifest/disk mismatches.
 fn count_health_issues(dir: &Path, tome_home: &Path) -> Result<usize> {
     let m = manifest::load(tome_home)?;
@@ -320,7 +313,8 @@ fn count_health_issues(dir: &Path, tome_home: &Path) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
+    use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     // -- gather() tests --
@@ -338,21 +332,24 @@ mod tests {
         )
         .unwrap();
         assert!(!report.configured);
-        assert!(report.sources.is_empty());
-        assert!(report.targets.is_empty());
+        assert!(report.directories.is_empty());
     }
 
     #[test]
-    fn gather_with_sources_marks_configured() {
-        use crate::config::{Source, SourceType};
-
+    fn gather_with_directories_marks_configured() {
         let config = Config {
             library_dir: PathBuf::from("/nonexistent/tome/library"),
-            sources: vec![Source {
-                name: "test".to_string(),
-                path: PathBuf::from("/nonexistent/source"),
-                source_type: SourceType::Directory,
-            }],
+            directories: BTreeMap::from([(
+                DirectoryName::new("test").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/nonexistent/source"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
             ..Config::default()
         };
 
@@ -362,10 +359,10 @@ mod tests {
         )
         .unwrap();
         assert!(report.configured);
-        assert_eq!(report.sources.len(), 1);
-        assert_eq!(report.sources[0].name, "test");
-        // Source path doesn't exist — discover_source returns Ok(empty) with a warning
-        assert_eq!(report.sources[0].skill_count.count, Some(0));
+        assert_eq!(report.directories.len(), 1);
+        assert_eq!(report.directories[0].name, "test");
+        // Source path doesn't exist — count_skill_dirs returns Ok(0)
+        assert_eq!(report.directories[0].skill_count.count, Some(0));
     }
 
     #[test]
@@ -389,22 +386,21 @@ mod tests {
     }
 
     #[test]
-    fn gather_with_targets_populates_target_status() {
-        use crate::config::{TargetConfig, TargetMethod, TargetName};
-        use std::collections::BTreeMap;
-
+    fn gather_with_target_directory_populates_status() {
         let lib_dir = tempfile::TempDir::new().unwrap();
         let target_dir = tempfile::TempDir::new().unwrap();
 
         let config = Config {
             library_dir: lib_dir.path().to_path_buf(),
-            targets: BTreeMap::from([(
-                TargetName::new("claude").unwrap(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: target_dir.path().to_path_buf(),
-                    },
+            directories: BTreeMap::from([(
+                DirectoryName::new("claude").unwrap(),
+                DirectoryConfig {
+                    path: target_dir.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
                 },
             )]),
             ..Config::default()
@@ -415,10 +411,49 @@ mod tests {
             &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
         )
         .unwrap();
-        assert_eq!(report.targets.len(), 1);
-        assert_eq!(report.targets[0].name, "claude");
-        assert!(report.targets[0].enabled);
-        assert_eq!(report.targets[0].method, "symlink");
+        assert_eq!(report.directories.len(), 1);
+        assert_eq!(report.directories[0].name, "claude");
+        assert!(report.directories[0]
+            .role
+            .contains("Target"));
+    }
+
+    #[test]
+    fn gather_directory_status_includes_role_description() {
+        let lib_dir = tempfile::TempDir::new().unwrap();
+
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("my-skills").unwrap(),
+                DirectoryConfig {
+                    path: lib_dir.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Synced),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let report = gather(
+            &config,
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directories.len(), 1);
+        assert!(
+            report.directories[0].role.contains("Synced"),
+            "role should contain Synced, got: {}",
+            report.directories[0].role
+        );
+        assert!(
+            report.directories[0].role.contains("discovered here AND distributed here"),
+            "role should include description, got: {}",
+            report.directories[0].role
+        );
     }
 
     #[test]
@@ -437,94 +472,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.health.count, Some(1));
-    }
-
-    // -- Legacy tests (now calling show(), which delegates to gather() + render) --
-
-    #[test]
-    fn status_shows_init_prompt_when_unconfigured() {
-        let config = Config {
-            library_dir: PathBuf::from("/nonexistent/tome/library"),
-            ..Config::default()
-        };
-
-        let report = gather(
-            &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        )
-        .unwrap();
-        assert!(!report.configured);
-    }
-
-    #[test]
-    fn status_warns_when_library_missing_but_sources_configured() {
-        use crate::config::{Source, SourceType};
-
-        let config = Config {
-            library_dir: PathBuf::from("/nonexistent/tome/library"),
-            sources: vec![Source {
-                name: "test".to_string(),
-                path: PathBuf::from("/nonexistent/source"),
-                source_type: SourceType::Directory,
-            }],
-            ..Config::default()
-        };
-
-        let report = gather(
-            &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        )
-        .unwrap();
-        assert!(report.configured);
-        assert_eq!(report.sources.len(), 1);
-    }
-
-    #[test]
-    fn status_shows_tables_with_configured_sources_and_targets() {
-        use crate::config::{Source, SourceType, TargetConfig, TargetMethod, TargetName};
-        use std::collections::BTreeMap;
-
-        let lib_dir = tempfile::TempDir::new().unwrap();
-        let source_dir = tempfile::TempDir::new().unwrap();
-        let target_skill = tempfile::TempDir::new().unwrap();
-
-        // Create a skill in the source
-        let skill = source_dir.path().join("my-skill");
-        std::fs::create_dir_all(&skill).unwrap();
-        std::fs::write(skill.join("SKILL.md"), "# My Skill").unwrap();
-
-        // Create a real directory in the library (v0.2 style)
-        let lib_skill = lib_dir.path().join("my-skill");
-        std::fs::create_dir_all(&lib_skill).unwrap();
-        std::fs::write(lib_skill.join("SKILL.md"), "# My Skill").unwrap();
-
-        let config = Config {
-            library_dir: lib_dir.path().to_path_buf(),
-            sources: vec![Source {
-                name: "test-source".to_string(),
-                path: source_dir.path().to_path_buf(),
-                source_type: SourceType::Directory,
-            }],
-            targets: BTreeMap::from([(
-                TargetName::new("antigravity").unwrap(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: target_skill.path().to_path_buf(),
-                    },
-                },
-            )]),
-            ..Config::default()
-        };
-
-        let report = gather(
-            &config,
-            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
-        )
-        .unwrap();
-        assert!(report.configured);
-        assert_eq!(report.sources.len(), 1);
-        assert_eq!(report.targets.len(), 1);
     }
 
     // -- count_entries --
@@ -568,6 +515,50 @@ mod tests {
         std::fs::write(dir.path().join(".tome-manifest.json"), "{}").unwrap();
 
         assert_eq!(count_entries(dir.path()).unwrap(), 2);
+    }
+
+    // -- count_skill_dirs --
+
+    #[test]
+    fn count_skill_dirs_nonexistent_returns_zero() {
+        assert_eq!(
+            count_skill_dirs(Path::new("/nonexistent/dir")).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn count_skill_dirs_counts_subdirs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join("skill-a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("skill-b")).unwrap();
+        std::fs::write(dir.path().join("not-a-skill.txt"), "").unwrap();
+
+        assert_eq!(count_skill_dirs(dir.path()).unwrap(), 2);
+    }
+
+    // -- count_symlinks --
+
+    #[test]
+    fn count_symlinks_nonexistent_returns_zero() {
+        assert_eq!(
+            count_symlinks(Path::new("/nonexistent/dir")).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn count_symlinks_counts_only_symlinks() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = tempfile::TempDir::new().unwrap();
+
+        unix_fs::symlink(target.path(), dir.path().join("linked")).unwrap();
+        std::fs::create_dir_all(dir.path().join("real-dir")).unwrap();
+        std::fs::write(dir.path().join("file.txt"), "").unwrap();
+
+        assert_eq!(count_symlinks(dir.path()).unwrap(), 1);
     }
 
     // -- count_health_issues --

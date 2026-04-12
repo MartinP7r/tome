@@ -1,5 +1,5 @@
 //! Diagnose and optionally repair issues such as missing entries, orphan directories,
-//! and stale target symlinks.
+//! and stale directory symlinks.
 
 use anyhow::{Context, Result};
 use console::style;
@@ -35,7 +35,7 @@ pub struct DiagnosticIssue {
 pub struct DoctorReport {
     pub configured: bool,
     pub library_issues: Vec<DiagnosticIssue>,
-    pub target_issues: Vec<(String, Vec<DiagnosticIssue>)>,
+    pub directory_issues: Vec<(String, Vec<DiagnosticIssue>)>,
     pub config_issues: Vec<DiagnosticIssue>,
 }
 
@@ -43,7 +43,7 @@ impl DoctorReport {
     pub fn total_issues(&self) -> usize {
         self.library_issues.len()
             + self
-                .target_issues
+                .directory_issues
                 .iter()
                 .map(|(_, v)| v.len())
                 .sum::<usize>()
@@ -55,25 +55,24 @@ impl DoctorReport {
 
 /// Run all diagnostic checks and return a structured report.
 pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
-    let configured = paths.library_dir().is_dir() || !config.sources.is_empty();
+    let configured = paths.library_dir().is_dir() || !config.directories.is_empty();
 
     if !configured {
         return Ok(DoctorReport {
             configured: false,
             library_issues: Vec::new(),
-            target_issues: Vec::new(),
+            directory_issues: Vec::new(),
             config_issues: Vec::new(),
         });
     }
 
     let library_issues = check_library(paths)?;
 
-    let mut target_issues = Vec::new();
-    for (name, t) in config.targets.iter() {
-        if t.enabled {
-            let issues = check_target_dir(name.as_str(), t.skills_dir(), paths.library_dir())?;
-            target_issues.push((name.as_str().to_string(), issues));
-        }
+    let mut directory_issues = Vec::new();
+    for (name, dir_config) in config.distribution_dirs() {
+        let issues =
+            check_distribution_dir(name.as_str(), &dir_config.path, paths.library_dir())?;
+        directory_issues.push((name.as_str().to_string(), issues));
     }
 
     let config_issues = check_config(config)?;
@@ -81,7 +80,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
     Ok(DoctorReport {
         configured: true,
         library_issues,
-        target_issues,
+        directory_issues,
         config_issues,
     })
 }
@@ -119,9 +118,9 @@ pub fn diagnose(
     println!("{}", style("Checking library...").bold());
     render_issues(&report.library_issues, "library");
 
-    println!("{}", style("Checking targets...").bold());
-    for (name, issues) in &report.target_issues {
-        render_issues_for_target(name, issues);
+    println!("{}", style("Checking directories...").bold());
+    for (name, issues) in &report.directory_issues {
+        render_issues_for_directory(name, issues);
     }
 
     println!("{}", style("Checking config...").bold());
@@ -154,18 +153,19 @@ pub fn diagnose(
                 println!("{}", style("Repairing...").bold());
                 repair_library(paths)?;
 
-                for (name, t) in config.targets.iter() {
-                    if t.enabled {
-                        let removed =
-                            cleanup::cleanup_target(t.skills_dir(), paths.library_dir(), false)?;
-                        if removed > 0 {
-                            println!(
-                                "  {} Removed {} stale symlink(s) from {}",
-                                style("fixed").green(),
-                                removed,
-                                name
-                            );
-                        }
+                for (name, dir_config) in config.distribution_dirs() {
+                    let removed = cleanup::cleanup_target(
+                        &dir_config.path,
+                        paths.library_dir(),
+                        false,
+                    )?;
+                    if removed > 0 {
+                        println!(
+                            "  {} Removed {} stale symlink(s) from {}",
+                            style("fixed").green(),
+                            removed,
+                            name
+                        );
                     }
                 }
             }
@@ -191,7 +191,7 @@ fn render_issues(issues: &[DiagnosticIssue], section: &str) {
     }
 }
 
-fn render_issues_for_target(name: &str, issues: &[DiagnosticIssue]) {
+fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue]) {
     if issues.is_empty() {
         println!("  {} {}: OK", style("ok").green(), name);
     } else {
@@ -292,7 +292,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     Ok(issues)
 }
 
-fn check_target_dir(
+fn check_distribution_dir(
     _name: &str,
     skills_dir: &Path,
     library_dir: &Path,
@@ -302,7 +302,10 @@ fn check_target_dir(
     if !skills_dir.is_dir() {
         issues.push(DiagnosticIssue {
             severity: IssueSeverity::Warning,
-            message: format!("target directory does not exist ({})", skills_dir.display()),
+            message: format!(
+                "directory path does not exist ({})",
+                skills_dir.display()
+            ),
         });
         return Ok(issues);
     }
@@ -347,14 +350,14 @@ fn check_target_dir(
 fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
 
-    for source in &config.sources {
-        if !source.path.exists() {
+    for (name, dir_config) in &config.directories {
+        if !dir_config.path.exists() {
             issues.push(DiagnosticIssue {
                 severity: IssueSeverity::Warning,
                 message: format!(
-                    "source '{}' path does not exist: {}",
-                    source.name,
-                    source.path.display()
+                    "directory '{}' path does not exist: {}",
+                    name,
+                    dir_config.path.display()
                 ),
             });
         }
@@ -429,7 +432,10 @@ fn repair_library(paths: &TomePaths) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, Source, SourceType};
+    use crate::config::{
+        Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType,
+    };
+    use std::collections::BTreeMap;
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
@@ -507,16 +513,22 @@ mod tests {
     }
 
     #[test]
-    fn check_detects_missing_source_path() {
+    fn check_detects_missing_directory_path() {
         let lib = TempDir::new().unwrap();
 
         let config = Config {
             library_dir: lib.path().to_path_buf(),
-            sources: vec![Source {
-                name: "gone".to_string(),
-                path: PathBuf::from("/nonexistent/source"),
-                source_type: SourceType::Directory,
-            }],
+            directories: BTreeMap::from([(
+                DirectoryName::new("gone").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/nonexistent/source"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
             ..Config::default()
         };
 
@@ -623,49 +635,59 @@ mod tests {
         assert_eq!(result[0].severity, IssueSeverity::Error);
     }
 
-    // -- check_target_dir --
+    // -- check_distribution_dir --
 
     #[test]
-    fn check_target_dir_missing_dir() {
+    fn check_distribution_dir_missing_dir() {
         let lib = TempDir::new().unwrap();
-        let result =
-            check_target_dir("test-target", Path::new("/nonexistent/target"), lib.path()).unwrap();
+        let result = check_distribution_dir(
+            "test-dir",
+            Path::new("/nonexistent/dir"),
+            lib.path(),
+        )
+        .unwrap();
         assert_eq!(result.len(), 1);
     }
 
     #[test]
-    fn check_target_dir_stale_symlink() {
+    fn check_distribution_dir_stale_symlink() {
         let lib = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
 
         let stale_target = lib.path().join("deleted-skill");
         unix_fs::symlink(&stale_target, target_dir.path().join("skill-link")).unwrap();
 
-        let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
+        let result = check_distribution_dir("test", target_dir.path(), lib.path()).unwrap();
         assert_eq!(result.len(), 1);
     }
 
     #[test]
-    fn check_target_dir_ignores_external_symlinks() {
+    fn check_distribution_dir_ignores_external_symlinks() {
         let lib = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
 
         unix_fs::symlink("/some/other/place", target_dir.path().join("external")).unwrap();
 
-        let result = check_target_dir("test", target_dir.path(), lib.path()).unwrap();
+        let result = check_distribution_dir("test", target_dir.path(), lib.path()).unwrap();
         assert!(result.is_empty());
     }
 
     // -- check_config --
 
     #[test]
-    fn check_config_missing_source() {
+    fn check_config_missing_directory() {
         let config = Config {
-            sources: vec![Source {
-                name: "gone".to_string(),
-                path: PathBuf::from("/nonexistent/source"),
-                source_type: SourceType::Directory,
-            }],
+            directories: BTreeMap::from([(
+                DirectoryName::new("gone").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/nonexistent/source"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
             ..Config::default()
         };
 
@@ -674,14 +696,20 @@ mod tests {
     }
 
     #[test]
-    fn check_config_valid_sources() {
+    fn check_config_valid_directories() {
         let source_dir = TempDir::new().unwrap();
         let config = Config {
-            sources: vec![Source {
-                name: "real".to_string(),
-                path: source_dir.path().to_path_buf(),
-                source_type: SourceType::Directory,
-            }],
+            directories: BTreeMap::from([(
+                DirectoryName::new("real").unwrap(),
+                DirectoryConfig {
+                    path: source_dir.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
             ..Config::default()
         };
 
@@ -734,7 +762,6 @@ mod tests {
         );
         manifest::save(&m, tome_home.path()).unwrap();
 
-        // check_library should read manifest from tome_home, not library_dir
         let issues = check_library(
             &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
         )
@@ -744,8 +771,6 @@ mod tests {
             "should find no issues when manifest is at tome_home and skill exists in library"
         );
 
-        // Verify it would fail if we pointed tome_home at the wrong place
-        // (library_dir has no manifest, so it loads an empty one and sees an orphan)
         let issues = check_library(
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
         )
@@ -759,12 +784,9 @@ mod tests {
 
     #[test]
     fn repair_library_uses_tome_home_for_manifest() {
-        // Verify that repair_library reads the manifest from tome_home
-        // and operates on the separate library_dir.
         let tome_home = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
 
-        // Create a manifest at tome_home with an orphan entry (no dir in library)
         let mut m = manifest::Manifest::default();
         m.insert(
             crate::discover::SkillName::new("orphan-skill").unwrap(),
@@ -778,13 +800,11 @@ mod tests {
         );
         manifest::save(&m, tome_home.path()).unwrap();
 
-        // Repair should read manifest from tome_home and check library_dir
         repair_library(
             &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
         )
         .unwrap();
 
-        // The orphan entry should be removed from the manifest at tome_home
         let after = manifest::load(tome_home.path()).unwrap();
         assert!(
             !after.contains_key("orphan-skill"),
@@ -796,7 +816,6 @@ mod tests {
     fn repair_library_removes_orphan_manifest_entry() {
         let lib = TempDir::new().unwrap();
 
-        // Create a manifest entry with no corresponding directory
         let mut m = manifest::Manifest::default();
         m.insert(
             crate::discover::SkillName::new("ghost").unwrap(),
@@ -826,7 +845,6 @@ mod tests {
     fn repair_library_removes_broken_managed_symlink() {
         let lib = TempDir::new().unwrap();
 
-        // Create a broken managed symlink + manifest entry
         unix_fs::symlink("/nonexistent/source", lib.path().join("broken-plugin")).unwrap();
         let mut m = manifest::Manifest::default();
         m.insert(
@@ -858,7 +876,6 @@ mod tests {
     fn repair_library_removes_broken_legacy_symlink() {
         let lib = TempDir::new().unwrap();
 
-        // Broken legacy symlink (not in manifest)
         unix_fs::symlink("/nonexistent/v01/skill", lib.path().join("legacy")).unwrap();
 
         repair_library(
