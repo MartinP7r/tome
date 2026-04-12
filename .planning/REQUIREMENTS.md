@@ -34,7 +34,7 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Machine Preferences
 
-- [ ] **MACH-01**: `disabled_targets` renamed to `disabled_directories` in machine.toml
+- [x] **MACH-01**: `disabled_targets` renamed to `disabled_directories` in machine.toml
 - [ ] **MACH-02**: Per-directory `disabled` set (blocklist) in machine.toml
 - [ ] **MACH-03**: Per-directory `enabled` set (exclusive allowlist) in machine.toml
 - [ ] **MACH-04**: `disabled` + `enabled` on same directory = validation error
@@ -59,9 +59,9 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### State Schema
 
-- [ ] **STATE-01**: Manifest `source_name` field populated from directory name (field name preserved)
-- [ ] **STATE-02**: Lockfile `source_name` field populated from directory name (field name preserved)
-- [ ] **STATE-03**: Status output merges SourceStatus/TargetStatus into DirectoryStatus with role
+- [x] **STATE-01**: Manifest `source_name` field populated from directory name (field name preserved)
+- [x] **STATE-02**: Lockfile `source_name` field populated from directory name (field name preserved)
+- [x] **STATE-03**: Status output merges SourceStatus/TargetStatus into DirectoryStatus with role
 
 ### Browse Polish
 
@@ -119,10 +119,10 @@ Deferred to future releases. Tracked but not in current roadmap.
 | WIZ-03 | Phase 1 | Pending |
 | WIZ-04 | Phase 1 | Pending |
 | WIZ-05 | Phase 1 | Pending |
-| MACH-01 | Phase 1 | Pending |
-| STATE-01 | Phase 1 | Pending |
-| STATE-02 | Phase 1 | Pending |
-| STATE-03 | Phase 1 | Pending |
+| MACH-01 | Phase 1 | Complete |
+| STATE-01 | Phase 1 | Complete |
+| STATE-02 | Phase 1 | Complete |
+| STATE-03 | Phase 1 | Complete |
 | MACH-02 | Phase 2 | Pending |
 | MACH-03 | Phase 2 | Pending |
 | MACH-04 | Phase 2 | Pending |
