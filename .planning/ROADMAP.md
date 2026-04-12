@@ -28,7 +28,14 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Old-format `tome.toml` files fail to parse with a clear error message (not silent empty config)
   4. `tome status` and `tome doctor` report directories with their roles instead of separate source/target sections
   5. Cleanup with an empty directories map does not delete the library (safety guard fires)
-**Plans**: TBD
+**Plans:** 5 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Config type system (DirectoryName, DirectoryType, DirectoryRole, DirectoryConfig, Config rewrite)
+- [ ] 01-02-PLAN.md — Pipeline core (discover, library, distribute, cleanup)
+- [ ] 01-03-PLAN.md — State schema (manifest, lockfile, machine, status, doctor)
+- [ ] 01-04-PLAN.md — Wizard rewrite (KNOWN_DIRECTORIES, auto-role, summary table)
+- [ ] 01-05-PLAN.md — Integration wiring (lib.rs sync, remaining modules, integration tests, CHANGELOG)
 
 ### Phase 2: Git Sources & Selection
 **Goal**: Users can add remote git repos as skill sources and control which skills reach which directories on a per-machine basis
@@ -60,6 +67,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Unified Directory Foundation | 0/? | Not started | - |
+| 1. Unified Directory Foundation | 0/5 | Planning complete | - |
 | 2. Git Sources & Selection | 0/? | Not started | - |
 | 3. Import, Reassignment & Browse Polish | 0/? | Not started | - |
