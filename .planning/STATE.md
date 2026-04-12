@@ -21,7 +21,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 1: Unified Directory Foundation
+**Current focus:** Phase 01 — unified-directory-foundation
 
 ## Current Position
 

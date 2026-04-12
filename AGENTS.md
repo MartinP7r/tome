@@ -291,3 +291,316 @@ For more details, see README.md and docs/QUICKSTART.md.
 - If push fails, resolve and retry until it succeeds
 
 <!-- END BEADS INTEGRATION -->
+
+<!-- GSD:project-start source:PROJECT.md -->
+## Project
+
+**tome v0.6 — Unified Directory Model**
+
+tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from sources, consolidates them into a central library, and distributes them to target tools via symlinks. v0.6 replaces the artificial source/target split with a unified directory model where each configured directory declares its relationship to tome.
+
+**Core Value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. One config, one library, every tool.
+
+### Constraints
+
+- **Platform**: Unix-only (symlinks). No Windows support.
+- **Rust edition**: 2024. Strict clippy with `-D warnings`.
+- **Single user**: Martin is the sole user. This unblocks hard-breaking changes but means there's no migration tooling.
+- **No nested git**: Git source clones go to `~/.tome/repos/`, not inside the library dir (which may be its own git repo).
+- **Backward compat**: None. Old `tome.toml` files will fail to parse. Migration is documented, not automated.
+<!-- GSD:project-end -->
+
+<!-- GSD:stack-start source:codebase/STACK.md -->
+## Technology Stack
+
+## Languages
+- Rust 1.85.0+ (Edition 2024) - CLI binary (`crates/tome`) with library re-exports
+## Runtime
+- Standalone binary (no runtime required beyond OS)
+- Targets: `aarch64-apple-darwin`, `x86_64-apple-darwin`, `x86_64-unknown-linux-gnu`
+- Cargo (Rust 1.85.0+)
+- Lockfile: `Cargo.lock` (present)
+## Frameworks
+- `clap` 4 - CLI argument parsing with derive macros
+- `clap_complete` 4 - Shell completion generation
+- `ratatui` 0.30 - Terminal UI framework (TUI) for `tome browse` command
+- `crossterm` 0.29 - Terminal event handling and cursor control
+- `nucleo-matcher` 0.3 - Fuzzy matching for interactive search in browse view
+- `serde` 1 with derive - Serialization/deserialization framework
+- `toml` 1 - TOML configuration parsing (`~/.tome/tome.toml`)
+- `serde_json` 1 - JSON for manifest files (`.tome-manifest.json`, lockfiles)
+- `serde_yaml` 0.9 - YAML frontmatter parsing from SKILL.md files
+- `walkdir` 2 - Recursive directory traversal
+- `dirs` 6 - Platform-aware home directory detection
+- `tempfile` 3 (dev) - Temporary file creation for tests
+- `dialoguer` 0.12 - Interactive prompts (MultiSelect, Input, Confirm, Select) in wizard
+- `indicatif` 0.18 - Progress bars and spinners
+- `console` 0.16 - Terminal colors and formatting
+- `tabled` 0.20 - ASCII table output for `tome list` and `tome status`
+- `sha2` 0.11 - SHA-256 hashing for content integrity (skill directory hashes)
+- `anyhow` 1 - Error handling and context propagation
+## Testing
+- `assert_cmd` 2 - CLI binary assertion testing
+- `assert_fs` 1 - Filesystem assertion helpers (TempDir)
+- `insta` 1 with json+filters features - Snapshot testing with path redaction
+- `predicates` 3 - Assertion predicates for test conditions
+- Unit tests: co-located in modules via `#[cfg(test)] mod tests`
+- Integration tests: `crates/tome/tests/cli.rs` exercises binary via `assert_cmd`
+- Snapshot tests: stored in `crates/tome/tests/snapshots/`
+## Key Dependencies
+- `serde` + `toml` - Config loading/saving; schema validation via deserialization
+- `walkdir` - Skill discovery from configured sources
+- `sha2` - Content hashing for idempotent sync (detects unchanged skills)
+- `clap` - CLI parsing and help text generation
+- `dialoguer` - Interactive setup (wizard) via `tome init`
+- `ratatui`/`crossterm` - Terminal UI for `tome browse` command
+- `indicatif` - Progress feedback during long operations
+## Build System
+- Workspace manifest: `Cargo.toml` (root, defines all dependencies)
+- Crate manifest: `crates/tome/Cargo.toml` (binary-specific)
+- Profile configuration in root `Cargo.toml`:
+- `cargo-dist` 0.30.3 - Artifact building and release automation
+- Targets: Homebrew (primary), GitHub Releases (hosting)
+- CI: GitHub Actions (ubuntu-latest, macos-latest)
+## Configuration
+- Primary config: `~/.tome/tome.toml` (TOML format)
+- Per-machine prefs: `~/.config/tome/machine.toml` (disabled skills/targets)
+- Library manifest: `~/.tome/.tome-manifest.json` (provenance + hashes)
+- Lockfile: `~/.tome/tome.lock` (reproducibility snapshot)
+- Rust formatting: `cargo fmt` (no separate prettier/rustfmt.toml)
+- Linting: `cargo clippy --all-targets -- -D warnings`
+- Dependency auditing: `cargo deny` (policy in `deny.toml`)
+- Typo checking: `typos` CLI
+- Unused dependency detection: `cargo machete`
+## Platform Requirements
+- Rust 1.85.0+ (via `dtolnay/rust-toolchain@stable` in CI)
+- macOS (tested) or Linux (tested) — Unix-only (`std::os::unix::fs::symlink`)
+- Cargo and workspace resolver v3
+- macOS 10.15+ (aarch64-apple-darwin, x86_64-apple-darwin)
+- Linux x86_64 (GNU libc, x86_64-unknown-linux-gnu)
+- No external services or network requirements
+## Dependency Audit Policy
+- Multiple versions of the same crate trigger warnings (highlight all)
+- Unknown registries and git sources trigger warnings
+<!-- GSD:stack-end -->
+
+<!-- GSD:conventions-start source:CONVENTIONS.md -->
+## Conventions
+
+## Naming Patterns
+- Lowercase snake_case for all module files: `discover.rs`, `library.rs`, `cleanup.rs`
+- Tests co-located in same file using `#[cfg(test)] mod tests { }` blocks
+- Integration tests in separate `tests/cli.rs` directory
+- Lowercase snake_case: `hash_directory()`, `resolve_machine_path()`, `expand_tilde()`
+- Descriptive action verbs: `discover_`, `consolidate_`, `distribute_`, `cleanup_`
+- Helper functions marked with `pub(crate)` for internal use
+- Lowercase snake_case: `tmp_dir`, `source_path`, `skill_name`
+- Single-letter loop variables acceptable in short contexts: `for (k, v) in...`
+- Collection variables use plural forms: `sources`, `targets`, `skills`, `directories`
+- PascalCase for struct/enum names: `SkillName`, `TargetName`, `DiscoveredSkill`, `SkillOrigin`, `SyncReport`
+- Newtype wrappers use transparent repr: `pub struct SkillName(String);`
+- Enums descriptive and specific: `SourceType::ClaudePlugins`, `SkillOrigin::Managed { provenance }`
+## Code Style
+- `cargo fmt` (rustfmt default settings)
+- No explicit `.rustfmt.toml` — uses Rust edition 2024 defaults
+- Max line length: implicit, around 100-120 characters
+- `cargo clippy --all-targets -- -D warnings` enforced in CI
+- Clippy warnings treated as build failures (`-D warnings`)
+- Use `#[allow(dead_code)]` or `#[allow(unused)]` with justification when necessary (e.g., builder pattern with optional methods)
+## Import Organization
+- No module path aliases used
+- Full qualified paths preferred for clarity: `crate::validation::validate_identifier()`
+## Error Handling
+- `anyhow::Result<T>` used throughout for application-level error handling
+- `anyhow::Context` trait for adding context: `.context("description of what failed")?` or `.with_context(|| format!(...))?`
+- `anyhow::ensure!()` macro for validation: `ensure!(condition, "error message")`
+- `anyhow::bail!()` for error returns: `bail!("descriptive error")`
+- `Option::is_some_and()` for conditional checks: `p.parent().is_some_and(|d| d.exists())`
+- Centralized in `crate::validation` module
+- `validate_identifier()` function rejects: empty names, `.` and `..`, whitespace-only, path separators
+- Newtype types enforce validation at construction time
+## Logging
+- User-facing errors: `eprintln!("error: {e:#}");` with debug formatting for context
+- Progress/feedback: spinners via `indicatif::ProgressBar`
+- Status messages: colored text via `console::style()`
+- Verbose output: conditioned on `--verbose` flag
+## Comments
+- Above functions with `///` doc comments explaining purpose, parameters, examples
+- Module-level `//!` doc comments in each module file
+- Inline comments for non-obvious logic or workarounds
+- Avoid redundant comments that simply restate code
+- Comprehensive doc comments on all public types and functions
+- Doc comments include `# Examples` sections for complex functionality
+- Code examples in doc comments are formatted as executable code
+## Function Design
+- Accept references or owned types depending on lifetime needs: `&Path` vs `PathBuf`
+- Generic constraints used where appropriate: `impl Into<String>`
+- Builder patterns for complex initialization
+- `anyhow::Result<T>` for fallible operations
+- `Option<T>` for optional values (not defaults)
+- Struct types with public fields (e.g., `SyncReport`, `DiscoveredSkill`)
+## Module Design
+- `pub` for public API items
+- `pub(crate)` for internal-only helpers (not exported from crate root)
+- `pub(crate)` on internal struct fields that should not be directly accessed
+- Minimal public surface area
+- No barrel re-exports (no `pub use`)
+- Crate root (`lib.rs`) explicitly lists all modules and re-exports key types
+## Type Safety
+- Used for domain types to prevent mixing (e.g., `SkillName`, `TargetName`, `ContentHash`)
+- Provides validation at construction time
+- Implements `AsRef<str>`, `Display`, `Borrow<str>` for ergonomics
+- Custom `Deserialize` impl validates on deserialization
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[serde(transparent)]
+## Trait Implementations
+- `Debug` always derived
+- `Clone` derived unless expensive (rare)
+- `Default` implemented for configuration structs
+- `Display` implemented for user-facing types
+- `AsRef<T>`, `Borrow<T>`, `TryFrom<T>` for ergonomics
+- `Serialize`, `Deserialize` derived for data-holding structs
+- `#[serde(transparent)]` for newtype wrappers
+- `#[serde(default)]` for optional fields
+- Custom deserialize impls validate during parsing
+<!-- GSD:conventions-end -->
+
+<!-- GSD:architecture-start source:ARCHITECTURE.md -->
+## Architecture
+
+## Pattern Overview
+- Unix-only symlink-based distribution (uses `std::os::unix::fs::symlink`)
+- Idempotent consolidation with SHA-256 content hashing
+- Managed vs. local dual consolidation strategies
+- Data-driven target configuration (BTreeMap-based)
+- Dry-run threading throughout all operations
+- Atomic file writes with temp+rename pattern
+## Layers
+- Purpose: Parse command arguments and dispatch to domain logic
+- Location: `crates/tome/src/cli.rs`, `crates/tome/src/main.rs`
+- Contains: `Cli` struct (parsed args), `Command` enum (subcommands), thin `main.rs` wrapper
+- Depends on: Domain modules (sync, status, doctor, lint, browse, etc.)
+- Used by: Entry point only
+- Purpose: Load, validate, and manage TOML config files
+- Location: `crates/tome/src/config.rs`, `crates/tome/src/paths.rs`, `crates/tome/src/machine.rs`
+- Contains: `Config` (sources/targets), `TargetName`, `SkillName`, `TomePaths` (path bundling), `MachinePrefs` (per-machine disable lists)
+- Depends on: `serde`, file I/O, tilde expansion
+- Used by: All domain operations
+- Purpose: Scan sources and identify available skills
+- Location: `crates/tome/src/discover.rs`
+- Contains: `DiscoveredSkill`, `SkillName`, source scanners (ClaudePlugins, Directory)
+- Depends on: `config.rs` (source definitions), `walkdir` (filesystem traversal)
+- Used by: Sync pipeline, browse command, lint
+- Purpose: Copy or symlink skills into the library
+- Location: `crates/tome/src/library.rs`
+- Contains: Two strategies—**managed** (symlink library→source), **local** (copy to library). Manifest-driven idempotency via content hashing.
+- Depends on: `discover.rs`, `manifest.rs`, `paths.rs`
+- Used by: Sync pipeline
+- Purpose: Distribute library skills to target tool directories
+- Location: `crates/tome/src/distribute.rs`
+- Contains: Symlink creation (library→target), circular symlink detection (`shares_tool_root`, `find_tool_dir`)
+- Depends on: `manifest.rs`, `machine.rs` (disabled skills), `config.rs` (target config)
+- Used by: Sync pipeline
+- Purpose: Track skill provenance and history
+- Location: `crates/tome/src/manifest.rs`, `crates/tome/src/lockfile.rs`
+- Contains: `.tome-manifest.json` (SHA-256 hashes, source names, sync timestamps), `tome.lock` (reproducible snapshots)
+- Depends on: `serde_json`, `sha2`, filesystem I/O
+- Used by: Consolidate, distribute, cleanup, update
+- Purpose: Remove stale entries and broken symlinks
+- Location: `crates/tome/src/cleanup.rs`, `crates/tome/src/doctor.rs`
+- Contains: Stale skill removal, broken symlink detection, orphan directory identification
+- Depends on: `manifest.rs`, `paths.rs` (symlink verification)
+- Used by: Sync pipeline, doctor command
+- Purpose: Browse and manage skills interactively
+- Location: `crates/tome/src/browse/` (mod.rs, app.rs, ui.rs, fuzzy.rs)
+- Contains: TUI app state (ratatui), fuzzy search (nucleo-matcher), keyboard event handling
+- Depends on: `ratatui`, `crossterm` (terminal control), `nucleo-matcher` (fuzzy matching)
+- Used by: browse command only
+- Purpose: Validate SKILL.md frontmatter and directory structure
+- Location: `crates/tome/src/lint.rs`, `crates/tome/src/skill.rs`, `crates/tome/src/validation.rs`
+- Contains: Frontmatter parsing (YAML), content hashing, skill name/target name validation
+- Depends on: `serde_yaml`, `sha2`, regex patterns
+- Used by: Lint command, consolidate (validation)
+- Purpose: Orchestrate the full sync pipeline
+- Location: `crates/tome/src/lib.rs` (sync function), `crates/tome/src/update.rs`
+- Contains: Discover → consolidate → triage (via lockfile diff) → distribute → cleanup → save flow
+- Depends on: All above layers
+- Used by: `run()` entry point (init, sync commands)
+- Purpose: Shared helpers and backup functionality
+- Location: `crates/tome/src/backup.rs`, `crates/tome/src/eject.rs`, `crates/tome/src/relocate.rs`, `crates/tome/src/install.rs`
+- Contains: Git-backed snapshots (backup), symlink removal (eject), library relocation (relocate), shell completion (install)
+- Depends on: Core modules, git operations, shell integration
+- Used by: Individual commands
+## Data Flow
+- **Manifest** (`.tome-manifest.json`): Single source of truth for what's in the library. Tracks per-skill: source path, source name, SHA-256 hash, sync timestamp, managed flag.
+- **Lockfile** (`tome.lock`): Reproducible snapshot for version control. Tracks per-skill: source name, content hash, registry ID, version, git commit SHA (for managed plugins).
+- **Machine Preferences** (`~/.config/tome/machine.toml`): Machine-specific disables. Separate from portable tome home so skills list stays complete across machines.
+- **TomePaths**: Bundles `tome_home`, `library_dir`, `config_dir` to prevent parameter swaps.
+## Key Abstractions
+- Purpose: Validated, type-safe skill identifier
+- Examples: `crates/tome/src/discover.rs` (SkillName type)
+- Pattern: Newtype wrapper with `new()` constructor, lenient validation (rejects empty + path separators), strict convention checking (lowercase + digits + hyphens)
+- Purpose: Validated, type-safe target identifier
+- Examples: `crates/tome/src/config.rs` (TargetName type)
+- Pattern: Same as SkillName; prevents accidental string parameter mixing
+- Purpose: Enum-based source discovery strategy
+- Examples: `crates/tome/src/config.rs` (SourceType enum)
+- Pattern: Variants = ClaudePlugins (plugin-based), Directory (flat walkdir). Determines consolidation strategy.
+- Purpose: Bundle tome_home + library_dir + config_dir to prevent swaps
+- Examples: `crates/tome/src/paths.rs` (TomePaths struct)
+- Pattern: Newtype-like pattern; absolute path validation in constructor; smart config_dir detection (either tome_home or tome_home/.tome/)
+- Purpose: SHA-256 digest for idempotent content comparison
+- Examples: `crates/tome/src/validation.rs`, `crates/tome/src/manifest.rs`
+- Pattern: Serialized as hex string; computed via `hash_directory()` for deterministic directory hashing
+- Purpose: Metadata about a discovered skill before consolidation
+- Examples: `crates/tome/src/discover.rs` (DiscoveredSkill struct)
+- Pattern: Captures name, path, source name, origin (managed vs. local), provenance metadata (registry_id, version, git_commit_sha)
+## Entry Points
+- Location: `crates/tome/src/main.rs`
+- Triggers: Binary execution
+- Responsibilities: Parse CLI args via clap, call `tome::run()`
+- Location: `crates/tome/src/lib.rs::run(cli: Cli)`
+- Triggers: All CLI commands
+- Responsibilities: Resolve paths (tome_home, config), load config, dispatch to subcommand handlers (sync, status, doctor, lint, browse, etc.)
+- Location: `crates/tome/src/lib.rs::sync(config, paths, options)`
+- Triggers: `tome init`, `tome sync`
+- Responsibilities: Orchestrate the full pipeline: discover → consolidate → triage → distribute → cleanup → save
+- Location: `crates/tome/src/wizard.rs::run(dry_run)`
+- Triggers: `tome init`
+- Responsibilities: Interactive setup with dialoguer; auto-discovers known source/target locations; writes config
+- Location: `crates/tome/src/browse/mod.rs::browse(skills, manifest)`
+- Triggers: `tome browse`
+- Responsibilities: Launch ratatui TUI; display skill list with fuzzy search; show metadata (source, path, sync timestamp)
+## Error Handling
+- `.with_context()` to add operation context to errors
+- `dry_run` parameter allows skipping filesystem writes while still counting changes
+- Atomic writes (temp+rename) prevent partial updates
+- Symlink verification before removal prevents cascading failures
+- Manifest/lockfile parsing errors fail fast (corrupt config is unrecoverable)
+## Cross-Cutting Concerns
+- Skill/target names: `crate::validation::validate_identifier()` (rejects empty + path separators)
+- SKILL.md frontmatter: `serde_yaml::from_str()` with strict mode
+- Config TOML: `toml::from_str()` with custom deserialization
+- Paths: Absolute path requirements in TomePaths constructor
+- Symlinks: `symlink_points_to()` verifies destination before operations
+<!-- GSD:architecture-end -->
+
+<!-- GSD:workflow-start source:GSD defaults -->
+## GSD Workflow Enforcement
+
+Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
+
+Use these entry points:
+- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
+- `/gsd:debug` for investigation and bug fixing
+- `/gsd:execute-phase` for planned phase work
+
+Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
+<!-- GSD:workflow-end -->
+
+<!-- GSD:profile-start -->
+## Developer Profile
+
+> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
+> This section is managed by `generate-claude-profile` -- do not edit manually.
+<!-- GSD:profile-end -->
