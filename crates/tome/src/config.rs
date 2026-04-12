@@ -1,4 +1,7 @@
 //! TOML configuration loading, saving, and validation. Handles tilde expansion and default paths.
+//!
+//! v0.6: Unified directory model — replaces separate `[[sources]]` and `[targets.*]`
+//! with a single `[directories.*]` config.
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -7,20 +10,20 @@ use std::path::{Path, PathBuf};
 
 use crate::discover::SkillName;
 
-/// A validated target name.
+/// A validated directory name.
 ///
 /// Rejects empty names and path separators, matching the `SkillName` validation pattern.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
 #[serde(transparent)]
-pub struct TargetName(String);
+pub struct DirectoryName(String);
 
-impl TargetName {
-    /// Create a new target name from any string-like value.
+impl DirectoryName {
+    /// Create a new directory name from any string-like value.
     ///
     /// Rejects empty names and names containing path separators (`/` or `\`).
     pub fn new(name: impl Into<String>) -> Result<Self> {
         let name = name.into();
-        crate::validation::validate_identifier(&name, "target name")?;
+        crate::validation::validate_identifier(&name, "directory name")?;
         Ok(Self(name))
     }
 
@@ -29,43 +32,43 @@ impl TargetName {
     }
 }
 
-impl std::fmt::Display for TargetName {
+impl std::fmt::Display for DirectoryName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
     }
 }
 
-impl AsRef<str> for TargetName {
+impl AsRef<str> for DirectoryName {
     fn as_ref(&self) -> &str {
         &self.0
     }
 }
 
-impl AsRef<Path> for TargetName {
+impl AsRef<Path> for DirectoryName {
     fn as_ref(&self) -> &Path {
         Path::new(&self.0)
     }
 }
 
-impl PartialEq<str> for TargetName {
+impl PartialEq<str> for DirectoryName {
     fn eq(&self, other: &str) -> bool {
         self.0 == other
     }
 }
 
-impl PartialEq<&str> for TargetName {
+impl PartialEq<&str> for DirectoryName {
     fn eq(&self, other: &&str) -> bool {
         self.0 == *other
     }
 }
 
-impl std::borrow::Borrow<str> for TargetName {
+impl std::borrow::Borrow<str> for DirectoryName {
     fn borrow(&self) -> &str {
         &self.0
     }
 }
 
-impl TryFrom<String> for TargetName {
+impl TryFrom<String> for DirectoryName {
     type Error = anyhow::Error;
 
     fn try_from(s: String) -> Result<Self> {
@@ -73,17 +76,155 @@ impl TryFrom<String> for TargetName {
     }
 }
 
-impl<'de> serde::Deserialize<'de> for TargetName {
+impl<'de> serde::Deserialize<'de> for DirectoryName {
     fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        TargetName::new(s).map_err(serde::de::Error::custom)
+        DirectoryName::new(s).map_err(serde::de::Error::custom)
     }
 }
 
-/// Backup configuration — controls git-backed snapshots of the skill library.
+/// The type of a configured directory — determines discovery strategy and default role.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DirectoryType {
+    /// Reads installed_plugins.json for plugin-based discovery
+    ClaudePlugins,
+    /// Scans for */SKILL.md directly
+    #[default]
+    Directory,
+    /// Clones/pulls a remote git repository
+    Git,
+}
+
+impl std::fmt::Display for DirectoryType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DirectoryType::ClaudePlugins => write!(f, "claude-plugins"),
+            DirectoryType::Directory => write!(f, "directory"),
+            DirectoryType::Git => write!(f, "git"),
+        }
+    }
+}
+
+impl DirectoryType {
+    /// Returns the default role for this directory type.
+    pub fn default_role(&self) -> DirectoryRole {
+        match self {
+            DirectoryType::ClaudePlugins => DirectoryRole::Managed,
+            DirectoryType::Directory => DirectoryRole::Synced,
+            DirectoryType::Git => DirectoryRole::Source,
+        }
+    }
+
+    /// Returns the set of valid roles for this directory type.
+    /// Used by the wizard to filter the role picker.
+    pub fn valid_roles(&self) -> Vec<DirectoryRole> {
+        match self {
+            DirectoryType::ClaudePlugins => vec![DirectoryRole::Managed],
+            DirectoryType::Directory => {
+                vec![
+                    DirectoryRole::Synced,
+                    DirectoryRole::Source,
+                    DirectoryRole::Target,
+                ]
+            }
+            DirectoryType::Git => vec![DirectoryRole::Source],
+        }
+    }
+}
+
+/// The role a directory plays in the sync pipeline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DirectoryRole {
+    /// Read-only, owned by package manager (e.g. Claude plugins cache)
+    Managed,
+    /// Skills discovered here AND distributed here (bidirectional)
+    Synced,
+    /// Skills discovered here, not distributed here
+    Source,
+    /// Skills distributed here, not discovered here
+    Target,
+}
+
+impl DirectoryRole {
+    /// Human-readable description with plain-english explanation.
+    /// Per D-04/D-05: every user-facing display includes a parenthetical.
+    pub fn description(&self) -> &'static str {
+        match self {
+            DirectoryRole::Managed => "Managed (read-only, owned by package manager)",
+            DirectoryRole::Synced => "Synced (skills discovered here AND distributed here)",
+            DirectoryRole::Source => "Source (skills discovered here, not distributed here)",
+            DirectoryRole::Target => "Target (skills distributed here, not discovered here)",
+        }
+    }
+
+    /// Whether this role participates in discovery (skills are read from it).
+    pub fn is_discovery(&self) -> bool {
+        matches!(
+            self,
+            DirectoryRole::Managed | DirectoryRole::Synced | DirectoryRole::Source
+        )
+    }
+
+    /// Whether this role participates in distribution (skills are pushed to it).
+    pub fn is_distribution(&self) -> bool {
+        matches!(self, DirectoryRole::Synced | DirectoryRole::Target)
+    }
+}
+
+impl std::fmt::Display for DirectoryRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DirectoryRole::Managed => write!(f, "managed"),
+            DirectoryRole::Synced => write!(f, "synced"),
+            DirectoryRole::Source => write!(f, "source"),
+            DirectoryRole::Target => write!(f, "target"),
+        }
+    }
+}
+
+/// Configuration for a single directory in the unified model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryConfig {
+    /// Path to the directory
+    pub path: PathBuf,
+
+    /// How to discover skills in this directory
+    #[serde(rename = "type", default)]
+    pub directory_type: DirectoryType,
+
+    /// Role in the sync pipeline (defaults based on directory_type)
+    #[serde(default)]
+    pub(crate) role: Option<DirectoryRole>,
+
+    /// Git branch to track (git type only)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+
+    /// Git tag to pin (git type only)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+
+    /// Git revision to pin (git type only)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+}
+
+impl DirectoryConfig {
+    /// Returns the effective role, defaulting from directory_type if not explicitly set.
+    pub fn role(&self) -> DirectoryRole {
+        self.role
+            .clone()
+            .unwrap_or_else(|| self.directory_type.default_role())
+    }
+}
+
+/// Backup configuration -- controls git-backed snapshots of the skill library.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BackupConfig {
@@ -101,7 +242,9 @@ impl Default for BackupConfig {
 }
 
 /// Top-level configuration for tome.
+#[allow(deprecated)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Where the consolidated skill library lives
     #[serde(default = "defaults::library_dir")]
@@ -111,157 +254,47 @@ pub struct Config {
     #[serde(default)]
     pub(crate) exclude: BTreeSet<SkillName>,
 
-    /// Skill sources — order determines priority for duplicates
+    /// Unified directory entries -- replaces separate sources and targets
     #[serde(default)]
-    pub(crate) sources: Vec<Source>,
-
-    /// Distribution targets — keyed by tool name (e.g. "claude", "antigravity")
-    #[serde(default, deserialize_with = "deserialize_targets")]
-    pub(crate) targets: BTreeMap<TargetName, TargetConfig>,
+    pub(crate) directories: BTreeMap<DirectoryName, DirectoryConfig>,
 
     /// Backup settings
     #[serde(default)]
     pub(crate) backup: BackupConfig,
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Source {
-    /// Display name for this source
-    pub(crate) name: String,
+    // --- Deprecated fields for migration compatibility ---
+    // These are NOT part of the TOML config (serde(skip)). They exist only so
+    // other modules can compile with `config.sources` / `config.targets` field
+    // access until they are converted in plans 01-02 through 01-05.
 
-    /// Path to the source directory
-    pub(crate) path: PathBuf,
+    /// Deprecated: Always empty. Use `directories` with discovery roles instead.
+    #[serde(skip)]
+    #[deprecated(note = "Use directories with discovery roles — removed in plan 01-02")]
+    pub(crate) sources: Vec<Source>,
 
-    /// How to discover skills in this source
-    #[serde(rename = "type")]
-    pub(crate) source_type: SourceType,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SourceType {
-    /// Reads installed_plugins.json for plugin-based discovery
-    ClaudePlugins,
-    /// Scans for */SKILL.md directly
-    Directory,
-}
-
-impl std::fmt::Display for SourceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceType::ClaudePlugins => write!(f, "claude-plugins"),
-            SourceType::Directory => write!(f, "directory"),
-        }
-    }
-}
-
-/// How a target receives skills — each variant carries its required path.
-#[derive(Debug, Clone)]
-pub enum TargetMethod {
-    Symlink { skills_dir: PathBuf },
-}
-
-/// Configuration for a single distribution target.
-#[derive(Debug, Clone)]
-pub struct TargetConfig {
-    pub enabled: bool,
-    pub method: TargetMethod,
-}
-
-impl TargetConfig {
-    /// Returns the skills directory for this target.
-    pub fn skills_dir(&self) -> &Path {
-        match &self.method {
-            TargetMethod::Symlink { skills_dir } => skills_dir,
-        }
-    }
-}
-
-// --- Serde layer: flat TOML format ↔ TargetConfig ---
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RawTargetConfig {
-    enabled: bool,
-    method: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    skills_dir: Option<PathBuf>,
-}
-
-impl TryFrom<RawTargetConfig> for TargetConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw: RawTargetConfig) -> Result<Self> {
-        let method = match raw.method.as_str() {
-            "symlink" => {
-                let skills_dir = raw
-                    .skills_dir
-                    .ok_or_else(|| anyhow::anyhow!("symlink target requires skills_dir"))?;
-                TargetMethod::Symlink { skills_dir }
-            }
-            other => anyhow::bail!("unknown target method: '{}'", other),
-        };
-        Ok(TargetConfig {
-            enabled: raw.enabled,
-            method,
-        })
-    }
-}
-
-impl From<&TargetConfig> for RawTargetConfig {
-    fn from(tc: &TargetConfig) -> Self {
-        match &tc.method {
-            TargetMethod::Symlink { skills_dir } => RawTargetConfig {
-                enabled: tc.enabled,
-                method: "symlink".to_string(),
-                skills_dir: Some(skills_dir.clone()),
-            },
-        }
-    }
-}
-
-impl Serialize for TargetConfig {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        RawTargetConfig::from(self).serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for TargetConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let raw = RawTargetConfig::deserialize(deserializer)?;
-        TargetConfig::try_from(raw).map_err(serde::de::Error::custom)
-    }
-}
-
-/// Deserialize targets map from TOML, validating target names.
-fn deserialize_targets<'de, D>(
-    deserializer: D,
-) -> std::result::Result<BTreeMap<TargetName, TargetConfig>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let raw: BTreeMap<String, TargetConfig> = BTreeMap::deserialize(deserializer)?;
-    raw.into_iter()
-        .map(|(k, v)| {
-            let name = TargetName::new(k).map_err(serde::de::Error::custom)?;
-            Ok((name, v))
-        })
-        .collect()
+    /// Deprecated: Always empty. Use `directories` with distribution roles instead.
+    #[serde(skip)]
+    #[deprecated(note = "Use directories with distribution roles — removed in plan 01-02")]
+    pub(crate) targets: BTreeMap<DirectoryName, TargetConfig>,
 }
 
 impl Config {
     /// Load config from file, or return defaults if file doesn't exist.
+    ///
+    /// When parsing fails, checks for old-format keys and appends a migration hint.
     pub fn load(path: &Path) -> Result<Self> {
         if path.exists() {
             let content = std::fs::read_to_string(path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
-            let mut config: Config = toml::from_str(&content)
-                .with_context(|| format!("failed to parse {}", path.display()))?;
+            let mut config: Config = toml::from_str(&content).map_err(|e| {
+                let mut msg = format!("failed to parse {}: {e}", path.display());
+                if content.contains("[[sources]]") || content.contains("[targets.") {
+                    msg.push_str("\nhint: tome v0.6 replaced [[sources]] and [targets.*] with [directories.*]. See CHANGELOG.md for migration instructions.");
+                }
+                anyhow::anyhow!("{msg}")
+            })?;
             config.expand_tildes()?;
+            config.validate()?;
             Ok(config)
         } else {
             let mut config = Self::default();
@@ -274,17 +307,7 @@ impl Config {
     ///
     /// When an explicit path is provided and its parent directory does not
     /// exist, this is treated as a configuration error (likely a typo).
-    /// A missing file in an existing directory is fine — first-run scenario.
-    ///
-    /// # Examples
-    ///
-    /// ```text
-    /// // Load from default ~/.tome/tome.toml
-    /// let config = Config::load_or_default(None)?;
-    ///
-    /// // Load from explicit path (parent dir must exist)
-    /// let config = Config::load_or_default(Some(Path::new("/tmp/tome.toml")))?;
-    /// ```
+    /// A missing file in an existing directory is fine -- first-run scenario.
     pub fn load_or_default(cli_path: Option<&Path>) -> Result<Self> {
         let path = match cli_path {
             Some(p) => {
@@ -311,6 +334,11 @@ impl Config {
     }
 
     /// Validate config for common misconfigurations.
+    ///
+    /// Checks:
+    /// - library_dir is not a file
+    /// - Role/type combos are valid (Managed only for ClaudePlugins, Target not for Git)
+    /// - Git fields (branch/tag/rev) only on Git type directories
     pub fn validate(&self) -> Result<()> {
         // library_dir exists but is a file, not a directory
         if self.library_dir.exists() && !self.library_dir.is_dir() {
@@ -320,56 +348,80 @@ impl Config {
             );
         }
 
-        // Empty source names
-        for source in &self.sources {
-            anyhow::ensure!(!source.name.is_empty(), "source name cannot be empty");
-        }
+        for (name, dir) in &self.directories {
+            let role = dir.role();
 
-        // Duplicate source names
-        let mut seen = std::collections::HashSet::new();
-        for source in &self.sources {
-            anyhow::ensure!(
-                seen.insert(&source.name),
-                "duplicate source name: '{}'",
-                source.name
-            );
-        }
+            // Managed role only valid with ClaudePlugins type
+            if role == DirectoryRole::Managed && dir.directory_type != DirectoryType::ClaudePlugins {
+                anyhow::bail!(
+                    "directory '{}': Managed role is only valid with claude-plugins type",
+                    name
+                );
+            }
 
-        // TargetName validation is enforced at parse time; no additional check needed here.
+            // Target role invalid with Git type
+            if role == DirectoryRole::Target && dir.directory_type == DirectoryType::Git {
+                anyhow::bail!(
+                    "directory '{}': Target role is not valid with git type",
+                    name
+                );
+            }
+
+            // Git fields only valid with Git type
+            let has_git_fields =
+                dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
+            if has_git_fields && dir.directory_type != DirectoryType::Git {
+                anyhow::bail!(
+                    "directory '{}': branch/tag/rev fields are only valid with git type",
+                    name
+                );
+            }
+        }
 
         Ok(())
+    }
+
+    /// Directories that participate in discovery (Managed, Synced, Source roles).
+    pub fn discovery_dirs(&self) -> impl Iterator<Item = (&DirectoryName, &DirectoryConfig)> {
+        self.directories
+            .iter()
+            .filter(|(_, dir)| dir.role().is_discovery())
+    }
+
+    /// Directories that participate in distribution (Synced, Target roles).
+    pub fn distribution_dirs(&self) -> impl Iterator<Item = (&DirectoryName, &DirectoryConfig)> {
+        self.directories
+            .iter()
+            .filter(|(_, dir)| dir.role().is_distribution())
+    }
+
+    /// Directories with Managed role only.
+    pub fn managed_dirs(&self) -> impl Iterator<Item = (&DirectoryName, &DirectoryConfig)> {
+        self.directories
+            .iter()
+            .filter(|(_, dir)| dir.role() == DirectoryRole::Managed)
     }
 
     /// Expand `~` in all path fields.
     fn expand_tildes(&mut self) -> Result<()> {
         self.library_dir = expand_tilde(&self.library_dir)?;
-        for source in &mut self.sources {
-            source.path = expand_tilde(&source.path)?;
-        }
-        for t in self.targets.values_mut() {
-            expand_target_tildes(t)?;
+        for dir in self.directories.values_mut() {
+            dir.path = expand_tilde(&dir.path)?;
         }
         Ok(())
     }
 }
 
-fn expand_target_tildes(t: &mut TargetConfig) -> Result<()> {
-    match &mut t.method {
-        TargetMethod::Symlink { skills_dir } => {
-            *skills_dir = expand_tilde(skills_dir)?;
-        }
-    }
-    Ok(())
-}
-
+#[allow(deprecated)]
 impl Default for Config {
     fn default() -> Self {
         Self {
             library_dir: defaults::library_dir(),
             exclude: BTreeSet::new(),
+            directories: BTreeMap::new(),
+            backup: BackupConfig::default(),
             sources: Vec::new(),
             targets: BTreeMap::new(),
-            backup: BackupConfig::default(),
         }
     }
 }
@@ -389,7 +441,7 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
 ///
 /// Resolution order:
 /// 1. `TOME_HOME` environment variable (if set and non-empty)
-/// 2. `~/.config/tome/config.toml` → `tome_home` field
+/// 2. `~/.config/tome/config.toml` -> `tome_home` field
 /// 3. `~/.tome/`
 pub fn default_tome_home() -> Result<PathBuf> {
     // 1. TOME_HOME env var
@@ -457,6 +509,148 @@ pub fn default_config_path() -> Result<PathBuf> {
     Ok(resolve_config_dir(&home).join("tome.toml"))
 }
 
+// =============================================================================
+// DEPRECATED COMPATIBILITY SHIMS
+// =============================================================================
+// These types exist only to keep other modules compiling during the v0.6
+// migration. They will be removed as each module is converted to the new
+// unified directory model (plans 01-02 through 01-05).
+
+/// Deprecated: Use `DirectoryName` instead.
+#[deprecated(note = "Use DirectoryName instead — will be removed in plan 01-02")]
+pub type TargetName = DirectoryName;
+
+/// Deprecated source definition — kept for compilation during migration.
+#[allow(deprecated)]
+#[deprecated(note = "Use DirectoryConfig instead — will be removed in plan 01-02")]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Source {
+    /// Display name for this source
+    pub(crate) name: String,
+
+    /// Path to the source directory
+    pub(crate) path: PathBuf,
+
+    /// How to discover skills in this source
+    #[serde(rename = "type")]
+    pub(crate) source_type: SourceType,
+}
+
+/// Deprecated source type enum — kept for compilation during migration.
+#[deprecated(note = "Use DirectoryType instead — will be removed in plan 01-02")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SourceType {
+    /// Reads installed_plugins.json for plugin-based discovery
+    ClaudePlugins,
+    /// Scans for */SKILL.md directly
+    Directory,
+}
+
+#[allow(deprecated)]
+impl std::fmt::Display for SourceType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SourceType::ClaudePlugins => write!(f, "claude-plugins"),
+            SourceType::Directory => write!(f, "directory"),
+        }
+    }
+}
+
+/// Deprecated target method — kept for compilation during migration.
+#[deprecated(note = "Use DirectoryConfig.path instead — will be removed in plan 01-02")]
+#[derive(Debug, Clone)]
+pub enum TargetMethod {
+    Symlink { skills_dir: PathBuf },
+}
+
+/// Deprecated target configuration — kept for compilation during migration.
+#[allow(deprecated)]
+#[deprecated(note = "Use DirectoryConfig instead — will be removed in plan 01-02")]
+#[derive(Debug, Clone)]
+pub struct TargetConfig {
+    pub enabled: bool,
+    pub method: TargetMethod,
+}
+
+#[allow(deprecated)]
+impl TargetConfig {
+    /// Returns the skills directory for this target.
+    pub fn skills_dir(&self) -> &Path {
+        match &self.method {
+            TargetMethod::Symlink { skills_dir } => skills_dir,
+        }
+    }
+}
+
+// Serde layer for deprecated TargetConfig
+#[allow(deprecated)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RawTargetConfig {
+    enabled: bool,
+    method: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    skills_dir: Option<PathBuf>,
+}
+
+#[allow(deprecated)]
+impl TryFrom<RawTargetConfig> for TargetConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: RawTargetConfig) -> Result<Self> {
+        let method = match raw.method.as_str() {
+            "symlink" => {
+                let skills_dir = raw
+                    .skills_dir
+                    .ok_or_else(|| anyhow::anyhow!("symlink target requires skills_dir"))?;
+                TargetMethod::Symlink { skills_dir }
+            }
+            other => anyhow::bail!("unknown target method: '{}'", other),
+        };
+        Ok(TargetConfig {
+            enabled: raw.enabled,
+            method,
+        })
+    }
+}
+
+#[allow(deprecated)]
+impl From<&TargetConfig> for RawTargetConfig {
+    fn from(tc: &TargetConfig) -> Self {
+        match &tc.method {
+            TargetMethod::Symlink { skills_dir } => RawTargetConfig {
+                enabled: tc.enabled,
+                method: "symlink".to_string(),
+                skills_dir: Some(skills_dir.clone()),
+            },
+        }
+    }
+}
+
+#[allow(deprecated)]
+impl Serialize for TargetConfig {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        RawTargetConfig::from(self).serialize(serializer)
+    }
+}
+
+#[allow(deprecated)]
+impl<'de> Deserialize<'de> for TargetConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let raw = RawTargetConfig::deserialize(deserializer)?;
+        TargetConfig::try_from(raw).map_err(serde::de::Error::custom)
+    }
+}
+
+// =============================================================================
+// END DEPRECATED COMPATIBILITY SHIMS
+// =============================================================================
+
 mod defaults {
     use std::path::PathBuf;
 
@@ -479,6 +673,497 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    // --- DirectoryName tests ---
+
+    #[test]
+    fn directory_name_accepts_valid() {
+        let name = DirectoryName::new("my-dir-123").unwrap();
+        assert_eq!(name.as_str(), "my-dir-123");
+        assert_eq!(name.to_string(), "my-dir-123");
+        assert_eq!(name, *"my-dir-123");
+    }
+
+    #[test]
+    fn directory_name_rejects_empty() {
+        assert!(DirectoryName::new("").is_err());
+    }
+
+    #[test]
+    fn directory_name_rejects_path_separator() {
+        assert!(DirectoryName::new("foo/bar").is_err());
+        assert!(DirectoryName::new("foo\\bar").is_err());
+    }
+
+    #[test]
+    fn directory_name_rejects_dot_special() {
+        assert!(DirectoryName::new(".").is_err());
+        assert!(DirectoryName::new("..").is_err());
+    }
+
+    #[test]
+    fn directory_name_rejects_whitespace() {
+        assert!(DirectoryName::new("  ").is_err());
+        assert!(DirectoryName::new(" leading").is_err());
+        assert!(DirectoryName::new("trailing ").is_err());
+    }
+
+    #[test]
+    fn directory_name_deserialize_rejects_empty() {
+        let result: std::result::Result<DirectoryName, _> = serde_json::from_str(r#""""#);
+        assert!(result.is_err());
+    }
+
+    // --- DirectoryType tests ---
+
+    #[test]
+    fn directory_type_default_is_directory() {
+        assert_eq!(DirectoryType::default(), DirectoryType::Directory);
+    }
+
+    #[test]
+    fn directory_type_default_roles() {
+        assert_eq!(
+            DirectoryType::ClaudePlugins.default_role(),
+            DirectoryRole::Managed
+        );
+        assert_eq!(
+            DirectoryType::Directory.default_role(),
+            DirectoryRole::Synced
+        );
+        assert_eq!(DirectoryType::Git.default_role(), DirectoryRole::Source);
+    }
+
+    #[test]
+    fn directory_type_valid_roles() {
+        assert_eq!(
+            DirectoryType::ClaudePlugins.valid_roles(),
+            vec![DirectoryRole::Managed]
+        );
+        assert_eq!(
+            DirectoryType::Directory.valid_roles(),
+            vec![
+                DirectoryRole::Synced,
+                DirectoryRole::Source,
+                DirectoryRole::Target,
+            ]
+        );
+        assert_eq!(
+            DirectoryType::Git.valid_roles(),
+            vec![DirectoryRole::Source]
+        );
+    }
+
+    #[test]
+    fn directory_type_display() {
+        assert_eq!(DirectoryType::ClaudePlugins.to_string(), "claude-plugins");
+        assert_eq!(DirectoryType::Directory.to_string(), "directory");
+        assert_eq!(DirectoryType::Git.to_string(), "git");
+    }
+
+    // --- DirectoryRole tests ---
+
+    #[test]
+    fn directory_role_descriptions() {
+        assert_eq!(
+            DirectoryRole::Managed.description(),
+            "Managed (read-only, owned by package manager)"
+        );
+        assert_eq!(
+            DirectoryRole::Synced.description(),
+            "Synced (skills discovered here AND distributed here)"
+        );
+        assert_eq!(
+            DirectoryRole::Source.description(),
+            "Source (skills discovered here, not distributed here)"
+        );
+        assert_eq!(
+            DirectoryRole::Target.description(),
+            "Target (skills distributed here, not discovered here)"
+        );
+    }
+
+    #[test]
+    fn directory_role_is_discovery() {
+        assert!(DirectoryRole::Managed.is_discovery());
+        assert!(DirectoryRole::Synced.is_discovery());
+        assert!(DirectoryRole::Source.is_discovery());
+        assert!(!DirectoryRole::Target.is_discovery());
+    }
+
+    #[test]
+    fn directory_role_is_distribution() {
+        assert!(!DirectoryRole::Managed.is_distribution());
+        assert!(DirectoryRole::Synced.is_distribution());
+        assert!(!DirectoryRole::Source.is_distribution());
+        assert!(DirectoryRole::Target.is_distribution());
+    }
+
+    // --- Config parsing tests ---
+
+    #[test]
+    fn config_parses_minimal_directory() {
+        let toml_str = r#"
+[directories.foo]
+path = "/tmp/foo"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let foo = config.directories.get("foo").expect("foo missing");
+        assert_eq!(foo.path, PathBuf::from("/tmp/foo"));
+        assert_eq!(foo.directory_type, DirectoryType::Directory);
+        assert_eq!(foo.role(), DirectoryRole::Synced);
+    }
+
+    #[test]
+    fn config_parses_explicit_directory() {
+        let toml_str = r#"
+[directories.foo]
+path = "/tmp"
+type = "claude-plugins"
+role = "managed"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let foo = config.directories.get("foo").expect("foo missing");
+        assert_eq!(foo.directory_type, DirectoryType::ClaudePlugins);
+        assert_eq!(foo.role(), DirectoryRole::Managed);
+    }
+
+    #[test]
+    fn config_parses_git_directory_with_branch() {
+        let toml_str = r#"
+[directories.remote-skills]
+path = "/tmp/remote"
+type = "git"
+branch = "main"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let dir = config
+            .directories
+            .get("remote-skills")
+            .expect("remote-skills missing");
+        assert_eq!(dir.directory_type, DirectoryType::Git);
+        assert_eq!(dir.role(), DirectoryRole::Source);
+        assert_eq!(dir.branch.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn config_rejects_old_format_sources() {
+        let toml_str = r#"
+[[sources]]
+name = "claude-plugins"
+path = "~/.claude/plugins/cache"
+type = "claude-plugins"
+"#;
+        let err = toml::from_str::<Config>(toml_str).unwrap_err();
+        // Config::load would add the migration hint; here we verify deny_unknown_fields catches it
+        assert!(
+            err.to_string().contains("unknown field"),
+            "expected 'unknown field' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn config_rejects_old_format_targets() {
+        let toml_str = r#"
+[targets.antigravity]
+enabled = true
+method = "symlink"
+skills_dir = "~/.gemini/antigravity/skills"
+"#;
+        let err = toml::from_str::<Config>(toml_str).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field"),
+            "expected 'unknown field' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn config_load_adds_migration_hint_for_old_sources() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("tome.toml");
+        std::fs::write(
+            &path,
+            r#"
+[[sources]]
+name = "test"
+path = "/tmp"
+type = "directory"
+"#,
+        )
+        .unwrap();
+        let err = Config::load(&path).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("hint: tome v0.6 replaced [[sources]] and [targets.*] with [directories.*]. See CHANGELOG.md for migration instructions."),
+            "expected migration hint, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn config_load_adds_migration_hint_for_old_targets() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("tome.toml");
+        std::fs::write(
+            &path,
+            r#"
+[targets.foo]
+enabled = true
+method = "symlink"
+skills_dir = "/tmp"
+"#,
+        )
+        .unwrap();
+        let err = Config::load(&path).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("hint: tome v0.6 replaced [[sources]] and [targets.*] with [directories.*]. See CHANGELOG.md for migration instructions."),
+            "expected migration hint, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn config_rejects_unknown_field_on_directory() {
+        let toml_str = r#"
+[directories.foo]
+path = "/tmp"
+bogus = true
+"#;
+        let err = toml::from_str::<Config>(toml_str).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown field"),
+            "expected 'unknown field' error, got: {err}"
+        );
+    }
+
+    // --- Config validation tests ---
+
+    #[test]
+    fn validate_rejects_managed_with_directory_type() {
+        let config = Config {
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Managed),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("Managed role is only valid with claude-plugins type"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_target_with_git_type() {
+        let config = Config {
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp"),
+                    directory_type: DirectoryType::Git,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("Target role is not valid with git type"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_git_fields_with_non_git_type() {
+        let config = Config {
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp"),
+                    directory_type: DirectoryType::Directory,
+                    role: None,
+                    branch: Some("main".to_string()),
+                    tag: None,
+                    rev: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("branch/tag/rev fields are only valid with git type"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_passes_for_valid_config() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/nonexistent-lib"),
+            directories: BTreeMap::from([
+                (
+                    DirectoryName::new("claude-plugins").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/plugins"),
+                        directory_type: DirectoryType::ClaudePlugins,
+                        role: Some(DirectoryRole::Managed),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("my-skills").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/skills"),
+                        directory_type: DirectoryType::Directory,
+                        role: None, // defaults to Synced
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
+        config.validate().unwrap();
+    }
+
+    // --- Convenience iterator tests ---
+
+    #[test]
+    fn discovery_dirs_returns_managed_synced_source() {
+        let config = Config {
+            directories: BTreeMap::from([
+                (
+                    DirectoryName::new("a-managed").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/a"),
+                        directory_type: DirectoryType::ClaudePlugins,
+                        role: Some(DirectoryRole::Managed),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("b-synced").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/b"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Synced),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("c-source").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/c"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Source),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("d-target").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/d"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Target),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
+
+        let discovery: Vec<&str> = config.discovery_dirs().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(discovery, vec!["a-managed", "b-synced", "c-source"]);
+    }
+
+    #[test]
+    fn distribution_dirs_returns_synced_target() {
+        let config = Config {
+            directories: BTreeMap::from([
+                (
+                    DirectoryName::new("a-managed").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/a"),
+                        directory_type: DirectoryType::ClaudePlugins,
+                        role: Some(DirectoryRole::Managed),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("b-synced").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/b"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Synced),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("c-source").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/c"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Source),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+                (
+                    DirectoryName::new("d-target").unwrap(),
+                    DirectoryConfig {
+                        path: PathBuf::from("/tmp/d"),
+                        directory_type: DirectoryType::Directory,
+                        role: Some(DirectoryRole::Target),
+                        branch: None,
+                        tag: None,
+                        rev: None,
+                    },
+                ),
+            ]),
+            ..Default::default()
+        };
+
+        let distribution: Vec<&str> = config
+            .distribution_dirs()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert_eq!(distribution, vec!["b-synced", "d-target"]);
+    }
+
+    #[test]
+    fn empty_directories_is_detectable() {
+        let config = Config::default();
+        assert!(config.directories.is_empty());
+    }
+
+    // --- Existing tests that remain valid ---
+
     #[test]
     fn expand_tilde_expands_home() {
         let result = expand_tilde(Path::new("~/foo/bar")).unwrap();
@@ -499,16 +1184,16 @@ mod tests {
     }
 
     #[test]
-    fn default_config_has_empty_sources() {
+    fn default_config_has_empty_directories() {
         let config = Config::default();
-        assert!(config.sources.is_empty());
+        assert!(config.directories.is_empty());
         assert!(config.exclude.is_empty());
     }
 
     #[test]
     fn config_loads_defaults_when_file_missing() {
         let config = Config::load(Path::new("/nonexistent/path/config.toml")).unwrap();
-        assert!(config.sources.is_empty());
+        assert!(config.directories.is_empty());
     }
 
     #[test]
@@ -524,7 +1209,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let missing_file = tmp.path().join("config.toml");
         let config = Config::load_or_default(Some(&missing_file)).unwrap();
-        assert!(config.sources.is_empty());
+        assert!(config.directories.is_empty());
     }
 
     #[test]
@@ -532,20 +1217,25 @@ mod tests {
         let config = Config {
             library_dir: PathBuf::from("/tmp/skills"),
             exclude: [SkillName::new("test-skill").unwrap()].into(),
-            sources: vec![Source {
-                name: "test".into(),
-                path: PathBuf::from("/tmp/source"),
-                source_type: SourceType::Directory,
-            }],
-            targets: BTreeMap::new(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("test").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp/source"),
+                    directory_type: DirectoryType::Directory,
+                    role: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                },
+            )]),
             ..Default::default()
         };
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
         assert_eq!(parsed.library_dir, config.library_dir);
         assert_eq!(parsed.exclude, config.exclude);
-        assert_eq!(parsed.sources.len(), 1);
-        assert_eq!(parsed.sources[0].name, "test");
+        assert_eq!(parsed.directories.len(), 1);
+        assert!(parsed.directories.contains_key("test"));
     }
 
     #[test]
@@ -554,113 +1244,6 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "this is [[[not valid toml").unwrap();
         assert!(Config::load(&path).is_err());
-    }
-
-    #[test]
-    fn validate_passes_for_valid_config() {
-        let config = Config {
-            library_dir: PathBuf::from("/tmp/nonexistent-lib"),
-            exclude: BTreeSet::new(),
-            sources: vec![Source {
-                name: "test".into(),
-                path: PathBuf::from("/tmp/source"),
-                source_type: SourceType::Directory,
-            }],
-            targets: BTreeMap::from([(
-                TargetName::new("antigravity").unwrap(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: PathBuf::from("/tmp/target"),
-                    },
-                },
-            )]),
-            ..Default::default()
-        };
-        config.validate().unwrap();
-    }
-
-    #[test]
-    fn validate_rejects_empty_source_name() {
-        let config = Config {
-            sources: vec![Source {
-                name: "".into(),
-                path: PathBuf::from("/tmp"),
-                source_type: SourceType::Directory,
-            }],
-            ..Default::default()
-        };
-        let err = config.validate().unwrap_err();
-        assert!(
-            err.to_string().contains("cannot be empty"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn validate_rejects_duplicate_source_names() {
-        let config = Config {
-            sources: vec![
-                Source {
-                    name: "dupe".into(),
-                    path: PathBuf::from("/tmp/a"),
-                    source_type: SourceType::Directory,
-                },
-                Source {
-                    name: "dupe".into(),
-                    path: PathBuf::from("/tmp/b"),
-                    source_type: SourceType::Directory,
-                },
-            ],
-            ..Default::default()
-        };
-        let err = config.validate().unwrap_err();
-        assert!(
-            err.to_string().contains("duplicate source name"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn try_from_raw_rejects_symlink_without_skills_dir() {
-        let raw = RawTargetConfig {
-            enabled: true,
-            method: "symlink".to_string(),
-            skills_dir: None,
-        };
-        let err = TargetConfig::try_from(raw).unwrap_err();
-        assert!(
-            err.to_string().contains("requires skills_dir"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn try_from_raw_rejects_unknown_method() {
-        let raw = RawTargetConfig {
-            enabled: true,
-            method: "mcp".to_string(),
-            skills_dir: None,
-        };
-        let err = TargetConfig::try_from(raw).unwrap_err();
-        assert!(
-            err.to_string().contains("unknown target method"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn target_config_roundtrip_symlink() {
-        let tc = TargetConfig {
-            enabled: true,
-            method: TargetMethod::Symlink {
-                skills_dir: PathBuf::from("/tmp/skills"),
-            },
-        };
-        let toml_str = toml::to_string_pretty(&tc).unwrap();
-        let parsed: TargetConfig = toml::from_str(&toml_str).unwrap();
-        assert!(parsed.enabled);
-        assert_eq!(parsed.skills_dir(), Path::new("/tmp/skills"));
     }
 
     #[test]
@@ -686,157 +1269,23 @@ mod tests {
 library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
-[[sources]]
-name = "claude-plugins"
+[directories.claude-plugins]
 path = "~/.claude/plugins/cache"
 type = "claude-plugins"
+role = "managed"
 
-[[sources]]
-name = "standalone"
+[directories.standalone]
 path = "~/.claude/skills"
-type = "directory"
 
-[targets.antigravity]
-enabled = true
-method = "symlink"
-skills_dir = "~/.gemini/antigravity/skills"
+[directories.antigravity]
+path = "~/.gemini/antigravity/skills"
+role = "target"
 "#;
         let config: Config = toml::from_str(toml_str).unwrap();
-        assert_eq!(config.sources.len(), 2);
-        assert!(config.targets.contains_key("antigravity"));
-        assert!(!config.targets.contains_key("openclaw"));
-    }
-
-    #[test]
-    fn targets_iter_includes_claude() {
-        let targets: BTreeMap<TargetName, TargetConfig> = BTreeMap::from([(
-            TargetName::new("claude").unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: PathBuf::from("/tmp/claude-skills"),
-                },
-            },
-        )]);
-        let names: Vec<&str> = targets.keys().map(|name| name.as_str()).collect();
-        assert_eq!(names, vec!["claude"]);
-    }
-
-    #[test]
-    fn config_roundtrip_claude_target() {
-        let config = Config {
-            library_dir: PathBuf::from("/tmp/skills"),
-            exclude: BTreeSet::new(),
-            sources: Vec::new(),
-            targets: BTreeMap::from([(
-                TargetName::new("claude").unwrap(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: PathBuf::from("/tmp/claude-skills"),
-                    },
-                },
-            )]),
-            ..Default::default()
-        };
-        let toml_str = toml::to_string_pretty(&config).unwrap();
-        let parsed: Config = toml::from_str(&toml_str).unwrap();
-        let claude = parsed.targets.get("claude").expect("claude target missing");
-        assert!(claude.enabled);
-        assert_eq!(claude.skills_dir(), Path::new("/tmp/claude-skills"));
-    }
-
-    #[test]
-    fn config_parses_claude_target_from_toml() {
-        let toml_str = r#"
-[targets.claude]
-enabled = true
-method = "symlink"
-skills_dir = "~/.claude/skills"
-"#;
-        let mut config: Config = toml::from_str(toml_str).unwrap();
-        config.expand_tildes().unwrap();
-        let claude = config.targets.get("claude").expect("claude target missing");
-        assert!(claude.enabled);
-        let home = dirs::home_dir().expect("home dir not found");
-        assert!(
-            claude.skills_dir().starts_with(&home),
-            "Expected skills_dir to start with home dir {:?}, got {:?}",
-            home,
-            claude.skills_dir()
-        );
-        assert!(
-            claude.skills_dir().ends_with(".claude/skills"),
-            "Expected skills_dir to end with .claude/skills, got {:?}",
-            claude.skills_dir()
-        );
-    }
-
-    #[test]
-    fn config_parses_arbitrary_target_name() {
-        let toml_str = r#"
-[targets.amp]
-enabled = true
-method = "symlink"
-skills_dir = "~/.amp/skills"
-"#;
-        let mut config: Config = toml::from_str(toml_str).unwrap();
-        config.expand_tildes().unwrap();
-        let amp = config.targets.get("amp").expect("amp target missing");
-        assert!(amp.enabled);
-        let home = dirs::home_dir().expect("home dir not found");
-        assert!(
-            amp.skills_dir().starts_with(&home),
-            "Expected skills_dir to start with home dir {:?}, got {:?}",
-            home,
-            amp.skills_dir()
-        );
-        assert!(
-            amp.skills_dir().ends_with(".amp/skills"),
-            "Expected skills_dir to end with .amp/skills, got {:?}",
-            amp.skills_dir()
-        );
-    }
-
-    #[test]
-    fn target_name_rejects_empty() {
-        assert!(TargetName::new("").is_err());
-    }
-
-    #[test]
-    fn target_name_rejects_path_separator() {
-        assert!(TargetName::new("foo/bar").is_err());
-        assert!(TargetName::new("foo\\bar").is_err());
-    }
-
-    #[test]
-    fn target_name_accepts_valid() {
-        let name = TargetName::new("my-target-123").unwrap();
-        assert_eq!(name.as_str(), "my-target-123");
-        assert_eq!(name.to_string(), "my-target-123");
-        assert_eq!(name, *"my-target-123");
-    }
-
-    #[test]
-    fn target_name_rejects_dot_special() {
-        assert!(TargetName::new(".").is_err());
-        assert!(TargetName::new("..").is_err());
-    }
-
-    #[test]
-    fn target_name_rejects_whitespace() {
-        assert!(TargetName::new("  ").is_err());
-        assert!(TargetName::new(" leading").is_err());
-        assert!(TargetName::new("trailing ").is_err());
-    }
-
-    #[test]
-    fn target_name_deserialize_rejects_empty() {
-        // TOML with an empty target key would be malformed TOML, but we can test
-        // the TargetName::new validation directly (already covered above).
-        // Instead, test that TargetName rejects empty via serde:
-        let result: std::result::Result<TargetName, _> = serde_json::from_str(r#""""#);
-        assert!(result.is_err());
+        assert_eq!(config.directories.len(), 3);
+        assert!(config.directories.contains_key("claude-plugins"));
+        assert!(config.directories.contains_key("standalone"));
+        assert!(config.directories.contains_key("antigravity"));
     }
 
     // TOME_HOME env var tests are covered by integration tests in cli.rs,
