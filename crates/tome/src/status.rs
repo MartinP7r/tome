@@ -169,10 +169,7 @@ fn render_status(report: &StatusReport) {
             let count = match (&dir.skill_count.count, &dir.skill_count.error) {
                 (Some(n), _) => format!("✓ {}", n),
                 (None, Some(e)) => {
-                    eprintln!(
-                        "warning: could not count skills in '{}': {}",
-                        dir.name, e
-                    );
+                    eprintln!("warning: could not count skills in '{}': {}", dir.name, e);
                     "✗ ?".to_string()
                 }
                 (None, None) => "✓ 0".to_string(),
@@ -413,9 +410,7 @@ mod tests {
         .unwrap();
         assert_eq!(report.directories.len(), 1);
         assert_eq!(report.directories[0].name, "claude");
-        assert!(report.directories[0]
-            .role
-            .contains("Target"));
+        assert!(report.directories[0].role.contains("Target"));
     }
 
     #[test]
@@ -450,7 +445,9 @@ mod tests {
             report.directories[0].role
         );
         assert!(
-            report.directories[0].role.contains("discovered here AND distributed here"),
+            report.directories[0]
+                .role
+                .contains("discovered here AND distributed here"),
             "role should include description, got: {}",
             report.directories[0].role
         );
@@ -521,10 +518,7 @@ mod tests {
 
     #[test]
     fn count_skill_dirs_nonexistent_returns_zero() {
-        assert_eq!(
-            count_skill_dirs(Path::new("/nonexistent/dir")).unwrap(),
-            0
-        );
+        assert_eq!(count_skill_dirs(Path::new("/nonexistent/dir")).unwrap(), 0);
     }
 
     #[test]
@@ -541,10 +535,7 @@ mod tests {
 
     #[test]
     fn count_symlinks_nonexistent_returns_zero() {
-        assert_eq!(
-            count_symlinks(Path::new("/nonexistent/dir")).unwrap(),
-            0
-        );
+        assert_eq!(count_symlinks(Path::new("/nonexistent/dir")).unwrap(), 0);
     }
 
     #[test]

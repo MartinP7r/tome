@@ -47,7 +47,7 @@ pub(crate) mod wizard;
 
 use std::collections::HashSet;
 use std::io::IsTerminal;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command as GitCommand;
 
 use anyhow::{Context, Result};
@@ -378,7 +378,7 @@ pub fn run(cli: Cli) -> Result<()> {
 /// configured directory name. Helps catch typos and stale entries.
 fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
     for name in &machine_prefs.disabled_directories {
-        if !config.targets.contains_key(name.as_str()) {
+        if !config.directories.contains_key(name.as_str()) {
             eprintln!(
                 "warning: disabled directory '{}' in machine.toml does not match any configured directory",
                 name
@@ -555,16 +555,15 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Regenerate lockfile after cleanup so it reflects removals
     let new_lockfile = lockfile::generate(&manifest, &skills);
 
-    // 5. Distribute to targets
-    let source_paths: Vec<PathBuf> = config.sources.iter().map(|s| s.path.clone()).collect();
+    // 5. Distribute to directories with distribution roles
     let mut distribute_results = Vec::new();
-    for (name, target) in config.targets.iter() {
+    for (name, dir_config) in config.distribution_dirs() {
         if machine_prefs.is_directory_disabled(name.as_str()) {
             if verbose {
                 eprintln!(
                     "{}",
                     style(format!(
-                        "Skipping target '{}' (disabled in machine preferences)",
+                        "Skipping directory '{}' (disabled in machine preferences)",
                         name
                     ))
                     .dim()
@@ -576,13 +575,12 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
-        let result = distribute::distribute_to_target(
+        let result = distribute::distribute_to_directory(
             paths.library_dir(),
-            name.as_str(),
-            target,
+            name,
+            dir_config,
             &manifest,
             &machine_prefs,
-            &source_paths,
             dry_run,
             force,
         )?;
@@ -592,10 +590,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // 6. Cleanup stale symlinks from targets
+    // 6. Cleanup stale symlinks from distribution directories
     let mut removed_from_targets = 0usize;
-    for (_name, target) in config.targets.iter() {
-        let skills_dir = target.skills_dir();
+    for (_name, dir_config) in config.distribution_dirs() {
+        let skills_dir = &dir_config.path;
         removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
         // Also clean up symlinks for disabled skills
         removed_from_targets +=

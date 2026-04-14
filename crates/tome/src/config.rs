@@ -242,7 +242,6 @@ impl Default for BackupConfig {
 }
 
 /// Top-level configuration for tome.
-#[allow(deprecated)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -261,21 +260,6 @@ pub struct Config {
     /// Backup settings
     #[serde(default)]
     pub(crate) backup: BackupConfig,
-
-    // --- Deprecated fields for migration compatibility ---
-    // These are NOT part of the TOML config (serde(skip)). They exist only so
-    // other modules can compile with `config.sources` / `config.targets` field
-    // access until they are converted in plans 01-02 through 01-05.
-
-    /// Deprecated: Always empty. Use `directories` with discovery roles instead.
-    #[serde(skip)]
-    #[deprecated(note = "Use directories with discovery roles — removed in plan 01-02")]
-    pub(crate) sources: Vec<Source>,
-
-    /// Deprecated: Always empty. Use `directories` with distribution roles instead.
-    #[serde(skip)]
-    #[deprecated(note = "Use directories with distribution roles — removed in plan 01-02")]
-    pub(crate) targets: BTreeMap<DirectoryName, TargetConfig>,
 }
 
 impl Config {
@@ -352,7 +336,8 @@ impl Config {
             let role = dir.role();
 
             // Managed role only valid with ClaudePlugins type
-            if role == DirectoryRole::Managed && dir.directory_type != DirectoryType::ClaudePlugins {
+            if role == DirectoryRole::Managed && dir.directory_type != DirectoryType::ClaudePlugins
+            {
                 anyhow::bail!(
                     "directory '{}': Managed role is only valid with claude-plugins type",
                     name
@@ -368,8 +353,7 @@ impl Config {
             }
 
             // Git fields only valid with Git type
-            let has_git_fields =
-                dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
+            let has_git_fields = dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
             if has_git_fields && dir.directory_type != DirectoryType::Git {
                 anyhow::bail!(
                     "directory '{}': branch/tag/rev fields are only valid with git type",
@@ -412,7 +396,6 @@ impl Config {
     }
 }
 
-#[allow(deprecated)]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -420,8 +403,6 @@ impl Default for Config {
             exclude: BTreeSet::new(),
             directories: BTreeMap::new(),
             backup: BackupConfig::default(),
-            sources: Vec::new(),
-            targets: BTreeMap::new(),
         }
     }
 }
@@ -513,143 +494,8 @@ pub fn default_config_path() -> Result<PathBuf> {
 // DEPRECATED COMPATIBILITY SHIMS
 // =============================================================================
 // These types exist only to keep other modules compiling during the v0.6
-// migration. They will be removed as each module is converted to the new
-// unified directory model (plans 01-02 through 01-05).
-
-/// Deprecated: Use `DirectoryName` instead.
-#[deprecated(note = "Use DirectoryName instead — will be removed in plan 01-02")]
-pub type TargetName = DirectoryName;
-
-/// Deprecated source definition — kept for compilation during migration.
-#[allow(deprecated)]
-#[deprecated(note = "Use DirectoryConfig instead — will be removed in plan 01-02")]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Source {
-    /// Display name for this source
-    pub(crate) name: String,
-
-    /// Path to the source directory
-    pub(crate) path: PathBuf,
-
-    /// How to discover skills in this source
-    #[serde(rename = "type")]
-    pub(crate) source_type: SourceType,
-}
-
-/// Deprecated source type enum — kept for compilation during migration.
-#[deprecated(note = "Use DirectoryType instead — will be removed in plan 01-02")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum SourceType {
-    /// Reads installed_plugins.json for plugin-based discovery
-    ClaudePlugins,
-    /// Scans for */SKILL.md directly
-    Directory,
-}
-
-#[allow(deprecated)]
-impl std::fmt::Display for SourceType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceType::ClaudePlugins => write!(f, "claude-plugins"),
-            SourceType::Directory => write!(f, "directory"),
-        }
-    }
-}
-
-/// Deprecated target method — kept for compilation during migration.
-#[deprecated(note = "Use DirectoryConfig.path instead — will be removed in plan 01-02")]
-#[derive(Debug, Clone)]
-pub enum TargetMethod {
-    Symlink { skills_dir: PathBuf },
-}
-
-/// Deprecated target configuration — kept for compilation during migration.
-#[allow(deprecated)]
-#[deprecated(note = "Use DirectoryConfig instead — will be removed in plan 01-02")]
-#[derive(Debug, Clone)]
-pub struct TargetConfig {
-    pub enabled: bool,
-    pub method: TargetMethod,
-}
-
-#[allow(deprecated)]
-impl TargetConfig {
-    /// Returns the skills directory for this target.
-    pub fn skills_dir(&self) -> &Path {
-        match &self.method {
-            TargetMethod::Symlink { skills_dir } => skills_dir,
-        }
-    }
-}
-
-// Serde layer for deprecated TargetConfig
-#[allow(deprecated)]
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RawTargetConfig {
-    enabled: bool,
-    method: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    skills_dir: Option<PathBuf>,
-}
-
-#[allow(deprecated)]
-impl TryFrom<RawTargetConfig> for TargetConfig {
-    type Error = anyhow::Error;
-
-    fn try_from(raw: RawTargetConfig) -> Result<Self> {
-        let method = match raw.method.as_str() {
-            "symlink" => {
-                let skills_dir = raw
-                    .skills_dir
-                    .ok_or_else(|| anyhow::anyhow!("symlink target requires skills_dir"))?;
-                TargetMethod::Symlink { skills_dir }
-            }
-            other => anyhow::bail!("unknown target method: '{}'", other),
-        };
-        Ok(TargetConfig {
-            enabled: raw.enabled,
-            method,
-        })
-    }
-}
-
-#[allow(deprecated)]
-impl From<&TargetConfig> for RawTargetConfig {
-    fn from(tc: &TargetConfig) -> Self {
-        match &tc.method {
-            TargetMethod::Symlink { skills_dir } => RawTargetConfig {
-                enabled: tc.enabled,
-                method: "symlink".to_string(),
-                skills_dir: Some(skills_dir.clone()),
-            },
-        }
-    }
-}
-
-#[allow(deprecated)]
-impl Serialize for TargetConfig {
-    fn serialize<S: serde::Serializer>(
-        &self,
-        serializer: S,
-    ) -> std::result::Result<S::Ok, S::Error> {
-        RawTargetConfig::from(self).serialize(serializer)
-    }
-}
-
-#[allow(deprecated)]
-impl<'de> Deserialize<'de> for TargetConfig {
-    fn deserialize<D: serde::Deserializer<'de>>(
-        deserializer: D,
-    ) -> std::result::Result<Self, D::Error> {
-        let raw = RawTargetConfig::deserialize(deserializer)?;
-        TargetConfig::try_from(raw).map_err(serde::de::Error::custom)
-    }
-}
-
-// =============================================================================
-// END DEPRECATED COMPATIBILITY SHIMS
-// =============================================================================
+// NOTE: Deprecated Source, SourceType, TargetName, TargetConfig, TargetMethod
+// types were removed as part of v0.6 unified directory migration (plan 01-05).
 
 mod defaults {
     use std::path::PathBuf;
@@ -954,7 +800,8 @@ bogus = true
         };
         let err = config.validate().unwrap_err();
         assert!(
-            err.to_string().contains("Managed role is only valid with claude-plugins type"),
+            err.to_string()
+                .contains("Managed role is only valid with claude-plugins type"),
             "unexpected error: {err}"
         );
     }
@@ -977,7 +824,8 @@ bogus = true
         };
         let err = config.validate().unwrap_err();
         assert!(
-            err.to_string().contains("Target role is not valid with git type"),
+            err.to_string()
+                .contains("Target role is not valid with git type"),
             "unexpected error: {err}"
         );
     }

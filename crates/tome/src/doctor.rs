@@ -70,8 +70,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
 
     let mut directory_issues = Vec::new();
     for (name, dir_config) in config.distribution_dirs() {
-        let issues =
-            check_distribution_dir(name.as_str(), &dir_config.path, paths.library_dir())?;
+        let issues = check_distribution_dir(name.as_str(), &dir_config.path, paths.library_dir())?;
         directory_issues.push((name.as_str().to_string(), issues));
     }
 
@@ -154,11 +153,8 @@ pub fn diagnose(
                 repair_library(paths)?;
 
                 for (name, dir_config) in config.distribution_dirs() {
-                    let removed = cleanup::cleanup_target(
-                        &dir_config.path,
-                        paths.library_dir(),
-                        false,
-                    )?;
+                    let removed =
+                        cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
                     if removed > 0 {
                         println!(
                             "  {} Removed {} stale symlink(s) from {}",
@@ -302,10 +298,7 @@ fn check_distribution_dir(
     if !skills_dir.is_dir() {
         issues.push(DiagnosticIssue {
             severity: IssueSeverity::Warning,
-            message: format!(
-                "directory path does not exist ({})",
-                skills_dir.display()
-            ),
+            message: format!("directory path does not exist ({})", skills_dir.display()),
         });
         return Ok(issues);
     }
@@ -432,9 +425,7 @@ fn repair_library(paths: &TomePaths) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{
-        Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType,
-    };
+    use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
     use std::collections::BTreeMap;
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
@@ -640,12 +631,8 @@ mod tests {
     #[test]
     fn check_distribution_dir_missing_dir() {
         let lib = TempDir::new().unwrap();
-        let result = check_distribution_dir(
-            "test-dir",
-            Path::new("/nonexistent/dir"),
-            lib.path(),
-        )
-        .unwrap();
+        let result =
+            check_distribution_dir("test-dir", Path::new("/nonexistent/dir"), lib.path()).unwrap();
         assert_eq!(result.len(), 1);
     }
 

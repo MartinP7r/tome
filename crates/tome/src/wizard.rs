@@ -236,9 +236,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
 
         let dir_name = DirectoryName::new(name)?;
 
-        let path_str: String = Input::new()
-            .with_prompt("Path")
-            .interact_text()?;
+        let path_str: String = Input::new().with_prompt("Path").interact_text()?;
 
         let path = crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(&path_str))?);
 

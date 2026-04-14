@@ -25,45 +25,6 @@ pub struct DistributeResult {
     pub target_name: DirectoryName,
 }
 
-/// Deprecated: compat shim for lib.rs until it is converted in plan 01-05.
-/// Wraps `distribute_to_directory` with the old signature.
-#[allow(deprecated, clippy::too_many_arguments)]
-#[deprecated(note = "Use distribute_to_directory instead — removed in plan 01-05")]
-pub fn distribute_to_target(
-    library_dir: &Path,
-    target_name: &str,
-    target: &crate::config::TargetConfig,
-    manifest: &Manifest,
-    machine_prefs: &MachinePrefs,
-    _source_paths: &[std::path::PathBuf],
-    dry_run: bool,
-    force: bool,
-) -> Result<DistributeResult> {
-    if !target.enabled {
-        let name = DirectoryName::new(target_name)?;
-        return Ok(DistributeResult {
-            target_name: name.clone(),
-            directory_name: name,
-            changed: 0,
-            unchanged: 0,
-            skipped: 0,
-            disabled: 0,
-            skipped_managed: 0,
-        });
-    }
-
-    let dir_name = DirectoryName::new(target_name)?;
-    let dir_config = DirectoryConfig {
-        path: target.skills_dir().to_path_buf(),
-        directory_type: crate::config::DirectoryType::Directory,
-        role: Some(crate::config::DirectoryRole::Target),
-        branch: None,
-        tag: None,
-        rev: None,
-    };
-    distribute_to_directory(library_dir, &dir_name, &dir_config, manifest, machine_prefs, dry_run, force)
-}
-
 /// Distribute skills from the library to a configured directory.
 ///
 /// Creates symlinks in `dir_config.path` pointing to library entries.
@@ -127,23 +88,23 @@ pub fn distribute_to_directory(
         // Skip skills that originate from the same directory we're distributing to.
         // This prevents circular symlinks when a directory has a Synced role
         // (both discovery source and distribution target).
-        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref()) {
-            if manifest_entry.source_name == dir_name.as_str() {
-                // Remove any existing symlink from a previous sync that
-                // didn't have this check (cleans up legacy duplicates).
-                if !dry_run
-                    && target_link.is_symlink()
-                    && let Err(e) = std::fs::remove_file(&target_link)
-                {
-                    eprintln!(
-                        "warning: failed to remove legacy symlink {}: {}",
-                        target_link.display(),
-                        e
-                    );
-                }
-                result.skipped_managed += 1;
-                continue;
+        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref())
+            && manifest_entry.source_name == dir_name.as_str()
+        {
+            // Remove any existing symlink from a previous sync that
+            // didn't have this check (cleans up legacy duplicates).
+            if !dry_run
+                && target_link.is_symlink()
+                && let Err(e) = std::fs::remove_file(&target_link)
+            {
+                eprintln!(
+                    "warning: failed to remove legacy symlink {}: {}",
+                    target_link.display(),
+                    e
+                );
             }
+            result.skipped_managed += 1;
+            continue;
         }
 
         if target_link.is_symlink() {

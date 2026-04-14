@@ -57,7 +57,7 @@ fn write_config_with_target(
     std::fs::write(
         &config_path,
         format!(
-            "library_dir = \"{}\"\n{}\n[targets.test-target]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n",
+            "library_dir = \"{}\"\n{}\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
             library_dir.display(),
             sources_toml,
             target_dir.display()
@@ -218,7 +218,7 @@ impl TestEnvBuilder {
                 .unwrap();
 
                 config_toml.push_str(&format!(
-                    "[[sources]]\nname = \"{name}\"\npath = \"{}\"\ntype = \"claude-plugins\"\n\n",
+                    "[directories.{name}]\npath = \"{}\"\ntype = \"claude-plugins\"\n\n",
                     source_dir.display()
                 ));
             } else {
@@ -235,7 +235,7 @@ impl TestEnvBuilder {
                 }
 
                 config_toml.push_str(&format!(
-                    "[[sources]]\nname = \"{name}\"\npath = \"{}\"\ntype = \"directory\"\n\n",
+                    "[directories.{name}]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n",
                     source_dir.display()
                 ));
             }
@@ -248,7 +248,7 @@ impl TestEnvBuilder {
             let target_dir = tmp.path().join("targets").join(name);
             std::fs::create_dir_all(&target_dir).unwrap();
             config_toml.push_str(&format!(
-                "[targets.{name}]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n\n",
+                "[directories.{name}]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n\n",
                 target_dir.display()
             ));
             target_dirs.push((name.clone(), target_dir));
@@ -277,7 +277,7 @@ impl TestEnvBuilder {
                     .iter()
                     .map(|s| format!("\"{s}\""))
                     .collect();
-                content.push_str(&format!("disabled_targets = [{}]\n", items.join(", ")));
+                content.push_str(&format!("disabled_directories = [{}]\n", items.join(", ")));
             }
             std::fs::write(&path, content).unwrap();
             Some(path)
@@ -453,7 +453,7 @@ fn list_shows_discovered_skills() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -483,7 +483,7 @@ fn sync_dry_run_makes_no_changes() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -514,7 +514,7 @@ fn sync_copies_skills_to_library() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -553,7 +553,7 @@ fn sync_idempotent() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -592,7 +592,7 @@ fn sync_creates_lockfile() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -637,7 +637,7 @@ fn sync_dry_run_does_not_create_lockfile() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -678,7 +678,9 @@ fn status_shows_library_info() {
 
 #[test]
 fn config_path_prints_default_path() {
+    let tmp = TempDir::new().unwrap();
     tome()
+        .env("TOME_HOME", tmp.path())
         .args(["config", "--path"])
         .assert()
         .success()
@@ -705,15 +707,15 @@ fn sync_distributes_to_symlink_target() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 
-[targets.antigravity]
-enabled = true
-method = "symlink"
-skills_dir = "{}"
+[directories.antigravity]
+path = "{}"
+type = "directory"
+role = "target"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -752,10 +754,10 @@ fn sync_lifecycle_cleans_up_removed_skills() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -802,10 +804,10 @@ fn sync_force_recreates_all() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -850,10 +852,10 @@ fn sync_updates_changed_source() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -918,10 +920,10 @@ fn sync_migrates_v01_symlinks() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -1079,10 +1081,10 @@ fn sync_skips_git_commit_without_tty() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -1126,10 +1128,10 @@ fn sync_dry_run_skips_git_commit() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -1170,7 +1172,7 @@ fn list_json_outputs_valid_json() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test-src\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test-src]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -1208,7 +1210,7 @@ fn list_json_with_quiet_still_outputs_json() {
     let config = write_config(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
     );
@@ -1268,10 +1270,10 @@ fn sync_quiet_skips_git_commit() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -1349,7 +1351,7 @@ fn sync_with_no_lockfile_works_gracefully() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1382,7 +1384,7 @@ fn sync_triage_shows_new_skills() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1421,7 +1423,7 @@ fn sync_triage_dry_run_makes_no_changes() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1465,7 +1467,7 @@ fn sync_respects_machine_disabled() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1523,7 +1525,7 @@ fn sync_triage_disable_removes_symlink() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1581,7 +1583,7 @@ fn sync_respects_machine_disabled_targets() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1591,7 +1593,7 @@ fn sync_respects_machine_disabled_targets() {
     let machine_path = tmp.path().join("machine.toml");
     std::fs::write(
         &machine_path,
-        "disabled_targets = [\"test-target\", \"nonexistent-target\"]\n",
+        "disabled_directories = [\"test-target\", \"nonexistent-target\"]\n",
     )
     .unwrap();
 
@@ -1607,7 +1609,7 @@ fn sync_respects_machine_disabled_targets() {
         .success()
         .stdout(predicate::str::contains("Sync complete"))
         .stderr(predicate::str::contains(
-            "warning: disabled target 'nonexistent-target' in machine.toml does not match any configured target",
+            "warning: disabled directory 'nonexistent-target' in machine.toml does not match any configured directory",
         ));
 
     // The target directory should not have the skill (target is disabled)
@@ -1641,20 +1643,20 @@ fn sync_with_two_targets_via_config() {
         format!(
             r#"library_dir = "{}"
 
-[[sources]]
-name = "test"
+[directories.test]
 path = "{}"
 type = "directory"
+role = "source"
 
-[targets.target-a]
-enabled = true
-method = "symlink"
-skills_dir = "{}"
+[directories.target-a]
+path = "{}"
+type = "directory"
+role = "target"
 
-[targets.target-b]
-enabled = true
-method = "symlink"
-skills_dir = "{}"
+[directories.target-b]
+path = "{}"
+type = "directory"
+role = "target"
 "#,
             library_dir.display(),
             skills_dir.display(),
@@ -1686,7 +1688,7 @@ fn sync_warns_unknown_disabled_targets() {
     let config = write_config_with_target(
         tmp.path(),
         &format!(
-            "[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
         &target_dir,
@@ -1702,7 +1704,7 @@ fn sync_warns_unknown_disabled_targets() {
     let machine_path = tmp.path().join("machine.toml");
     std::fs::write(
         &machine_path,
-        "disabled_targets = [\"nonexistent-target\"]\n",
+        "disabled_directories = [\"nonexistent-target\"]\n",
     )
     .unwrap();
 
@@ -1717,7 +1719,7 @@ fn sync_warns_unknown_disabled_targets() {
         .assert()
         .success()
         .stderr(predicate::str::contains(
-            "warning: disabled target 'nonexistent-target' in machine.toml does not match any configured target",
+            "warning: disabled directory 'nonexistent-target' in machine.toml does not match any configured directory",
         ));
 }
 
@@ -2319,7 +2321,7 @@ fn edge_config_library_dir_is_file() {
     std::fs::write(
         &config_path,
         format!(
-            "library_dir = \"{}\"\n\n[[sources]]\nname = \"test\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "library_dir = \"{}\"\n\n[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             library_path.display(),
             skills_dir.display(),
         ),
@@ -2595,7 +2597,7 @@ fn lifecycle_multi_target_distribution() {
 
     // Disable target-b via machine.toml and re-sync
     let machine_path = env.tome_home().join("machine.toml");
-    std::fs::write(&machine_path, "disabled_targets = [\"target-b\"]\n").unwrap();
+    std::fs::write(&machine_path, "disabled_directories = [\"target-b\"]\n").unwrap();
 
     env.cmd()
         .args(["--machine", machine_path.to_str().unwrap(), "sync"])
@@ -2709,6 +2711,7 @@ fn completions_fish_installs_to_file() {
     let xdg_config = home.path().join(".config");
     tome()
         .env("HOME", home.path())
+        .env("TOME_HOME", home.path().join(".tome"))
         .env("XDG_CONFIG_HOME", &xdg_config)
         .args(["completions", "fish"])
         .assert()
@@ -2726,6 +2729,7 @@ fn completions_bash_installs_to_file() {
     let xdg_data = home.path().join(".local/share");
     tome()
         .env("HOME", home.path())
+        .env("TOME_HOME", home.path().join(".tome"))
         .env("XDG_DATA_HOME", &xdg_data)
         .args(["completions", "bash"])
         .assert()
@@ -2742,6 +2746,7 @@ fn completions_zsh_installs_to_file() {
     let home = TempDir::new().unwrap();
     tome()
         .env("HOME", home.path())
+        .env("TOME_HOME", home.path().join(".tome"))
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -2759,7 +2764,9 @@ fn completions_invalid_shell_fails() {
 
 #[test]
 fn completions_powershell_errors_with_instructions() {
+    let tmp = TempDir::new().unwrap();
     tome()
+        .env("TOME_HOME", tmp.path())
         .args(["completions", "powershell"])
         .assert()
         .failure()
@@ -2771,7 +2778,9 @@ fn completions_powershell_errors_with_instructions() {
 
 #[test]
 fn completions_print_outputs_to_stdout() {
+    let tmp = TempDir::new().unwrap();
     tome()
+        .env("TOME_HOME", tmp.path())
         .args(["completions", "fish", "--print"])
         .assert()
         .success()
@@ -2851,6 +2860,7 @@ fn lint_single_skill_path() {
     .unwrap();
 
     tome()
+        .env("TOME_HOME", tmp.path())
         .args(["lint", &skill.to_string_lossy()])
         .assert()
         .success()
@@ -2865,6 +2875,7 @@ fn lint_single_skill_path_with_errors() {
     std::fs::write(skill.join("SKILL.md"), "# No frontmatter").unwrap();
 
     tome()
+        .env("TOME_HOME", tmp.path())
         .args(["lint", &skill.to_string_lossy()])
         .assert()
         .failure()
@@ -3061,8 +3072,7 @@ fn status_json_output() {
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("status --json should produce valid JSON");
     assert_eq!(json["configured"], true);
-    assert!(json["sources"].is_array());
-    assert!(json["targets"].is_array());
+    assert!(json["directories"].is_array());
 }
 
 #[test]

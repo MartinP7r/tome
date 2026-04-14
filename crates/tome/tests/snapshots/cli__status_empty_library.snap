@@ -5,10 +5,7 @@ expression: stdout
 Library: [TMPDIR]/library
   ✓ 0 skills consolidated
 
-Sources:
-  (none configured)
-
-Targets:
+Directories:
   (none configured)
 
 Health: ✓ All good

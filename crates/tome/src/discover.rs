@@ -227,24 +227,6 @@ pub fn discover_directory_entry(
     }
 }
 
-/// Deprecated: compat shim for modules not yet converted to unified directory model.
-/// Will be removed when status.rs is converted (plan 01-04).
-#[allow(deprecated)]
-#[deprecated(note = "Use discover_directory_entry instead — removed in plan 01-04")]
-pub fn discover_source(
-    source: &crate::config::Source,
-    warnings: &mut Vec<String>,
-) -> Result<Vec<DiscoveredSkill>> {
-    match source.source_type {
-        crate::config::SourceType::ClaudePlugins => {
-            discover_claude_plugins(&source.name, &source.path, true, warnings)
-        }
-        crate::config::SourceType::Directory => {
-            discover_flat_directory(&source.name, &source.path, false, warnings)
-        }
-    }
-}
-
 /// Discover skills from a Claude plugins cache directory.
 ///
 /// Reads `installed_plugins.json` from the directory path or its parent,
@@ -506,8 +488,9 @@ mod tests {
     }
 
     /// Helper to build a Config with unified directories.
-    #[allow(deprecated)]
-    fn config_with_dirs(dirs: Vec<(&str, PathBuf, DirectoryType, Option<DirectoryRole>)>) -> Config {
+    fn config_with_dirs(
+        dirs: Vec<(&str, PathBuf, DirectoryType, Option<DirectoryRole>)>,
+    ) -> Config {
         let mut directories = std::collections::BTreeMap::new();
         for (name, path, dir_type, role) in dirs {
             directories.insert(
@@ -537,13 +520,7 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("not-a-skill")).unwrap();
         std::fs::write(tmp.path().join("not-a-skill/README.md"), "hi").unwrap();
 
-        let skills = discover_flat_directory(
-            "test",
-            tmp.path(),
-            false,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_flat_directory("test", tmp.path(), false, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
     }
 
@@ -574,13 +551,7 @@ mod tests {
         // A legitimate skill in a subdirectory
         create_skill(tmp.path(), "real-skill");
 
-        let skills = discover_flat_directory(
-            "test",
-            tmp.path(),
-            false,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_flat_directory("test", tmp.path(), false, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "real-skill");
     }
@@ -595,8 +566,18 @@ mod tests {
         create_skill(tmp2.path(), "unique-skill");
 
         let config = config_with_dirs(vec![
-            ("alpha", tmp1.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
-            ("beta", tmp2.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Synced)),
+            (
+                "alpha",
+                tmp1.path().to_path_buf(),
+                DirectoryType::Directory,
+                Some(DirectoryRole::Source),
+            ),
+            (
+                "beta",
+                tmp2.path().to_path_buf(),
+                DirectoryType::Directory,
+                Some(DirectoryRole::Synced),
+            ),
         ]);
 
         let skills = discover_all(&config, &mut Vec::new()).unwrap();
@@ -612,9 +593,12 @@ mod tests {
         create_skill(tmp.path(), "keep-me");
         create_skill(tmp.path(), "exclude-me");
 
-        let mut config = config_with_dirs(vec![
-            ("test", tmp.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
-        ]);
+        let mut config = config_with_dirs(vec![(
+            "test",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
         config.exclude = [SkillName::new("exclude-me").unwrap()].into();
 
         let skills = discover_all(&config, &mut Vec::new()).unwrap();
@@ -637,13 +621,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins(
-            "plugins",
-            tmp.path(),
-            true,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "plugin-skill");
     }
@@ -688,13 +666,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins(
-            "plugins",
-            tmp.path(),
-            true,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
 
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
@@ -740,13 +712,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins(
-            "plugins",
-            tmp.path(),
-            true,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
             skills[0].origin.provenance().is_none(),
@@ -799,13 +765,7 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins(
-            "plugins",
-            tmp.path(),
-            true,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
         // Should deduplicate to 1, not produce a spurious conflict
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "shared-skill");
@@ -819,9 +779,12 @@ mod tests {
         create_skill(tmp.path(), "skill-alpha");
         create_skill(tmp.path(), "skill-beta");
 
-        let config = config_with_dirs(vec![
-            ("wizard-test", tmp.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
-        ]);
+        let config = config_with_dirs(vec![(
+            "wizard-test",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
 
         let skills = discover_all(&config, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
@@ -893,13 +856,7 @@ mod tests {
         // Verify the JSON is NOT in the cache dir itself
         assert!(!cache_dir.join("installed_plugins.json").exists());
 
-        let skills = discover_claude_plugins(
-            "plugins",
-            &cache_dir,
-            true,
-            &mut Vec::new(),
-        )
-        .unwrap();
+        let skills = discover_claude_plugins("plugins", &cache_dir, true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "parent-skill");
     }
@@ -909,9 +866,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         create_skill(tmp.path(), "My_Unconventional");
 
-        let config = config_with_dirs(vec![
-            ("test", tmp.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
-        ]);
+        let config = config_with_dirs(vec![(
+            "test",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
 
         let mut warnings = Vec::new();
         let skills = discover_all(&config, &mut warnings).unwrap();
@@ -928,8 +888,18 @@ mod tests {
         create_skill(tmp2.path(), "shared");
 
         let config = config_with_dirs(vec![
-            ("first", tmp1.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
-            ("second", tmp2.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Source)),
+            (
+                "first",
+                tmp1.path().to_path_buf(),
+                DirectoryType::Directory,
+                Some(DirectoryRole::Source),
+            ),
+            (
+                "second",
+                tmp2.path().to_path_buf(),
+                DirectoryType::Directory,
+                Some(DirectoryRole::Source),
+            ),
         ]);
 
         let mut warnings = Vec::new();
@@ -946,12 +916,18 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         create_skill(tmp.path(), "should-not-discover");
 
-        let config = config_with_dirs(vec![
-            ("target-only", tmp.path().to_path_buf(), DirectoryType::Directory, Some(DirectoryRole::Target)),
-        ]);
+        let config = config_with_dirs(vec![(
+            "target-only",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Target),
+        )]);
 
         let skills = discover_all(&config, &mut Vec::new()).unwrap();
-        assert!(skills.is_empty(), "Target-only directories should not participate in discovery");
+        assert!(
+            skills.is_empty(),
+            "Target-only directories should not participate in discovery"
+        );
     }
 
     #[test]
@@ -960,9 +936,13 @@ mod tests {
         create_skill(tmp.path(), "managed-skill");
 
         // A Managed-role directory (via flat scan) should produce Managed origin
-        let skills = discover_flat_directory("managed-dir", tmp.path(), true, &mut Vec::new()).unwrap();
+        let skills =
+            discover_flat_directory("managed-dir", tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
-        assert!(skills[0].origin.is_managed(), "Managed-role directory should produce Managed origin");
+        assert!(
+            skills[0].origin.is_managed(),
+            "Managed-role directory should produce Managed origin"
+        );
     }
 
     #[test]
@@ -971,8 +951,12 @@ mod tests {
         create_skill(tmp.path(), "local-skill");
 
         // A Source-role directory should produce Local origin
-        let skills = discover_flat_directory("source-dir", tmp.path(), false, &mut Vec::new()).unwrap();
+        let skills =
+            discover_flat_directory("source-dir", tmp.path(), false, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
-        assert!(!skills[0].origin.is_managed(), "Source-role directory should produce Local origin");
+        assert!(
+            !skills[0].origin.is_managed(),
+            "Source-role directory should produce Local origin"
+        );
     }
 }
