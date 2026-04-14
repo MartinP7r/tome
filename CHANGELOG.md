@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes — v0.6 Unified Directory Model
+
+The `[[sources]]` and `[targets.*]` config sections have been replaced by a single
+`[directories.*]` section. tome will refuse to parse old-format config files and
+show a migration hint.
+
+**Before (v0.5):**
+```toml
+library_dir = "~/.tome/skills"
+
+[[sources]]
+name = "my-skills"
+path = "~/skills"
+type = "directory"
+
+[[sources]]
+name = "plugins"
+path = "~/.claude/plugins/cache"
+type = "claude-plugins"
+
+[targets.claude]
+enabled = true
+method = "symlink"
+skills_dir = "~/.claude/skills"
+```
+
+**After (v0.6):**
+```toml
+library_dir = "~/.tome/skills"
+
+[directories.my-skills]
+path = "~/skills"
+type = "directory"
+role = "source"
+
+[directories.plugins]
+path = "~/.claude/plugins/cache"
+type = "claude-plugins"
+
+[directories.claude]
+path = "~/.claude/skills"
+type = "directory"
+role = "target"
+```
+
+**Key changes:**
+- Each directory has a `type` (directory, claude-plugins, git) and a `role` (source, target, synced, managed)
+- `role` defaults based on type: `directory` → source, `claude-plugins` → managed
+- `synced` role = both source and target (discovered here AND distributed here)
+- `enabled`/`method`/`skills_dir` fields removed — `path` is the only location field
+- `disabled_targets` in `machine.toml` renamed to `disabled_directories`
+
 ## [0.5.4] - 2026-04-10
 
 ### Added

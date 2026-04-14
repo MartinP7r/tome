@@ -464,6 +464,14 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
     }
 
+    // Safety guard: warn and skip cleanup when no directories are configured (CFG-06)
+    if config.directories.is_empty() {
+        if !quiet {
+            eprintln!("warning: no directories configured. Run `tome init` to set up directories.");
+        }
+        return Ok(());
+    }
+
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
     if verbose {
