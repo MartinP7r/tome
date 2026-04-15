@@ -10,7 +10,7 @@ progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 5
-  completed_plans: 6
+  completed_plans: 7
   percent: 14
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 2 of 3 (git sources & selection)
-Plan: 1 of 4 in current phase (complete)
+Plan: 2 of 4 complete
 Status: Executing
 Last activity: 2026-04-15
 
@@ -72,6 +72,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Deprecated compat shims (discover_source, distribute_to_target) bridge unconverted modules
 - [Phase 02]: Git subprocess env clearing pattern: every Command::new("git") chains .env_remove for GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE
 - [Phase 02]: SHA-256 URL hashing for cache dirs uses per-byte format matching manifest.rs pattern
+- [Phase 02-02]: enabled field is Option<BTreeSet> (None = no allowlist, Some = exclusive allowlist)
+- [Phase 02-02]: is_skill_allowed uses locality principle: per-dir enabled > per-dir disabled > global disabled
 
 ### Pending Todos
 
@@ -83,6 +85,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T13:40:17Z
-Stopped at: Completed 02-01-PLAN.md (git module foundation)
-Resume file: .planning/phases/02-git-sources-selection/02-01-SUMMARY.md
+Last session: 2026-04-15T13:45:00Z
+Stopped at: Wave 1 complete (02-01, 02-02)
+Resume file: .planning/phases/02-git-sources-selection/02-02-SUMMARY.md
