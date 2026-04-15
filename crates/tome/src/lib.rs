@@ -31,6 +31,7 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod eject;
+pub(crate) mod git;
 pub(crate) mod install;
 pub(crate) mod library;
 pub(crate) mod lint;
