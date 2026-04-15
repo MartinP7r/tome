@@ -150,7 +150,11 @@ pub fn run(dry_run: bool) -> Result<Config> {
             directories: directories.clone(),
             ..Config::default()
         };
-        match crate::discover::discover_all(&tmp, &std::collections::BTreeMap::new(), &mut Vec::new()) {
+        match crate::discover::discover_all(
+            &tmp,
+            &std::collections::BTreeMap::new(),
+            &mut Vec::new(),
+        ) {
             Ok(skills) => skills,
             Err(e) => {
                 eprintln!("warning: could not discover skills from selected directories: {e}");

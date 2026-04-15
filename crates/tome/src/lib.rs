@@ -499,8 +499,7 @@ fn resolve_git_directories(
                             name
                         );
                     }
-                    let effective =
-                        git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                    let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
                     let sha = git::read_head_sha(&cache_dir).ok();
                     resolved.insert(name.clone(), (effective, sha));
                 } else if !quiet {
