@@ -51,8 +51,8 @@ Plans:
 
 Plans:
 - [x] 02-01-PLAN.md — Git module, config subdir field, TomePaths repos_dir
-- [ ] 02-02-PLAN.md — Per-directory skill filtering in machine.toml
-- [ ] 02-03-PLAN.md — Git resolution wiring in sync pipeline + distribute filtering
+- [x] 02-02-PLAN.md — Per-directory skill filtering in machine.toml
+- [x] 02-03-PLAN.md — Git resolution wiring in sync pipeline + distribute filtering
 - [ ] 02-04-PLAN.md — tome remove command + integration tests
 
 ### Phase 3: Import, Reassignment & Browse Polish

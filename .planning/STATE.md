@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.6
 milestone_name: milestone
 status: executing
-stopped_at: Phase 2 context gathered
-last_updated: "2026-04-15T12:06:25.595Z"
-last_activity: 2026-04-14
+stopped_at: Completed 02-03-PLAN.md
+last_updated: "2026-04-15T13:54:28.595Z"
+last_activity: 2026-04-15
 progress:
   total_phases: 3
   completed_phases: 1
-  total_plans: 5
-  completed_plans: 7
+  total_plans: 9
+  completed_plans: 8
   percent: 14
 ---
 
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 2 of 3 (git sources & selection)
-Plan: 2 of 4 complete
-Status: Executing
+Plan: 3 of 4 complete
+Status: Ready to execute
 Last activity: 2026-04-15
 
 Progress: [██░░░░░░░░] 14%
@@ -54,6 +54,7 @@ Progress: [██░░░░░░░░] 14%
 | Phase 01 P02 | 12min | 2 tasks | 2 files |
 | Phase 01 P03 | 9min | 2 tasks | 7 files |
 | Phase 02 P01 | 9min | 2 tasks | 10 files |
+| Phase 02 P03 | 6min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -74,6 +75,8 @@ Recent decisions affecting current work:
 - [Phase 02]: SHA-256 URL hashing for cache dirs uses per-byte format matching manifest.rs pattern
 - [Phase 02-02]: enabled field is Option<BTreeSet> (None = no allowlist, Some = exclusive allowlist)
 - [Phase 02-02]: is_skill_allowed uses locality principle: per-dir enabled > per-dir disabled > global disabled
+- [Phase 02]: Tuple (PathBuf, Option<String>) for resolved_paths to carry both path and SHA
+- [Phase 02]: Git-sourced skills marked Managed with provenance containing commit SHA
 
 ### Pending Todos
 
@@ -85,6 +88,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T13:45:00Z
-Stopped at: Wave 1 complete (02-01, 02-02)
-Resume file: .planning/phases/02-git-sources-selection/02-02-SUMMARY.md
+Last session: 2026-04-15T13:54:28.591Z
+Stopped at: Completed 02-03-PLAN.md
+Resume file: None

@@ -48,8 +48,8 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 - [x] **GIT-04**: Branch/tag/SHA pinning via `branch`, `tag`, `rev` fields (mutually exclusive)
 - [x] **GIT-05**: Resolved commit SHA recorded in lockfile for reproducibility
 - [x] **GIT-06**: All git Commands clear `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` env vars
-- [ ] **GIT-07**: Git resolution runs as pre-discovery step, resolves URLs to local cache paths
-- [ ] **GIT-08**: Failed git operations fall back to cached state, don't abort sync of local directories
+- [x] **GIT-07**: Git resolution runs as pre-discovery step, resolves URLs to local cache paths
+- [x] **GIT-08**: Failed git operations fall back to cached state, don't abort sync of local directories
 
 ### Management CLI
 
@@ -133,8 +133,8 @@ Deferred to future releases. Tracked but not in current roadmap.
 | GIT-04 | Phase 2 | Complete |
 | GIT-05 | Phase 2 | Complete |
 | GIT-06 | Phase 2 | Complete |
-| GIT-07 | Phase 2 | Pending |
-| GIT-08 | Phase 2 | Pending |
+| GIT-07 | Phase 2 | Complete |
+| GIT-08 | Phase 2 | Complete |
 | CLI-01 | Phase 2 | Pending |
 | CLI-02 | Phase 3 | Pending |
 | CLI-03 | Phase 3 | Pending |
