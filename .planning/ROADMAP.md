@@ -61,5 +61,5 @@ Phases execute in numeric order: 1 -> 2 -> 3
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Unified Directory Foundation | 0/? | Not started | - |
-| 2. Git Sources & Selection | 0/? | Not started | - |
+| 2. Git Sources & Selection | 1/4 | In progress | - |
 | 3. Import, Reassignment & Browse Polish | 0/? | Not started | - |

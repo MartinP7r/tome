@@ -53,7 +53,7 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Management CLI
 
-- [ ] **CLI-01**: `tome remove <directory-name>` removes entry from config, cleans up library + symlinks
+- [x] **CLI-01**: `tome remove <directory-name>` removes entry from config, cleans up library + symlinks
 - [ ] **CLI-02**: `tome add <github-url>` creates git directory entry in config from URL
 - [ ] **CLI-03**: `tome reassign <skill-name> --to <directory-name>` changes skill provenance
 
@@ -135,7 +135,7 @@ Deferred to future releases. Tracked but not in current roadmap.
 | GIT-06 | Phase 2 | Pending |
 | GIT-07 | Phase 2 | Pending |
 | GIT-08 | Phase 2 | Pending |
-| CLI-01 | Phase 2 | Pending |
+| CLI-01 | Phase 2 | Complete |
 | CLI-02 | Phase 3 | Pending |
 | CLI-03 | Phase 3 | Pending |
 | BROWSE-01 | Phase 3 | Pending |
