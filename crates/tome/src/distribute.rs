@@ -79,8 +79,8 @@ pub fn distribute_to_directory(
             continue;
         }
 
-        // Skip skills disabled in machine preferences
-        if machine_prefs.is_disabled(&skill_name_str) {
+        // Skip skills not allowed for this directory (global disabled + per-directory filtering)
+        if !machine_prefs.is_skill_allowed(&skill_name_str, dir_name.as_str()) {
             result.disabled += 1;
             continue;
         }
