@@ -118,6 +118,19 @@ pub enum Command {
     #[command(after_help = "Examples:\n  tome eject\n  tome eject --dry-run")]
     Eject,
 
+    /// Remove a source entry and clean up its artifacts
+    #[command(
+        after_help = "Examples:\n  tome remove my-git-source\n  tome remove my-git-source --dry-run\n  tome remove my-git-source --force"
+    )]
+    Remove {
+        /// Name of the source to remove (as shown in `tome status`)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Move the skill library to a new location safely
     #[command(after_help = "Examples:\n  tome relocate ~/new-library")]
     Relocate {

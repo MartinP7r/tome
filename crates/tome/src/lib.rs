@@ -39,6 +39,7 @@ pub(crate) mod machine;
 pub(crate) mod manifest;
 pub(crate) mod paths;
 pub(crate) mod relocate;
+pub(crate) mod remove;
 pub(crate) mod skill;
 pub(crate) mod status;
 pub(crate) mod update;
@@ -246,6 +247,60 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             let manifest = manifest::load(paths.config_dir())?;
             browse::browse(skills, &manifest)?;
+        }
+        Command::Remove { name, force } => {
+            let manifest = manifest::load(paths.config_dir())?;
+            let plan = remove::plan(&name, &config, &paths, &manifest)?;
+            remove::render_plan(&plan);
+
+            if cli.dry_run {
+                println!("\n{}", style("Dry run — no changes made.").yellow());
+                return Ok(());
+            }
+
+            if !force {
+                if std::io::stdin().is_terminal() {
+                    let confirmed = dialoguer::Confirm::new()
+                        .with_prompt(format!("Remove source '{}'?", name))
+                        .default(false)
+                        .interact()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                } else if cli.no_input {
+                    anyhow::bail!(
+                        "tome remove requires confirmation — use --force in non-interactive mode"
+                    );
+                } else {
+                    eprintln!(
+                        "warning: removing source '{}' in non-interactive mode",
+                        name
+                    );
+                }
+            }
+
+            let mut config = config;
+            let mut manifest = manifest;
+            let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
+
+            // Save updated config
+            config.save(&paths.config_path())?;
+            // Save updated manifest
+            manifest::save(&manifest, paths.config_dir())?;
+            // Regenerate lockfile
+            let mut warnings = Vec::new();
+            let skills = discover::discover_all(&config, &mut warnings)?;
+            let lockfile = lockfile::generate(&manifest, &skills);
+            lockfile::save(&lockfile, paths.config_dir())?;
+
+            println!(
+                "\n{} Removed source '{}': {} library entries, {} symlinks",
+                style("✓").green(),
+                name,
+                result.library_entries_removed,
+                result.symlinks_removed,
+            );
         }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;
