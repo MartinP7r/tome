@@ -105,7 +105,10 @@ pub(crate) fn plan(
 
 /// Render the plan to stdout.
 pub(crate) fn render_plan(plan: &RemovePlan) {
-    println!("Remove plan for source '{}':", style(&plan.source_name).cyan());
+    println!(
+        "Remove plan for source '{}':",
+        style(&plan.source_name).cyan()
+    );
 
     if plan.skills.is_empty() {
         println!("  No skills found in library from this source.");
@@ -274,7 +277,12 @@ mod tests {
         let (_tmp, config, paths, manifest) = make_test_setup();
         let result = plan("nonexistent", &config, &paths, &manifest);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("not found in config"));
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not found in config")
+        );
     }
 
     #[test]
