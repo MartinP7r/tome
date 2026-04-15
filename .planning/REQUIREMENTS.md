@@ -42,12 +42,12 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Git Sources
 
-- [ ] **GIT-01**: `type = "git"` directory config with URL in `path` field
-- [ ] **GIT-02**: Shallow clone (`--depth 1`) to `~/.tome/repos/<sha256(url)>/` with `.git` intact
-- [ ] **GIT-03**: Update via `git fetch --depth 1 origin <ref> && git reset --hard FETCH_HEAD` (not `git pull`)
-- [ ] **GIT-04**: Branch/tag/SHA pinning via `branch`, `tag`, `rev` fields (mutually exclusive)
-- [ ] **GIT-05**: Resolved commit SHA recorded in lockfile for reproducibility
-- [ ] **GIT-06**: All git Commands clear `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` env vars
+- [x] **GIT-01**: `type = "git"` directory config with URL in `path` field
+- [x] **GIT-02**: Shallow clone (`--depth 1`) to `~/.tome/repos/<sha256(url)>/` with `.git` intact
+- [x] **GIT-03**: Update via `git fetch --depth 1 origin <ref> && git reset --hard FETCH_HEAD` (not `git pull`)
+- [x] **GIT-04**: Branch/tag/SHA pinning via `branch`, `tag`, `rev` fields (mutually exclusive)
+- [x] **GIT-05**: Resolved commit SHA recorded in lockfile for reproducibility
+- [x] **GIT-06**: All git Commands clear `GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` env vars
 - [ ] **GIT-07**: Git resolution runs as pre-discovery step, resolves URLs to local cache paths
 - [ ] **GIT-08**: Failed git operations fall back to cached state, don't abort sync of local directories
 
@@ -127,12 +127,12 @@ Deferred to future releases. Tracked but not in current roadmap.
 | MACH-03 | Phase 2 | Pending |
 | MACH-04 | Phase 2 | Pending |
 | MACH-05 | Phase 2 | Pending |
-| GIT-01 | Phase 2 | Pending |
-| GIT-02 | Phase 2 | Pending |
-| GIT-03 | Phase 2 | Pending |
-| GIT-04 | Phase 2 | Pending |
-| GIT-05 | Phase 2 | Pending |
-| GIT-06 | Phase 2 | Pending |
+| GIT-01 | Phase 2 | Complete |
+| GIT-02 | Phase 2 | Complete |
+| GIT-03 | Phase 2 | Complete |
+| GIT-04 | Phase 2 | Complete |
+| GIT-05 | Phase 2 | Complete |
+| GIT-06 | Phase 2 | Complete |
 | GIT-07 | Phase 2 | Pending |
 | GIT-08 | Phase 2 | Pending |
 | CLI-01 | Phase 2 | Pending |
