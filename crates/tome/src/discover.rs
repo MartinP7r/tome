@@ -3,7 +3,7 @@
 //! exclusion filtering.
 
 use anyhow::{Context, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -159,16 +159,38 @@ pub struct DiscoveredSkill {
 ///
 /// Returns deduplicated skills — BTreeMap iteration order provides alphabetical priority
 /// (first-seen-wins on name conflicts). Applies exclusion list from config.
+///
+/// `resolved_paths` maps git directory names to `(local_path, Option<git_commit_sha>)`.
+/// For git-type directories, the resolved path is used instead of the config path (which is a URL).
 /// Warnings about naming conventions and deduplication are collected in `warnings`.
-pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<DiscoveredSkill>> {
+pub fn discover_all(
+    config: &Config,
+    resolved_paths: &BTreeMap<DirectoryName, (PathBuf, Option<String>)>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<DiscoveredSkill>> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
     let mut conflicts: Vec<(String, String, String)> = Vec::new();
 
     for (dir_name, dir_config) in config.discovery_dirs() {
-        let dir_skills = discover_directory_entry(dir_name, dir_config, warnings)?;
+        // For git directories, use the resolved local path instead of the URL
+        let dir_skills = if let Some((resolved_path, _sha)) = resolved_paths.get(dir_name) {
+            let is_managed = dir_config.role() == DirectoryRole::Managed;
+            discover_flat_directory(dir_name.as_str(), resolved_path, is_managed, warnings)?
+        } else if dir_config.directory_type == DirectoryType::Git {
+            // Git directory not in resolved_paths — it failed to clone/update
+            // and has no cached state. Skip silently (warning already emitted).
+            continue;
+        } else {
+            discover_directory_entry(dir_name, dir_config, warnings)?
+        };
 
-        for skill in dir_skills {
+        // Attach git_commit_sha to skills from git directories
+        let git_sha = resolved_paths
+            .get(dir_name)
+            .and_then(|(_path, sha)| sha.clone());
+
+        for mut skill in dir_skills {
             if config.exclude.contains(&skill.name) {
                 continue;
             }
@@ -178,6 +200,40 @@ pub fn discover_all(config: &Config, warnings: &mut Vec<String>) -> Result<Vec<D
                     "skill name '{}' should be lowercase letters, digits, or hyphens",
                     skill.name
                 ));
+            }
+
+            // Wire git commit SHA into provenance for git-sourced skills
+            if let Some(ref sha) = git_sha {
+                match &mut skill.origin {
+                    SkillOrigin::Managed {
+                        provenance: Some(prov),
+                    } => {
+                        if prov.git_commit_sha.is_none() {
+                            prov.git_commit_sha = Some(sha.clone());
+                        }
+                    }
+                    SkillOrigin::Managed {
+                        provenance: None, ..
+                    } => {
+                        skill.origin = SkillOrigin::Managed {
+                            provenance: Some(SkillProvenance {
+                                registry_id: skill.source_name.clone(),
+                                version: None,
+                                git_commit_sha: Some(sha.clone()),
+                            }),
+                        };
+                    }
+                    SkillOrigin::Local => {
+                        // Local git skills get provenance with just the SHA
+                        skill.origin = SkillOrigin::Managed {
+                            provenance: Some(SkillProvenance {
+                                registry_id: skill.source_name.clone(),
+                                version: None,
+                                git_commit_sha: Some(sha.clone()),
+                            }),
+                        };
+                    }
+                }
             }
 
             let name_str = skill.name.as_str().to_string();
@@ -582,7 +638,7 @@ mod tests {
             ),
         ]);
 
-        let skills = discover_all(&config, &mut Vec::new()).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
 
         let shared = skills.iter().find(|s| s.name == "shared-skill").unwrap();
@@ -603,7 +659,7 @@ mod tests {
         )]);
         config.exclude = [SkillName::new("exclude-me").unwrap()].into();
 
-        let skills = discover_all(&config, &mut Vec::new()).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "keep-me");
     }
@@ -788,7 +844,7 @@ mod tests {
             Some(DirectoryRole::Source),
         )]);
 
-        let skills = discover_all(&config, &mut Vec::new()).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
         assert!(names.contains(&"skill-alpha"));
@@ -876,7 +932,7 @@ mod tests {
         )]);
 
         let mut warnings = Vec::new();
-        let skills = discover_all(&config, &mut warnings).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut warnings).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("lowercase"));
@@ -905,7 +961,7 @@ mod tests {
         ]);
 
         let mut warnings = Vec::new();
-        let skills = discover_all(&config, &mut warnings).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut warnings).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("first"));
@@ -925,7 +981,7 @@ mod tests {
             Some(DirectoryRole::Target),
         )]);
 
-        let skills = discover_all(&config, &mut Vec::new()).unwrap();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut Vec::new()).unwrap();
         assert!(
             skills.is_empty(),
             "Target-only directories should not participate in discovery"

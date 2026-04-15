@@ -46,9 +46,9 @@ pub(crate) mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command as GitCommand;
 
 use anyhow::{Context, Result};
@@ -57,7 +57,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use cleanup::CleanupResult;
 use cli::{Cli, Command};
-use config::Config;
+use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
@@ -235,7 +235,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::Browse => {
             let mut warnings = Vec::new();
-            let skills = discover::discover_all(&config, &mut warnings)?;
+            let skills = discover::discover_all(&config, &BTreeMap::new(), &mut warnings)?;
             if !cli.quiet {
                 for w in &warnings {
                     eprintln!("warning: {}", w);
@@ -399,6 +399,122 @@ struct SyncOptions<'a> {
     machine_override: Option<&'a Path>,
 }
 
+/// Pre-discovery step: clone or update git-type directories.
+///
+/// Returns a map of directory name -> (resolved local path, optional HEAD SHA).
+/// Failed git operations produce warnings and are skipped (GIT-08).
+fn resolve_git_directories(
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    quiet: bool,
+    verbose: bool,
+) -> BTreeMap<DirectoryName, (PathBuf, Option<String>)> {
+    let mut resolved = BTreeMap::new();
+    let repos_dir = paths.repos_dir();
+
+    // Check git availability once
+    if !config
+        .directories
+        .values()
+        .any(|d| d.directory_type == DirectoryType::Git)
+    {
+        return resolved;
+    }
+
+    if !git::is_git_available() {
+        if !quiet {
+            eprintln!("warning: git is not available — skipping all git-type directories");
+        }
+        return resolved;
+    }
+
+    for (name, dir_config) in &config.directories {
+        if dir_config.directory_type != DirectoryType::Git {
+            continue;
+        }
+
+        let url = dir_config.path.to_string_lossy();
+        let cache_dir = git::repo_cache_dir(&repos_dir, &url);
+        let already_cloned = cache_dir.is_dir();
+
+        if dry_run {
+            // In dry-run, use cached path if it exists, skip otherwise
+            if already_cloned {
+                let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                let sha = git::read_head_sha(&cache_dir).ok();
+                resolved.insert(name.clone(), (effective, sha));
+            }
+            continue;
+        }
+
+        // Create repos dir if needed
+        if let Err(e) = std::fs::create_dir_all(&repos_dir) {
+            if !quiet {
+                eprintln!(
+                    "warning: failed to create repos directory {}: {e}",
+                    repos_dir.display()
+                );
+            }
+            continue;
+        }
+
+        let result = if already_cloned {
+            // Update existing clone (GIT-03)
+            if verbose {
+                eprintln!("  Updating git directory '{}'...", name);
+            }
+            git::update_repo(
+                &cache_dir,
+                dir_config.branch.as_deref(),
+                dir_config.tag.as_deref(),
+                dir_config.rev.as_deref(),
+            )
+        } else {
+            // Fresh clone (GIT-02)
+            if verbose {
+                eprintln!("  Cloning git directory '{}'...", name);
+            }
+            git::clone_repo(
+                &url,
+                &cache_dir,
+                dir_config.branch.as_deref(),
+                dir_config.tag.as_deref(),
+                dir_config.rev.as_deref(),
+            )
+        };
+
+        match result {
+            Ok(()) => {
+                let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                let sha = git::read_head_sha(&cache_dir).ok();
+                resolved.insert(name.clone(), (effective, sha));
+            }
+            Err(e) => {
+                // D-09, D-10: Distinct messages for never-cloned vs update-failed
+                if already_cloned {
+                    if !quiet {
+                        eprintln!(
+                            "warning: could not update '{}' — using cached state: {e}",
+                            name
+                        );
+                    }
+                    let effective =
+                        git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                    let sha = git::read_head_sha(&cache_dir).ok();
+                    resolved.insert(name.clone(), (effective, sha));
+                } else if !quiet {
+                    eprintln!(
+                        "warning: could not clone '{}' — skipping (no cached state): {e}",
+                        name
+                    );
+                }
+            }
+        }
+    }
+    resolved
+}
+
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
     let SyncOptions {
@@ -473,13 +589,23 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         return Ok(());
     }
 
+    // 0. Resolve git directories (clone/update to local cache)
+    let sp = show_progress.then(|| spinner("Resolving git sources..."));
+    if verbose {
+        eprintln!("{}", style("Resolving git sources...").dim());
+    }
+    let resolved_git_paths = resolve_git_directories(config, paths, dry_run, quiet, verbose);
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
+
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
     let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &mut warnings)?;
+    let skills = discover::discover_all(config, &resolved_git_paths, &mut warnings)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -771,7 +897,7 @@ fn render_sync_report(report: &SyncReport) {
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
     let mut warnings = Vec::new();
-    let mut skills = discover::discover_all(config, &mut warnings)?;
+    let mut skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
     skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     if !quiet {
         for w in &warnings {

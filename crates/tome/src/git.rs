@@ -4,9 +4,6 @@
 //! variables to prevent interference from the calling environment (e.g., running tome
 //! inside a git worktree or from a git hook).
 
-// Functions in this module are wired into the sync pipeline in a subsequent plan.
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
