@@ -345,6 +345,8 @@ mod tests {
                     branch: None,
                     tag: None,
                     rev: None,
+
+                    subdir: None,
                 },
             )]),
             ..Config::default()
@@ -398,6 +400,8 @@ mod tests {
                     branch: None,
                     tag: None,
                     rev: None,
+
+                    subdir: None,
                 },
             )]),
             ..Config::default()
@@ -428,6 +432,8 @@ mod tests {
                     branch: None,
                     tag: None,
                     rev: None,
+
+                    subdir: None,
                 },
             )]),
             ..Config::default()

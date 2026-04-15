@@ -4,6 +4,9 @@
 //! variables to prevent interference from the calling environment (e.g., running tome
 //! inside a git worktree or from a git hook).
 
+// Functions in this module are wired into the sync pipeline in a subsequent plan.
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -204,18 +207,12 @@ mod tests {
 
     #[test]
     fn ref_spec_with_branch() {
-        assert_eq!(
-            ref_spec_for_config(Some("main"), None, None),
-            Some("main")
-        );
+        assert_eq!(ref_spec_for_config(Some("main"), None, None), Some("main"));
     }
 
     #[test]
     fn ref_spec_with_tag() {
-        assert_eq!(
-            ref_spec_for_config(None, Some("v1.0"), None),
-            Some("v1.0")
-        );
+        assert_eq!(ref_spec_for_config(None, Some("v1.0"), None), Some("v1.0"));
     }
 
     #[test]

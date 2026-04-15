@@ -213,6 +213,11 @@ pub struct DirectoryConfig {
     /// Git revision to pin (git type only)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+
+    /// Subdirectory within the repo to scan for skills (git type only).
+    /// When set, discovery scans `<clone_path>/<subdir>/` instead of the repo root.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subdir: Option<String>,
 }
 
 impl DirectoryConfig {
@@ -357,6 +362,14 @@ impl Config {
             if has_git_fields && dir.directory_type != DirectoryType::Git {
                 anyhow::bail!(
                     "directory '{}': branch/tag/rev fields are only valid with git type",
+                    name
+                );
+            }
+
+            // subdir only valid with Git type
+            if dir.subdir.is_some() && dir.directory_type != DirectoryType::Git {
+                anyhow::bail!(
+                    "directory '{}': 'subdir' is only valid for git-type directories",
                     name
                 );
             }
@@ -794,6 +807,7 @@ bogus = true
                     branch: None,
                     tag: None,
                     rev: None,
+                    subdir: None,
                 },
             )]),
             ..Default::default()
@@ -818,6 +832,7 @@ bogus = true
                     branch: None,
                     tag: None,
                     rev: None,
+                    subdir: None,
                 },
             )]),
             ..Default::default()
@@ -842,6 +857,7 @@ bogus = true
                     branch: Some("main".to_string()),
                     tag: None,
                     rev: None,
+                    subdir: None,
                 },
             )]),
             ..Default::default()
@@ -868,6 +884,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -879,6 +897,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
             ]),
@@ -902,6 +922,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -913,6 +935,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -924,6 +948,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -935,6 +961,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
             ]),
@@ -958,6 +986,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -969,6 +999,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -980,6 +1012,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
                 (
@@ -991,6 +1025,8 @@ bogus = true
                         branch: None,
                         tag: None,
                         rev: None,
+
+                        subdir: None,
                     },
                 ),
             ]),
@@ -1074,6 +1110,7 @@ bogus = true
                     branch: None,
                     tag: None,
                     rev: None,
+                    subdir: None,
                 },
             )]),
             ..Default::default()

@@ -276,6 +276,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
                 branch: None,
                 tag: None,
                 rev: None,
+                subdir: None,
             },
         );
 
@@ -407,6 +408,7 @@ fn configure_directories() -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
                     branch: None,
                     tag: None,
                     rev: None,
+                    subdir: None,
                 },
             );
         }
