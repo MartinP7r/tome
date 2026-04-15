@@ -3152,3 +3152,217 @@ fn no_color_env_suppresses_ansi_escapes() {
         "stderr should not contain ANSI escapes with NO_COLOR=1, got: {stderr}"
     );
 }
+
+// === tome remove tests ===
+
+/// Helper to create a remove-test environment where config is at `tome.toml`
+/// (matching what `tome remove` saves to via `paths.config_path()`).
+fn remove_test_env(tmp: &TempDir, sources_toml: &str, targets_toml: &str) -> PathBuf {
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "library_dir = \"{}\"\n{}\n{}",
+            library_dir.display(),
+            sources_toml,
+            targets_toml,
+        ),
+    )
+    .unwrap();
+    config_path
+}
+
+#[test]
+fn test_remove_nonexistent_source() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        "",
+    );
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "nonexistent",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in config"));
+}
+
+#[test]
+fn test_remove_local_directory() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        &format!(
+            "[targets.test-target]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n",
+            target_dir.display()
+        ),
+    );
+
+    // First sync to populate library and targets
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let library_dir = tmp.path().join("library");
+    assert!(library_dir.join("my-skill").exists());
+    assert!(target_dir.join("my-skill").exists());
+
+    // Remove the source
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // Verify cleanup
+    assert!(
+        !library_dir.join("my-skill").exists(),
+        "library skill should be removed"
+    );
+    assert!(
+        !target_dir.join("my-skill").exists(),
+        "target symlink should be removed"
+    );
+
+    // Verify config no longer has the source
+    let config_content = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        !config_content.contains(r#"name = "local""#),
+        "config should no longer contain the removed source"
+    );
+}
+
+#[test]
+fn test_remove_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        &format!(
+            "[targets.test-target]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n",
+            target_dir.display()
+        ),
+    );
+
+    // First sync
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // Remove with --dry-run
+    let output = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--dry-run",
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Dry run"),
+        "should show dry run message, got: {stdout}"
+    );
+
+    // Verify nothing was actually removed
+    let library_dir = tmp.path().join("library");
+    assert!(
+        library_dir.join("my-skill").exists(),
+        "library skill should still exist after dry run"
+    );
+    let config_content = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        config_content.contains(r#"name = "local""#),
+        "config should still contain the source after dry run"
+    );
+}
+
+#[test]
+fn test_remove_no_input_without_force_fails() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            skills_dir.display()
+        ),
+        "",
+    );
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--no-input",
+            "remove",
+            "local",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("use --force"));
+}

@@ -21,34 +21,35 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 01 — unified-directory-foundation
+**Current focus:** Phase 02 — git-sources-selection
 
 ## Current Position
 
 Phase: 2 of 3 (git sources & selection)
-Plan: 3 of 4 complete
-Status: Ready to execute
+Plan: 4 of 4 complete
+Status: All plans executed, awaiting verification
 Last activity: 2026-04-15
 
-Progress: [██░░░░░░░░] 14%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 1
+- Total plans completed: 4
 - Average duration: 8min
-- Total execution time: 0.13 hours
+- Total execution time: 0.5 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Unified Directory Foundation | 1/5 | 8min | 8min |
+| 1. Unified Directory Foundation | 3/5 | 29min | 10min |
+| 2. Git Sources & Selection | 4/4 | 31min | 8min |
 
 **Recent Trend:**
 
-- Last 5 plans: -
+- Last 5 plans: 02-01 (9min), 02-02 (4min), 02-03 (6min), 02-04 (7min)
 - Trend: -
 
 | Phase 01 P02 | 12min | 2 tasks | 2 files |
@@ -77,6 +78,8 @@ Recent decisions affecting current work:
 - [Phase 02-02]: is_skill_allowed uses locality principle: per-dir enabled > per-dir disabled > global disabled
 - [Phase 02]: Tuple (PathBuf, Option<String>) for resolved_paths to carry both path and SHA
 - [Phase 02]: Git-sourced skills marked Managed with provenance containing commit SHA
+- [Phase 02-04]: Adapted tome remove to source-based config (sources Vec) since unified directory model not yet on main
+- [Phase 02-04]: Plan/render/execute pattern for destructive commands with --force and --dry-run
 
 ### Pending Todos
 
@@ -88,6 +91,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T13:54:28.591Z
-Stopped at: Completed 02-03-PLAN.md
+Last session: 2026-04-15
+Stopped at: All phase 02 plans executed, awaiting verification
 Resume file: None

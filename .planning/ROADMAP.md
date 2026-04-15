@@ -53,7 +53,7 @@ Plans:
 - [x] 02-01-PLAN.md — Git module, config subdir field, TomePaths repos_dir
 - [x] 02-02-PLAN.md — Per-directory skill filtering in machine.toml
 - [x] 02-03-PLAN.md — Git resolution wiring in sync pipeline + distribute filtering
-- [ ] 02-04-PLAN.md — tome remove command + integration tests
+- [x] 02-04-PLAN.md — tome remove command + integration tests
 
 ### Phase 3: Import, Reassignment & Browse Polish
 **Goal**: Users can import standalone skills from GitHub, reassign skill provenance, and enjoy a polished browse experience
@@ -73,6 +73,6 @@ Phases execute in numeric order: 1 -> 2 -> 3
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Unified Directory Foundation | 2/5 | In Progress|  |
-| 2. Git Sources & Selection | 1/4 | In Progress | - |
+| 1. Unified Directory Foundation | 3/5 | In Progress |  |
+| 2. Git Sources & Selection | 4/4 | Verifying | - |
 | 3. Import, Reassignment & Browse Polish | 0/? | Not started | - |
