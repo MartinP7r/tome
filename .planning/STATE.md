@@ -10,8 +10,8 @@ progress:
   total_phases: 3
   completed_phases: 1
   total_plans: 5
-  completed_plans: 5
-  percent: 7
+  completed_plans: 6
+  percent: 10
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-04-10)
 ## Current Position
 
 Phase: 2 of 3 (git sources & selection)
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-04-14
+Plan: 2 of 4 complete
+Status: Executing
+Last activity: 2026-04-15
 
 Progress: [█░░░░░░░░░] 7%
 
@@ -69,6 +69,8 @@ Recent decisions affecting current work:
 - [Phase 01]: Separate count_skill_dirs and count_symlinks helpers for role-based counting in status.rs
 - [Phase 01]: Manifest-based source_name == dir_name check replaces shares_tool_root() for circular symlink prevention
 - [Phase 01]: Deprecated compat shims (discover_source, distribute_to_target) bridge unconverted modules
+- [Phase 02-02]: enabled field is Option<BTreeSet> (None = no allowlist, Some = exclusive allowlist)
+- [Phase 02-02]: is_skill_allowed uses locality principle: per-dir enabled > per-dir disabled > global disabled
 
 ### Pending Todos
 
@@ -80,6 +82,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-15T12:06:25.590Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-git-sources-selection/02-CONTEXT.md
+Last session: 2026-04-15T13:35:00Z
+Stopped at: Completed 02-02-PLAN.md
+Resume file: .planning/phases/02-git-sources-selection/02-02-SUMMARY.md

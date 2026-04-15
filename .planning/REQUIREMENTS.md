@@ -35,10 +35,10 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 ### Machine Preferences
 
 - [x] **MACH-01**: `disabled_targets` renamed to `disabled_directories` in machine.toml
-- [ ] **MACH-02**: Per-directory `disabled` set (blocklist) in machine.toml
-- [ ] **MACH-03**: Per-directory `enabled` set (exclusive allowlist) in machine.toml
-- [ ] **MACH-04**: `disabled` + `enabled` on same directory = validation error
-- [ ] **MACH-05**: Resolution: global disabled → per-directory disabled → per-directory enabled (allowlist)
+- [x] **MACH-02**: Per-directory `disabled` set (blocklist) in machine.toml
+- [x] **MACH-03**: Per-directory `enabled` set (exclusive allowlist) in machine.toml
+- [x] **MACH-04**: `disabled` + `enabled` on same directory = validation error
+- [x] **MACH-05**: Resolution: global disabled → per-directory disabled → per-directory enabled (allowlist)
 
 ### Git Sources
 
@@ -123,10 +123,10 @@ Deferred to future releases. Tracked but not in current roadmap.
 | STATE-01 | Phase 1 | Complete |
 | STATE-02 | Phase 1 | Complete |
 | STATE-03 | Phase 1 | Complete |
-| MACH-02 | Phase 2 | Pending |
-| MACH-03 | Phase 2 | Pending |
-| MACH-04 | Phase 2 | Pending |
-| MACH-05 | Phase 2 | Pending |
+| MACH-02 | Phase 2 | Complete |
+| MACH-03 | Phase 2 | Complete |
+| MACH-04 | Phase 2 | Complete |
+| MACH-05 | Phase 2 | Complete |
 | GIT-01 | Phase 2 | Pending |
 | GIT-02 | Phase 2 | Pending |
 | GIT-03 | Phase 2 | Pending |
