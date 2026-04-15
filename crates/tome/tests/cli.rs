@@ -3155,19 +3155,17 @@ fn no_color_env_suppresses_ansi_escapes() {
 
 // === tome remove tests ===
 
-/// Helper to create a remove-test environment where config is at `tome.toml`
-/// (matching what `tome remove` saves to via `paths.config_path()`).
-fn remove_test_env(tmp: &TempDir, sources_toml: &str, targets_toml: &str) -> PathBuf {
+/// Helper to create a remove-test environment where config is at `tome.toml`.
+fn remove_test_env(tmp: &TempDir, directories_toml: &str) -> PathBuf {
     let library_dir = tmp.path().join("library");
     std::fs::create_dir_all(&library_dir).unwrap();
     let config_path = tmp.path().join("tome.toml");
     std::fs::write(
         &config_path,
         format!(
-            "library_dir = \"{}\"\n{}\n{}",
+            "library_dir = \"{}\"\n{}",
             library_dir.display(),
-            sources_toml,
-            targets_toml,
+            directories_toml,
         ),
     )
     .unwrap();
@@ -3175,7 +3173,7 @@ fn remove_test_env(tmp: &TempDir, sources_toml: &str, targets_toml: &str) -> Pat
 }
 
 #[test]
-fn test_remove_nonexistent_source() {
+fn test_remove_nonexistent_directory() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "my-skill");
@@ -3183,10 +3181,9 @@ fn test_remove_nonexistent_source() {
     remove_test_env(
         &tmp,
         &format!(
-            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
-        "",
     );
 
     tome()
@@ -3215,11 +3212,8 @@ fn test_remove_local_directory() {
     remove_test_env(
         &tmp,
         &format!(
-            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
-            skills_dir.display()
-        ),
-        &format!(
-            "[targets.test-target]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n",
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
             target_dir.display()
         ),
     );
@@ -3240,7 +3234,7 @@ fn test_remove_local_directory() {
     assert!(library_dir.join("my-skill").exists());
     assert!(target_dir.join("my-skill").exists());
 
-    // Remove the source
+    // Remove the source directory
     tome()
         .args([
             "--tome-home",
@@ -3263,11 +3257,11 @@ fn test_remove_local_directory() {
         "target symlink should be removed"
     );
 
-    // Verify config no longer has the source
+    // Verify config no longer has the directory
     let config_content = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
     assert!(
-        !config_content.contains(r#"name = "local""#),
-        "config should no longer contain the removed source"
+        !config_content.contains("[directories.local]"),
+        "config should no longer contain the removed directory"
     );
 }
 
@@ -3283,11 +3277,8 @@ fn test_remove_dry_run() {
     remove_test_env(
         &tmp,
         &format!(
-            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
-            skills_dir.display()
-        ),
-        &format!(
-            "[targets.test-target]\nenabled = true\nmethod = \"symlink\"\nskills_dir = \"{}\"\n",
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
             target_dir.display()
         ),
     );
@@ -3333,8 +3324,8 @@ fn test_remove_dry_run() {
     );
     let config_content = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
     assert!(
-        config_content.contains(r#"name = "local""#),
-        "config should still contain the source after dry run"
+        config_content.contains("[directories.local]"),
+        "config should still contain the directory after dry run"
     );
 }
 
@@ -3347,10 +3338,9 @@ fn test_remove_no_input_without_force_fails() {
     remove_test_env(
         &tmp,
         &format!(
-            "[[sources]]\nname = \"local\"\npath = \"{}\"\ntype = \"directory\"\n",
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
             skills_dir.display()
         ),
-        "",
     );
 
     tome()

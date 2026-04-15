@@ -262,7 +262,7 @@ pub fn run(cli: Cli) -> Result<()> {
             if !force {
                 if std::io::stdin().is_terminal() {
                     let confirmed = dialoguer::Confirm::new()
-                        .with_prompt(format!("Remove source '{}'?", name))
+                        .with_prompt(format!("Remove directory '{}'?", name))
                         .default(false)
                         .interact()?;
                     if !confirmed {
@@ -275,7 +275,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     );
                 } else {
                     eprintln!(
-                        "warning: removing source '{}' in non-interactive mode",
+                        "warning: removing directory '{}' in non-interactive mode",
                         name
                     );
                 }
@@ -291,12 +291,13 @@ pub fn run(cli: Cli) -> Result<()> {
             manifest::save(&manifest, paths.config_dir())?;
             // Regenerate lockfile
             let mut warnings = Vec::new();
-            let skills = discover::discover_all(&config, &mut warnings)?;
+            let resolved_paths = std::collections::BTreeMap::new();
+            let skills = discover::discover_all(&config, &resolved_paths, &mut warnings)?;
             let lockfile = lockfile::generate(&manifest, &skills);
             lockfile::save(&lockfile, paths.config_dir())?;
 
             println!(
-                "\n{} Removed source '{}': {} library entries, {} symlinks",
+                "\n{} Removed directory '{}': {} library entries, {} symlinks",
                 style("✓").green(),
                 name,
                 result.library_entries_removed,

@@ -1,40 +1,44 @@
-//! Remove a source entry from config and clean up all artifacts.
+//! Remove a directory entry from config and clean up all artifacts.
 //!
 //! Cleanup order:
-//! 1. Remove symlinks from target directories
-//! 2. Remove library entries for skills from this source
+//! 1. Remove symlinks from distribution directories
+//! 2. Remove library entries for skills from this directory
 //! 3. Remove manifest entries
-//! 4. Remove source entry from config
-//! 5. Regenerate lockfile
+//! 4. Remove cached git repo (if git-type directory)
+//! 5. Remove directory entry from config
+//! 6. Regenerate lockfile
 
 use anyhow::{Context, Result, bail};
 use console::style;
 use std::path::PathBuf;
 
-use crate::config::Config;
+use crate::config::{Config, DirectoryName, DirectoryRole, DirectoryType};
 use crate::manifest::Manifest;
 use crate::paths::TomePaths;
 
 /// What will be removed.
 #[derive(Debug)]
 pub(crate) struct RemovePlan {
-    /// Name of the source to remove.
-    pub source_name: String,
-    /// Skills from this source found in the manifest.
+    /// Name of the directory to remove.
+    pub directory_name: DirectoryName,
+    /// Skills from this directory found in the manifest.
     pub skills: Vec<String>,
-    /// Symlinks in target directories pointing to these skills.
+    /// Symlinks in distribution directories pointing to these skills.
     pub symlinks_to_remove: Vec<PathBuf>,
     /// Library directories for these skills.
     pub library_paths: Vec<PathBuf>,
+    /// Cached git repo path (if git-type directory).
+    pub git_cache_path: Option<PathBuf>,
 }
 
 impl RemovePlan {
-    /// Returns true if there is nothing to clean up (source entry still removed from config).
+    /// Returns true if there is nothing to clean up (directory entry still removed from config).
     #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.skills.is_empty()
             && self.symlinks_to_remove.is_empty()
             && self.library_paths.is_empty()
+            && self.git_cache_path.is_none()
     }
 }
 
@@ -42,6 +46,8 @@ impl RemovePlan {
 pub(crate) struct RemoveResult {
     pub symlinks_removed: usize,
     pub library_entries_removed: usize,
+    #[allow(dead_code)]
+    pub git_cache_removed: bool,
 }
 
 /// Build a plan describing what `tome remove <name>` will do.
@@ -51,23 +57,35 @@ pub(crate) fn plan(
     paths: &TomePaths,
     manifest: &Manifest,
 ) -> Result<RemovePlan> {
-    // Validate the source exists in config
-    let source_exists = config.sources.iter().any(|s| s.name == name);
-    if !source_exists {
-        bail!("source '{}' not found in config", name);
-    }
+    let dir_name = DirectoryName::new(name)
+        .with_context(|| format!("invalid directory name: {name}"))?;
 
-    // Find skills from this source in the manifest
+    // Validate the directory exists in config
+    let dir_config = config.directories.get(&dir_name);
+    if dir_config.is_none() {
+        bail!("directory '{}' not found in config", name);
+    }
+    let dir_config = dir_config.unwrap();
+
+    // Find skills from this directory in the manifest
     let skills: Vec<String> = manifest
         .iter()
         .filter(|(_, entry)| entry.source_name == name)
         .map(|(skill_name, _)| skill_name.as_str().to_string())
         .collect();
 
-    // Find symlinks to remove from targets
+    // Find symlinks to remove from distribution directories (Target or Synced role)
     let mut symlinks_to_remove = Vec::new();
-    for (_target_name, target_config) in config.targets.iter() {
-        let skills_dir = target_config.skills_dir();
+    for (other_name, other_config) in &config.directories {
+        let role = other_config.role();
+        if role != DirectoryRole::Target && role != DirectoryRole::Synced {
+            continue;
+        }
+        // Skip the directory being removed
+        if *other_name == dir_name {
+            continue;
+        }
+        let skills_dir = &other_config.path;
         if !skills_dir.is_dir() {
             continue;
         }
@@ -95,23 +113,35 @@ pub(crate) fn plan(
         .filter(|p| p.exists())
         .collect();
 
+    // Check for cached git repo
+    let git_cache_path = if dir_config.directory_type == DirectoryType::Git {
+        let cache_dir = crate::git::repo_cache_dir(
+            &paths.repos_dir(),
+            dir_config.path.to_str().unwrap_or_default(),
+        );
+        if cache_dir.exists() { Some(cache_dir) } else { None }
+    } else {
+        None
+    };
+
     Ok(RemovePlan {
-        source_name: name.to_string(),
+        directory_name: dir_name,
         skills,
         symlinks_to_remove,
         library_paths,
+        git_cache_path,
     })
 }
 
 /// Render the plan to stdout.
 pub(crate) fn render_plan(plan: &RemovePlan) {
     println!(
-        "Remove plan for source '{}':",
-        style(&plan.source_name).cyan()
+        "Remove plan for directory '{}':",
+        style(AsRef::<str>::as_ref(&plan.directory_name)).cyan()
     );
 
     if plan.skills.is_empty() {
-        println!("  No skills found in library from this source.");
+        println!("  No skills found in library from this directory.");
     } else {
         println!(
             "  Skills to remove from library: {}",
@@ -136,6 +166,10 @@ pub(crate) fn render_plan(plan: &RemovePlan) {
         );
     }
 
+    if plan.git_cache_path.is_some() {
+        println!("  Git repo cache will be removed.");
+    }
+
     println!("  Config entry will be removed.");
 }
 
@@ -148,8 +182,9 @@ pub(crate) fn execute(
 ) -> Result<RemoveResult> {
     let mut symlinks_removed = 0;
     let mut library_entries_removed = 0;
+    let mut git_cache_removed = false;
 
-    // 1. Remove symlinks from target directories
+    // 1. Remove symlinks from distribution directories
     for symlink in &plan.symlinks_to_remove {
         if !dry_run && let Err(e) = std::fs::remove_file(symlink) {
             eprintln!(
@@ -192,21 +227,36 @@ pub(crate) fn execute(
         }
     }
 
-    // 4. Remove source entry from config
+    // 4. Remove cached git repo
+    if let Some(cache_path) = &plan.git_cache_path {
+        if !dry_run
+            && let Err(e) = std::fs::remove_dir_all(cache_path)
+        {
+            eprintln!(
+                "warning: failed to remove git cache {}: {}",
+                cache_path.display(),
+                e
+            );
+        }
+        git_cache_removed = true;
+    }
+
+    // 5. Remove directory entry from config
     if !dry_run {
-        config.sources.retain(|s| s.name != plan.source_name);
+        config.directories.remove(&plan.directory_name);
     }
 
     Ok(RemoveResult {
         symlinks_removed,
         library_entries_removed,
+        git_cache_removed,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, Source, SourceType, TargetConfig, TargetMethod, TargetName};
+    use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
     use crate::discover::SkillName;
     use crate::manifest::{Manifest, SkillEntry};
     use crate::validation::ContentHash;
@@ -237,22 +287,35 @@ mod tests {
         // Create a symlink in the target
         unix_fs::symlink(&skill_dir, target_dir.join("my-skill")).unwrap();
 
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new("test-source").unwrap(),
+            DirectoryConfig {
+                path: source_dir,
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Source),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+        directories.insert(
+            DirectoryName::new("test-target").unwrap(),
+            DirectoryConfig {
+                path: target_dir,
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Target),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+
         let config = Config {
             library_dir: library_dir.clone(),
-            sources: vec![Source {
-                name: "test-source".to_string(),
-                path: source_dir,
-                source_type: SourceType::Directory,
-            }],
-            targets: BTreeMap::from([(
-                TargetName::new("test-target").unwrap(),
-                TargetConfig {
-                    enabled: true,
-                    method: TargetMethod::Symlink {
-                        skills_dir: target_dir,
-                    },
-                },
-            )]),
+            directories,
             ..Default::default()
         };
 
@@ -273,7 +336,7 @@ mod tests {
     }
 
     #[test]
-    fn plan_errors_on_nonexistent_source() {
+    fn plan_errors_on_nonexistent_directory() {
         let (_tmp, config, paths, manifest) = make_test_setup();
         let result = plan("nonexistent", &config, &paths, &manifest);
         assert!(result.is_err());
@@ -303,7 +366,7 @@ mod tests {
         let result = execute(&p, &mut config, &mut manifest, false).unwrap();
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
-        assert!(config.sources.is_empty());
+        assert!(!config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
         assert!(manifest.is_empty());
     }
 
@@ -316,7 +379,7 @@ mod tests {
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
         // Config and manifest should not be modified
-        assert_eq!(config.sources.len(), 1);
+        assert!(config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
         assert!(!manifest.is_empty());
     }
 }
