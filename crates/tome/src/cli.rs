@@ -52,7 +52,9 @@ pub enum LintFormat {
 #[derive(Subcommand)]
 pub enum Command {
     /// Add a git skill repository
-    #[command(after_help = "Examples:\n  tome add https://github.com/user/skills.git\n  tome add https://github.com/user/skills.git --name my-skills\n  tome add git@github.com:user/skills.git --branch main")]
+    #[command(
+        after_help = "Examples:\n  tome add https://github.com/user/skills.git\n  tome add https://github.com/user/skills.git --name my-skills\n  tome add git@github.com:user/skills.git --branch main"
+    )]
     Add {
         /// Git repository URL (HTTPS or SSH)
         #[arg(value_name = "URL")]
@@ -163,7 +165,9 @@ pub enum Command {
     },
 
     /// Fork a managed skill to a local directory for customization
-    #[command(after_help = "Examples:\n  tome fork my-skill --to local-skills\n  tome fork my-skill --to local-skills --force")]
+    #[command(
+        after_help = "Examples:\n  tome fork my-skill --to local-skills\n  tome fork my-skill --to local-skills --force"
+    )]
     Fork {
         /// Skill name to fork
         #[arg(value_name = "SKILL")]

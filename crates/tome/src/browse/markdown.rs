@@ -157,10 +157,12 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].spans.len(), 1);
         assert_eq!(lines[0].spans[0].content, "Hello");
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 
     #[test]
@@ -168,10 +170,12 @@ mod tests {
         let theme = Theme::dark();
         let lines = render_markdown("## Sub", &theme);
         assert_eq!(lines[0].spans[0].content, "Sub");
-        assert!(lines[0].spans[0]
-            .style
-            .add_modifier
-            .contains(Modifier::BOLD));
+        assert!(
+            lines[0].spans[0]
+                .style
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 
     #[test]

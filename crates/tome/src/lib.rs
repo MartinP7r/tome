@@ -343,8 +343,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 // Regenerate lockfile to keep it in sync
                 let mut regen_warnings = Vec::new();
                 let resolved_paths = std::collections::BTreeMap::new();
-                let skills =
-                    discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+                let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
                 }
@@ -397,8 +396,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 // Regenerate lockfile to keep it in sync
                 let mut regen_warnings = Vec::new();
                 let resolved_paths = std::collections::BTreeMap::new();
-                let skills =
-                    discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+                let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
                 }

@@ -149,17 +149,13 @@ pub(crate) fn execute(
 
     // Copy files if needed
     if matches!(plan.action, ReassignAction::CopyAndRelink) {
-        let dest = target_dir_path
-            .join(plan.skill_name.as_str());
+        let dest = target_dir_path.join(plan.skill_name.as_str());
         copy_dir_recursive(&plan.library_skill_path, &dest)
             .with_context(|| format!("failed to copy skill to {}", dest.display()))?;
     }
 
     // Update manifest source_name
-    if !manifest.update_source_name(
-        plan.skill_name.as_str(),
-        plan.to_directory.as_ref(),
-    ) {
+    if !manifest.update_source_name(plan.skill_name.as_str(), plan.to_directory.as_ref()) {
         anyhow::bail!(
             "skill '{}' disappeared from manifest during reassignment",
             plan.skill_name.as_str()
@@ -267,7 +263,15 @@ mod tests {
             ),
         );
 
-        let result = plan("test-skill", "target-dir", &config, &paths, &manifest, false).unwrap();
+        let result = plan(
+            "test-skill",
+            "target-dir",
+            &config,
+            &paths,
+            &manifest,
+            false,
+        )
+        .unwrap();
         assert_eq!(result.skill_name.as_str(), "test-skill");
         assert_eq!(result.from_directory, "old-dir");
         assert_eq!(AsRef::<str>::as_ref(&result.to_directory), "target-dir");
@@ -324,7 +328,14 @@ mod tests {
             ),
         );
 
-        let result = plan("test-skill", "nonexistent", &config, &paths, &manifest, false);
+        let result = plan(
+            "test-skill",
+            "nonexistent",
+            &config,
+            &paths,
+            &manifest,
+            false,
+        );
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

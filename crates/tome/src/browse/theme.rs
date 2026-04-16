@@ -52,9 +52,9 @@ impl Theme {
     /// Light palette for light-background terminals.
     pub fn light() -> Self {
         Self {
-            accent: Color::Indexed(30),  // dark cyan
-            alert: Color::Indexed(136),  // dark yellow
-            muted: Color::Indexed(243),  // medium gray
+            accent: Color::Indexed(30),       // dark cyan
+            alert: Color::Indexed(136),       // dark yellow
+            muted: Color::Indexed(243),       // medium gray
             selected_bg: Color::Indexed(254), // near-white gray
             status_bar_bg: Color::Indexed(254),
             status_bar_fg: Color::Indexed(243),
@@ -86,16 +86,12 @@ impl Theme {
 
     /// alert fg + Bold -- fuzzy match character highlights.
     pub fn match_highlight(&self) -> Style {
-        Style::default()
-            .fg(self.alert)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(self.alert).add_modifier(Modifier::BOLD)
     }
 
     /// alert fg + Bold -- source group headers.
     pub fn group_header(&self) -> Style {
-        Style::default()
-            .fg(self.alert)
-            .add_modifier(Modifier::BOLD)
+        Style::default().fg(self.alert).add_modifier(Modifier::BOLD)
     }
 }
 
@@ -150,6 +146,11 @@ mod tests {
         assert!(theme.preview_header().add_modifier.contains(Modifier::BOLD));
         assert_eq!(theme.preview_code().fg, Some(Color::Magenta));
         assert_eq!(theme.match_highlight().fg, Some(Color::Yellow));
-        assert!(theme.match_highlight().add_modifier.contains(Modifier::BOLD));
+        assert!(
+            theme
+                .match_highlight()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
     }
 }

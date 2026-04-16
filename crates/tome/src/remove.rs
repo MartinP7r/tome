@@ -57,8 +57,8 @@ pub(crate) fn plan(
     paths: &TomePaths,
     manifest: &Manifest,
 ) -> Result<RemovePlan> {
-    let dir_name = DirectoryName::new(name)
-        .with_context(|| format!("invalid directory name: {name}"))?;
+    let dir_name =
+        DirectoryName::new(name).with_context(|| format!("invalid directory name: {name}"))?;
 
     // Validate the directory exists in config
     let dir_config = config
@@ -119,7 +119,11 @@ pub(crate) fn plan(
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("directory '{}' path is not valid UTF-8", name))?;
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url_str);
-        if cache_dir.exists() { Some(cache_dir) } else { None }
+        if cache_dir.exists() {
+            Some(cache_dir)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -373,7 +377,11 @@ mod tests {
         let result = execute(&p, &mut config, &mut manifest, false).unwrap();
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
-        assert!(!config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
+        assert!(
+            !config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap())
+        );
         assert!(manifest.is_empty());
     }
 
@@ -386,7 +394,11 @@ mod tests {
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
         // Config and manifest should not be modified
-        assert!(config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
+        assert!(
+            config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap())
+        );
         assert!(!manifest.is_empty());
     }
 }

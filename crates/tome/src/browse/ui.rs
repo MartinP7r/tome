@@ -129,7 +129,10 @@ fn build_visible_rows<'a>(app: &'a App, show_groups: bool, theme: &Theme) -> Vec
                     .iter()
                     .filter(|&&idx| app.rows[idx].source == current_source)
                     .count();
-                let header_text = format!("\u{2500}\u{2500} {} ({}) \u{2500}\u{2500}", current_source, group_count);
+                let header_text = format!(
+                    "\u{2500}\u{2500} {} ({}) \u{2500}\u{2500}",
+                    current_source, group_count
+                );
                 rows.push(
                     Row::new(vec![
                         Cell::from(header_text),
@@ -244,7 +247,9 @@ fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
     };
     let label_style = Style::default().fg(theme.muted);
     let metadata = Paragraph::new(vec![
-        Line::from("\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}"),
+        Line::from(
+            "\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}\u{2500}",
+        ),
         Line::from(vec![
             Span::styled("Source:   ", label_style),
             Span::raw(source),
@@ -361,15 +366,11 @@ fn render_status_bar(
         ),
         Span::styled(
             format!(" {mode_text}"),
-            Style::default()
-                .fg(theme.alert)
-                .bg(theme.status_bar_bg),
+            Style::default().fg(theme.alert).bg(theme.status_bar_bg),
         ),
         Span::styled(
             hints,
-            Style::default()
-                .fg(theme.muted)
-                .bg(theme.status_bar_bg),
+            Style::default().fg(theme.muted).bg(theme.status_bar_bg),
         ),
         // Fill the rest
         Span::styled(

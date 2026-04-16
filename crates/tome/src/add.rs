@@ -119,33 +119,21 @@ mod tests {
 
     #[test]
     fn test_extract_repo_name_https_no_git() {
-        assert_eq!(
-            extract_repo_name("https://github.com/user/repo"),
-            "repo"
-        );
+        assert_eq!(extract_repo_name("https://github.com/user/repo"), "repo");
     }
 
     #[test]
     fn test_extract_repo_name_trailing_slash() {
-        assert_eq!(
-            extract_repo_name("https://github.com/user/repo/"),
-            "repo"
-        );
+        assert_eq!(extract_repo_name("https://github.com/user/repo/"), "repo");
     }
 
     #[test]
     fn test_extract_repo_name_ssh() {
-        assert_eq!(
-            extract_repo_name("git@github.com:user/repo.git"),
-            "repo"
-        );
+        assert_eq!(extract_repo_name("git@github.com:user/repo.git"), "repo");
     }
 
     #[test]
     fn test_extract_repo_name_ssh_no_git() {
-        assert_eq!(
-            extract_repo_name("git@github.com:user/repo"),
-            "repo"
-        );
+        assert_eq!(extract_repo_name("git@github.com:user/repo"), "repo");
     }
 }
