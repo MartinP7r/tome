@@ -57,8 +57,8 @@ pub(crate) fn plan(
     paths: &TomePaths,
     manifest: &Manifest,
 ) -> Result<RemovePlan> {
-    let dir_name = DirectoryName::new(name)
-        .with_context(|| format!("invalid directory name: {name}"))?;
+    let dir_name =
+        DirectoryName::new(name).with_context(|| format!("invalid directory name: {name}"))?;
 
     // Validate the directory exists in config
     let dir_config = config.directories.get(&dir_name);
@@ -119,7 +119,11 @@ pub(crate) fn plan(
             &paths.repos_dir(),
             dir_config.path.to_str().unwrap_or_default(),
         );
-        if cache_dir.exists() { Some(cache_dir) } else { None }
+        if cache_dir.exists() {
+            Some(cache_dir)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -229,9 +233,7 @@ pub(crate) fn execute(
 
     // 4. Remove cached git repo
     if let Some(cache_path) = &plan.git_cache_path {
-        if !dry_run
-            && let Err(e) = std::fs::remove_dir_all(cache_path)
-        {
+        if !dry_run && let Err(e) = std::fs::remove_dir_all(cache_path) {
             eprintln!(
                 "warning: failed to remove git cache {}: {}",
                 cache_path.display(),
@@ -366,7 +368,11 @@ mod tests {
         let result = execute(&p, &mut config, &mut manifest, false).unwrap();
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
-        assert!(!config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
+        assert!(
+            !config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap())
+        );
         assert!(manifest.is_empty());
     }
 
@@ -379,7 +385,11 @@ mod tests {
         assert_eq!(result.symlinks_removed, 1);
         assert_eq!(result.library_entries_removed, 1);
         // Config and manifest should not be modified
-        assert!(config.directories.contains_key(&DirectoryName::new("test-source").unwrap()));
+        assert!(
+            config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap())
+        );
         assert!(!manifest.is_empty());
     }
 }
