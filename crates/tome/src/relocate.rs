@@ -11,7 +11,7 @@ use anyhow::{Context, Result, bail};
 use console::style;
 use std::path::{Path, PathBuf};
 
-use crate::config::{Config, TargetName, expand_tilde};
+use crate::config::{Config, DirectoryName, expand_tilde};
 use crate::discover::SkillName;
 use crate::manifest;
 use crate::paths::{TomePaths, resolve_symlink_target};
@@ -23,7 +23,7 @@ pub(crate) struct RelocatePlan {
     pub new_library_dir: PathBuf,
     pub skills: Vec<SkillMoveEntry>,
     /// (target_name, symlink_count) for each target with symlinks pointing into the library.
-    pub targets: Vec<(TargetName, usize)>,
+    pub targets: Vec<(DirectoryName, usize)>,
     pub cross_filesystem: bool,
     pub config_path: PathBuf,
 }
@@ -110,8 +110,8 @@ pub(crate) fn plan(
     let canonical_old_for_targets =
         std::fs::canonicalize(&old_library_dir).unwrap_or(old_library_dir.clone());
     let mut targets = Vec::new();
-    for (target_name, target_config) in config.targets.iter() {
-        let skills_dir = target_config.skills_dir();
+    for (dir_name, dir_config) in config.distribution_dirs() {
+        let skills_dir = &dir_config.path;
         if !skills_dir.is_dir() {
             continue;
         }
@@ -132,7 +132,7 @@ pub(crate) fn plan(
             }
         }
         if count > 0 {
-            targets.push((target_name.clone(), count));
+            targets.push((dir_name.clone(), count));
         }
     }
 
@@ -270,7 +270,7 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
         for issue in &report.library_issues {
             println!("  {} {}", style("!").yellow(), issue.message);
         }
-        for (name, issues) in &report.target_issues {
+        for (name, issues) in &report.directory_issues {
             for issue in issues {
                 println!("  {} {}: {}", style("!").yellow(), name, issue.message);
             }
@@ -422,12 +422,12 @@ fn recreate_target_symlinks(plan: &RelocatePlan) -> Result<()> {
     let canonical_old =
         std::fs::canonicalize(&plan.old_library_dir).unwrap_or(plan.old_library_dir.clone());
 
-    for (target_name, _) in &plan.targets {
-        let target_config = match config.targets.get(target_name.as_str()) {
-            Some(tc) => tc,
+    for (dir_name, _) in &plan.targets {
+        let dir_config = match config.directories.get(dir_name.as_str()) {
+            Some(dc) => dc,
             None => continue,
         };
-        let skills_dir = target_config.skills_dir();
+        let skills_dir = &dir_config.path;
         if !skills_dir.is_dir() {
             continue;
         }
@@ -477,19 +477,20 @@ fn recreate_target_symlinks(plan: &RelocatePlan) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, TargetConfig, TargetMethod};
+    use crate::config::{Config, DirectoryConfig, DirectoryRole, DirectoryType};
     use crate::manifest::{self, SkillEntry};
     use std::collections::BTreeMap;
     use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
 
     /// Helper to create a minimal config for testing.
-    fn test_config(library_dir: PathBuf, targets: BTreeMap<TargetName, TargetConfig>) -> Config {
+    fn test_config(
+        library_dir: PathBuf,
+        targets: BTreeMap<DirectoryName, DirectoryConfig>,
+    ) -> Config {
         Config {
             library_dir,
-            exclude: Default::default(),
-            sources: Vec::new(),
-            targets,
+            directories: targets,
             ..Default::default()
         }
     }
@@ -668,12 +669,16 @@ mod tests {
 
         let mut targets = BTreeMap::new();
         targets.insert(
-            TargetName::new("test-target").unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: target_dir.clone(),
-                },
+            DirectoryName::new("test-target").unwrap(),
+            DirectoryConfig {
+                path: target_dir.clone(),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Target),
+                branch: None,
+                tag: None,
+                rev: None,
+
+                subdir: None,
             },
         );
 

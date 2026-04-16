@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::config::{Config, SourceType};
+use crate::config::{Config, DirectoryType};
 use crate::lockfile::Lockfile;
 
 /// A managed plugin that's in the lockfile but not installed locally.
@@ -184,17 +184,17 @@ pub(crate) fn reconcile(
     Ok(installed_count)
 }
 
-/// Find the path to `installed_plugins.json` by scanning config sources.
+/// Find the path to `installed_plugins.json` by scanning config directories.
 ///
-/// Returns the first path found for a `ClaudePlugins` source, or `None`.
+/// Returns the first path found for a `ClaudePlugins` directory, or `None`.
 pub(crate) fn find_installed_plugins_json(config: &Config) -> Option<std::path::PathBuf> {
-    for source in &config.sources {
-        if source.source_type != SourceType::ClaudePlugins {
+    for dir_config in config.directories.values() {
+        if dir_config.directory_type != DirectoryType::ClaudePlugins {
             continue;
         }
         // Same search logic as discover_claude_plugins
-        let mut candidates = vec![source.path.join("installed_plugins.json")];
-        if let Some(parent) = source.path.parent() {
+        let mut candidates = vec![dir_config.path.join("installed_plugins.json")];
+        if let Some(parent) = dir_config.path.parent() {
             candidates.push(parent.join("installed_plugins.json"));
         }
         for candidate in &candidates {

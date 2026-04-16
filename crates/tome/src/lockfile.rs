@@ -1,6 +1,6 @@
 //! Lockfile for reproducible skill libraries.
 //!
-//! The `tome.lock` file captures provenance metadata (source name, content hash,
+//! The `tome.lock` file captures provenance metadata (directory name, content hash,
 //! registry ID + version for managed plugins) for every skill in the library.
 //! It is regenerated after every `tome sync` and is meant to be committed to version control.
 
@@ -28,7 +28,7 @@ pub struct Lockfile {
 /// A single skill entry in the lockfile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockEntry {
-    /// Config source name (maps to a `[[sources]]` entry in `tome.toml`).
+    /// Directory name (maps to a `[directories.*]` entry in `tome.toml`).
     pub source_name: String,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: ContentHash,

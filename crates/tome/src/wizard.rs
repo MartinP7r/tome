@@ -1,46 +1,163 @@
-//! Interactive `tome init` setup wizard using dialoguer. Auto-discovers known source locations.
+//! Interactive `tome init` setup wizard using dialoguer.
+//!
+//! Auto-discovers known directory locations and assigns roles from a merged
+//! `KNOWN_DIRECTORIES` registry — replacing the former separate KNOWN_SOURCES
+//! and KNOWN_TARGETS arrays.
 
 use anyhow::{Context, Result};
 use console::{Term, style};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use std::collections::BTreeMap;
-
 use crate::config::{
-    Config, Source, SourceType, TargetConfig, TargetMethod, TargetName, default_config_path,
+    Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, default_config_path,
     expand_tilde,
 };
+
+// ---------------------------------------------------------------------------
+// Known directory registry
+// ---------------------------------------------------------------------------
+
+/// A well-known directory that tome can auto-discover on the filesystem.
+#[derive(Debug)]
+struct KnownDirectory {
+    /// Identifier used as the BTreeMap key (e.g. "claude-plugins")
+    name: &'static str,
+    /// Human-readable label shown in prompts (e.g. "Claude Code Plugins")
+    display: &'static str,
+    /// Path relative to `$HOME`
+    default_path: &'static str,
+    /// Discovery / consolidation strategy
+    directory_type: DirectoryType,
+    /// Default role assigned during auto-discovery
+    default_role: DirectoryRole,
+}
+
+/// Merged registry of all known directories — replaces the former separate
+/// `KNOWN_SOURCES` and `KNOWN_TARGETS` arrays.
+///
+/// Entries are ordered roughly by popularity / likelihood of being present.
+const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
+    KnownDirectory {
+        name: "claude-plugins",
+        display: "Claude Code Plugins",
+        default_path: ".claude/plugins",
+        directory_type: DirectoryType::ClaudePlugins,
+        default_role: DirectoryRole::Managed,
+    },
+    KnownDirectory {
+        name: "claude-skills",
+        display: "Claude Code Skills",
+        default_path: ".claude/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "antigravity",
+        display: "Antigravity",
+        default_path: ".gemini/antigravity/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "codex",
+        display: "Codex",
+        default_path: ".codex/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "codex-agents",
+        display: "Codex Agents",
+        default_path: ".agents/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "openclaw",
+        display: "OpenClaw",
+        default_path: ".openclaw/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "goose",
+        display: "Goose",
+        default_path: ".config/goose/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "gemini-cli",
+        display: "Gemini CLI",
+        default_path: ".gemini/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "amp",
+        display: "Amp",
+        default_path: ".config/amp/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "opencode",
+        display: "OpenCode",
+        default_path: ".config/opencode/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "copilot",
+        display: "VS Code Copilot",
+        default_path: ".copilot/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+];
+
+// ---------------------------------------------------------------------------
+// Public entry point
+// ---------------------------------------------------------------------------
 
 /// Run the interactive setup wizard.
 pub fn run(dry_run: bool) -> Result<Config> {
     println!();
     println!("{}", style("Welcome to tome setup!").bold().cyan());
-    println!("This wizard will help you configure skill sources and targets.");
+    println!("This wizard will help you configure your skill directories.");
     println!();
 
     println!("{}", style("How it works:").bold());
-    println!("  Tome copies your local skills into a central library for safekeeping.");
-    println!(
-        "  Managed skills (e.g. plugins installed from the Claude Code marketplace) are symlinked there instead."
-    );
-    println!("  Each target tool receives symlinks into the library — your originals");
-    println!("  are never touched. Removing tome leaves all source files untouched.");
+    println!("  Each directory you configure has a role:");
+    println!("    Managed  - read-only, owned by a package manager (e.g. Claude plugins)");
+    println!("    Synced   - skills are discovered AND distributed here");
+    println!("    Source   - skills are discovered here but not distributed");
+    println!("    Target   - skills are distributed here but not discovered");
+    println!();
+    println!("  Tome copies local skills into a central library for safekeeping.");
+    println!("  Managed skills are symlinked instead. Each tool receives symlinks");
+    println!("  into the library -- your originals are never touched.");
     println!();
 
-    // Step 1: Discover and select sources
-    let sources = configure_sources()?;
+    // Step 1: Auto-discover and select directories
+    let mut directories = configure_directories()?;
 
-    // Discover skills now so step 4 can offer a MultiSelect
+    // Discover skills now so step 3 can offer an exclusion picker
     let discovered = {
         let tmp = Config {
-            sources: sources.clone(),
+            directories: directories.clone(),
             ..Config::default()
         };
-        match crate::discover::discover_all(&tmp, &mut Vec::new()) {
+        match crate::discover::discover_all(
+            &tmp,
+            &std::collections::BTreeMap::new(),
+            &mut Vec::new(),
+        ) {
             Ok(skills) => skills,
             Err(e) => {
-                eprintln!("warning: could not discover skills from selected sources: {e}");
+                eprintln!("warning: could not discover skills from selected directories: {e}");
                 eprintln!("  (exclusions can be added manually to config later)");
                 Vec::new()
             }
@@ -50,62 +167,134 @@ pub fn run(dry_run: bool) -> Result<Config> {
     // Step 2: Choose library location
     let library_dir = configure_library()?;
 
-    // Step 3: Configure targets
-    let targets = configure_targets()?;
-
-    // Warn if any source path overlaps with a symlink target path
-    let overlaps = find_source_target_overlaps(&sources, &targets);
-    for (name, path) in &overlaps {
-        println!(
-            "  {} \"{}\" ({}) is both a source and a target — this may cause circular symlinks",
-            style("warning:").yellow().bold(),
-            name,
-            path.display()
-        );
-    }
-    if !overlaps.is_empty() {
-        println!();
-    }
-
-    // Step 4: Exclusions
+    // Step 3: Exclusions
     let exclude = configure_exclusions(&discovered)?;
+
+    // Step 4: Summary table
+    step_divider("Summary");
+    show_directory_summary(&directories);
+
+    // Offer to edit roles
+    loop {
+        let edit = Confirm::new()
+            .with_prompt("Would you like to edit any directory's role?")
+            .default(false)
+            .interact()?;
+
+        if !edit {
+            break;
+        }
+
+        let editable: Vec<(DirectoryName, DirectoryConfig)> = directories
+            .iter()
+            .filter(|(_, cfg)| cfg.directory_type != DirectoryType::ClaudePlugins)
+            .map(|(n, c)| (n.clone(), c.clone()))
+            .collect();
+
+        if editable.is_empty() {
+            println!("  No editable directories (ClaudePlugins are always Managed).");
+            break;
+        }
+
+        let labels: Vec<String> = editable
+            .iter()
+            .map(|(n, c)| format!("{} ({})", n, c.role().description()))
+            .collect();
+
+        let idx = Select::new()
+            .with_prompt("Which directory to edit?")
+            .items(&labels)
+            .interact()?;
+
+        let (name, cfg) = &editable[idx];
+        let valid = cfg.directory_type.valid_roles();
+        let role_labels: Vec<&str> = valid.iter().map(|r| r.description()).collect();
+
+        let role_idx = Select::new()
+            .with_prompt(format!("New role for {name}"))
+            .items(&role_labels)
+            .default(0)
+            .interact()?;
+
+        if let Some(entry) = directories.get_mut(name) {
+            entry.role = Some(valid[role_idx].clone());
+        }
+
+        show_directory_summary(&directories);
+    }
+
+    // Offer to add custom directories
+    loop {
+        let add = Confirm::new()
+            .with_prompt("Add a custom directory?")
+            .default(false)
+            .interact()?;
+
+        if !add {
+            break;
+        }
+
+        let name: String = Input::new()
+            .with_prompt("Directory name (identifier)")
+            .interact_text()?;
+
+        let dir_name = DirectoryName::new(name)?;
+
+        let path_str: String = Input::new().with_prompt("Path").interact_text()?;
+
+        let path = crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(&path_str))?);
+
+        // Type picker (Git not available in wizard since it needs URLs)
+        let type_labels = ["directory", "claude-plugins"];
+        let type_idx = Select::new()
+            .with_prompt("Directory type")
+            .items(type_labels)
+            .default(0)
+            .interact()?;
+
+        let directory_type = match type_idx {
+            0 => DirectoryType::Directory,
+            _ => DirectoryType::ClaudePlugins,
+        };
+
+        // Role picker (filtered by type)
+        let valid = directory_type.valid_roles();
+        let role = if valid.len() == 1 {
+            valid[0].clone()
+        } else {
+            let role_labels: Vec<&str> = valid.iter().map(|r| r.description()).collect();
+            let role_idx = Select::new()
+                .with_prompt("Role")
+                .items(&role_labels)
+                .default(0)
+                .interact()?;
+            valid[role_idx].clone()
+        };
+
+        directories.insert(
+            dir_name,
+            DirectoryConfig {
+                path,
+                directory_type,
+                role: Some(role),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+
+        show_directory_summary(&directories);
+    }
+
+    println!();
 
     let config = Config {
         library_dir,
         exclude,
-        sources,
-        targets,
+        directories,
         ..Default::default()
     };
-
-    // Summary
-    step_divider("Summary");
-    println!(
-        "  Sources:    {}",
-        if config.sources.is_empty() {
-            style("none".to_string()).yellow()
-        } else {
-            style(format!("{}", config.sources.len())).cyan()
-        }
-    );
-    println!(
-        "  Library:    {}",
-        style(config.library_dir.display()).cyan()
-    );
-    let target_count = config.targets.len();
-    println!(
-        "  Targets:    {}",
-        if target_count == 0 {
-            style("none".to_string()).yellow()
-        } else {
-            style(format!("{target_count}")).cyan()
-        }
-    );
-    if !config.exclude.is_empty() {
-        let names: Vec<_> = config.exclude.iter().map(|n| n.as_str()).collect();
-        println!("  Exclusions: {}", style(names.join(", ")).dim());
-    }
-    println!();
 
     // Save config
     let config_path = default_config_path()?;
@@ -115,7 +304,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
     );
 
     if dry_run {
-        println!("  (dry run — not saving)");
+        println!("  (dry run -- not saving)");
         let toml_str = toml::to_string_pretty(&config)?;
         println!();
         println!("{}", style("Generated config:").bold());
@@ -147,84 +336,96 @@ pub fn run(dry_run: bool) -> Result<Config> {
     Ok(config)
 }
 
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
 fn step_divider(label: &str) {
     println!(
         "{}",
-        style(format!("── {label} ──────────────────────────────")).dim()
+        style(format!("-- {label} ----------------------------------")).dim()
     );
 }
 
-fn configure_sources() -> Result<Vec<Source>> {
-    step_divider("Step 1: Skill sources");
+fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>) {
+    if directories.is_empty() {
+        println!("  (no directories configured)");
+        return;
+    }
+    // Header
+    println!(
+        "  {:<20} {:<35} {:<16} {}",
+        style("Name").bold(),
+        style("Path").bold(),
+        style("Type").bold(),
+        style("Role").bold(),
+    );
+    for (name, cfg) in directories {
+        println!(
+            "  {:<20} {:<35} {:<16} {}",
+            name,
+            cfg.path.display(),
+            cfg.directory_type,
+            cfg.role().description(),
+        );
+    }
+    println!();
+}
 
-    let known_sources = find_known_sources()?;
-    let mut sources = Vec::new();
+fn configure_directories() -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
+    step_divider("Step 1: Directories");
 
-    if !known_sources.is_empty() {
-        let labels: Vec<String> = known_sources
+    let found = find_known_directories()?;
+    let mut directories = BTreeMap::new();
+
+    if !found.is_empty() {
+        let labels: Vec<String> = found
             .iter()
-            .map(|s| match s.source_type {
-                SourceType::ClaudePlugins => {
-                    format!(
-                        "{} — active plugins installed from Claude Code marketplace",
-                        s.path.display()
-                    )
-                }
-                SourceType::Directory => {
-                    format!("{} ({})", s.path.display(), s.source_type)
-                }
+            .map(|(kd, _path)| {
+                format!(
+                    "{} (~/{}) [{}]",
+                    kd.display,
+                    kd.default_path,
+                    kd.default_role.description()
+                )
             })
             .collect();
 
         let selections = MultiSelect::new()
             .with_prompt(
-                "Found skills in these locations — select sources to include\n  (space to toggle, enter to confirm)",
+                "Found these directories -- select which to include\n  (space to toggle, enter to confirm)",
             )
             .items(&labels)
-            .defaults(&vec![true; known_sources.len()])
+            .defaults(&vec![true; found.len()])
             .report(false)
             .interact()?;
 
-        for idx in &selections {
-            sources.push(known_sources[*idx].clone());
+        for &idx in &selections {
+            let (kd, _path) = &found[idx];
+            let dir_name = DirectoryName::new(kd.name)?;
+            directories.insert(
+                dir_name,
+                DirectoryConfig {
+                    path: PathBuf::from("~").join(kd.default_path),
+                    directory_type: kd.directory_type.clone(),
+                    role: Some(kd.default_role.clone()),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                },
+            );
         }
 
         println!(
-            "  {} {} source(s) selected:",
-            style("✓").green(),
+            "  {} {} directory(ies) selected",
+            style("v").green(),
             selections.len()
         );
-        for idx in &selections {
-            let s = &known_sources[*idx];
-            println!("    • {} ({})", s.name, s.path.display());
-        }
-    }
-
-    // Offer to add custom paths
-    loop {
-        let custom: String = Input::new()
-            .with_prompt("Add another directory? (path or Enter to skip)")
-            .default(String::new())
-            .allow_empty(true)
-            .interact_text()?;
-
-        if custom.is_empty() {
-            break;
-        }
-
-        let name: String = Input::new()
-            .with_prompt("Name for this source")
-            .interact_text()?;
-
-        sources.push(Source {
-            name,
-            path: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(&custom))?),
-            source_type: SourceType::Directory,
-        });
     }
 
     println!();
-    Ok(sources)
+    Ok(directories)
 }
 
 fn configure_library() -> Result<PathBuf> {
@@ -254,154 +455,13 @@ fn configure_library() -> Result<PathBuf> {
     Ok(path)
 }
 
-/// Well-known distribution targets with sensible defaults.
-struct KnownTarget {
-    name: &'static str,
-    display: &'static str,
-    /// Path relative to $HOME
-    default_path: &'static str,
-    path_prompt: &'static str,
-}
-
-const KNOWN_TARGETS: &[KnownTarget] = &[
-    KnownTarget {
-        name: "claude",
-        display: "Claude Code",
-        default_path: ".claude/skills",
-        path_prompt: "Claude Code skills directory",
-    },
-    KnownTarget {
-        name: "antigravity",
-        display: "Antigravity",
-        default_path: ".gemini/antigravity/skills",
-        path_prompt: "Antigravity skills directory",
-    },
-    // Codex reads skills from .agents/skills (the agent runtime directory),
-    // while the source is .codex/skills (where the user/package manager stores them)
-    KnownTarget {
-        name: "codex",
-        display: "Codex",
-        default_path: ".agents/skills",
-        path_prompt: "Codex skills directory",
-    },
-    KnownTarget {
-        name: "openclaw",
-        display: "OpenClaw",
-        default_path: ".openclaw/skills",
-        path_prompt: "OpenClaw skills directory",
-    },
-    KnownTarget {
-        name: "goose",
-        display: "Goose",
-        default_path: ".config/goose/skills",
-        path_prompt: "Goose skills directory",
-    },
-    KnownTarget {
-        name: "gemini-cli",
-        display: "Gemini CLI",
-        default_path: ".gemini/skills",
-        path_prompt: "Gemini CLI skills directory",
-    },
-    KnownTarget {
-        name: "amp",
-        display: "Amp",
-        default_path: ".config/amp/skills",
-        path_prompt: "Amp skills directory",
-    },
-    KnownTarget {
-        name: "opencode",
-        display: "OpenCode",
-        default_path: ".config/opencode/skills",
-        path_prompt: "OpenCode skills directory",
-    },
-    KnownTarget {
-        name: "copilot",
-        display: "VS Code Copilot",
-        default_path: ".copilot/skills",
-        path_prompt: "Copilot skills directory",
-    },
-];
-
-fn configure_targets() -> Result<BTreeMap<TargetName, TargetConfig>> {
-    step_divider("Step 3: Distribution targets");
-
-    let labels: Vec<String> = KNOWN_TARGETS
-        .iter()
-        .map(|t| format!("{} (~/{}/)", t.display, t.default_path))
-        .collect();
-    let selections = MultiSelect::new()
-        .with_prompt("Which tools should receive skills?\n  (space to toggle, enter to confirm)")
-        .items(&labels)
-        .interact()?;
-
-    println!();
-    println!("  Confirm the skills directory for each selected tool.");
-    println!("  Press enter to accept the default, or type a custom path.");
-    println!();
-
-    let mut targets = BTreeMap::new();
-
-    for idx in selections {
-        let known = &KNOWN_TARGETS[idx];
-        let default_path = format!("~/{}", known.default_path);
-        let path: String = Input::new()
-            .with_prompt(known.path_prompt)
-            .default(default_path)
-            .interact_text()?;
-
-        targets.insert(
-            TargetName::new(known.name)?,
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(
-                        path,
-                    ))?),
-                },
-            },
-        );
-    }
-
-    // Offer custom targets
-    loop {
-        let name: String = Input::new()
-            .with_prompt("Add a custom target? (name or Enter to skip)")
-            .default(String::new())
-            .allow_empty(true)
-            .interact_text()?;
-
-        if name.is_empty() {
-            break;
-        }
-
-        let path: String = Input::new()
-            .with_prompt("Skills directory")
-            .interact_text()?;
-
-        targets.insert(
-            TargetName::new(name)?,
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(
-                        path,
-                    ))?),
-                },
-            },
-        );
-    }
-
-    println!();
-    Ok(targets)
-}
-
 fn configure_exclusions(
     skills: &[crate::discover::DiscoveredSkill],
 ) -> Result<std::collections::BTreeSet<crate::discover::SkillName>> {
-    step_divider("Step 4: Exclusions");
+    step_divider("Step 3: Exclusions");
 
     if skills.is_empty() {
-        println!("  (no skills discovered yet — exclusions can be added manually to config)");
+        println!("  (no skills discovered yet -- exclusions can be added manually to config)");
         println!();
         return Ok(std::collections::BTreeSet::new());
     }
@@ -432,211 +492,111 @@ fn configure_exclusions(
     Ok(exclude)
 }
 
-/// Well-known skill locations: (name, relative path from $HOME, source type).
-const KNOWN_SOURCES: &[(&str, &str, SourceType)] = &[
-    (
-        "claude-plugins",
-        ".claude/plugins",
-        SourceType::ClaudePlugins,
-    ),
-    ("claude-skills", ".claude/skills", SourceType::Directory),
-    ("codex-skills", ".codex/skills", SourceType::Directory),
-    (
-        "antigravity-skills",
-        ".gemini/antigravity/skills",
-        SourceType::Directory,
-    ),
-    (
-        "goose-skills",
-        ".config/goose/skills",
-        SourceType::Directory,
-    ),
-    ("gemini-cli-skills", ".gemini/skills", SourceType::Directory),
-    ("amp-skills", ".config/amp/skills", SourceType::Directory),
-    (
-        "opencode-skills",
-        ".config/opencode/skills",
-        SourceType::Directory,
-    ),
-    ("copilot-skills", ".copilot/skills", SourceType::Directory),
-    ("agents-skills", ".agents/skills", SourceType::Directory),
-];
-
-/// Check if any source path matches a target's skills directory.
-///
-/// Returns `(source_name, overlapping_path)` pairs for each conflict.
-fn find_source_target_overlaps(
-    sources: &[Source],
-    targets: &BTreeMap<TargetName, TargetConfig>,
-) -> Vec<(String, PathBuf)> {
-    let target_paths: Vec<PathBuf> = targets
-        .values()
-        .map(|config| config.skills_dir().to_path_buf())
-        .collect();
-
-    sources
-        .iter()
-        .filter(|source| {
-            target_paths.iter().any(|tp| {
-                // Try canonicalize for symlink-resolved comparison, fall back to exact match
-                match (source.path.canonicalize(), tp.canonicalize()) {
-                    (Ok(src), Ok(tgt)) => src == tgt,
-                    _ => source.path == *tp,
-                }
-            })
-        })
-        .map(|source| (source.name.clone(), source.path.clone()))
-        .collect()
-}
-
-/// Scan well-known locations for existing skills.
-fn find_known_sources() -> Result<Vec<Source>> {
+/// Scan well-known locations for existing directories.
+fn find_known_directories() -> Result<Vec<(&'static KnownDirectory, PathBuf)>> {
     let home = dirs::home_dir().context("could not determine home directory")?;
-    find_known_sources_in(&home)
+    find_known_directories_in(&home)
 }
 
-/// Scan well-known locations relative to `home` for existing skills.
+/// Scan well-known locations relative to `home` for existing directories.
 ///
 /// Uses `std::fs::metadata()` instead of `path.is_dir()` so that permission
 /// errors surface as warnings rather than being silently swallowed.
-fn find_known_sources_in(home: &Path) -> Result<Vec<Source>> {
-    let mut sources = Vec::new();
+fn find_known_directories_in(home: &Path) -> Result<Vec<(&'static KnownDirectory, PathBuf)>> {
+    let mut found = Vec::new();
 
-    for (name, rel_path, source_type) in KNOWN_SOURCES {
-        let abs_path = home.join(rel_path);
+    for kd in KNOWN_DIRECTORIES {
+        let abs_path = home.join(kd.default_path);
         match std::fs::metadata(&abs_path) {
             Ok(meta) if meta.is_dir() => {
-                sources.push(Source {
-                    name: (*name).into(),
-                    path: PathBuf::from("~").join(rel_path),
-                    source_type: source_type.clone(),
-                });
+                found.push((kd, abs_path));
             }
-            Ok(_) => {} // exists but not a directory — skip
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // expected — skip
+            Ok(_) => {} // exists but not a directory -- skip
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // expected -- skip
             Err(e) => {
                 eprintln!("warning: could not check {}: {}", abs_path.display(), e);
             }
         }
     }
 
-    Ok(sources)
+    Ok(found)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use tempfile::TempDir;
 
     #[test]
-    fn find_known_sources_in_empty_home_returns_empty() {
-        let tmp = TempDir::new().unwrap();
-        let sources = find_known_sources_in(tmp.path()).unwrap();
-        assert!(sources.is_empty());
+    fn known_directories_has_no_duplicate_names() {
+        let mut names: Vec<&str> = KNOWN_DIRECTORIES.iter().map(|kd| kd.name).collect();
+        let original_len = names.len();
+        names.sort();
+        names.dedup();
+        assert_eq!(
+            names.len(),
+            original_len,
+            "KNOWN_DIRECTORIES contains duplicate names"
+        );
     }
 
     #[test]
-    fn find_known_sources_in_discovers_existing_dirs() {
+    fn known_directories_all_have_valid_names() {
+        for kd in KNOWN_DIRECTORIES {
+            DirectoryName::new(kd.name)
+                .unwrap_or_else(|e| panic!("invalid directory name '{}': {e}", kd.name));
+        }
+    }
+
+    #[test]
+    fn find_known_directories_in_empty_home_returns_empty() {
+        let tmp = TempDir::new().unwrap();
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        assert!(found.is_empty());
+    }
+
+    #[test]
+    fn find_known_directories_in_discovers_existing_dirs() {
         let tmp = TempDir::new().unwrap();
 
-        // Create one of the known source directories
+        // Create one of the known directory paths
         let skills_dir = tmp.path().join(".claude/skills");
         std::fs::create_dir_all(&skills_dir).unwrap();
 
-        let sources = find_known_sources_in(tmp.path()).unwrap();
-        assert_eq!(sources.len(), 1);
-        assert_eq!(sources[0].name, "claude-skills");
-        assert_eq!(sources[0].path, PathBuf::from("~/.claude/skills"));
-        assert_eq!(sources[0].source_type, SourceType::Directory);
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0.name, "claude-skills");
+        assert_eq!(found[0].1, skills_dir);
     }
 
     #[test]
-    fn find_known_sources_in_skips_files_with_same_name() {
+    fn find_known_directories_in_skips_files_with_same_name() {
         let tmp = TempDir::new().unwrap();
 
-        // Create a file (not a directory) at a known source path
+        // Create a file (not a directory) at a known path
         let claude_dir = tmp.path().join(".claude");
         std::fs::create_dir_all(&claude_dir).unwrap();
         std::fs::write(claude_dir.join("skills"), "not a directory").unwrap();
 
-        let sources = find_known_sources_in(tmp.path()).unwrap();
-        // The file should be skipped — only directories are included
+        let found = find_known_directories_in(tmp.path()).unwrap();
         assert!(
-            sources.is_empty(),
-            "expected no sources when path is a file, got: {sources:?}"
+            found.is_empty(),
+            "expected no directories when path is a file, got: {found:?}"
         );
     }
 
     #[test]
-    fn detects_source_target_overlap() {
-        let sources = vec![Source {
-            name: "antigravity-skills".into(),
-            path: PathBuf::from("/home/user/.gemini/antigravity/skills"),
-            source_type: SourceType::Directory,
-        }];
-
-        let targets = BTreeMap::from([(
-            TargetName::new("antigravity").unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
-                },
-            },
-        )]);
-
-        let overlaps = find_source_target_overlaps(&sources, &targets);
-        assert_eq!(overlaps.len(), 1);
-        assert_eq!(overlaps[0].0, "antigravity-skills");
+    fn claude_plugins_always_managed() {
+        let entry = KNOWN_DIRECTORIES
+            .iter()
+            .find(|kd| kd.name == "claude-plugins")
+            .expect("claude-plugins entry must exist");
+        assert_eq!(entry.directory_type, DirectoryType::ClaudePlugins);
+        assert_eq!(entry.default_role, DirectoryRole::Managed);
+        // ClaudePlugins type only allows Managed role
         assert_eq!(
-            overlaps[0].1,
-            PathBuf::from("/home/user/.gemini/antigravity/skills")
+            entry.directory_type.valid_roles(),
+            vec![DirectoryRole::Managed]
         );
-    }
-
-    #[test]
-    fn no_overlap_when_paths_differ() {
-        let sources = vec![Source {
-            name: "claude-skills".into(),
-            path: PathBuf::from("/home/user/.claude/skills"),
-            source_type: SourceType::Directory,
-        }];
-
-        let targets = BTreeMap::from([(
-            TargetName::new("antigravity").unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: PathBuf::from("/home/user/.gemini/antigravity/skills"),
-                },
-            },
-        )]);
-
-        let overlaps = find_source_target_overlaps(&sources, &targets);
-        assert!(overlaps.is_empty());
-    }
-
-    #[test]
-    fn detects_claude_source_target_overlap() {
-        let sources = vec![Source {
-            name: "claude-skills".into(),
-            path: PathBuf::from("/home/user/.claude/skills"),
-            source_type: SourceType::Directory,
-        }];
-
-        let targets = BTreeMap::from([(
-            TargetName::new("claude").unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: PathBuf::from("/home/user/.claude/skills"),
-                },
-            },
-        )]);
-
-        let overlaps = find_source_target_overlaps(&sources, &targets);
-        assert_eq!(overlaps.len(), 1);
-        assert_eq!(overlaps[0].0, "claude-skills");
     }
 }

@@ -1,13 +1,14 @@
-//! Eject tome's symlinks from all target tool directories.
+//! Eject tome's symlinks from all distribution directories.
 //!
-//! Removes symlinks that point into the library from each configured target,
-//! leaving the library and config intact. Reversible via `tome sync`.
+//! Removes symlinks that point into the library from each configured directory
+//! with a distribution role, leaving the library and config intact. Reversible
+//! via `tome sync`.
 
 use anyhow::{Context, Result};
 use console::style;
 use std::path::PathBuf;
 
-use crate::config::{Config, TargetName};
+use crate::config::{Config, DirectoryName};
 use crate::paths::TomePaths;
 
 /// Plan describing what eject will remove.
@@ -17,17 +18,17 @@ pub(crate) struct EjectPlan {
 }
 
 pub(crate) struct TargetEjectEntry {
-    pub name: TargetName,
+    pub name: DirectoryName,
     pub symlinks: Vec<PathBuf>,
 }
 
-/// Build an eject plan by scanning target directories for symlinks into the library.
+/// Build an eject plan by scanning distribution directories for symlinks into the library.
 pub(crate) fn plan(config: &Config, paths: &TomePaths) -> Result<EjectPlan> {
     let mut targets = Vec::new();
     let mut total = 0;
 
-    for (target_name, target_config) in config.targets.iter() {
-        let skills_dir = target_config.skills_dir();
+    for (dir_name, dir_config) in config.distribution_dirs() {
+        let skills_dir = &dir_config.path;
         if !skills_dir.is_dir() {
             continue;
         }
@@ -51,7 +52,7 @@ pub(crate) fn plan(config: &Config, paths: &TomePaths) -> Result<EjectPlan> {
         total += symlinks.len();
         if !symlinks.is_empty() {
             targets.push(TargetEjectEntry {
-                name: target_name.clone(),
+                name: dir_name.clone(),
                 symlinks,
             });
         }
@@ -103,7 +104,7 @@ pub(crate) fn execute(plan: &EjectPlan, dry_run: bool) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Config, TargetConfig, TargetMethod, TargetName};
+    use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
     use std::collections::BTreeMap;
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
@@ -114,19 +115,23 @@ mod tests {
         target_name: &str,
         target_skills_dir: PathBuf,
     ) -> Config {
-        let mut targets = BTreeMap::new();
-        targets.insert(
-            TargetName::new(target_name).unwrap(),
-            TargetConfig {
-                enabled: true,
-                method: TargetMethod::Symlink {
-                    skills_dir: target_skills_dir,
-                },
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new(target_name).unwrap(),
+            DirectoryConfig {
+                path: target_skills_dir,
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Target),
+                branch: None,
+                tag: None,
+                rev: None,
+
+                subdir: None,
             },
         );
         Config {
             library_dir,
-            targets,
+            directories,
             ..Config::default()
         }
     }

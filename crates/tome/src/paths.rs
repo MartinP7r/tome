@@ -85,6 +85,11 @@ impl TomePaths {
     pub fn lockfile_path(&self) -> PathBuf {
         self.config_dir.join(crate::lockfile::LOCKFILE_NAME)
     }
+
+    /// Path to the git repository cache directory: `<tome_home>/repos/`.
+    pub fn repos_dir(&self) -> PathBuf {
+        self.tome_home.join("repos")
+    }
 }
 
 /// Resolve a symlink's raw target to an absolute path.

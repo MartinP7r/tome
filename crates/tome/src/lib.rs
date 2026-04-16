@@ -31,6 +31,7 @@ pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod eject;
+pub(crate) mod git;
 pub(crate) mod install;
 pub(crate) mod library;
 pub(crate) mod lint;
@@ -39,13 +40,14 @@ pub(crate) mod machine;
 pub(crate) mod manifest;
 pub(crate) mod paths;
 pub(crate) mod relocate;
+pub(crate) mod remove;
 pub(crate) mod skill;
 pub(crate) mod status;
 pub(crate) mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command as GitCommand;
@@ -56,7 +58,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 
 use cleanup::CleanupResult;
 use cli::{Cli, Command};
-use config::Config;
+use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
@@ -234,7 +236,7 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::Browse => {
             let mut warnings = Vec::new();
-            let skills = discover::discover_all(&config, &mut warnings)?;
+            let skills = discover::discover_all(&config, &BTreeMap::new(), &mut warnings)?;
             if !cli.quiet {
                 for w in &warnings {
                     eprintln!("warning: {}", w);
@@ -246,6 +248,61 @@ pub fn run(cli: Cli) -> Result<()> {
             }
             let manifest = manifest::load(paths.config_dir())?;
             browse::browse(skills, &manifest)?;
+        }
+        Command::Remove { name, force } => {
+            let manifest = manifest::load(paths.config_dir())?;
+            let plan = remove::plan(&name, &config, &paths, &manifest)?;
+            remove::render_plan(&plan);
+
+            if cli.dry_run {
+                println!("\n{}", style("Dry run — no changes made.").yellow());
+                return Ok(());
+            }
+
+            if !force {
+                if std::io::stdin().is_terminal() {
+                    let confirmed = dialoguer::Confirm::new()
+                        .with_prompt(format!("Remove directory '{}'?", name))
+                        .default(false)
+                        .interact()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                } else if cli.no_input {
+                    anyhow::bail!(
+                        "tome remove requires confirmation — use --force in non-interactive mode"
+                    );
+                } else {
+                    eprintln!(
+                        "warning: removing directory '{}' in non-interactive mode",
+                        name
+                    );
+                }
+            }
+
+            let mut config = config;
+            let mut manifest = manifest;
+            let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
+
+            // Save updated config
+            config.save(&paths.config_path())?;
+            // Save updated manifest
+            manifest::save(&manifest, paths.config_dir())?;
+            // Regenerate lockfile
+            let mut warnings = Vec::new();
+            let resolved_paths = std::collections::BTreeMap::new();
+            let skills = discover::discover_all(&config, &resolved_paths, &mut warnings)?;
+            let lockfile = lockfile::generate(&manifest, &skills);
+            lockfile::save(&lockfile, paths.config_dir())?;
+
+            println!(
+                "\n{} Removed directory '{}': {} library entries, {} symlinks",
+                style("✓").green(),
+                name,
+                result.library_entries_removed,
+                result.symlinks_removed,
+            );
         }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;
@@ -374,13 +431,13 @@ pub fn run(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-/// Warn about `disabled_targets` entries in machine.toml that don't match any
-/// configured target name. Helps catch typos and stale entries.
-fn warn_unknown_disabled_targets(machine_prefs: &machine::MachinePrefs, config: &Config) {
-    for name in &machine_prefs.disabled_targets {
-        if !config.targets.contains_key(name.as_str()) {
+/// Warn about `disabled_directories` entries in machine.toml that don't match any
+/// configured directory name. Helps catch typos and stale entries.
+fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
+    for name in &machine_prefs.disabled_directories {
+        if !config.directories.contains_key(name.as_str()) {
             eprintln!(
-                "warning: disabled target '{}' in machine.toml does not match any configured target",
+                "warning: disabled directory '{}' in machine.toml does not match any configured directory",
                 name
             );
         }
@@ -396,6 +453,121 @@ struct SyncOptions<'a> {
     verbose: bool,
     quiet: bool,
     machine_override: Option<&'a Path>,
+}
+
+/// Pre-discovery step: clone or update git-type directories.
+///
+/// Returns a map of directory name -> (resolved local path, optional HEAD SHA).
+/// Failed git operations produce warnings and are skipped (GIT-08).
+fn resolve_git_directories(
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    quiet: bool,
+    verbose: bool,
+) -> BTreeMap<DirectoryName, (PathBuf, Option<String>)> {
+    let mut resolved = BTreeMap::new();
+    let repos_dir = paths.repos_dir();
+
+    // Check git availability once
+    if !config
+        .directories
+        .values()
+        .any(|d| d.directory_type == DirectoryType::Git)
+    {
+        return resolved;
+    }
+
+    if !git::is_git_available() {
+        if !quiet {
+            eprintln!("warning: git is not available — skipping all git-type directories");
+        }
+        return resolved;
+    }
+
+    for (name, dir_config) in &config.directories {
+        if dir_config.directory_type != DirectoryType::Git {
+            continue;
+        }
+
+        let url = dir_config.path.to_string_lossy();
+        let cache_dir = git::repo_cache_dir(&repos_dir, &url);
+        let already_cloned = cache_dir.is_dir();
+
+        if dry_run {
+            // In dry-run, use cached path if it exists, skip otherwise
+            if already_cloned {
+                let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                let sha = git::read_head_sha(&cache_dir).ok();
+                resolved.insert(name.clone(), (effective, sha));
+            }
+            continue;
+        }
+
+        // Create repos dir if needed
+        if let Err(e) = std::fs::create_dir_all(&repos_dir) {
+            if !quiet {
+                eprintln!(
+                    "warning: failed to create repos directory {}: {e}",
+                    repos_dir.display()
+                );
+            }
+            continue;
+        }
+
+        let result = if already_cloned {
+            // Update existing clone (GIT-03)
+            if verbose {
+                eprintln!("  Updating git directory '{}'...", name);
+            }
+            git::update_repo(
+                &cache_dir,
+                dir_config.branch.as_deref(),
+                dir_config.tag.as_deref(),
+                dir_config.rev.as_deref(),
+            )
+        } else {
+            // Fresh clone (GIT-02)
+            if verbose {
+                eprintln!("  Cloning git directory '{}'...", name);
+            }
+            git::clone_repo(
+                &url,
+                &cache_dir,
+                dir_config.branch.as_deref(),
+                dir_config.tag.as_deref(),
+                dir_config.rev.as_deref(),
+            )
+        };
+
+        match result {
+            Ok(()) => {
+                let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                let sha = git::read_head_sha(&cache_dir).ok();
+                resolved.insert(name.clone(), (effective, sha));
+            }
+            Err(e) => {
+                // D-09, D-10: Distinct messages for never-cloned vs update-failed
+                if already_cloned {
+                    if !quiet {
+                        eprintln!(
+                            "warning: could not update '{}' — using cached state: {e}",
+                            name
+                        );
+                    }
+                    let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
+                    let sha = git::read_head_sha(&cache_dir).ok();
+                    resolved.insert(name.clone(), (effective, sha));
+                } else if !quiet {
+                    eprintln!(
+                        "warning: could not clone '{}' — skipping (no cached state): {e}",
+                        name
+                    );
+                }
+            }
+        }
+    }
+    resolved
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
@@ -464,13 +636,31 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
     }
 
+    // Safety guard: warn and skip cleanup when no directories are configured (CFG-06)
+    if config.directories.is_empty() {
+        if !quiet {
+            eprintln!("warning: no directories configured. Run `tome init` to set up directories.");
+        }
+        return Ok(());
+    }
+
+    // 0. Resolve git directories (clone/update to local cache)
+    let sp = show_progress.then(|| spinner("Resolving git sources..."));
+    if verbose {
+        eprintln!("{}", style("Resolving git sources...").dim());
+    }
+    let resolved_git_paths = resolve_git_directories(config, paths, dry_run, quiet, verbose);
+    if let Some(sp) = sp {
+        sp.finish_and_clear();
+    }
+
     // 1. Discover
     let sp = show_progress.then(|| spinner("Discovering skills..."));
     if verbose {
         eprintln!("{}", style("Discovering skills...").dim());
     }
     let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &mut warnings)?;
+    let skills = discover::discover_all(config, &resolved_git_paths, &mut warnings)?;
     if let Some(sp) = sp {
         sp.finish_and_clear();
     }
@@ -532,9 +722,9 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     let discovered_names: HashSet<String> =
         skills.iter().map(|s| s.name.as_str().to_string()).collect();
 
-    // Warn about disabled_targets that don't match any configured target
+    // Warn about disabled_directories that don't match any configured directory
     if !quiet {
-        warn_unknown_disabled_targets(&machine_prefs, config);
+        warn_unknown_disabled_directories(&machine_prefs, config);
     }
 
     // 4. Cleanup stale library entries (before distribute so counts are accurate)
@@ -555,16 +745,15 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Regenerate lockfile after cleanup so it reflects removals
     let new_lockfile = lockfile::generate(&manifest, &skills);
 
-    // 5. Distribute to targets
-    let source_paths: Vec<PathBuf> = config.sources.iter().map(|s| s.path.clone()).collect();
+    // 5. Distribute to directories with distribution roles
     let mut distribute_results = Vec::new();
-    for (name, target) in config.targets.iter() {
-        if machine_prefs.is_target_disabled(name.as_str()) {
+    for (name, dir_config) in config.distribution_dirs() {
+        if machine_prefs.is_directory_disabled(name.as_str()) {
             if verbose {
                 eprintln!(
                     "{}",
                     style(format!(
-                        "Skipping target '{}' (disabled in machine preferences)",
+                        "Skipping directory '{}' (disabled in machine preferences)",
                         name
                     ))
                     .dim()
@@ -576,13 +765,12 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         if verbose {
             eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
         }
-        let result = distribute::distribute_to_target(
+        let result = distribute::distribute_to_directory(
             paths.library_dir(),
-            name.as_str(),
-            target,
+            name,
+            dir_config,
             &manifest,
             &machine_prefs,
-            &source_paths,
             dry_run,
             force,
         )?;
@@ -592,10 +780,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // 6. Cleanup stale symlinks from targets
+    // 6. Cleanup stale symlinks from distribution directories
     let mut removed_from_targets = 0usize;
-    for (_name, target) in config.targets.iter() {
-        let skills_dir = target.skills_dir();
+    for (_name, dir_config) in config.distribution_dirs() {
+        let skills_dir = &dir_config.path;
         removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
         // Also clean up symlinks for disabled skills
         removed_from_targets +=
@@ -764,7 +952,7 @@ fn render_sync_report(report: &SyncReport) {
 /// List all discovered skills.
 fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
     let mut warnings = Vec::new();
-    let mut skills = discover::discover_all(config, &mut warnings)?;
+    let mut skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
     skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     if !quiet {
         for w in &warnings {
