@@ -1,8 +1,8 @@
-# tome v0.6 — Unified Directory Model
+# tome — Unified Directory Model
 
 ## What This Is
 
-tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from sources, consolidates them into a central library, and distributes them to target tools via symlinks. v0.6 replaces the artificial source/target split with a unified directory model where each configured directory declares its relationship to tome.
+tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. The unified directory model (shipped in v0.6) replaces the old separate source/target config with a single `[directories.*]` map where each entry declares its type and role.
 
 ## Core Value
 
@@ -25,76 +25,63 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ Config-based tool root detection — v0.5.4
 - ✓ `--json` output for list/status/doctor — v0.5.4
 - ✓ XDG config for tome_home — v0.5.4
+- ✓ Unified `[directories.*]` config replacing `[[sources]]` + `[targets.*]` — v0.6
+- ✓ Git sources — clone/pull remote skill repos — v0.6
+- ✓ Per-directory skill selection (`enabled`/`disabled` in machine.toml) — v0.6
+- ✓ `tome add` — register git skill repos from URL — v0.6
+- ✓ `tome remove` — remove directories from config with cleanup — v0.6
+- ✓ `tome reassign` / `tome fork` — change skill provenance — v0.6
+- ✓ Browse TUI polish (theming, scrollbar, fuzzy highlighting, markdown preview) — v0.6
 
 ### Active
 
-(All v0.6 requirements completed — see Validated)
+(No active requirements — next milestone not yet planned)
 
-### Recently Validated (v0.6)
+### Known Gaps (deferred from v0.6)
 
-- ✓ Unified `[directories.*]` config replacing `[[sources]]` + `[targets.*]` (#396) — Phase 1
-- ✓ Wizard rewrite with merged KNOWN_DIRECTORIES registry (#362) — Phase 1
-- ✓ Git sources — clone/pull remote skill repos (#58) — Phase 2
-- ✓ Standalone SKILL.md import from GitHub repos (#92) — Phase 3
-- ✓ Per-target skill selection in machine.toml (#253) — Phase 2
-- ✓ `tome remove` — CLI to remove directories from config (#392) — Phase 2
-- ✓ Change skill source after the fact (#395) — Phase 3
-- ✓ Browse TUI visual polish (#365) — Phase 3
+- WIZ-01 through WIZ-05: Wizard rewrite with merged `KNOWN_DIRECTORIES` registry. The old wizard code still works but uses the legacy source/target mental model. Low priority since `tome init` is a one-time operation.
 
 ### Out of Scope
 
-- Backward-compatible config parsing — single user, hard break with migration instructions
-- Connector trait abstraction (#192) — deferred; unified directories solve config flexibility first
-- Format transforms / rules syncing (#57, #193, #194) — different concern, deferred to post-v0.6
-- Watch mode (#59) — low priority, deferred
-- Skill composition / Wolpertinger (#267) — v0.7 experimental
-- Config migration command (`tome migrate`) — not worth building for one user; manual migration sufficient
+- Backward-compatible config parsing — single user; hard break with migration docs
+- Connector trait abstraction (#192) — unified directories solve config flexibility
+- Format transforms / rules syncing (#57, #193, #194) — different concern, post-v0.6
+- Watch mode (#59) — low priority
+- Config migration command (`tome migrate`) — not worth building for one user
 
 ## Context
 
-tome is at v0.5.4 with a mature sync pipeline. The codebase has ~17 source modules in a single Rust crate. The core insight driving v0.6 is that `~/.claude/skills` appears in config as **both** a source and a target — the wizard even has `find_source_target_overlaps()` to detect this. The unified directory model eliminates this artificial split.
+tome is at v0.6 (unreleased) with ~20k lines of Rust across 20+ source modules in a single crate. The unified directory model eliminated the source/target config split. Git-backed skill repos are supported with shallow clones and ref pinning.
 
-The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, and `ratatui` for the browser TUI. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS.
+The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS.
 
-Current config has `sources: Vec<Source>` (ordered, first wins for duplicates) and `targets: BTreeMap<TargetName, TargetConfig>`. The unified model replaces both with `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git).
+Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git).
 
 ## Constraints
 
 - **Platform**: Unix-only (symlinks). No Windows support.
 - **Rust edition**: 2024. Strict clippy with `-D warnings`.
-- **Single user**: Martin is the sole user. This unblocks hard-breaking changes but means there's no migration tooling.
-- **No nested git**: Git source clones go to `~/.tome/repos/`, not inside the library dir (which may be its own git repo).
-- **Backward compat**: None. Old `tome.toml` files will fail to parse. Migration is documented, not automated.
+- **Single user**: Martin is the sole user. Unblocks hard-breaking changes.
+- **No nested git**: Git source clones go to `~/.tome/repos/`, not inside the library dir.
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Hard break, no backward compat | Single user; migration tooling not worth the cost | — Pending |
-| BTreeMap (alphabetical) for duplicate priority | Simplest; conflicts rare; `priority` field can be added later | — Pending |
-| Auto-assign roles in wizard, show summary | Faster UX; known directories get sensible defaults | — Pending |
-| Per-target selection in machine.toml | Per-machine concern, not portable across machines | — Pending |
-| Git clones in `~/.tome/repos/<hash>/` | Avoids nested git repos inside library; `.git` intact for pull | — Pending |
-| One atomic PR for foundation (#396 + #362) | Cohesive change; easier to review as a unit | — Pending |
-| Remove `TargetMethod` enum | Only `Symlink` variant exists; path lives in `DirectoryConfig.path` | — Pending |
-| Default roles: ClaudePlugins→Managed, Directory→Synced, Git→Source | Sensible defaults matching typical usage patterns | — Pending |
+| Hard break, no backward compat | Single user; migration tooling not worth the cost | ✓ Good — clean implementation |
+| BTreeMap (alphabetical) for duplicate priority | Simplest; conflicts rare | ✓ Good — works in practice |
+| Per-directory selection in machine.toml | Per-machine concern, not portable | ✓ Good — `enabled`/`disabled` with locality principle |
+| Git clones in `~/.tome/repos/<sha256>/` | Avoids nested git repos; `.git` intact for pull | ✓ Good |
+| Remove `TargetMethod` enum | Only `Symlink` variant existed | ✓ Good — eliminated dead code |
+| Default roles: ClaudePlugins→Managed, Directory→Synced, Git→Source | Sensible defaults | ✓ Good — no manual role needed |
+| Plan/render/execute pattern for destructive commands | Separation of planning from execution | ✓ Good — reused for remove, reassign, fork |
+| Manifest-based circular prevention | Replaces `shares_tool_root()` path heuristic | ✓ Good — more reliable |
+| Git env clearing pattern | Every `Command::new("git")` clears GIT_DIR etc. | ✓ Good — prevents nesting bugs |
+| Defer wizard rewrite (WIZ-01–05) | Old wizard still works; low priority | ⚠️ Revisit — tech debt |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
-**After each phase transition** (via `/gsd:transition`):
-1. Requirements invalidated? → Move to Out of Scope with reason
-2. Requirements validated? → Move to Validated with phase reference
-3. New requirements emerged? → Add to Active
-4. Decisions to log? → Add to Key Decisions
-5. "What This Is" still accurate? → Update if drifted
-
-**After each milestone** (via `/gsd:complete-milestone`):
-1. Full review of all sections
-2. Core Value check — still the right priority?
-3. Audit Out of Scope — reasons still valid?
-4. Update Context with current state
-
 ---
-*Last updated: 2026-04-16 after Phase 3 completion (all v0.6 phases complete)*
+*Last updated: 2026-04-16 after v0.6 milestone completion*
