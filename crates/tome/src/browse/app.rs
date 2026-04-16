@@ -10,6 +10,7 @@ pub enum Mode {
     Normal,
     Search,
     Detail,
+    Help,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,9 +70,11 @@ pub struct SkillRow {
 
 pub struct App {
     pub mode: Mode,
+    pub previous_mode: Mode,
     pub should_quit: bool,
     pub rows: Vec<SkillRow>,
     pub filtered_indices: Vec<usize>,
+    pub match_indices: Vec<Vec<u32>>,
     pub selected: usize,
     pub scroll_offset: usize,
     pub search_input: String,
@@ -82,15 +85,19 @@ pub struct App {
     pub group_by_source: bool,
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
+    pub theme: super::theme::Theme,
 }
 
 impl App {
     pub fn new(rows: Vec<SkillRow>) -> Self {
+        let match_indices = vec![Vec::new(); rows.len()];
         let filtered_indices: Vec<usize> = (0..rows.len()).collect();
         let mut app = Self {
             mode: Mode::Normal,
+            previous_mode: Mode::Normal,
             should_quit: false,
             filtered_indices,
+            match_indices,
             rows,
             selected: 0,
             scroll_offset: 0,
@@ -102,6 +109,7 @@ impl App {
             group_by_source: false,
             detail_actions: Vec::new(),
             detail_selected: 0,
+            theme: super::theme::Theme::detect(),
         };
         app.apply_sort();
         app.refresh_preview();
@@ -113,6 +121,10 @@ impl App {
             Mode::Normal => self.handle_normal_key(key),
             Mode::Search => self.handle_search_key(key),
             Mode::Detail => self.handle_detail_key(key),
+            Mode::Help => {
+                // Any key dismisses help overlay
+                self.mode = self.previous_mode;
+            }
         }
     }
 
@@ -143,6 +155,10 @@ impl App {
                 if !self.filtered_indices.is_empty() {
                     self.enter_detail_mode();
                 }
+            }
+            KeyCode::Char('?') => {
+                self.previous_mode = self.mode;
+                self.mode = Mode::Help;
             }
             _ => {}
         }
@@ -235,7 +251,13 @@ impl App {
     }
 
     fn refilter(&mut self) {
-        self.filtered_indices = fuzzy::filter_rows(&self.search_input, &self.rows);
+        let matches = fuzzy::filter_rows_with_indices(&self.search_input, &self.rows);
+        self.filtered_indices = matches.iter().map(|m| m.row_index).collect();
+        // Build a lookup: for each row_index, store its name_indices
+        self.match_indices = vec![Vec::new(); self.rows.len()];
+        for m in matches {
+            self.match_indices[m.row_index] = m.name_indices;
+        }
         self.apply_sort();
         // Clamp cursor
         if self.filtered_indices.is_empty() {

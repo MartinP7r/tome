@@ -51,6 +51,28 @@ pub enum LintFormat {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Add a git skill repository
+    #[command(
+        after_help = "Examples:\n  tome add https://github.com/user/skills.git\n  tome add https://github.com/user/skills.git --name my-skills\n  tome add git@github.com:user/skills.git --branch main"
+    )]
+    Add {
+        /// Git repository URL (HTTPS or SSH)
+        #[arg(value_name = "URL")]
+        url: String,
+        /// Custom directory name (default: extracted from URL)
+        #[arg(long)]
+        name: Option<String>,
+        /// Track a specific branch
+        #[arg(long, conflicts_with_all = ["tag", "rev"])]
+        branch: Option<String>,
+        /// Pin to a specific tag
+        #[arg(long, conflicts_with_all = ["branch", "rev"])]
+        tag: Option<String>,
+        /// Pin to a specific commit SHA
+        #[arg(long, conflicts_with_all = ["branch", "tag"])]
+        rev: Option<String>,
+    },
+
     /// Interactive wizard to configure sources and targets
     #[command(after_help = "Examples:\n  tome init")]
     Init,
@@ -126,6 +148,33 @@ pub enum Command {
         /// Name of the directory to remove (as shown in `tome status`)
         #[arg(value_name = "NAME")]
         name: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Reassign a skill to a different directory
+    #[command(after_help = "Examples:\n  tome reassign my-skill --to local-skills")]
+    Reassign {
+        /// Skill name to reassign
+        #[arg(value_name = "SKILL")]
+        skill: String,
+        /// Target directory name
+        #[arg(long)]
+        to: String,
+    },
+
+    /// Fork a managed skill to a local directory for customization
+    #[command(
+        after_help = "Examples:\n  tome fork my-skill --to local-skills\n  tome fork my-skill --to local-skills --force"
+    )]
+    Fork {
+        /// Skill name to fork
+        #[arg(value_name = "SKILL")]
+        skill: String,
+        /// Target local directory
+        #[arg(long)]
+        to: String,
         /// Skip confirmation prompt
         #[arg(long)]
         force: bool,
