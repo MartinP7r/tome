@@ -48,50 +48,52 @@ fn render_inline_markdown<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
 
     while i < len {
         // Check for ** (bold)
-        if i + 1 < len && chars[i] == '*' && chars[i + 1] == '*' {
-            // Find closing **
-            if let Some(end) = find_double_star(&chars, i + 2) {
-                // Flush plain text before this
-                if plain_start < i {
-                    let text: String = chars[plain_start..i].iter().collect();
-                    spans.push(Span::raw(text));
-                }
-                let content: String = chars[i + 2..end].iter().collect();
-                spans.push(Span::styled(content, theme.preview_bold));
-                i = end + 2;
-                plain_start = i;
-                continue;
+        if i + 1 < len
+            && chars[i] == '*'
+            && chars[i + 1] == '*'
+            && let Some(end) = find_double_star(&chars, i + 2)
+        {
+            // Flush plain text before this
+            if plain_start < i {
+                let text: String = chars[plain_start..i].iter().collect();
+                spans.push(Span::raw(text));
             }
+            let content: String = chars[i + 2..end].iter().collect();
+            spans.push(Span::styled(content, theme.preview_bold));
+            i = end + 2;
+            plain_start = i;
+            continue;
         }
 
         // Check for backtick (code)
-        if chars[i] == '`' {
-            if let Some(end) = find_char(&chars, '`', i + 1) {
-                if plain_start < i {
-                    let text: String = chars[plain_start..i].iter().collect();
-                    spans.push(Span::raw(text));
-                }
-                let content: String = chars[i + 1..end].iter().collect();
-                spans.push(Span::styled(content, theme.preview_code));
-                i = end + 1;
-                plain_start = i;
-                continue;
+        if chars[i] == '`'
+            && let Some(end) = find_char(&chars, '`', i + 1)
+        {
+            if plain_start < i {
+                let text: String = chars[plain_start..i].iter().collect();
+                spans.push(Span::raw(text));
             }
+            let content: String = chars[i + 1..end].iter().collect();
+            spans.push(Span::styled(content, theme.preview_code));
+            i = end + 1;
+            plain_start = i;
+            continue;
         }
 
         // Check for single * (italic) -- must not be **
-        if chars[i] == '*' && !(i + 1 < len && chars[i + 1] == '*') {
-            if let Some(end) = find_single_star(&chars, i + 1) {
-                if plain_start < i {
-                    let text: String = chars[plain_start..i].iter().collect();
-                    spans.push(Span::raw(text));
-                }
-                let content: String = chars[i + 1..end].iter().collect();
-                spans.push(Span::styled(content, theme.preview_italic));
-                i = end + 1;
-                plain_start = i;
-                continue;
+        if chars[i] == '*'
+            && !(i + 1 < len && chars[i + 1] == '*')
+            && let Some(end) = find_single_star(&chars, i + 1)
+        {
+            if plain_start < i {
+                let text: String = chars[plain_start..i].iter().collect();
+                spans.push(Span::raw(text));
             }
+            let content: String = chars[i + 1..end].iter().collect();
+            spans.push(Span::styled(content, theme.preview_italic));
+            i = end + 1;
+            plain_start = i;
+            continue;
         }
 
         i += 1;

@@ -15,6 +15,7 @@ pub struct FuzzyMatch {
 ///
 /// Returns indices into `rows` sorted by match score (highest first).
 /// An empty query returns all indices in original order.
+#[cfg(test)]
 pub fn filter_rows(query: &str, rows: &[SkillRow]) -> Vec<usize> {
     if query.is_empty() {
         return (0..rows.len()).collect();

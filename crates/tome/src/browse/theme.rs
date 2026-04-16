@@ -20,11 +20,14 @@ pub struct Theme {
     pub status_bar_bg: Color,
     /// Gray family -- status bar text.
     pub status_bar_fg: Color,
-    /// Red family -- errors.
+    /// Red family -- errors (used by future CLI output integration).
+    #[allow(dead_code)]
     pub destructive: Color,
-    /// Green family -- confirmations.
+    /// Green family -- confirmations (used by future CLI output integration).
+    #[allow(dead_code)]
     pub success: Color,
-    /// Magenta family -- inline code.
+    /// Magenta family -- inline code (consumed via `preview_code` style).
+    #[allow(dead_code)]
     pub code_fg: Color,
     /// Bold + accent fg -- markdown `#` headers in preview.
     pub preview_header: Style,
