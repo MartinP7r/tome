@@ -68,10 +68,14 @@ impl Manifest {
 
     /// Update the source_name for an existing skill entry.
     ///
+    /// Returns `true` if the skill was found and updated, `false` if missing.
     /// Preserves `content_hash`, `synced_at`, and other fields.
-    pub fn update_source_name(&mut self, skill_name: &str, new_source: &str) {
+    pub fn update_source_name(&mut self, skill_name: &str, new_source: &str) -> bool {
         if let Some(entry) = self.skills.get_mut(skill_name) {
             entry.source_name = new_source.to_string();
+            true
+        } else {
+            false
         }
     }
 }
@@ -374,5 +378,30 @@ mod tests {
             year >= 2025,
             "expected current year >= 2025, got {year} from timestamp '{ts}'"
         );
+    }
+
+    #[test]
+    fn update_source_name_existing_skill() {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/source/my-skill"),
+                "old-source".to_string(),
+                test_hash("my-skill"),
+                false,
+            ),
+        );
+
+        let updated = manifest.update_source_name("my-skill", "new-source");
+        assert!(updated, "should return true for existing skill");
+        assert_eq!(manifest.get("my-skill").unwrap().source_name, "new-source");
+    }
+
+    #[test]
+    fn update_source_name_missing_skill() {
+        let mut manifest = Manifest::default();
+        let updated = manifest.update_source_name("nonexistent", "new-source");
+        assert!(!updated, "should return false for missing skill");
     }
 }

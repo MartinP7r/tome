@@ -6,7 +6,9 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-/// All colors and derived styles consumed by `ui::render`.
+/// All colors consumed by `ui::render`. Derived styles are computed
+/// via methods to ensure they always stay consistent with the base colors.
+#[derive(Clone)]
 pub struct Theme {
     /// Cyan family -- headers, badges, selection indicators.
     pub accent: Color,
@@ -20,27 +22,8 @@ pub struct Theme {
     pub status_bar_bg: Color,
     /// Gray family -- status bar text.
     pub status_bar_fg: Color,
-    /// Red family -- errors (used by future CLI output integration).
-    #[allow(dead_code)]
-    pub destructive: Color,
-    /// Green family -- confirmations (used by future CLI output integration).
-    #[allow(dead_code)]
-    pub success: Color,
-    /// Magenta family -- inline code (consumed via `preview_code` style).
-    #[allow(dead_code)]
+    /// Magenta family -- inline code.
     pub code_fg: Color,
-    /// Bold + accent fg -- markdown `#` headers in preview.
-    pub preview_header: Style,
-    /// Bold modifier only -- `**bold**` in preview.
-    pub preview_bold: Style,
-    /// Italic modifier only -- `*italic*` in preview.
-    pub preview_italic: Style,
-    /// code_fg color -- `` `code` `` in preview.
-    pub preview_code: Style,
-    /// alert fg + Bold -- fuzzy match character highlights.
-    pub match_highlight: Style,
-    /// alert fg + Bold -- source group headers.
-    pub group_header: Style,
 }
 
 impl Theme {
@@ -62,54 +45,57 @@ impl Theme {
             selected_bg: Color::DarkGray,
             status_bar_bg: Color::DarkGray,
             status_bar_fg: Color::Gray,
-            destructive: Color::Red,
-            success: Color::Green,
             code_fg: Color::Magenta,
-            preview_header: Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-            preview_bold: Style::default().add_modifier(Modifier::BOLD),
-            preview_italic: Style::default().add_modifier(Modifier::ITALIC),
-            preview_code: Style::default().fg(Color::Magenta),
-            match_highlight: Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-            group_header: Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
         }
     }
 
     /// Light palette for light-background terminals.
     pub fn light() -> Self {
-        let accent = Color::Indexed(30); // dark cyan
-        let alert = Color::Indexed(136); // dark yellow
-        let muted = Color::Indexed(243); // medium gray
-        let code_fg = Color::Indexed(133); // dark magenta
-
         Self {
-            accent,
-            alert,
-            muted,
+            accent: Color::Indexed(30),  // dark cyan
+            alert: Color::Indexed(136),  // dark yellow
+            muted: Color::Indexed(243),  // medium gray
             selected_bg: Color::Indexed(254), // near-white gray
             status_bar_bg: Color::Indexed(254),
             status_bar_fg: Color::Indexed(243),
-            destructive: Color::Indexed(124), // dark red
-            success: Color::Indexed(28),      // dark green
-            code_fg,
-            preview_header: Style::default()
-                .fg(accent)
-                .add_modifier(Modifier::BOLD),
-            preview_bold: Style::default().add_modifier(Modifier::BOLD),
-            preview_italic: Style::default().add_modifier(Modifier::ITALIC),
-            preview_code: Style::default().fg(code_fg),
-            match_highlight: Style::default()
-                .fg(alert)
-                .add_modifier(Modifier::BOLD),
-            group_header: Style::default()
-                .fg(alert)
-                .add_modifier(Modifier::BOLD),
+            code_fg: Color::Indexed(133), // dark magenta
         }
+    }
+
+    /// Bold + accent fg -- markdown `#` headers in preview.
+    pub fn preview_header(&self) -> Style {
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// Bold modifier only -- `**bold**` in preview.
+    pub fn preview_bold(&self) -> Style {
+        Style::default().add_modifier(Modifier::BOLD)
+    }
+
+    /// Italic modifier only -- `*italic*` in preview.
+    pub fn preview_italic(&self) -> Style {
+        Style::default().add_modifier(Modifier::ITALIC)
+    }
+
+    /// code_fg color -- `` `code` `` in preview.
+    pub fn preview_code(&self) -> Style {
+        Style::default().fg(self.code_fg)
+    }
+
+    /// alert fg + Bold -- fuzzy match character highlights.
+    pub fn match_highlight(&self) -> Style {
+        Style::default()
+            .fg(self.alert)
+            .add_modifier(Modifier::BOLD)
+    }
+
+    /// alert fg + Bold -- source group headers.
+    pub fn group_header(&self) -> Style {
+        Style::default()
+            .fg(self.alert)
+            .add_modifier(Modifier::BOLD)
     }
 }
 
@@ -137,8 +123,6 @@ mod tests {
         assert_eq!(theme.muted, Color::Gray);
         assert_eq!(theme.selected_bg, Color::DarkGray);
         assert_eq!(theme.code_fg, Color::Magenta);
-        assert_eq!(theme.destructive, Color::Red);
-        assert_eq!(theme.success, Color::Green);
     }
 
     #[test]
@@ -149,8 +133,6 @@ mod tests {
         assert_eq!(theme.muted, Color::Indexed(243));
         assert_eq!(theme.selected_bg, Color::Indexed(254));
         assert_eq!(theme.code_fg, Color::Indexed(133));
-        assert_eq!(theme.destructive, Color::Indexed(124));
-        assert_eq!(theme.success, Color::Indexed(28));
     }
 
     #[test]
@@ -159,5 +141,15 @@ mod tests {
         // so detect() should return dark theme.
         let theme = Theme::detect();
         assert_eq!(theme.accent, Color::Cyan);
+    }
+
+    #[test]
+    fn test_derived_styles_use_base_colors() {
+        let theme = Theme::dark();
+        assert_eq!(theme.preview_header().fg, Some(Color::Cyan));
+        assert!(theme.preview_header().add_modifier.contains(Modifier::BOLD));
+        assert_eq!(theme.preview_code().fg, Some(Color::Magenta));
+        assert_eq!(theme.match_highlight().fg, Some(Color::Yellow));
+        assert!(theme.match_highlight().add_modifier.contains(Modifier::BOLD));
     }
 }

@@ -156,25 +156,13 @@ pub(crate) fn execute(
     }
 
     // Update manifest source_name
-    manifest.update_source_name(
+    if !manifest.update_source_name(
         plan.skill_name.as_str(),
         plan.to_directory.as_ref(),
-    );
-
-    if plan.is_fork {
-        println!(
-            "{} '{}' to '{}' (local copy created)",
-            style("Forked").green(),
-            style(plan.skill_name.as_str()).cyan(),
-            style(AsRef::<str>::as_ref(&plan.to_directory)).cyan(),
-        );
-    } else {
-        println!(
-            "{} '{}' from '{}' to '{}'",
-            style("Reassigned").green(),
-            style(plan.skill_name.as_str()).cyan(),
-            style(&plan.from_directory).cyan(),
-            style(AsRef::<str>::as_ref(&plan.to_directory)).cyan(),
+    ) {
+        anyhow::bail!(
+            "skill '{}' disappeared from manifest during reassignment",
+            plan.skill_name.as_str()
         );
     }
 
@@ -221,7 +209,7 @@ mod tests {
         let tome_home = tmp.path().join("tome_home");
         let library = tome_home.join("library");
         std::fs::create_dir_all(&library).unwrap();
-        TomePaths::new(tome_home, library.into()).unwrap()
+        TomePaths::new(tome_home, library).unwrap()
     }
 
     #[test]
@@ -238,6 +226,82 @@ mod tests {
             err.contains("not found in library"),
             "expected 'not found in library' in error: {err}"
         );
+    }
+
+    fn make_config_with_dir(tmp: &TempDir, name: &str) -> Config {
+        use crate::config::{DirectoryConfig, DirectoryType};
+        let dir_path = tmp.path().join(name);
+        std::fs::create_dir_all(&dir_path).unwrap();
+        let mut config = Config::default();
+        config.directories.insert(
+            DirectoryName::new(name).unwrap(),
+            DirectoryConfig {
+                path: dir_path,
+                directory_type: DirectoryType::Directory,
+                role: None,
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+        config
+    }
+
+    #[test]
+    fn test_plan_happy_path_copy_and_relink() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        let config = make_config_with_dir(&tmp, "target-dir");
+        let mut manifest = Manifest::default();
+
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                "old-dir".to_string(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let result = plan("test-skill", "target-dir", &config, &paths, &manifest, false).unwrap();
+        assert_eq!(result.skill_name.as_str(), "test-skill");
+        assert_eq!(result.from_directory, "old-dir");
+        assert_eq!(AsRef::<str>::as_ref(&result.to_directory), "target-dir");
+        assert!(matches!(result.action, ReassignAction::CopyAndRelink));
+        assert!(!result.is_fork);
+    }
+
+    #[test]
+    fn test_plan_relink_when_skill_exists_in_target() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        let config = make_config_with_dir(&tmp, "target-dir");
+        let mut manifest = Manifest::default();
+
+        // Create skill dir in the target so it detects as Relink
+        let target_skill = tmp.path().join("target-dir").join("test-skill");
+        std::fs::create_dir_all(&target_skill).unwrap();
+        std::fs::write(target_skill.join("SKILL.md"), "# test").unwrap();
+
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                "old-dir".to_string(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let result = plan("test-skill", "target-dir", &config, &paths, &manifest, true).unwrap();
+        assert!(matches!(result.action, ReassignAction::Relink));
+        assert!(result.is_fork);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use nucleo_matcher::{Config, Matcher, Utf32Str};
 use super::app::SkillRow;
 
 /// A fuzzy match result with the row index and matched character positions.
+#[derive(Debug)]
 pub struct FuzzyMatch {
     /// Index into the original `rows` slice.
     pub row_index: usize,

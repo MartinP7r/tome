@@ -13,7 +13,8 @@ use super::app::{App, Mode, SortMode};
 use super::theme::Theme;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let theme = Theme::detect();
+    // Clone theme out to avoid borrow conflict with &mut app
+    let theme = app.theme.clone();
 
     match app.mode {
         Mode::Detail => render_detail(frame, app, &theme),
@@ -135,7 +136,7 @@ fn build_visible_rows<'a>(app: &'a App, show_groups: bool, theme: &Theme) -> Vec
                         Cell::from(""),
                         Cell::from(""),
                     ])
-                    .style(theme.group_header),
+                    .style(theme.group_header()),
                 );
                 prev_source = Some(current_source);
             }
@@ -178,7 +179,7 @@ fn highlight_name<'a>(name: &'a str, indices: &[u32], theme: &Theme) -> Line<'a>
         .enumerate()
         .map(|(i, ch)| {
             if index_set.contains(&(i as u32)) {
-                Span::styled(ch.to_string(), theme.match_highlight)
+                Span::styled(ch.to_string(), theme.match_highlight())
             } else {
                 Span::raw(ch.to_string())
             }

@@ -8,7 +8,7 @@
 //! 5. Remove directory entry from config
 //! 6. Regenerate lockfile
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use console::style;
 use std::path::PathBuf;
 
@@ -61,11 +61,10 @@ pub(crate) fn plan(
         .with_context(|| format!("invalid directory name: {name}"))?;
 
     // Validate the directory exists in config
-    let dir_config = config.directories.get(&dir_name);
-    if dir_config.is_none() {
-        bail!("directory '{}' not found in config", name);
-    }
-    let dir_config = dir_config.unwrap();
+    let dir_config = config
+        .directories
+        .get(&dir_name)
+        .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", name))?;
 
     // Find skills from this directory in the manifest
     let skills: Vec<String> = manifest
@@ -115,10 +114,11 @@ pub(crate) fn plan(
 
     // Check for cached git repo
     let git_cache_path = if dir_config.directory_type == DirectoryType::Git {
-        let cache_dir = crate::git::repo_cache_dir(
-            &paths.repos_dir(),
-            dir_config.path.to_str().unwrap_or_default(),
-        );
+        let url_str = dir_config
+            .path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("directory '{}' path is not valid UTF-8", name))?;
+        let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url_str);
         if cache_dir.exists() { Some(cache_dir) } else { None }
     } else {
         None
@@ -186,38 +186,44 @@ pub(crate) fn execute(
 
     // 1. Remove symlinks from distribution directories
     for symlink in &plan.symlinks_to_remove {
-        if !dry_run && let Err(e) = std::fs::remove_file(symlink) {
+        if dry_run {
+            symlinks_removed += 1;
+        } else if let Err(e) = std::fs::remove_file(symlink) {
             eprintln!(
                 "warning: failed to remove symlink {}: {}",
                 symlink.display(),
                 e
             );
+        } else {
+            symlinks_removed += 1;
         }
-        symlinks_removed += 1;
     }
 
     // 2. Remove library directories
     for lib_path in &plan.library_paths {
-        if !dry_run {
-            if lib_path.is_symlink() {
-                if let Err(e) = std::fs::remove_file(lib_path) {
-                    eprintln!(
-                        "warning: failed to remove library symlink {}: {}",
-                        lib_path.display(),
-                        e
-                    );
-                }
-            } else if lib_path.is_dir()
-                && let Err(e) = std::fs::remove_dir_all(lib_path)
-            {
+        if dry_run {
+            library_entries_removed += 1;
+        } else if lib_path.is_symlink() {
+            if let Err(e) = std::fs::remove_file(lib_path) {
+                eprintln!(
+                    "warning: failed to remove library symlink {}: {}",
+                    lib_path.display(),
+                    e
+                );
+            } else {
+                library_entries_removed += 1;
+            }
+        } else if lib_path.is_dir() {
+            if let Err(e) = std::fs::remove_dir_all(lib_path) {
                 eprintln!(
                     "warning: failed to remove library directory {}: {}",
                     lib_path.display(),
                     e
                 );
+            } else {
+                library_entries_removed += 1;
             }
         }
-        library_entries_removed += 1;
     }
 
     // 3. Remove manifest entries
@@ -229,16 +235,17 @@ pub(crate) fn execute(
 
     // 4. Remove cached git repo
     if let Some(cache_path) = &plan.git_cache_path {
-        if !dry_run
-            && let Err(e) = std::fs::remove_dir_all(cache_path)
-        {
+        if dry_run {
+            git_cache_removed = true;
+        } else if let Err(e) = std::fs::remove_dir_all(cache_path) {
             eprintln!(
                 "warning: failed to remove git cache {}: {}",
                 cache_path.display(),
                 e
             );
+        } else {
+            git_cache_removed = true;
         }
-        git_cache_removed = true;
     }
 
     // 5. Remove directory entry from config

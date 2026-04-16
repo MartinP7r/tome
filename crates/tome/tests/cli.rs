@@ -3356,3 +3356,342 @@ fn test_remove_no_input_without_force_fails() {
         .failure()
         .stderr(predicate::str::contains("use --force"));
 }
+
+// ── tome add integration tests ─────────────────────────────────────
+
+#[test]
+fn test_add_happy_path() {
+    let tmp = TempDir::new().unwrap();
+
+    // Create minimal config
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "https://github.com/user/my-skills.git",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added"));
+
+    // Verify config was written
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config_content.contains("[directories.my-skills]"),
+        "config should contain the new directory: {config_content}"
+    );
+    assert!(
+        config_content.contains("type = \"git\""),
+        "directory type should be git: {config_content}"
+    );
+}
+
+#[test]
+fn test_add_custom_name() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "https://github.com/user/repo.git",
+            "--name",
+            "custom-name",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("custom-name"));
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(config_content.contains("[directories.custom-name]"));
+}
+
+#[test]
+fn test_add_duplicate_name_fails() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(
+        &config_path,
+        "[directories.my-skills]\npath = \"https://github.com/user/my-skills.git\"\ntype = \"git\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "https://github.com/user/my-skills.git",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already exists in config"));
+}
+
+#[test]
+fn test_add_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--dry-run",
+            "add",
+            "https://github.com/user/my-skills.git",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would"));
+
+    // Config should be unchanged (empty)
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !config_content.contains("[directories"),
+        "dry run should not modify config"
+    );
+}
+
+#[test]
+fn test_add_with_branch() {
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "https://github.com/user/repo.git",
+            "--branch",
+            "develop",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config_content.contains("branch = \"develop\""),
+        "config should contain branch: {config_content}"
+    );
+}
+
+// ── tome reassign integration tests ────────────────────────────────
+
+fn reassign_test_env(tmp: &TempDir) {
+    let source_dir = tmp.path().join("source");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    create_skill(&source_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_content = format!(
+        "library_dir = \"{}\"\n\n[directories.local-source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.local-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+        library_dir.display(),
+        source_dir.display(),
+        target_dir.display()
+    );
+
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, config_content).unwrap();
+
+    // Sync to populate library and manifest
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_reassign_happy_path() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "reassign",
+            "my-skill",
+            "--to",
+            "local-target",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Reassigned"));
+}
+
+#[test]
+fn test_reassign_nonexistent_skill() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "reassign",
+            "nonexistent-skill",
+            "--to",
+            "local-target",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in library"));
+}
+
+#[test]
+fn test_reassign_nonexistent_dir() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "reassign",
+            "my-skill",
+            "--to",
+            "nonexistent-dir",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found in config"));
+}
+
+#[test]
+fn test_reassign_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--dry-run",
+            "reassign",
+            "my-skill",
+            "--to",
+            "local-target",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would"));
+}
+
+// ── tome fork integration tests ────────────────────────────────────
+
+#[test]
+fn test_fork_with_force() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "fork",
+            "my-skill",
+            "--to",
+            "local-target",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Forked"));
+
+    // Verify files were actually copied to the target directory
+    let target_skill = tmp.path().join("target").join("my-skill").join("SKILL.md");
+    assert!(
+        target_skill.exists(),
+        "forked skill should exist in target directory"
+    );
+}
+
+#[test]
+fn test_fork_no_input_without_force_fails() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--no-input",
+            "fork",
+            "my-skill",
+            "--to",
+            "local-target",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("use --force"));
+}
+
+#[test]
+fn test_fork_dry_run() {
+    let tmp = TempDir::new().unwrap();
+    reassign_test_env(&tmp);
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--dry-run",
+            "fork",
+            "my-skill",
+            "--to",
+            "local-target",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would"));
+
+    // Target may already have a symlink from sync, but the fork dry run
+    // should not have created a regular (non-symlink) directory
+    let target_skill = tmp.path().join("target").join("my-skill");
+    if target_skill.exists() {
+        assert!(
+            target_skill.is_symlink(),
+            "dry run should not create a real directory copy in target"
+        );
+    }
+}

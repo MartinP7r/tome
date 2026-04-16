@@ -17,13 +17,13 @@ pub fn render_markdown<'a>(raw: &'a str, theme: &Theme) -> Vec<Line<'a>> {
 fn render_line<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
     // Headers: # / ## / ###
     if let Some(rest) = line.strip_prefix("### ") {
-        return Line::from(Span::styled(rest.to_string(), theme.preview_header));
+        return Line::from(Span::styled(rest.to_string(), theme.preview_header()));
     }
     if let Some(rest) = line.strip_prefix("## ") {
-        return Line::from(Span::styled(rest.to_string(), theme.preview_header));
+        return Line::from(Span::styled(rest.to_string(), theme.preview_header()));
     }
     if let Some(rest) = line.strip_prefix("# ") {
-        return Line::from(Span::styled(rest.to_string(), theme.preview_header));
+        return Line::from(Span::styled(rest.to_string(), theme.preview_header()));
     }
 
     // Horizontal rule
@@ -59,7 +59,7 @@ fn render_inline_markdown<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
                 spans.push(Span::raw(text));
             }
             let content: String = chars[i + 2..end].iter().collect();
-            spans.push(Span::styled(content, theme.preview_bold));
+            spans.push(Span::styled(content, theme.preview_bold()));
             i = end + 2;
             plain_start = i;
             continue;
@@ -74,7 +74,7 @@ fn render_inline_markdown<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
                 spans.push(Span::raw(text));
             }
             let content: String = chars[i + 1..end].iter().collect();
-            spans.push(Span::styled(content, theme.preview_code));
+            spans.push(Span::styled(content, theme.preview_code()));
             i = end + 1;
             plain_start = i;
             continue;
@@ -90,7 +90,7 @@ fn render_inline_markdown<'a>(line: &'a str, theme: &Theme) -> Line<'a> {
                 spans.push(Span::raw(text));
             }
             let content: String = chars[i + 1..end].iter().collect();
-            spans.push(Span::styled(content, theme.preview_italic));
+            spans.push(Span::styled(content, theme.preview_italic()));
             i = end + 1;
             plain_start = i;
             continue;
@@ -138,14 +138,10 @@ fn find_single_star(chars: &[char], start: usize) -> Option<usize> {
 
 /// Find a specific character starting from `start`.
 fn find_char(chars: &[char], ch: char, start: usize) -> Option<usize> {
-    chars.iter().position(|&c| c == ch).and_then(|pos| {
-        // We need position >= start
-        if pos >= start {
-            Some(pos)
-        } else {
-            chars[start..].iter().position(|&c| c == ch).map(|p| p + start)
-        }
-    })
+    chars[start..]
+        .iter()
+        .position(|&c| c == ch)
+        .map(|p| p + start)
 }
 
 #[cfg(test)]

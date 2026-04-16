@@ -283,7 +283,7 @@ pub fn run(cli: Cli) -> Result<()> {
             }
 
             if !force {
-                if std::io::stdin().is_terminal() {
+                if !cli.no_input && std::io::stdin().is_terminal() {
                     let confirmed = dialoguer::Confirm::new()
                         .with_prompt(format!("Remove directory '{}'?", name))
                         .default(false)
@@ -292,14 +292,9 @@ pub fn run(cli: Cli) -> Result<()> {
                         println!("Aborted.");
                         return Ok(());
                     }
-                } else if cli.no_input {
+                } else {
                     anyhow::bail!(
                         "tome remove requires confirmation — use --force in non-interactive mode"
-                    );
-                } else {
-                    eprintln!(
-                        "warning: removing directory '{}' in non-interactive mode",
-                        name
                     );
                 }
             }
@@ -313,9 +308,12 @@ pub fn run(cli: Cli) -> Result<()> {
             // Save updated manifest
             manifest::save(&manifest, paths.config_dir())?;
             // Regenerate lockfile
-            let mut warnings = Vec::new();
+            let mut regen_warnings = Vec::new();
             let resolved_paths = std::collections::BTreeMap::new();
-            let skills = discover::discover_all(&config, &resolved_paths, &mut warnings)?;
+            let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+            for w in &regen_warnings {
+                eprintln!("warning: {}", w);
+            }
             let lockfile = lockfile::generate(&manifest, &skills);
             lockfile::save(&lockfile, paths.config_dir())?;
 
@@ -340,15 +338,34 @@ pub fn run(cli: Cli) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
 
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
-            manifest::save(&manifest, paths.config_dir())?;
+            if !cli.dry_run {
+                manifest::save(&manifest, paths.config_dir())?;
+                // Regenerate lockfile to keep it in sync
+                let mut regen_warnings = Vec::new();
+                let resolved_paths = std::collections::BTreeMap::new();
+                let skills =
+                    discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+                for w in &regen_warnings {
+                    eprintln!("warning: {}", w);
+                }
+                let lockfile_data = lockfile::generate(&manifest, &skills);
+                lockfile::save(&lockfile_data, paths.config_dir())?;
+                println!(
+                    "{} '{}' from '{}' to '{}'",
+                    style("Reassigned").green(),
+                    style(&skill).cyan(),
+                    style(&plan.from_directory).cyan(),
+                    style(&to).cyan(),
+                );
+            }
         }
         Command::Fork { skill, to, force } => {
             let mut manifest = manifest::load(paths.config_dir())?;
             let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true)?;
             reassign::render_plan(&plan);
 
-            if !force && !cli.no_input {
-                if std::io::stdin().is_terminal() {
+            if !force {
+                if !cli.no_input && std::io::stdin().is_terminal() {
                     let confirmed = dialoguer::Confirm::new()
                         .with_prompt(format!(
                             "Fork '{}' to '{}'? This copies skill files to the target directory.",
@@ -375,7 +392,25 @@ pub fn run(cli: Cli) -> Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
 
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
-            manifest::save(&manifest, paths.config_dir())?;
+            if !cli.dry_run {
+                manifest::save(&manifest, paths.config_dir())?;
+                // Regenerate lockfile to keep it in sync
+                let mut regen_warnings = Vec::new();
+                let resolved_paths = std::collections::BTreeMap::new();
+                let skills =
+                    discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+                for w in &regen_warnings {
+                    eprintln!("warning: {}", w);
+                }
+                let lockfile_data = lockfile::generate(&manifest, &skills);
+                lockfile::save(&lockfile_data, paths.config_dir())?;
+                println!(
+                    "{} '{}' to '{}' (local copy created)",
+                    style("Forked").green(),
+                    style(&skill).cyan(),
+                    style(&to).cyan(),
+                );
+            }
         }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;

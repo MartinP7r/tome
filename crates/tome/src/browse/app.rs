@@ -85,6 +85,7 @@ pub struct App {
     pub group_by_source: bool,
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
+    pub theme: super::theme::Theme,
 }
 
 impl App {
@@ -108,6 +109,7 @@ impl App {
             group_by_source: false,
             detail_actions: Vec::new(),
             detail_selected: 0,
+            theme: super::theme::Theme::detect(),
         };
         app.apply_sort();
         app.refresh_preview();
