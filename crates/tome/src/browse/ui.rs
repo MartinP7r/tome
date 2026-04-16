@@ -279,7 +279,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, width: u16, area: ratatui::la
     };
 
     let mode_text = match app.mode {
-        Mode::Normal | Mode::Detail => String::new(),
+        Mode::Normal | Mode::Detail | Mode::Help => String::new(),
         Mode::Search => format!("/{}", app.search_input),
     };
 
