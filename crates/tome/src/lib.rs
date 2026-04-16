@@ -22,6 +22,7 @@
 //! - [`TomePaths`] — bundled home/library paths
 //! - [`SyncReport`] — sync operation results
 
+pub(crate) mod add;
 pub(crate) mod backup;
 pub(crate) mod browse;
 pub(crate) mod cleanup;
@@ -197,6 +198,27 @@ pub fn run(cli: Cli) -> Result<()> {
 
     match cli.command {
         Command::Init => unreachable!(),
+        Command::Add {
+            url,
+            name,
+            branch,
+            tag,
+            rev,
+        } => {
+            let mut config = config;
+            add::add(
+                &mut config,
+                add::AddOptions {
+                    url: &url,
+                    name: name.as_deref(),
+                    branch: branch.as_deref(),
+                    tag: tag.as_deref(),
+                    rev: rev.as_deref(),
+                    dry_run: cli.dry_run,
+                    config_path: &paths.config_path(),
+                },
+            )?;
+        }
         Command::Sync { force, no_triage } => sync(
             &config,
             &paths,

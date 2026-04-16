@@ -51,6 +51,26 @@ pub enum LintFormat {
 
 #[derive(Subcommand)]
 pub enum Command {
+    /// Add a git skill repository
+    #[command(after_help = "Examples:\n  tome add https://github.com/user/skills.git\n  tome add https://github.com/user/skills.git --name my-skills\n  tome add git@github.com:user/skills.git --branch main")]
+    Add {
+        /// Git repository URL (HTTPS or SSH)
+        #[arg(value_name = "URL")]
+        url: String,
+        /// Custom directory name (default: extracted from URL)
+        #[arg(long)]
+        name: Option<String>,
+        /// Track a specific branch
+        #[arg(long, conflicts_with_all = ["tag", "rev"])]
+        branch: Option<String>,
+        /// Pin to a specific tag
+        #[arg(long, conflicts_with_all = ["branch", "rev"])]
+        tag: Option<String>,
+        /// Pin to a specific commit SHA
+        #[arg(long, conflicts_with_all = ["branch", "tag"])]
+        rev: Option<String>,
+    },
+
     /// Interactive wizard to configure sources and targets
     #[command(after_help = "Examples:\n  tome init")]
     Init,
