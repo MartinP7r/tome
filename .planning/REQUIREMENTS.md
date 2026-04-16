@@ -65,10 +65,10 @@ Requirements for v0.6 release. Each maps to roadmap phases.
 
 ### Browse Polish
 
-- [ ] **BROWSE-01**: Theming support (configurable color scheme)
-- [ ] **BROWSE-02**: Fuzzy match highlighting in skill list
-- [ ] **BROWSE-03**: Scrollbar indicator for long lists
-- [ ] **BROWSE-04**: Markdown syntax rendering in preview panel
+- [x] **BROWSE-01**: Theming support (configurable color scheme)
+- [x] **BROWSE-02**: Fuzzy match highlighting in skill list
+- [x] **BROWSE-03**: Scrollbar indicator for long lists
+- [x] **BROWSE-04**: Markdown syntax rendering in preview panel
 
 ## v2 Requirements
 
@@ -138,10 +138,10 @@ Deferred to future releases. Tracked but not in current roadmap.
 | CLI-01 | Phase 2 | Pending |
 | CLI-02 | Phase 3 | Pending |
 | CLI-03 | Phase 3 | Pending |
-| BROWSE-01 | Phase 3 | Pending |
-| BROWSE-02 | Phase 3 | Pending |
-| BROWSE-03 | Phase 3 | Pending |
-| BROWSE-04 | Phase 3 | Pending |
+| BROWSE-01 | Phase 3 | Complete |
+| BROWSE-02 | Phase 3 | Complete |
+| BROWSE-03 | Phase 3 | Complete |
+| BROWSE-04 | Phase 3 | Complete |
 
 **Coverage:**
 - v1 requirements: 39 total
