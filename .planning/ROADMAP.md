@@ -67,7 +67,7 @@ Plans:
 **UI hint**: yes
 
 Plans:
-- [ ] 03-01-PLAN.md — CLI commands: tome add, tome reassign, tome fork
+- [x] 03-01-PLAN.md — CLI commands: tome add, tome reassign, tome fork
 - [ ] 03-02-PLAN.md — Browse TUI polish: theming, scrollbar, fuzzy highlighting, markdown preview, help overlay
 
 ## Progress
@@ -79,4 +79,4 @@ Phases execute in numeric order: 1 -> 2 -> 3
 |-------|----------------|--------|-----------|
 | 1. Unified Directory Foundation | 3/5 | In Progress |  |
 | 2. Git Sources & Selection | 4/4 | Verifying | - |
-| 3. Import, Reassignment & Browse Polish | 0/2 | Planned | - |
+| 3. Import, Reassignment & Browse Polish | 1/2 | In Progress | - |
