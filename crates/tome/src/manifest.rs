@@ -65,6 +65,15 @@ impl Manifest {
     pub fn len(&self) -> usize {
         self.skills.len()
     }
+
+    /// Update the source_name for an existing skill entry.
+    ///
+    /// Preserves `content_hash`, `synced_at`, and other fields.
+    pub fn update_source_name(&mut self, skill_name: &str, new_source: &str) {
+        if let Some(entry) = self.skills.get_mut(skill_name) {
+            entry.source_name = new_source.to_string();
+        }
+    }
 }
 
 /// A single skill entry in the manifest.

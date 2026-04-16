@@ -40,6 +40,7 @@ pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
 pub(crate) mod paths;
+pub(crate) mod reassign;
 pub(crate) mod relocate;
 pub(crate) mod remove;
 pub(crate) mod skill;
@@ -325,6 +326,56 @@ pub fn run(cli: Cli) -> Result<()> {
                 result.library_entries_removed,
                 result.symlinks_removed,
             );
+        }
+        Command::Reassign { skill, to } => {
+            let mut manifest = manifest::load(paths.config_dir())?;
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false)?;
+            reassign::render_plan(&plan);
+
+            let target_dir_path = config
+                .directories
+                .get(&config::DirectoryName::new(&to)?)
+                .map(|d| config::expand_tilde(&d.path))
+                .transpose()?
+                .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
+
+            reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
+            manifest::save(&manifest, paths.config_dir())?;
+        }
+        Command::Fork { skill, to, force } => {
+            let mut manifest = manifest::load(paths.config_dir())?;
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true)?;
+            reassign::render_plan(&plan);
+
+            if !force && !cli.no_input {
+                if std::io::stdin().is_terminal() {
+                    let confirmed = dialoguer::Confirm::new()
+                        .with_prompt(format!(
+                            "Fork '{}' to '{}'? This copies skill files to the target directory.",
+                            skill, to
+                        ))
+                        .default(false)
+                        .interact()?;
+                    if !confirmed {
+                        println!("Aborted.");
+                        return Ok(());
+                    }
+                } else {
+                    anyhow::bail!(
+                        "tome fork requires confirmation — use --force in non-interactive mode"
+                    );
+                }
+            }
+
+            let target_dir_path = config
+                .directories
+                .get(&config::DirectoryName::new(&to)?)
+                .map(|d| config::expand_tilde(&d.path))
+                .transpose()?
+                .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
+
+            reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
+            manifest::save(&manifest, paths.config_dir())?;
         }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;

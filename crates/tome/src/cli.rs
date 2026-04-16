@@ -151,6 +151,31 @@ pub enum Command {
         force: bool,
     },
 
+    /// Reassign a skill to a different directory
+    #[command(after_help = "Examples:\n  tome reassign my-skill --to local-skills")]
+    Reassign {
+        /// Skill name to reassign
+        #[arg(value_name = "SKILL")]
+        skill: String,
+        /// Target directory name
+        #[arg(long)]
+        to: String,
+    },
+
+    /// Fork a managed skill to a local directory for customization
+    #[command(after_help = "Examples:\n  tome fork my-skill --to local-skills\n  tome fork my-skill --to local-skills --force")]
+    Fork {
+        /// Skill name to fork
+        #[arg(value_name = "SKILL")]
+        skill: String,
+        /// Target local directory
+        #[arg(long)]
+        to: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Move the skill library to a new location safely
     #[command(after_help = "Examples:\n  tome relocate ~/new-library")]
     Relocate {
