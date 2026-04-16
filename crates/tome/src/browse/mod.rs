@@ -1,5 +1,7 @@
 pub(crate) mod app;
 pub(crate) mod fuzzy;
+pub(crate) mod markdown;
+pub(crate) mod theme;
 pub(crate) mod ui;
 
 use std::time::Duration;
