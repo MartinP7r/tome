@@ -44,7 +44,7 @@ pub fn filter_rows(query: &str, rows: &[SkillRow]) -> Vec<usize> {
         })
         .collect();
 
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.1));
     scored.into_iter().map(|(i, _)| i).collect()
 }
 
@@ -102,7 +102,7 @@ pub fn filter_rows_with_indices(query: &str, rows: &[SkillRow]) -> Vec<FuzzyMatc
         })
         .collect();
 
-    scored.sort_by(|a, b| b.1.cmp(&a.1));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.1));
     scored.into_iter().map(|(m, _)| m).collect()
 }
 
