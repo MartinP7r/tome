@@ -28,14 +28,18 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active
 
-- [ ] Unified `[directories.*]` config replacing `[[sources]]` + `[targets.*]` (#396)
-- [ ] Wizard rewrite with merged KNOWN_DIRECTORIES registry (#362)
-- [ ] Git sources — clone/pull remote skill repos (#58)
-- [ ] Standalone SKILL.md import from GitHub repos (#92)
-- [ ] Per-target skill selection in machine.toml (#253)
-- [ ] `tome remove` — CLI to remove directories from config (#392)
-- [ ] Change skill source after the fact (#395)
-- [ ] Browse TUI visual polish (#365)
+(All v0.6 requirements completed — see Validated)
+
+### Recently Validated (v0.6)
+
+- ✓ Unified `[directories.*]` config replacing `[[sources]]` + `[targets.*]` (#396) — Phase 1
+- ✓ Wizard rewrite with merged KNOWN_DIRECTORIES registry (#362) — Phase 1
+- ✓ Git sources — clone/pull remote skill repos (#58) — Phase 2
+- ✓ Standalone SKILL.md import from GitHub repos (#92) — Phase 3
+- ✓ Per-target skill selection in machine.toml (#253) — Phase 2
+- ✓ `tome remove` — CLI to remove directories from config (#392) — Phase 2
+- ✓ Change skill source after the fact (#395) — Phase 3
+- ✓ Browse TUI visual polish (#365) — Phase 3
 
 ### Out of Scope
 
@@ -93,4 +97,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-10 after initialization*
+*Last updated: 2026-04-16 after Phase 3 completion (all v0.6 phases complete)*
