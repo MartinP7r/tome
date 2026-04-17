@@ -139,13 +139,20 @@ pub fn diagnose(
         let interactive = !no_input && std::io::stdin().is_terminal();
 
         if !dry_run && interactive {
-            // Separate orphan directories (need user decision) from auto-fixable issues
+            // Separate interactive issues (orphans, git-tracked) from auto-fixable ones
             let orphan_dirs: Vec<&DiagnosticIssue> = report
                 .library_issues
                 .iter()
                 .filter(|i| i.message.contains("orphan directory"))
                 .collect();
-            let auto_fixable = report.total_issues() - orphan_dirs.len();
+            let interactive_count = report
+                .library_issues
+                .iter()
+                .filter(|i| {
+                    i.message.contains("orphan directory") || i.message.contains("tracked in git")
+                })
+                .count();
+            let auto_fixable = report.total_issues() - interactive_count;
 
             // Auto-repair safe things (stale manifest entries, broken symlinks, stale target symlinks)
             if auto_fixable > 0 {
@@ -247,6 +254,73 @@ pub fn diagnose(
                     }
                 }
             }
+
+            // Handle git-tracked managed symlinks interactively
+            let has_git_tracked = report
+                .library_issues
+                .iter()
+                .any(|i| i.message.contains("managed symlink(s) tracked in git"));
+            if has_git_tracked {
+                let manifest = manifest::load(paths.config_dir())?;
+                let tracked = tracked_managed_symlinks(paths.library_dir(), &manifest);
+                if !tracked.is_empty() {
+                    println!();
+                    println!(
+                        "{} managed symlink(s) tracked in git:",
+                        style(tracked.len()).bold()
+                    );
+                    println!(
+                        "  These contain absolute paths (e.g. /Users/.../plugins/...) and show as"
+                    );
+                    println!("  broken on GitHub. They are recreated by `tome sync`.");
+                    println!();
+                    for name in &tracked {
+                        println!("    {}/", name);
+                    }
+                    println!();
+                    let confirmed = Confirm::new()
+                        .with_prompt(
+                            "Untrack these from git? (git rm --cached, files stay on disk)",
+                        )
+                        .default(true)
+                        .interact()?;
+
+                    if confirmed {
+                        let mut untracked = 0;
+                        for name in &tracked {
+                            let status = std::process::Command::new("git")
+                                .args(["rm", "--cached", "-r", name])
+                                .current_dir(paths.library_dir())
+                                .env_remove("GIT_DIR")
+                                .env_remove("GIT_WORK_TREE")
+                                .env_remove("GIT_INDEX_FILE")
+                                .output();
+                            match status {
+                                Ok(out) if out.status.success() => {
+                                    untracked += 1;
+                                }
+                                Ok(out) => {
+                                    eprintln!(
+                                        "  warning: git rm --cached {} failed: {}",
+                                        name,
+                                        String::from_utf8_lossy(&out.stderr).trim()
+                                    );
+                                }
+                                Err(e) => {
+                                    eprintln!("  warning: failed to run git: {}", e);
+                                }
+                            }
+                        }
+                        if untracked > 0 {
+                            println!(
+                                "  {} Untracked {} symlink(s). Commit the change to complete cleanup.",
+                                style("fixed").green(),
+                                untracked
+                            );
+                        }
+                    }
+                }
+            }
         } else if !dry_run {
             eprintln!("info: non-interactive mode — skipping repair prompt");
         } else {
@@ -260,8 +334,10 @@ pub fn diagnose(
 /// Show auto-fixable repair actions (excludes orphan directories which are handled interactively).
 fn render_repair_plan_auto(report: &DoctorReport) {
     for issue in &report.library_issues {
-        let action = if issue.message.contains("orphan directory") {
-            continue; // handled separately
+        let action = if issue.message.contains("orphan directory")
+            || issue.message.contains("tracked in git")
+        {
+            continue; // handled separately in interactive flow
         } else if issue.message.contains("no directory on disk") {
             "will remove entry from manifest file"
         } else if issue.message.contains("broken") {
@@ -402,7 +478,71 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         }
     }
 
+    // Check if managed symlinks are git-tracked (they show as broken paths on GitHub)
+    let git_dir = library_dir.join(".git");
+    if git_dir.exists()
+        || library_dir
+            .parent()
+            .is_some_and(|p| p.join(".git").exists())
+    {
+        let tracked = tracked_managed_symlinks(library_dir, &m);
+        if !tracked.is_empty() {
+            issues.push(DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: format!(
+                    "{} managed symlink(s) tracked in git (machine-specific, should be gitignored)",
+                    tracked.len()
+                ),
+            });
+        }
+    }
+
     Ok(issues)
+}
+
+/// Find managed skill symlinks that are tracked by git in the library directory.
+///
+/// These contain absolute machine-specific paths and show as broken on GitHub.
+fn tracked_managed_symlinks(
+    library_dir: &Path,
+    manifest: &crate::manifest::Manifest,
+) -> Vec<String> {
+    let output = std::process::Command::new("git")
+        .args(["ls-files", "-s"])
+        .current_dir(library_dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output();
+
+    let Ok(output) = output else {
+        return Vec::new(); // git not available or not a repo
+    };
+
+    if !output.status.success() {
+        return Vec::new();
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut tracked = Vec::new();
+
+    for line in stdout.lines() {
+        // git ls-files -s output: "120000 <hash> <stage>\t<path>"
+        // 120000 = symlink file mode
+        if !line.starts_with("120000 ") {
+            continue;
+        }
+        let Some(path) = line.split('\t').nth(1) else {
+            continue;
+        };
+        // Check if this is a managed skill (just the name, no subdirectory)
+        let name = path.rsplit('/').next().unwrap_or(path);
+        if manifest.get(name).is_some_and(|e| e.managed) {
+            tracked.push(name.to_string());
+        }
+    }
+
+    tracked
 }
 
 fn check_distribution_dir(
