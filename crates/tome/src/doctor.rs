@@ -136,40 +136,115 @@ pub fn diagnose(
             style(format!("Found {} issue(s).", total)).yellow().bold()
         );
 
-        // Show what repair will do before asking
-        println!();
-        println!("{}", style("Repair plan:").bold());
-        render_repair_plan(&report);
+        let interactive = !no_input && std::io::stdin().is_terminal();
 
-        if !dry_run {
-            let confirmed = if !no_input && std::io::stdin().is_terminal() {
-                Confirm::new()
-                    .with_prompt("Proceed with repair?")
-                    .default(true)
-                    .interact()?
-            } else {
-                eprintln!("info: non-interactive mode — skipping repair prompt");
-                false
-            };
+        if !dry_run && interactive {
+            // Separate orphan directories (need user decision) from auto-fixable issues
+            let orphan_dirs: Vec<&DiagnosticIssue> = report
+                .library_issues
+                .iter()
+                .filter(|i| i.message.contains("orphan directory"))
+                .collect();
+            let auto_fixable = report.total_issues() - orphan_dirs.len();
 
-            if confirmed {
+            // Auto-repair safe things (stale manifest entries, broken symlinks, stale target symlinks)
+            if auto_fixable > 0 {
                 println!();
-                println!("{}", style("Repairing...").bold());
-                repair_library(paths)?;
+                println!(
+                    "{} auto-fixable issue(s):",
+                    style(auto_fixable).bold()
+                );
+                render_repair_plan_auto(&report);
 
-                for (name, dir_config) in config.distribution_dirs() {
-                    let removed =
-                        cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
-                    if removed > 0 {
-                        println!(
-                            "  {} Removed {} stale symlink(s) from {}",
-                            style("fixed").green(),
-                            removed,
-                            name
-                        );
+                let confirmed = Confirm::new()
+                    .with_prompt("Proceed with auto-repair?")
+                    .default(true)
+                    .interact()?;
+
+                if confirmed {
+                    println!();
+                    repair_library(paths)?;
+
+                    for (name, dir_config) in config.distribution_dirs() {
+                        let removed =
+                            cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
+                        if removed > 0 {
+                            println!(
+                                "  {} Removed {} stale symlink(s) from {}",
+                                style("fixed").green(),
+                                removed,
+                                name
+                            );
+                        }
                     }
                 }
             }
+
+            // Handle orphan directories interactively — one at a time
+            if !orphan_dirs.is_empty() {
+                println!();
+                println!(
+                    "{} orphan director{} in library (on disk but not in manifest):",
+                    style(orphan_dirs.len()).bold(),
+                    if orphan_dirs.len() == 1 { "y" } else { "ies" }
+                );
+                for issue in &orphan_dirs {
+                    // Extract path from message: "orphan directory: <path> (not in manifest)"
+                    let path_str = issue
+                        .message
+                        .strip_prefix("orphan directory: ")
+                        .and_then(|s| s.strip_suffix(" (not in manifest)"))
+                        .unwrap_or(&issue.message);
+                    println!("  {}", path_str);
+                }
+                println!();
+                println!("  {} — run {} to re-register them in the manifest", style("keep").cyan(), style("tome sync").bold());
+                println!("  {} — delete from disk permanently", style("delete").cyan());
+                println!("  {} — leave as-is for now", style("skip").cyan());
+
+                for issue in &orphan_dirs {
+                    let path_str = issue
+                        .message
+                        .strip_prefix("orphan directory: ")
+                        .and_then(|s| s.strip_suffix(" (not in manifest)"))
+                        .unwrap_or(&issue.message);
+
+                    let items = ["keep (re-register on next sync)", "delete from disk", "skip"];
+                    let selection = dialoguer::Select::new()
+                        .with_prompt(path_str)
+                        .items(items)
+                        .default(2)
+                        .interact()?;
+
+                    match selection {
+                        0 => {
+                            println!(
+                                "  {} Keeping — run {} to re-register",
+                                style("ok").green(),
+                                style("tome sync").bold()
+                            );
+                        }
+                        1 => {
+                            let path = std::path::Path::new(path_str);
+                            if path.is_dir() {
+                                std::fs::remove_dir_all(path).with_context(|| {
+                                    format!("failed to delete {}", path.display())
+                                })?;
+                                println!(
+                                    "  {} Deleted {}",
+                                    style("fixed").green(),
+                                    path.display()
+                                );
+                            }
+                        }
+                        _ => {
+                            println!("  {} Skipped", style("—").dim());
+                        }
+                    }
+                }
+            }
+        } else if !dry_run {
+            eprintln!("info: non-interactive mode — skipping repair prompt");
         } else {
             println!("  (dry run — no changes made)");
         }
@@ -178,15 +253,15 @@ pub fn diagnose(
     Ok(())
 }
 
-/// Show what each repair action will do, so the user knows before confirming.
-fn render_repair_plan(report: &DoctorReport) {
+/// Show auto-fixable repair actions (excludes orphan directories which are handled interactively).
+fn render_repair_plan_auto(report: &DoctorReport) {
     for issue in &report.library_issues {
         let action = if issue.message.contains("orphan directory") {
-            "will delete directory from library"
+            continue; // handled separately
         } else if issue.message.contains("no directory on disk") {
             "will remove entry from manifest file"
         } else if issue.message.contains("broken") {
-            "will delete symlink and remove manifest entry"
+            "will delete broken symlink and remove manifest entry"
         } else {
             "requires manual investigation"
         };
@@ -195,7 +270,7 @@ fn render_repair_plan(report: &DoctorReport) {
     for (name, issues) in &report.directory_issues {
         for issue in issues {
             let action = if issue.message.contains("stale symlink") {
-                "will delete symlink from disk"
+                "will delete stale symlink from disk"
             } else {
                 "no auto-repair available"
             };
