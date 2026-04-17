@@ -150,10 +150,7 @@ pub fn diagnose(
             // Auto-repair safe things (stale manifest entries, broken symlinks, stale target symlinks)
             if auto_fixable > 0 {
                 println!();
-                println!(
-                    "{} auto-fixable issue(s):",
-                    style(auto_fixable).bold()
-                );
+                println!("{} auto-fixable issue(s):", style(auto_fixable).bold());
                 render_repair_plan_auto(&report);
 
                 let confirmed = Confirm::new()
@@ -198,8 +195,15 @@ pub fn diagnose(
                     println!("  {}", path_str);
                 }
                 println!();
-                println!("  {} — run {} to re-register them in the manifest", style("keep").cyan(), style("tome sync").bold());
-                println!("  {} — delete from disk permanently", style("delete").cyan());
+                println!(
+                    "  {} — run {} to re-register them in the manifest",
+                    style("keep").cyan(),
+                    style("tome sync").bold()
+                );
+                println!(
+                    "  {} — delete from disk permanently",
+                    style("delete").cyan()
+                );
                 println!("  {} — leave as-is for now", style("skip").cyan());
 
                 for issue in &orphan_dirs {
@@ -209,7 +213,11 @@ pub fn diagnose(
                         .and_then(|s| s.strip_suffix(" (not in manifest)"))
                         .unwrap_or(&issue.message);
 
-                    let items = ["keep (re-register on next sync)", "delete from disk", "skip"];
+                    let items = [
+                        "keep (re-register on next sync)",
+                        "delete from disk",
+                        "skip",
+                    ];
                     let selection = dialoguer::Select::new()
                         .with_prompt(path_str)
                         .items(items)
@@ -230,11 +238,7 @@ pub fn diagnose(
                                 std::fs::remove_dir_all(path).with_context(|| {
                                     format!("failed to delete {}", path.display())
                                 })?;
-                                println!(
-                                    "  {} Deleted {}",
-                                    style("fixed").green(),
-                                    path.display()
-                                );
+                                println!("  {} Deleted {}", style("fixed").green(), path.display());
                             }
                         }
                         _ => {
