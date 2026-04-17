@@ -136,10 +136,15 @@ pub fn diagnose(
             style(format!("Found {} issue(s).", total)).yellow().bold()
         );
 
+        // Show what repair will do before asking
+        println!();
+        println!("{}", style("Repair plan:").bold());
+        render_repair_plan(&report);
+
         if !dry_run {
             let confirmed = if !no_input && std::io::stdin().is_terminal() {
                 Confirm::new()
-                    .with_prompt("Repair these issues?")
+                    .with_prompt("Proceed with repair?")
                     .default(true)
                     .interact()?
             } else {
@@ -171,6 +176,39 @@ pub fn diagnose(
     }
 
     Ok(())
+}
+
+/// Show what each repair action will do, so the user knows before confirming.
+fn render_repair_plan(report: &DoctorReport) {
+    for issue in &report.library_issues {
+        let action = if issue.message.contains("orphan directory") {
+            "remove orphan directory"
+        } else if issue.message.contains("no directory on disk") {
+            "remove stale manifest entry"
+        } else if issue.message.contains("broken") {
+            "remove broken symlink and manifest entry"
+        } else {
+            "investigate manually"
+        };
+        println!("  → {} ({})", issue.message, style(action).cyan());
+    }
+    for (name, issues) in &report.directory_issues {
+        for issue in issues {
+            let action = if issue.message.contains("stale symlink") {
+                "remove stale symlink"
+            } else {
+                "no auto-repair"
+            };
+            println!("  → {}: {} ({})", name, issue.message, style(action).cyan());
+        }
+    }
+    for issue in &report.config_issues {
+        println!(
+            "  → {} ({})",
+            issue.message,
+            style("no auto-repair").cyan()
+        );
+    }
 }
 
 fn render_issues(issues: &[DiagnosticIssue], section: &str) {
