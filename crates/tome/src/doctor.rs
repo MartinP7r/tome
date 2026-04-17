@@ -182,22 +182,22 @@ pub fn diagnose(
 fn render_repair_plan(report: &DoctorReport) {
     for issue in &report.library_issues {
         let action = if issue.message.contains("orphan directory") {
-            "remove orphan directory"
+            "will delete directory from library"
         } else if issue.message.contains("no directory on disk") {
-            "remove stale manifest entry"
+            "will remove entry from manifest file"
         } else if issue.message.contains("broken") {
-            "remove broken symlink and manifest entry"
+            "will delete symlink and remove manifest entry"
         } else {
-            "investigate manually"
+            "requires manual investigation"
         };
         println!("  → {} ({})", issue.message, style(action).cyan());
     }
     for (name, issues) in &report.directory_issues {
         for issue in issues {
             let action = if issue.message.contains("stale symlink") {
-                "remove stale symlink"
+                "will delete symlink from disk"
             } else {
-                "no auto-repair"
+                "no auto-repair available"
             };
             println!("  → {}: {} ({})", name, issue.message, style(action).cyan());
         }
@@ -206,7 +206,7 @@ fn render_repair_plan(report: &DoctorReport) {
         println!(
             "  → {} ({})",
             issue.message,
-            style("no auto-repair").cyan()
+            style("no auto-repair available").cyan()
         );
     }
 }
