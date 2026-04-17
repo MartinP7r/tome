@@ -151,10 +151,8 @@ impl App {
             KeyCode::Tab => {
                 self.group_by_source = !self.group_by_source;
             }
-            KeyCode::Enter => {
-                if !self.filtered_indices.is_empty() {
-                    self.enter_detail_mode();
-                }
+            KeyCode::Enter if !self.filtered_indices.is_empty() => {
+                self.enter_detail_mode();
             }
             KeyCode::Char('?') => {
                 self.previous_mode = self.mode;
@@ -166,11 +164,9 @@ impl App {
 
     fn handle_detail_key(&mut self, key: KeyEvent) {
         match key.code {
-            KeyCode::Char('j') | KeyCode::Down => {
-                if !self.detail_actions.is_empty() {
-                    self.detail_selected =
-                        (self.detail_selected + 1).min(self.detail_actions.len() - 1);
-                }
+            KeyCode::Char('j') | KeyCode::Down if !self.detail_actions.is_empty() => {
+                self.detail_selected =
+                    (self.detail_selected + 1).min(self.detail_actions.len() - 1);
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 self.detail_selected = self.detail_selected.saturating_sub(1);
