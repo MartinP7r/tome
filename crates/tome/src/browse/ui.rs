@@ -351,35 +351,56 @@ fn render_status_bar(
     };
 
     let sort_label = app.sort_mode.label();
-    let hints = format!(
-        " | j/k \u{2195}  / search  s sort:{}  tab group  ? help  \u{23ce} detail  q quit",
-        sort_label
-    );
+    let sort_hint = format!("sort:{}", sort_label);
 
-    let status = Line::from(vec![
+    // Key/label pairs rendered with distinct styles for scanability.
+    // Keys get accent+bold, labels get muted. Inspired by zellij's status bar.
+    let hint_pairs: &[(&str, &str)] = &[
+        ("j/k", "\u{2195}"),
+        ("/", "search"),
+        ("s", sort_hint.as_str()),
+        ("tab", "group"),
+        ("?", "help"),
+        ("\u{23ce}", "detail"),
+        ("q", "quit"),
+    ];
+
+    let key_style = Style::default()
+        .fg(theme.badge_bg)
+        .bg(theme.status_bar_bg)
+        .add_modifier(Modifier::BOLD);
+    let label_style = Style::default().fg(theme.muted).bg(theme.status_bar_bg);
+    let bg_style = Style::default().bg(theme.status_bar_bg);
+
+    let mut spans = vec![
+        // Count badge: high-contrast foreground on badge_bg
         Span::styled(
             format!(" {count_text} "),
             Style::default()
-                .fg(theme.status_bar_fg)
-                .bg(theme.accent)
+                .fg(theme.badge_fg)
+                .bg(theme.badge_bg)
                 .add_modifier(Modifier::BOLD),
         ),
+        // Separator + optional search input
         Span::styled(
-            format!(" {mode_text}"),
+            format!(" {} ", mode_text),
             Style::default().fg(theme.alert).bg(theme.status_bar_bg),
         ),
-        Span::styled(
-            hints,
-            Style::default().fg(theme.muted).bg(theme.status_bar_bg),
-        ),
-        // Fill the rest
-        Span::styled(
-            " ".repeat(width as usize),
-            Style::default().bg(theme.status_bar_bg),
-        ),
-    ]);
+    ];
 
-    frame.render_widget(Paragraph::new(status), area);
+    for (i, (key, label)) in hint_pairs.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled("  ", bg_style));
+        }
+        spans.push(Span::styled((*key).to_string(), key_style));
+        spans.push(Span::styled(" ", bg_style));
+        spans.push(Span::styled((*label).to_string(), label_style));
+    }
+
+    // Fill the rest of the line with bg
+    spans.push(Span::styled(" ".repeat(width as usize), bg_style));
+
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Render a centered help overlay showing all keyboard shortcuts.

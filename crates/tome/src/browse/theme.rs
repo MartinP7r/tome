@@ -24,6 +24,13 @@ pub struct Theme {
     pub status_bar_fg: Color,
     /// Magenta family -- inline code.
     pub code_fg: Color,
+    /// Background color for the status bar count badge (e.g. "100 skills").
+    /// Separated from `accent` so the badge can stand out visually without
+    /// affecting other accent-colored elements.
+    pub badge_bg: Color,
+    /// Foreground color for high-contrast badges on the `badge_bg` background.
+    /// Must contrast with `badge_bg`.
+    pub badge_fg: Color,
 }
 
 impl Theme {
@@ -46,6 +53,8 @@ impl Theme {
             status_bar_bg: Color::DarkGray,
             status_bar_fg: Color::Gray,
             code_fg: Color::Magenta,
+            badge_bg: Color::Green,
+            badge_fg: Color::Black, // black on green = high contrast
         }
     }
 
@@ -59,6 +68,8 @@ impl Theme {
             status_bar_bg: Color::Indexed(254),
             status_bar_fg: Color::Indexed(243),
             code_fg: Color::Indexed(133), // dark magenta
+            badge_bg: Color::Indexed(28), // dark green
+            badge_fg: Color::White,       // white on dark-green = high contrast
         }
     }
 
