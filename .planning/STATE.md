@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.7
 milestone_name: Wizard Hardening
-status: roadmapped
-stopped_at: Roadmap approved; ready for phase planning
-last_updated: "2026-04-18"
-last_activity: 2026-04-18
+status: "Roadmap defined; ready for `/gsd:plan-phase 4`"
+stopped_at: Phase 4 context gathered
+last_updated: "2026-04-18T16:41:29.579Z"
+last_activity: 2026-04-18 — Roadmap created for v0.7 Wizard Hardening (phases 4-6)
 progress:
   total_phases: 3
   completed_phases: 0
@@ -46,6 +46,7 @@ Progress: [░░░░░░░░░░] 0% (0/3 phases complete)
 Decisions are logged in PROJECT.md Key Decisions table.
 
 Roadmap-specific:
+
 - Split v0.7 into three phases instead of two (research-suggested Correctness + Polish) to give test-coverage work its own verifiable boundary. Tests depend on Phase 4's pure-function extraction and must pass before polish lands.
 - Phase 6 absorbs both display polish (WHARD-07) and the doc housekeeping (WHARD-08) since they are small and share a "milestone-close" character.
 
@@ -59,6 +60,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-18
-Stopped at: Roadmap approved; ready for phase planning
-Resume file: .planning/ROADMAP.md
+Last session: 2026-04-18T16:41:29.575Z
+Stopped at: Phase 4 context gathered
+Resume file: .planning/phases/04-wizard-correctness/04-CONTEXT.md
