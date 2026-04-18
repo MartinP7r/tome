@@ -35,7 +35,22 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active
 
-(No active requirements — next milestone not yet planned)
+- [ ] Merged KNOWN_DIRECTORIES registry replacing KNOWN_SOURCES + KNOWN_TARGETS
+- [ ] Auto-discovery with role auto-assignment from registry
+- [ ] Summary table (name | path | type | role) before confirmation
+- [ ] Custom directory addition with role selection
+- [ ] Remove find_source_target_overlaps() dead code
+
+## Current Milestone: v0.7 Wizard Rewrite
+
+**Goal:** Rewrite `tome init` wizard to use the unified directory model, replacing the legacy source/target mental model.
+
+**Target features:**
+- Merged `KNOWN_DIRECTORIES` registry (replaces `KNOWN_SOURCES` + `KNOWN_TARGETS`)
+- Auto-discovery with role auto-assignment from registry
+- Summary table before confirmation
+- Custom directory addition with role selection
+- Remove `find_source_target_overlaps()` dead code
 
 ### Known Gaps (deferred from v0.6)
 
@@ -51,7 +66,7 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ## Context
 
-tome is at v0.6 (unreleased) with ~20k lines of Rust across 20+ source modules in a single crate. The unified directory model eliminated the source/target config split. Git-backed skill repos are supported with shallow clones and ref pinning.
+tome is at v0.6.1 with ~20k lines of Rust across 20+ source modules in a single crate. The unified directory model eliminated the source/target config split. Git-backed skill repos are supported with shallow clones and ref pinning.
 
 The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS.
 
@@ -84,4 +99,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-16 after v0.6 milestone completion*
+*Last updated: 2026-04-18 — v0.7 milestone started*

@@ -1,38 +1,53 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.6
-milestone_name: Unified Directory Model
-status: complete
-stopped_at: Milestone v0.6 archived
-last_updated: "2026-04-16"
-last_activity: 2026-04-16
+milestone: v0.7
+milestone_name: Wizard Rewrite
+status: defining
+stopped_at: Defining requirements
+last_updated: "2026-04-18"
+last_activity: 2026-04-18
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 11
-  completed_plans: 11
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-16)
+See: .planning/PROJECT.md (updated 2026-04-18)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** v0.6 milestone complete — next milestone not yet planned
+**Current focus:** v0.7 Wizard Rewrite — defining requirements
 
 ## Current Position
 
-Milestone: v0.6 Unified Directory Model — COMPLETE
-Phases: 3/3 complete (11/11 plans)
-Last activity: 2026-04-16
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-04-18 — Milestone v0.7 started
 
-Progress: [██████████] 100%
+Progress: [░░░░░░░░░░] 0%
+
+## Accumulated Context
+
+### Decisions
+
+Decisions are logged in PROJECT.md Key Decisions table.
+
+### Pending Todos
+
+None yet.
+
+### Blockers/Concerns
+
+None yet.
 
 ## Session Continuity
 
-Last session: 2026-04-16
-Stopped at: Milestone v0.6 archived
+Last session: 2026-04-18
+Stopped at: Defining requirements
 Resume file: None
