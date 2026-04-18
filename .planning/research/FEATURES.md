@@ -1,108 +1,152 @@
 # Feature Landscape
 
-**Domain:** AI agent skill/config distribution tool (CLI)
-**Researched:** 2026-04-10
+**Domain:** Interactive CLI setup wizard for config tool (tome init)
+**Researched:** 2026-04-16
+**Confidence:** HIGH (code review + domain patterns)
+
+## Current State Assessment
+
+The wizard rewrite is **substantially complete**. All five Active items from PROJECT.md have been implemented in `wizard.rs`:
+
+| Feature | Status | Evidence |
+|---------|--------|----------|
+| Merged KNOWN_DIRECTORIES registry | Done | `wizard.rs:41` -- 11-entry `KNOWN_DIRECTORIES` const |
+| Auto-discovery with role auto-assignment | Done | `find_known_directories_in()` + `default_role` per entry |
+| Summary table (name, path, type, role) | Done | `show_directory_summary()` with formatted columns |
+| Custom directory addition with role selection | Done | Loop at line 227 with type + role pickers |
+| Remove find_source_target_overlaps() dead code | Done | grep confirms zero references in codebase |
+
+The remaining v0.7 work is polish, testing, and minor UX refinements -- not a ground-up rewrite.
 
 ## Table Stakes
 
-Features users expect. Missing = product feels incomplete.
+Features users expect from an interactive CLI wizard. Missing = setup feels broken or confusing.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Unified directory config | Every mature tool (Cargo workspaces, Terraform modules, Nix) uses a single config block per directory with role annotations rather than separate source/target lists. The current source/target split creates the exact overlap problem `find_source_target_overlaps()` exists to detect. | High | Core of v0.6. Replaces `[[sources]]` + `[targets.*]` with `[directories.*]`. Cargo's `[workspace.members]` and Terraform's `module` blocks both use a single declaration per external dependency with role implied by usage. |
-| Git source: clone and pull | Cargo (`git = "url"`), Go (`require github.com/...`), SPM (`.package(url:)`), Terraform (`source = "git::https://..."`) all support git-based dependencies as a first-class primitive. The agent skills ecosystem has 351k+ skills as of March 2026, many in GitHub repos. Without git sources, users must manually clone and point a Directory source at the clone. | High | Clone to `~/.tome/repos/<hash>/`, pull on sync. Cargo and SPM both store resolved commits in lockfiles (Cargo.lock, Package.resolved). tome should record resolved commit SHA in `tome.lock`. |
-| Git ref pinning (branch/tag/SHA) | Every git dependency system supports at least branch, tag, and commit SHA. Cargo: `branch`, `tag`, `rev` (mutually exclusive). SPM: `.branch()`, `.revision()`, `.exact()`. Terraform: `?ref=v1.0.0`. Go: `@commit-hash` pseudo-versions. | Medium | Implement as `ref` field in directory config. One of: branch name, tag, or full SHA. Default: repo default branch. Record resolved SHA in lockfile regardless of ref type. |
-| `tome remove` CLI | Any tool that has `add` or `init` for config entries needs a `remove` counterpart. `npm uninstall`, `cargo remove`, `brew uninstall`. Without it, users edit TOML by hand -- error-prone and hostile to the wizard-based UX. | Low | Remove directory entry from config, clean up library/symlinks. Interactive confirmation. |
-| Per-target skill selection | chezmoi uses per-machine templating (`{{ if eq .chezmoi.hostname "work" }}`). Nix home-manager uses `lib.mkIf` guards and per-host imports. tome already has global disable via `machine.toml` -- but "disable skill X only for target Y" is the natural next step. Every user with 2+ tools wants different skill subsets per tool. | Medium | Extend `machine.toml` with `[targets.<name>]` sections containing `disabled` sets. Distribution checks both global and per-target disables. |
-| Standalone skill import from URL | `npx skills add <package>` is the ecosystem standard. Users expect to grab a skill from a GitHub URL without configuring a full git source directory. Analogous to `go get` for a single package or `cargo add` for a single dependency. | Medium | Download SKILL.md (+ siblings) from GitHub URL, place in library. Could use GitHub API or raw URL fetch. Record provenance in manifest. |
-| Lockfile records git commit SHA | Cargo.lock records exact git commit hashes. SPM's Package.resolved does the same. Go's go.sum records hashes. Reproducibility requires knowing exactly what was synced. | Low | Already have lockfile infrastructure. Add `git_commit_sha` field (already exists in lockfile schema for managed plugins -- extend to git sources). |
+| Feature | Why Expected | Complexity | Status | Notes |
+|---------|--------------|------------|--------|-------|
+| Auto-discover existing directories | Users should not type paths the tool can find | Low | Done | `find_known_directories_in()` scans 11 known paths |
+| Pre-select all discovered dirs | Convention from ESLint, npm init -- discovered = wanted | Low | Done | `defaults(&vec![true; found.len()])` |
+| Role explanation before prompts | Users need to understand Managed/Synced/Source/Target before choosing | Low | Done | Printed at wizard start with descriptions |
+| Summary table before write | Review-before-commit is standard wizard UX (ESLint, Cargo) | Low | Done | `show_directory_summary()` |
+| Save confirmation prompt | Never write config without explicit consent | Low | Done | `Confirm::new().with_prompt("Save configuration?")` |
+| Dry-run mode | Let users preview without side effects | Low | Done | `--dry-run` prints generated TOML without saving |
+| Custom directory addition | Not all dirs are in the known registry | Low | Done | Loop with name/path/type/role prompts |
+| Exclusion picker | Fine-grained control over what gets synced | Med | Done | `configure_exclusions()` with MultiSelect |
+| Library location picker | Users may want non-default library paths | Low | Done | `configure_library()` with Select + Input fallback |
+| Role editing after summary | Fix mistakes without restarting the wizard | Low | Done | "Would you like to edit any directory's role?" loop |
 
 ## Differentiators
 
-Features that set tome apart from `npx skills` and manual symlink management.
+Features that elevate the wizard from functional to polished. Not expected, but valued.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Bidirectional directory roles | No comparable tool treats a single directory as both source and target. Stow is source-only (stow dir -> target). chezmoi is source-only (source state -> home). tome's unified model where `~/.claude/skills` can be both "read skills from here" AND "distribute skills to here" is unique. The `role` field (managed/synced/source/target) on each directory entry is a genuinely novel config model. | High | This IS the v0.6 headline. Roles: `managed` (package manager owns files, symlink from library), `synced` (bidirectional -- library is canonical but skills can originate here), `source` (read-only input), `target` (receive-only output). |
-| Source reassignment | No package manager lets you change where a dependency comes from without removing and re-adding. `cargo` requires editing Cargo.toml manually. tome can offer `tome reassign <skill> --from local --to git` to migrate a skill's provenance without losing the skill content. | Medium | Updates manifest provenance metadata. May need to convert between copy (local) and symlink (managed/git) strategies. |
-| Automatic role inference in wizard | `npx skills` has no concept of tool relationships. tome's wizard can auto-detect known directories (Claude plugins, Codex skills, Cursor rules) and assign sensible default roles. Cargo workspaces require manual `members` listing. tome can be smarter. | Medium | Merge `KNOWN_SOURCES` and `KNOWN_TARGETS` into `KNOWN_DIRECTORIES` with default roles. Wizard shows summary: "Detected ~/.claude/skills as synced directory (source + target)". |
-| Cross-tool skill distribution with single library | `npx skills` installs per-tool. chezmoi distributes dotfiles but has no concept of "the same config going to multiple tools". tome's library-as-hub model where one canonical copy fans out to 16+ AI tools is its core differentiator vs. every other tool in the space. | Already built | v0.2 delivered this. v0.6 just unifies the config model around it. |
-| Private git repo support | Terraform supports SSH keys per workspace. Cargo uses SSH agent or credential helpers. Go modules support `GOPRIVATE`. For enterprise users with internal skill repos, SSH-based git clone is essential. | Low | Use system git (inherits SSH agent, credential helpers). No custom auth needed -- just `git clone <url>` with whatever credentials the user's git is configured with. |
-| Shallow clone for large repos | Go modules and Cargo both fetch minimal data. For skill repos with thousands of commits, `git clone --depth 1` is the sensible default. | Low | Default to `--depth 1` for initial clone. Full clone available via config flag if needed. `git pull` with `--depth 1` for updates. |
+| Feature | Value Proposition | Complexity | Status | Notes |
+|---------|-------------------|------------|--------|-------|
+| Valid-role filtering by type | Prevents invalid combos (e.g. Git+Target, Directory+Managed) | Low | Done | `directory_type.valid_roles()` gates role picker |
+| ClaudePlugins locked to Managed | Prevents user error on immutable source | Low | Done | Filtered out of editable list |
+| Tilde-collapsed paths in display | Readable paths matching config file format | Low | Done | Uses `collapse_home_path()` |
+| Terminal-height-aware lists | Prevents scroll overflow on small terminals | Low | Done | `max_rows` from `Term::stderr().size()` |
+| Git backup init offer | Encourages backup practice post-setup | Low | Done | Offered after config save |
+| Summary table via `tabled` crate | Proper column alignment with borders, visual consistency with `tome list`/`tome status` | Low | Not done | Current: manual `format!` padding. `tabled` already in deps |
+| Existing config detection | Warn if config exists, offer merge/overwrite/abort | Med | Not done | Currently overwrites silently on confirm |
+| Path existence warning | Warn when custom path does not exist to catch typos | Low | Not done | `Input` accepts any string without validation |
+| Role recommendation hints | Show "Recommended: Synced" next to options based on type default | Low | Not done | `default_role()` exists but is not surfaced in picker UI |
+| Post-init next-steps message | Print "Run `tome sync` to populate" after save -- standard pattern (ESLint, npm, cargo) | Low | Not done | Silent after save currently |
+| Skill count per directory in summary | Show how many skills were discovered per dir before confirming | Low | Not done | Discovery already runs before exclusions step |
 
 ## Anti-Features
 
-Features to explicitly NOT build.
+Features to explicitly NOT build. Each would add complexity without proportional value.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Bidirectional file sync (two-way merge) | Dropbox-style conflict resolution is a bottomless pit. Stow deliberately avoids it. chezmoi uses source-state-wins semantics. Git itself is the only good merge tool. | tome's model is clear: library is canonical. Sources flow IN, targets flow OUT. "Synced" directories are just directories that are both source and target, not two-way-merged. |
-| Template rendering for per-machine config | chezmoi's Go template system is powerful but adds enormous complexity (template syntax, variable resolution, debugging). Nix's module system is even more complex. | Use tome's existing `machine.toml` for per-machine differences. It handles the 90% case (enable/disable skills per machine/target) without template complexity. |
-| Dependency resolution between skills | npm, Cargo, and Go all have dependency solvers. Skills are independent documents, not code with import graphs. Adding dependency resolution would be massive overengineering. | Skills are flat. If skill A needs skill B, document it in the SKILL.md description. The user manages the relationship. |
-| Auto-update on schedule / watch mode | Homebrew's auto-update is widely hated. Watch mode (#59) adds daemon complexity for marginal benefit. `tome sync` is fast and explicit. | Keep sync explicit. Users run `tome sync` when they want updates. CI can run it on schedule if desired. |
-| Registry / marketplace hosting | `npx skills` already has Skills.sh. Crates.io exists for Cargo. Building a competing registry is a different product entirely. | Support consuming from existing registries (GitHub, npm/npx skills). Don't host. |
-| Config migration command | Single user (Martin). Manual migration with documented steps is sufficient. Building `tome migrate` for a one-time use by one person is negative ROI. | Document the config format change in CHANGELOG. Provide a before/after example. |
-| Nested git repos in library | Git submodules are universally despised. Placing `.git` directories inside the library (which may itself be a git repo) causes confusion and tooling conflicts. | Clone git sources to `~/.tome/repos/<hash>/`. Consolidate into library via copy or symlink. Keep library clean. |
-| Format transforms in v0.6 | Rules syncing (#193), instruction file syncing (#194), and format conversion (#57) are a separate concern. Mixing them with the directory model refactor bloats scope and delays shipping. | Defer to post-v0.6. The unified directory model is the foundation; format transforms build on top of it. |
+| TUI-based wizard (ratatui) | Over-engineered for one-time setup; dialoguer is the correct abstraction for linear prompts | Keep dialoguer prompts |
+| Git URL input in wizard | Git sources need branch/tag/rev/subdir -- too many fields for wizard flow | Use `tome add <url>` post-init |
+| Undo/back navigation | dialoguer does not support back-navigation; linear wizards work fine for 4-5 steps | Let users re-run `tome init` or edit config manually |
+| Config migration from old format | Single user, hard break documented in CHANGELOG | Already handled |
+| Full home directory scan | Scanning entire $HOME is slow, produces false positives | Keep curated KNOWN_DIRECTORIES registry |
+| Template-based config generation | Over-engineering; TOML serialization from Config struct is sufficient | Keep `config.save()` |
+| Remote skill repo browsing | Network dependency in init is fragile | Suggest `tome add` in post-init message |
+| Interactive config editor (re-open wizard for existing config) | Scope creep; `tome init` is for first setup, manual TOML editing works for changes | Document TOML format in docs |
 
 ## Feature Dependencies
 
 ```
-Unified directory config (#396) --> Git sources (#58)
-  (git sources need the new DirectoryConfig with type=git and ref fields)
+Auto-discovery --> Summary table (need dirs to display)
+Summary table --> Role editing loop (edit what you see)
+Role editing loop --> Custom directory addition (add after reviewing)
+Custom directory addition --> Summary table refresh (show updated state)
+All above --> Save confirmation --> Config write
+Config write --> Git backup init offer (only if config saved)
+Exclusion picker depends on: directory selection (discovers skills from selected dirs)
 
-Unified directory config (#396) --> Per-target skill selection (#253)
-  (per-target selection references directory names from the new config)
-
-Unified directory config (#396) --> tome remove (#392)
-  (remove operates on the new directory entries)
-
-Unified directory config (#396) --> Source reassignment (#395)
-  (reassignment changes directory config entries)
-
-Unified directory config (#396) --> Wizard rewrite (#362)
-  (wizard must produce the new config format)
-
-Git sources (#58) --> Standalone SKILL.md import (#92)
-  (import is a simplified form of git source -- fetch from URL, place in library)
-
-Git sources (#58) --> Lockfile git SHA recording
-  (lockfile must record resolved commit for reproducibility)
+Polish features (no hard dependencies on each other):
+  tabled summary -- standalone
+  existing config detection -- standalone (check before step 1)
+  path existence warning -- standalone (in custom dir addition)
+  post-init message -- standalone (after save)
+  role recommendation hints -- standalone (in role picker)
 ```
+
+## Polish Candidates (v0.7 scope)
+
+Since the core rewrite is done, v0.7 should focus on polish items:
+
+### P1: Summary table with `tabled` (Low complexity)
+Replace manual `format!`-based table with the `tabled` crate already in dependencies. Gives proper column alignment, borders, and visual consistency with `tome list` and `tome status`.
+
+**Dependency:** None -- `tabled` already a dependency.
+
+### P2: Post-init next-steps message (Low complexity)
+After saving config, print actionable guidance: "Run `tome sync` to populate your library" and "Run `tome add <url>` to add git skill repos." Every major CLI tool does this (ESLint prints next steps, `cargo init` suggests `cargo run`, `npm init` says "run `npm install`").
+
+**Dependency:** None.
+
+### P3: Custom path existence warning (Low complexity)
+When user types a custom directory path, check if it exists. If not, show: "Path does not exist. It will be created during sync. Continue?" Catches typos before they become bad config entries.
+
+**Dependency:** None.
+
+### P4: Existing config detection (Low-Med complexity)
+When `tome.toml` already exists, warn and offer: overwrite, abort, or continue (merge discovered dirs). Prevents accidental config loss on re-init. `Config::load_or_default()` already provides the loading infrastructure.
+
+**Dependency:** Config loading infrastructure (exists).
+
+### P5: Role recommendation hints (Low complexity)
+In role picker for custom directories, highlight the default: "Synced (recommended for directory type)" vs just "Synced". The `default_role()` method exists but is not surfaced in the picker UI.
+
+**Dependency:** None.
+
+### P6: Skill count in summary table (Low complexity)
+Show discovered skill count per directory in the summary table. Discovery already runs between step 1 and step 3 -- the data is available. Helps users judge whether directories are correctly configured before saving.
+
+**Dependency:** Discovery results (already computed at line 148).
+
+### P7: Integration tests for non-interactive parts (Med complexity)
+Test discovery, summary rendering, and config generation in isolation. dialoguer requires a TTY so full wizard flow cannot be integration-tested, but the helper functions (`find_known_directories_in`, `show_directory_summary`, config struct assembly) are testable.
+
+**Dependency:** Test infrastructure.
 
 ## MVP Recommendation
 
-The dependency graph makes the ordering clear:
+**Ship (low effort, high impact):**
+1. P1: `tabled` summary table -- visual consistency with rest of CLI
+2. P2: Post-init next-steps message -- standard UX pattern
+3. P3: Custom path existence warning -- prevents typos
 
-**Phase 1 -- Foundation (must ship together):**
-1. Unified directory config (#396) -- everything depends on this
-2. Wizard rewrite (#362) -- config is useless without a way to create it
+**Consider (medium effort, medium impact):**
+4. P4: Existing config detection -- prevents data loss
+5. P6: Skill count in summary -- better informed decisions
+6. P5: Role recommendation hints -- reduces confusion
 
-**Phase 2 -- Git ecosystem:**
-3. Git sources with ref pinning (#58) -- highest-value new capability
-4. Lockfile git SHA recording -- comes naturally with git sources
-
-**Phase 3 -- Selection and management:**
-5. Per-target skill selection (#253) -- unblocked by unified config
-6. `tome remove` (#392) -- low complexity, high quality-of-life
-7. Standalone SKILL.md import (#92) -- simplified git fetch
-
-**Phase 4 -- Polish:**
-8. Source reassignment (#395) -- nice-to-have, not blocking
-9. Browse TUI polish (#365) -- visual only, no functional dependency
-
-**Defer:** Format transforms, watch mode, registry hosting, template rendering.
+**Defer:**
+7. P7: Integration tests -- valuable but not blocking; dialoguer testability is a known limitation
 
 ## Sources
 
-- [Cargo workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html) -- unified member/dependency config
-- [Cargo git dependencies](https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html) -- branch/tag/rev specification
-- [Go modules reference](https://go.dev/ref/mod) -- replace directive, version pinning
-- [Swift Package Manager](https://docs.swift.org/package-manager/PackageDescription/PackageDescription.html) -- .branch/.revision/.exact
-- [Terraform module sources](https://developer.hashicorp.com/terraform/language/modules/sources) -- git::url?ref= pattern
-- [chezmoi machine differences](https://www.chezmoi.io/user-guide/manage-machine-to-machine-differences/) -- per-machine templating
-- [GNU Stow manual](https://www.gnu.org/software/stow/manual/stow.html) -- symlink farm management
-- [Vercel skills CLI](https://github.com/vercel-labs/skills) -- npx skills add/find/update
-- [Agent Skills ecosystem 2026](https://vercel.com/docs/agent-resources/skills) -- 16+ tools, 351k+ skills
-- [Nix home-manager per-host config](https://github.com/rycee/home-manager/issues/8) -- conditional module selection
-- [Cargo git rev locking](https://github.com/rust-lang/cargo/issues/7497) -- commit hash in Cargo.lock
+- [ESLint CLI init wizard](https://eslint.org/docs/latest/use/command-line-interface) -- `--init` pattern: prompts, auto-detect, config generation, next-steps message
+- [chezmoi setup](https://www.chezmoi.io/user-guide/setup/) -- dotfile manager init flow
+- [dialoguer MultiSelect](https://docs.rs/dialoguer/latest/dialoguer/struct.MultiSelect.html) -- prompt library API
+- [tabled crate](https://docs.rs/crate/tabled/latest) -- table formatting, already in tome deps
+- [Progressive Disclosure (NN/G)](https://www.nngroup.com/articles/progressive-disclosure/) -- wizard UX: staged reveal of complexity
+- Code review: `crates/tome/src/wizard.rs` -- 602 lines, fully implemented unified model
+- Code review: `crates/tome/src/config.rs` -- DirectoryRole, DirectoryType, valid_roles(), default_role()

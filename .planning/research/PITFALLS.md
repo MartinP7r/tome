@@ -1,218 +1,190 @@
 # Domain Pitfalls
 
-**Domain:** Rust CLI config refactor with git source integration (tome v0.6)
-**Researched:** 2026-04-10
+**Domain:** Wizard rewrite — unified directory model (tome v0.7)  
+**Researched:** 2026-04-16  
+**Confidence:** HIGH (code-informed, single-crate analysis)
 
 ## Critical Pitfalls
 
 Mistakes that cause rewrites or major issues.
 
-### Pitfall 1: Serde Deserialization Silently Succeeds on Partial Old Config
+### Pitfall 1: Wizard bypasses config validation — invalid type/role combos save successfully
 
-**What goes wrong:** After replacing `sources: Vec<Source>` + `targets: BTreeMap<TargetName, TargetConfig>` with `directories: BTreeMap<DirectoryName, DirectoryConfig>`, serde's `#[serde(default)]` on the new `directories` field means an old `tome.toml` (with `[[sources]]` and `[targets.*]`) will parse *successfully* with an empty `directories` map. The old fields are silently ignored. `tome sync` runs, finds zero directories, does nothing, and the user thinks sync is broken.
+**What goes wrong:** The wizard builds `DirectoryConfig` structs in memory and passes them directly to `Config` without round-tripping through TOML deserialization. The `Deserialize` impl in `config.rs` (lines 344-370) validates type/role combinations (e.g., rejects `Git + Target`, rejects `Directory + Managed`), but the wizard constructs structs directly and never hits those checks. If the role-editing loop or custom directory flow produces an invalid combination, it saves without error.
 
-**Why it happens:** Serde's `#[serde(default)]` is designed for forward-compatible evolution but creates a trap during breaking migrations. The old fields become "unknown keys" which TOML deserialization silently discards (unless `#[serde(deny_unknown_fields)]` is used).
+**Why it happens:** Two validation paths exist: the serde `Deserialize` impl (used when loading from disk) and the wizard's in-memory construction. The wizard relies on `valid_roles()` to filter the role picker, but that filter can be bypassed during refactoring.
 
-**Consequences:** User runs `tome sync` after upgrade, gets zero skills synced, no error message. Library may even get cleaned up (cleanup removes skills not in any directory). Data loss if library contents were the only copies.
-
-**Prevention:**
-1. Add `#[serde(deny_unknown_fields)]` to `Config` struct during the transition. This makes old configs fail loudly with "unknown field `sources`" instead of silently succeeding.
-2. Alternatively, keep the old field names as `#[serde(skip)]` with a custom deserializer that detects them and returns an actionable error: "Config uses old format. See migration guide at [URL]."
-3. Add a config version field: `config_version = 2` at the top of the new format. Check for its absence.
-
-**Detection:** Integration test that loads a v0.5 config into the v0.6 `Config` struct and asserts it fails with a meaningful error, not silently succeeds.
-
-**Phase mapping:** Must be addressed in the foundation PR (#396) before any other v0.6 work.
-
-### Pitfall 2: Cleanup Deletes Library Skills During Config Migration Gap
-
-**What goes wrong:** Between upgrading the binary and updating `tome.toml`, there's a window where the new binary parses zero directories (see Pitfall 1) and the cleanup phase removes all library skills as "stale" (not referenced by any directory).
-
-**Why it happens:** The cleanup module removes library entries that don't correspond to any configured source/directory. With zero directories configured, *all* skills are stale.
-
-**Consequences:** Irreversible library data loss. Even if the library is git-backed (`tome backup`), the user may not realize what happened until skills are missing from their tools.
+**Consequences:** Config saves successfully but `tome sync` fails on next run with a confusing validation error. User blames sync, not init. Worse, if `deny_unknown_fields` is not set, the invalid config might partially work and produce subtle bugs.
 
 **Prevention:**
-1. Add a safety check in cleanup: if `directories.is_empty()`, skip cleanup entirely and warn "No directories configured -- skipping cleanup to protect library contents."
-2. This guard is cheap and prevents the catastrophic case regardless of how the zero-directory state is reached.
+- Call `Config::validate()` (or round-trip through `toml::from_str(toml::to_string_pretty(&config)?)`) on the assembled config before saving.
+- Unit test: construct every `(DirectoryType, DirectoryRole)` combination via the wizard's struct-building path and assert invalid ones are caught before save.
 
-**Detection:** Integration test: sync with zero sources/directories configured, verify library contents are preserved (not deleted).
+**Detection:** Integration test: wizard output round-trips through TOML serialization/deserialization without error.
 
-**Phase mapping:** Foundation PR (#396). This is a day-one safety rail.
+**Phase:** Must be in the wizard rewrite PR. Add the validation call before `config.save()`.
 
-### Pitfall 3: Git Clone in Sync Pipeline Makes Sync Unreliable
+### Pitfall 2: Synced role creates circular symlinks when library_dir overlaps a synced directory
 
-**What goes wrong:** Adding `git clone --depth 1` (or `git pull`) to the sync pipeline means `tome sync` now has a network dependency. If the remote is unreachable (offline, auth expired, DNS failure), sync fails entirely even though local directories are fine.
+**What goes wrong:** A `Synced` directory is both a discovery source and a distribution target. If the library directory lives inside (or is a parent of) a synced directory, the distribute step creates symlinks pointing back into the library, causing infinite loops or duplicate skill entries on every sync.
 
-**Why it happens:** Mixing network I/O with local filesystem operations in a single pipeline without fault isolation.
+**Why it happens:** The old model had separate source and target lists, making this architecturally impossible. With `Synced`, the same path participates in both pipelines. The wizard doesn't validate that `library_dir` doesn't overlap with any distribution directory.
 
-**Consequences:** Users who are offline (airplane, VPN down) cannot sync local skills. The entire sync breaks because one git remote is unreachable.
-
-**Prevention:**
-1. Git fetch/clone must be a **separate, failable phase** that runs before the main sync pipeline. Failed git sources should be logged as warnings, not errors that abort sync.
-2. Use cached state: if `~/.tome/repos/<hash>/` already has a previous clone, use it as-is when fetch fails. Log "Using cached version of [repo] (fetch failed: [reason])".
-3. Consider a separate command (`tome fetch` or `tome pull`) for explicit git updates, with `tome sync` only using whatever is already cached locally.
-
-**Detection:** Integration test that mocks a git remote failure (point at nonexistent URL) and verifies sync still completes for non-git directories.
-
-**Phase mapping:** Git sources implementation phase. Design the failure mode *before* writing the clone logic.
-
-### Pitfall 4: Shelling Out to `git` Without Checking `git` Exists
-
-**What goes wrong:** The existing `backup.rs` pattern uses `Command::new("git")` which fails with an opaque `io::Error` ("No such file or directory") if git is not installed. The same pattern for git sources would fail similarly.
-
-**Why it happens:** `Command::new("git").output()` returns `Err(io::Error)` when the binary is not found, but the error message doesn't mention that git is missing -- it looks like a file operation failure.
-
-**Consequences:** Confusing error message. Users without git installed (rare but possible in containers) get an unhelpful error.
+**Consequences:** `tome sync` loops or duplicates every skill. Manifest hashes change on every run (non-idempotent sync). Potentially fills disk with symlink chains.
 
 **Prevention:**
-1. At startup of any git operation, check `Command::new("git").arg("--version").output()` and convert the error to a human-readable "git is not installed. Git sources require git to be available in PATH."
-2. Extract this into a shared `git::require_git()` function that both backup and git-sources can call.
-3. Already partially exists in `backup.rs` -- extend the pattern, don't duplicate it.
+- At the wizard summary step (before save), validate that `library_dir` does not overlap with any directory where `is_distribution() == true`.
+- Port the existing manifest-based circular symlink detection to also cover the wizard's config assembly.
 
-**Detection:** Unit test that verifies the error message when git binary is not found (set PATH to empty in test).
+**Detection:** Test: synced directory containing library_dir should produce a wizard error, not a saved config. `tome doctor` should also flag this.
 
-**Phase mapping:** Git sources implementation. Can reuse/extend the `backup.rs` git helpers.
+**Phase:** Wizard rewrite PR. Add overlap check before the summary table.
+
+### Pitfall 3: BTreeMap ordering silently changes duplicate resolution vs. wizard display order
+
+**What goes wrong:** When two directories contain a skill with the same name, `discover_all` resolves by alphabetical BTreeMap key order (first key wins). The wizard presents directories in `KNOWN_DIRECTORIES` array order (roughly by popularity). Users see "claude-skills" listed first in the wizard prompt but "amp" wins in the BTreeMap because `"a" < "c"`.
+
+**Why it happens:** Display order (KNOWN_DIRECTORIES array position) and resolution order (BTreeMap key sort) are different.
+
+**Consequences:** User selects directories expecting one priority order but gets another. Skills from unexpected sources appear in the library. Hard to debug because the wizard shows one order and sync follows another.
+
+**Prevention:**
+- Sort the summary table alphabetically (matching BTreeMap iteration order) so users see actual resolution order.
+- Add a note: "In case of duplicate skill names, the first directory alphabetically wins."
+- Run `discover_all` before the summary step (already done for exclusions) and show warnings about duplicate skill names across selected directories.
+
+**Detection:** Test: two directories with overlapping skill names, verify the wizard warns about the conflict.
+
+**Phase:** Wizard rewrite PR. Add conflict detection to the summary step.
 
 ## Moderate Pitfalls
 
-### Pitfall 5: BTreeMap Alphabetical Priority Is Surprising for Users
+### Pitfall 4: Empty directory selection produces a useless but valid config
 
-**What goes wrong:** With `directories: BTreeMap<DirectoryName, DirectoryConfig>`, duplicate skill names are resolved by alphabetical order of the directory name. A directory named "aaa-plugins" always wins over "zzz-local" regardless of which the user considers more important.
+**What goes wrong:** `MultiSelect` with all defaults `true` — if the user deselects everything and hits Enter, the result is an empty `Vec`. The wizard proceeds to save a config with zero directories. `tome sync` does nothing.
 
-**Why it happens:** `BTreeMap` iterates in `Ord` order of keys. This is a valid choice for determinism but creates an implicit priority that users don't control.
+**Why it happens:** dialoguer's `MultiSelect` treats empty selection as valid. The wizard doesn't guard against it.
 
-**Consequences:** User adds a new directory with a name that alphabetically precedes their preferred source, and skills silently switch provenance. No warning, no error. The "wrong" version of a skill gets distributed.
+**Consequences:** User runs `tome sync`, nothing happens, no error. Has to re-run `tome init`.
 
-**Prevention:**
-1. During discovery deduplication, when a conflict is detected, log a warning: "Skill '[name]' found in both '[dir-a]' and '[dir-b]'. Using '[dir-a]' (alphabetically first). Add a `priority` field to override."
-2. Document the behavior clearly in config reference.
-3. Design the `priority` field now (as an optional integer, defaulting to 0) even if you don't implement sorting by it yet. This avoids a second config-breaking change later.
+**Prevention:** After MultiSelect for directories, check `selections.is_empty()`. If so, warn and re-prompt, or proceed only if user confirms "No directories selected. Continue anyway?"
 
-**Detection:** Unit test that configures two directories with the same skill and verifies which one wins, plus verifies the warning is emitted.
+**Detection:** Unit test: assert wizard rejects or warns on zero-directory configs.
 
-**Phase mapping:** Foundation PR (#396). The dedup warning should ship with the new config format.
+**Phase:** Wizard rewrite PR.
 
-### Pitfall 6: Shallow Clone `--depth 1` Breaks on Subsequent `git pull`
+### Pitfall 5: Custom directory path overlaps with existing entries
 
-**What goes wrong:** `git clone --depth 1` creates a shallow clone. A naive `git pull` on a shallow clone may:
-- Download more history than expected (unshallowing)
-- Fail with merge conflicts if the remote force-pushed
-- Behave unpredictably with `git fetch` depending on git version
+**What goes wrong:** The "Add a custom directory" flow accepts any path, with no check for: path already registered under a different name, path is a parent/child of an existing entry, resolved path matches another entry's resolved path.
 
-**Why it happens:** Shallow clones have truncated history. Operations that need ancestor commits (merge-base, rebase) may fail or silently download full history, defeating the purpose of shallow cloning.
+**Why it happens:** Auto-discovered directories have pre-validated unique paths (from KNOWN_DIRECTORIES). Custom directories skip that.
 
-**Consequences:** `tome sync` with git sources becomes slow (full history downloaded on update) or fails with confusing git errors that tome doesn't handle.
+**Consequences:**
+- Two entries pointing to the same resolved path with different names — undefined sync behavior.
+- Overlapping subtrees — one directory is a parent of another, causing duplicate skill discovery.
+- Worse: a custom entry that overlaps with `library_dir` creates the circular symlink problem (Pitfall 2).
 
 **Prevention:**
-1. Use `git fetch --depth 1 origin main && git reset --hard origin/main` instead of `git pull`. This keeps the clone shallow and avoids merge logic entirely (tome only needs the latest snapshot, not history).
-2. Never use `git pull` on shallow clones. The fetch+reset pattern is simpler and more predictable.
-3. Consider `--filter=blob:none` (blobless partial clone) as an alternative if you need sparse checkout later, but for now `--depth 1` with fetch+reset is sufficient.
+- Block if resolved path is already registered under another name.
+- Warn if path is a parent/child of an existing directory.
+- Validate against `library_dir` for overlap.
 
-**Detection:** Integration test that creates a local bare repo, clones it shallow, pushes a new commit to the bare repo, then verifies fetch+reset works correctly.
+**Detection:** Add `validate_no_path_overlaps()` helper. Test with overlapping paths.
 
-**Phase mapping:** Git sources implementation.
+**Phase:** Wizard rewrite PR. Add validation before inserting custom directories.
 
-### Pitfall 7: Nested Git Repos When Library Dir Is Inside a Git Repo
+### Pitfall 6: Test coverage gap — interactive flows are untestable with dialoguer
 
-**What goes wrong:** If `~/.tome/` is itself a git repo (via `tome backup`), and git source clones go inside `~/.tome/` (e.g., `~/.tome/repos/`), git may get confused by nested `.git` directories. The outer repo's `git add` may try to add the inner repos as submodules.
+**What goes wrong:** The wizard's `run()` function directly calls `dialoguer::MultiSelect::interact()`, `Confirm::interact()`, etc. These require a real TTY. The current test suite only covers `find_known_directories_in()` and registry invariants — zero coverage on wizard flow logic (role assignment, config assembly, validation).
 
-**Why it happens:** Git detects nested `.git` directories and treats them as submodules during `git add -A` or similar operations.
+**Why it happens:** dialoguer has no built-in mock/fake. The wizard function is monolithic — all logic and I/O in one function.
 
-**Consequences:** `tome backup` snapshots may include (or fail on) git source clones. Backup repo becomes bloated or corrupt.
+**Consequences:** Regressions in wizard logic are only caught by manual testing. Refactors are risky. The rewrite itself is the highest-risk change with the lowest test coverage.
 
-**Prevention:**
-1. The PROJECT.md already specifies `~/.tome/repos/` for clones. Add `repos/` to the backup repo's `.gitignore` during `backup init`.
-2. Verify this in an integration test: init backup, clone a git source, run `tome backup snapshot`, verify `repos/` is not committed.
+**Prevention:** Structure the wizard as separable layers:
+1. **Data gathering** (dialoguer — untestable, keep thin)
+2. **Config assembly** (pure function: selected directories + library path + exclusions -> Config — fully testable)
+3. **Validation** (pure function: Config -> Result<(), Vec<Warning>> — fully testable)
+4. **Presentation** (summary table formatting — testable with snapshot tests)
 
-**Detection:** `tome doctor` should check for nested `.git` directories inside `~/.tome/` and warn if they're not in `.gitignore`.
+Test layers 2, 3, 4 exhaustively. Layer 1 stays as thin as possible.
 
-**Phase mapping:** Git sources implementation. Must be coordinated with backup module.
+**Detection:** Track which wizard code paths have test coverage. After rewrite, every logic branch in layers 2-4 should have a test.
 
-### Pitfall 8: `TestEnvBuilder` Rewrite Loses Edge Case Coverage
+**Phase:** Wizard rewrite PR. Extract testable core before adding new features.
 
-**What goes wrong:** The `TestEnvBuilder` in `cli.rs` generates config TOML strings with the old `[[sources]]` + `[targets.*]` format. Rewriting it for `[directories.*]` is straightforward, but edge cases in the old test suite (managed vs. local transitions, circular symlink detection, cleanup behavior) may be silently dropped during the rewrite.
+### Pitfall 7: DirectoryName collision after case normalization
 
-**Why it happens:** When rewriting test infrastructure, it's natural to port the happy-path tests first and lose coverage for edge cases that were added incrementally over months.
+**What goes wrong:** `DirectoryName::new()` validates basic rules (no empty, no path separators) but doesn't normalize case. Custom names like "Claude-Skills" and "claude-skills" are different BTreeMap keys but look identical to humans. One silently shadows the other.
 
-**Consequences:** Regressions in consolidation strategy transitions, circular symlink prevention, or cleanup behavior that aren't caught until a user hits them.
+**Why it happens:** `DirectoryName` wraps a `String` with case-sensitive comparison. KNOWN_DIRECTORIES uses lowercase-kebab, but custom names have no such enforcement.
 
-**Prevention:**
-1. Before rewriting `TestEnvBuilder`, catalog all existing integration tests and their scenarios in a checklist. Port each one explicitly.
-2. Use `cargo test` with the old code as a baseline: count tests, note their names. After rewrite, verify the count is >= the original.
-3. The CONCERNS.md already flags "symlink strategy transitions" and "circular symlink prevention" as coverage gaps. Fix these gaps *during* the rewrite, not after.
-
-**Detection:** Compare test counts before and after the refactor. CI should not show fewer tests passing.
-
-**Phase mapping:** Foundation PR (#396). Test infrastructure changes are part of the config refactor.
-
-### Pitfall 9: GIT_DIR/GIT_WORK_TREE Environment Variable Leakage
-
-**What goes wrong:** When shelling out to `git` from within a git repository (which `~/.tome/` may be, via backup), environment variables like `GIT_DIR`, `GIT_WORK_TREE`, or `GIT_INDEX_FILE` from the parent process can leak into child `git` commands. This causes git source operations to target the wrong repository.
-
-**Why it happens:** `std::process::Command` inherits the parent's environment by default. If tome is run from a directory that has its own git context, or if the backup module sets git env vars, those leak to git-source operations.
-
-**Consequences:** `git clone` or `git fetch` for a git source operates on the wrong repo, corrupting the backup repo or producing confusing errors.
+**Consequences:** Config has two near-duplicate entries. Confusing behavior, hard to debug.
 
 **Prevention:**
-1. For all git-source operations, explicitly clear git environment variables: `.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE").env_remove("GIT_INDEX_FILE").env_remove("GIT_CEILING_DIRECTORIES")`.
-2. Better: use `.env_clear()` and selectively pass only PATH, HOME, SSH_AUTH_SOCK, and GIT_SSH_COMMAND. This is the nuclear option but guarantees isolation.
-3. The existing `backup.rs` `git()` helper uses `.current_dir(repo_dir)` which helps, but does not override explicit GIT_DIR if set.
+- In the custom directory flow, normalize to lowercase-kebab before insertion.
+- Check for case-insensitive duplicates against existing entries and warn/block.
+- The `DirectoryName` type has `check_convention()` — call it in the wizard and show the warning.
 
-**Detection:** Test that sets `GIT_DIR` to a bogus path before calling git-source operations, verifying they still work correctly.
+**Detection:** Test: inserting "My-Dir" when "my-dir" exists should warn or normalize.
 
-**Phase mapping:** Git sources implementation. Apply to the shared git helper module.
+**Phase:** Wizard rewrite PR.
 
 ## Minor Pitfalls
 
-### Pitfall 10: TOML Table vs. Inline Table Serialization Surprise
+### Pitfall 8: Summary table truncates long paths
 
-**What goes wrong:** `BTreeMap<DirectoryName, DirectoryConfig>` serialized with `toml::to_string_pretty` may produce `[directories.my-dir]` tables or inline tables depending on the structure depth. If `DirectoryConfig` has nested fields (e.g., `git: { url, branch }`), the TOML output may be ugly or use unexpected nesting.
+**What goes wrong:** `show_directory_summary()` uses fixed-width formatting (`{:<35}` for paths). Git source paths (`~/.tome/repos/<sha256>/subdir`) routinely exceed 35 characters and misalign the table.
 
-**Prevention:** Test the round-trip serialization of the new config format and assert the TOML output matches the expected human-readable format. Use `#[serde(rename)]` and flattening as needed to control the output shape.
+**Prevention:** Use `tabled` crate (already a dependency) for the summary table instead of manual `format!` strings.
 
-**Phase mapping:** Foundation PR. Include a config round-trip test.
+**Phase:** Wizard rewrite PR. Low effort, high polish.
 
-### Pitfall 11: Path Canonicalization Differences Between macOS and Linux
+### Pitfall 9: Git directories not addable in wizard
 
-**What goes wrong:** On macOS, `/var` is a symlink to `/private/var` and `/tmp` is a symlink to `/private/tmp`. Path comparisons using `canonicalize()` produce different results than `Path::starts_with()` on raw paths. The CONCERNS.md already flags this for cleanup, but the new unified directories model adds more path comparison points.
+**What goes wrong:** The wizard's custom directory flow only offers "directory" and "claude-plugins" types. Git directories require `tome add <url>` post-wizard. No mention of this in the wizard, so users expecting to add git repos during init are stuck.
 
-**Prevention:** Use a consistent path normalization strategy across the codebase. Canonicalize once at config load time and store the canonical path. Never compare raw user-provided paths with canonicalized paths.
+**Prevention:** Add a note after the custom directory loop: "For git-based skill repos, use `tome add <url>` after setup."
 
-**Phase mapping:** Foundation PR. Ensure `DirectoryConfig.path` is canonicalized during deserialization.
+**Phase:** Wizard rewrite PR. One-line println.
 
-### Pitfall 12: Role Transitions (Source -> Target or Vice Versa) Leave Stale State
+### Pitfall 10: Dry-run path uses different serialization than save path
 
-**What goes wrong:** If a user changes a directory's role from `source` to `target` (or adds the `target` role), the manifest still records the old provenance. Cleanup may not remove the now-stale library entries because the manifest says they came from that directory.
+**What goes wrong:** Dry-run calls `toml::to_string_pretty(&config)` directly. The actual save path goes through `config.save()` which may format differently (e.g., custom serialization, comments). The dry-run output doesn't match what would actually be saved.
 
-**Prevention:** When a directory's role changes, detect the mismatch between manifest provenance and current role during sync. Log a warning and re-consolidate affected skills.
+**Prevention:** Extract `Config::to_toml_string()` and use it in both dry-run display and `config.save()`.
 
-**Phase mapping:** Post-foundation. This is an edge case for the consolidation pipeline.
+**Phase:** Wizard rewrite PR. Minor refactor.
+
+### Pitfall 11: Role editing for ClaudePlugins shows "No editable directories" when it's the only entry
+
+**What goes wrong:** The role-editing loop filters out ClaudePlugins directories (they're always Managed). If the user only has `claude-plugins` configured, they see "No editable directories" and can't understand why.
+
+**Prevention:** Show a more helpful message: "ClaudePlugins directories are always Managed. Other directory types support role changes."
+
+**Phase:** Wizard rewrite PR.
 
 ## Phase-Specific Warnings
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Config struct refactor (#396) | Silent parse success on old config (Pitfall 1) | `deny_unknown_fields` or version check |
-| Config struct refactor (#396) | Cleanup deletes everything on empty config (Pitfall 2) | Empty-directories guard in cleanup |
-| Config struct refactor (#396) | Test coverage regression (Pitfall 8) | Catalog tests before rewrite |
-| Config struct refactor (#396) | BTreeMap priority surprise (Pitfall 5) | Dedup warning + document behavior |
-| Wizard rewrite (#362) | Auto-assigned roles don't match user intent | Show role summary, allow override |
-| Git sources (#58) | Network failure breaks entire sync (Pitfall 3) | Separate fetch phase, use cached state |
-| Git sources (#58) | Shallow clone update issues (Pitfall 6) | fetch+reset pattern, never git pull |
-| Git sources (#58) | Nested git repos in backup (Pitfall 7) | `.gitignore` repos/ in backup |
-| Git sources (#58) | GIT_DIR leakage (Pitfall 9) | Clear git env vars in Command |
-| Git sources (#58) | Missing git binary (Pitfall 4) | `require_git()` check at start |
+| KNOWN_DIRECTORIES registry | Already merged; verify no stale KNOWN_SOURCES/KNOWN_TARGETS references in tests/docs | `rg` search for old names before closing |
+| Role auto-assignment | Synced role on directories overlapping library_dir (Pitfall 2) | Validate library_dir against all distribution directories |
+| Summary table | Fixed-width formatting breaks on long paths (Pitfall 8) | Use `tabled` or dynamic column widths |
+| Custom directory addition | No duplicate/overlap detection (Pitfall 5) | Add validation helper before insertion |
+| Interactive testing | Zero test coverage on wizard flow logic (Pitfall 6) | Extract testable core; test config assembly as pure function |
+| Config assembly | Bypasses deserialization validation (Pitfall 1) | Validate or round-trip assembled config before save |
+| BTreeMap ordering | Display order != resolution order (Pitfall 3) | Sort summary alphabetically; warn on skill name conflicts |
+| Name validation | Case-insensitive collisions (Pitfall 7) | Normalize custom names to lowercase-kebab |
 
 ## Sources
 
-- [Serde issue #1652: Migrating serialized config to new schema](https://github.com/serde-rs/serde/issues/1652) — config migration patterns
-- [Rust issue #73126: Command output() error handling hazards](https://github.com/rust-lang/rust/issues/73126) — shelling out pitfalls
-- [GitHub Blog: Partial clone and shallow clone](https://github.blog/open-source/git/get-up-to-speed-with-partial-clone-and-shallow-clone/) — shallow clone limitations
-- [BTreeMap documentation](https://doc.rust-lang.org/std/collections/struct.BTreeMap.html) — iteration order guarantees
-- [Gitoxide 2025 retrospective](https://github.com/GitoxideLabs/gitoxide/discussions/2323) — gitoxide vs git2 maturity
-- [Rust forum: Command error handling](https://users.rust-lang.org/t/best-error-handing-practices-when-using-std-command/42259) — Command patterns
+- `/Users/martin/dev/opensource/tome/crates/tome/src/wizard.rs` — current wizard implementation (full analysis)
+- `/Users/martin/dev/opensource/tome/crates/tome/src/config.rs` — DirectoryType, DirectoryRole, valid_roles(), deserialization validation
+- `/Users/martin/dev/opensource/tome/crates/tome/src/discover.rs` — discover_all(), BTreeMap dedup behavior
+- `/Users/martin/dev/opensource/tome/.planning/PROJECT.md` — v0.7 milestone goals, active requirements
+- [dialoguer crate docs](https://docs.rs/dialoguer/latest/dialoguer/) — MultiSelect behavior, no mock support
 
 ---
 
-*Pitfalls research: 2026-04-10*
+*Pitfalls research: 2026-04-16*

@@ -1,172 +1,130 @@
-# Technology Stack
+# Technology Stack: Wizard Rewrite
 
-**Project:** tome v0.6 -- Unified Directory Model (Git Sources, Config Refactoring)
-**Researched:** 2026-04-10
+**Project:** tome v0.7 -- Wizard Rewrite
+**Researched:** 2026-04-16
 
-## Recommended Stack
+## Recommendation: No New Dependencies
 
-### Git Operations (clone, pull, checkout)
+The wizard rewrite requires **zero new crate additions**. Every capability needed is already in the dependency tree. The work is about using existing dependencies better and cleaning up the wizard code.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| `std::process::Command` (git CLI) | N/A (system git) | Clone repos, pull updates, checkout refs | Simplest, zero new deps, tome already requires git for backup. See rationale below. |
+## Current Stack (Already Validated, All at Latest Versions)
 
-**Rationale -- shell out to `git` instead of git2 or gix:**
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| `dialoguer` | 0.12.0 (latest) | Interactive prompts (MultiSelect, Select, Input, Confirm) | Already used in wizard |
+| `tabled` | 0.20.0 (latest) | ASCII table rendering | Used in `status.rs` and `lib.rs` but NOT in wizard |
+| `console` | 0.16.3 (latest) | Terminal colors, styling, terminal size detection | Already used in wizard |
+| `dirs` | 6.x | Home directory detection for auto-discovery | Already used |
 
-1. **tome's needs are narrow.** The git operations are: `git clone <url> <path>`, `git -C <path> pull --ff-only`, `git -C <path> checkout <ref>`. No merge, no commit, no push. This is ~30 lines of wrapper code around `Command::new("git")`.
+## Changes Within Existing Dependencies
 
-2. **git2 (v0.20.4) adds libgit2 as a C dependency.** This complicates cross-compilation, increases binary size, and adds build complexity (cmake or pkg-config). For three shell commands, it is not worth it.
+### 1. Use `tabled` for Summary Table (HIGH priority)
 
-3. **gix (v0.81.0) is pure Rust but heavyweight.** Clone/fetch are functional (`gix::prepare_clone()`), but pull is not implemented. The crate pulls in ~60 sub-crates and significantly increases compile time. The API is still evolving -- Cargo itself is still migrating from git2 to gix incrementally ([tracking issue](https://github.com/rust-lang/cargo/issues/11813)). The gix maintainer has previously recommended git2 over gix for clone/push workflows.
+**Current state:** `show_directory_summary()` in `wizard.rs` uses manual `println!` with fixed-width format strings (`{:<20}`, `{:<35}`, etc.). This breaks when directory names or paths exceed the column width, producing misaligned output.
 
-4. **git is already a runtime dependency.** tome v0.5 uses git for backup (`git init`, `git add`, `git commit`, `git push`). Users already have git installed. Adding a library to avoid calling a binary they already need is over-engineering.
+**Recommended:** Replace with `tabled::Table` using the same pattern already established in `status.rs`:
 
-5. **Error handling is straightforward.** `Command` output gives exit code + stderr. Wrap in a `GitError` variant with the stderr message. Done.
+```rust
+use tabled::settings::{Modify, Style, object::Rows};
 
-**Confidence: HIGH** -- This is a well-established pattern. Cargo itself shells out to git for some operations. Multiple Rust CLI tools (rustup, cargo-edit) use this approach for simple git interactions.
+let rows: Vec<[String; 4]> = directories
+    .iter()
+    .map(|(name, cfg)| {
+        [
+            name.to_string(),
+            cfg.path.display().to_string(),
+            cfg.directory_type.to_string(),
+            cfg.role().description().to_string(),
+        ]
+    })
+    .collect();
 
-### Config Schema Evolution (TOML with serde)
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| `serde` + `toml` (existing) | serde 1, toml 1 | Parse unified `[directories.*]` config | Already in the project; no new deps needed. |
-
-**Rationale -- no schema migration library needed:**
-
-The PROJECT.md explicitly states: "Backward compat: None. Old `tome.toml` files will fail to parse. Migration is documented, not automated." This eliminates the need for versioned schema migration.
-
-The approach:
-
-1. **Hard break.** Define the new `Config` struct with `directories: BTreeMap<String, DirectoryConfig>`. Remove `sources` and `targets` fields entirely. Old configs fail at deserialization with a clear serde error.
-
-2. **Use serde's `#[serde(deny_unknown_fields)]`** on the top-level Config to catch old field names and produce actionable error messages. Alternatively, implement a custom deserializer that detects `[[sources]]` or `[targets.*]` and returns a helpful "config format changed, see migration docs" error.
-
-3. **Use `#[serde(default)]` for optional fields** like `ref` (git branch/tag), `role`, etc. This allows progressive config complexity -- simple directories need only `path`, while git sources add `url` and optionally `ref`.
-
-4. **Enum-based role/type discrimination via `#[serde(tag = "type")]`** or a simpler approach: separate fields (`role = "synced"`, `type = "git"`) with serde enums. Given the small number of variants, flat fields with `#[serde(rename_all = "kebab-case")]` are cleaner than tagged enums.
-
-**Example target config shape:**
-
-```toml
-[directories.my-skills]
-path = "~/code/my-skills"
-role = "synced"
-
-[directories.community-skills]
-url = "https://github.com/example/skills.git"
-path = "~/.tome/repos/community-skills"
-role = "source"
-type = "git"
-ref = "main"
+let table = tabled::Table::from_iter(
+    std::iter::once(["Name".into(), "Path".into(), "Type".into(), "Role".into()])
+        .chain(rows),
+)
+.with(Style::rounded())
+.with(Modify::new(Rows::first()).with(
+    tabled::settings::Format::content(|s| s.to_uppercase()),
+));
+println!("{table}");
 ```
 
-**Libraries considered and rejected:**
+**Why:** Consistent with existing table rendering in the codebase. Handles variable-width content automatically. Zero additional compile cost since `tabled` 0.20 is already linked. The `Style::rounded()` matches the visual language used elsewhere in tome's CLI output.
+
+**Confidence: HIGH** -- Verified this pattern works by examining existing usage in `status.rs` lines 185-191 and `lib.rs` lines 1128-1134.
+
+### 2. `dialoguer` Feature Flags -- No Changes Needed
+
+**Evaluated and rejected:**
+
+| Feature | Purpose | Verdict |
+|---------|---------|---------|
+| `fuzzy-select` | Enables `FuzzySelect` prompt with inline filtering | **Reject** -- single-select only. The exclusion picker (Step 3) needs multi-select. Current `MultiSelect` with `max_length` is correct. |
+| `history` | Input prompt history tracking | **Reject** -- wizard is run once; history has no value. |
+| `completion` | Tab-completion for input prompts | **Reject** -- path input (custom directory) could benefit, but adds complexity for a rarely-used feature. Shell tab-completion already works for path entry. |
+| `editor` | Launch external editor | **Reject** -- no text editing in the wizard flow. |
+
+**Confidence: HIGH** -- Reviewed all dialoguer 0.12.0 features against wizard requirements.
+
+### 3. `dialoguer` Theme Customization -- Keep Default
+
+**Current state:** Uses default theme (no explicit `ColorfulTheme`).
+
+**Recommendation:** Keep the default theme. The wizard already uses `console::style()` for headers, dividers, and status messages. Adding a custom dialoguer theme would create visual inconsistency. The default dialoguer theme pairs naturally with `console` styling.
+
+**Confidence: HIGH** -- This is a stylistic decision, not a technical one.
+
+## What NOT to Add
 
 | Library | Why Not |
 |---------|---------|
-| `serde-evolve` (crates.io) | Designed for wire-format versioning with migration chains. Overkill for a hard-break single-user config. |
-| `version-migrate-macro` (crates.io) | Same -- migration framework for backward compat we explicitly don't need. |
-| `config` crate | Layered config merging. Adds complexity for no benefit; tome's config is a single TOML file. |
+| `inquire` | Alternative to dialoguer. Would add a second prompt library for identical functionality. dialoguer 0.12 covers all wizard needs. |
+| `cliclack` | Beautiful prompts but opinionated visual style that clashes with the existing console-based design language. |
+| `comfy-table` | Alternative to tabled. The project already uses tabled 0.20; switching would be churn for zero benefit. |
+| `term-table` | Unmaintained alternative to tabled. |
+| `skim` / `fzf` crates | Overkill for the exclusion picker. MultiSelect with max_length is sufficient for the expected number of skills (10-50). |
+| `termimad` | Markdown terminal rendering. Not needed for wizard; browse TUI already handles rich display with ratatui. |
 
-**Confidence: HIGH** -- serde + toml is the standard Rust pattern. The hard-break decision eliminates the hardest part of schema evolution.
+## Auto-Discovery -- No Stack Changes Needed
 
-### URL Hashing for Cache Paths
+The auto-discovery pattern in `find_known_directories_in()` is well-implemented:
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| `sha2` (existing) | 0.11 | Hash git URLs to deterministic cache directory names | Already in the project for content hashing. Reuse for URL hashing. |
+- Uses `std::fs::metadata()` (not `path.is_dir()`) to surface permission errors as warnings
+- Iterates a static `KNOWN_DIRECTORIES` registry with compiled-in defaults
+- Returns found directories paired with their registry metadata (type, role, display name)
 
-**Rationale -- use what you have:**
+Any expansion is data-only (adding entries to `KNOWN_DIRECTORIES`). No library changes required.
 
-tome needs to map `https://github.com/example/skills.git` to a stable directory name under `~/.tome/repos/`. The pattern is:
+## Integration Points (All Stable)
 
-```
-~/.tome/repos/<name>-<hash>/
-     where hash = sha256(url)[..16]  (first 16 hex chars)
-     and name = last path segment without .git
-```
-
-This follows Cargo's convention: `<name>-<short-hash>`. The name provides human readability; the hash prevents collisions between repos with the same name from different hosts.
-
-`sha2` is already a dependency. No new crate needed. The implementation is ~5 lines:
-
-```rust
-use sha2::{Sha256, Digest};
-
-fn repo_dir_name(url: &str) -> String {
-    let name = url.rsplit('/').next().unwrap_or("repo").trim_end_matches(".git");
-    let hash = Sha256::digest(url.as_bytes());
-    format!("{}-{}", name, hex::encode(&hash[..8]))  // 16 hex chars from 8 bytes
-}
-```
-
-**Note:** The `hex` encoding can use `format!("{:x}", ...)` on the hash bytes directly, avoiding a `hex` crate dependency. Or use the existing pattern from `manifest.rs` which already does hex encoding of SHA-256 hashes.
-
-**Confidence: HIGH** -- This is a trivial application of an existing dependency.
-
-## Full Stack Summary (Existing + New)
-
-### No New Dependencies Required
-
-The entire v0.6 scope (git sources, unified config, URL-based cache paths) requires **zero new crate dependencies**. Everything is covered by existing deps + `std::process::Command`.
-
-### Existing Dependencies (Unchanged)
-
-| Category | Crates | Role in v0.6 |
-|----------|--------|--------------|
-| Config | `serde` 1, `toml` 1 | New unified `DirectoryConfig` struct |
-| Hashing | `sha2` 0.11 | URL hashing for repo cache paths |
-| CLI | `clap` 4 | No changes needed |
-| Interactive | `dialoguer` 0.12 | Wizard rewrite for unified directories |
-| Filesystem | `walkdir` 2, `dirs` 6 | Unchanged |
-| Error handling | `anyhow` 1 | Unchanged |
-| Testing | `assert_cmd` 2, `tempfile` 3, `insta` 1 | Integration tests for git source sync |
-
-### New Internal Modules (No External Deps)
-
-| Module | Purpose | Uses |
-|--------|---------|------|
-| `git.rs` (new) | Thin wrapper around `git` CLI commands | `std::process::Command`, `anyhow` |
-| `directory.rs` (new or refactored) | Unified directory config and role logic | `serde`, `toml` |
-| `repo_cache.rs` (new) | URL-to-path mapping for `~/.tome/repos/` | `sha2` |
-
-## Alternatives Considered
-
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Git operations | `std::process::Command` | `git2` 0.20 | C dependency (libgit2), build complexity, overkill for 3 commands |
-| Git operations | `std::process::Command` | `gix` 0.81 | 60+ sub-crates, no pull support, API still evolving, massive compile time increase |
-| Schema migration | Hard break (serde only) | `serde-evolve` | No backward compat needed; single user |
-| URL hashing | `sha2` (existing) | `url-hash` crate | Adds a dependency for 5 lines of code |
-| URL hashing | `sha2` (existing) | `blake3` | Faster but adds a dep; SHA-256 is already in the project and speed is irrelevant for hashing a URL string |
+| Module | Interface Used | Change Needed |
+|--------|---------------|---------------|
+| `config.rs` | `Config`, `DirectoryConfig`, `DirectoryName`, `DirectoryRole`, `DirectoryType` | None -- unified model in place since v0.6 |
+| `discover.rs` | `discover_all()`, `SkillName`, `DiscoveredSkill` | None -- used for exclusion picker |
+| `paths.rs` | `collapse_home_path()` | None |
+| `backup.rs` | `init()` | None |
+| `tabled` (existing dep) | `Table::from_iter()`, `Style::rounded()` | Import into wizard.rs (currently unused there) |
 
 ## Installation
 
 ```bash
-# No new dependencies to install.
-# Existing Cargo.toml covers everything needed for v0.6.
+# No changes to Cargo.toml needed.
+# All dependencies are already declared at their latest versions.
 ```
 
-## Testing Considerations
+## Summary
 
-- **Git operations:** Integration tests should use `git init --bare` to create local test repos, avoiding network calls in CI. The `tempfile` crate (already a dev dependency) handles temporary repo directories.
-- **Config parsing:** Unit tests with TOML string literals. Snapshot tests (insta) for error messages when old config format is detected.
-- **URL hashing:** Pure function, trivial unit tests. Test stability (same URL always produces same hash) and collision resistance (different URLs produce different hashes).
+The wizard rewrite is a **code-level refactor**, not a dependency change. The only action item is importing `tabled` into `wizard.rs` for the summary table -- a crate that's already compiled and used elsewhere in the binary. Everything else stays as-is.
 
 ## Sources
 
-- [gix crate docs (v0.81.0)](https://docs.rs/gix/latest/gix/)
-- [gix `prepare_clone` function](https://docs.rs/gix/latest/gix/fn.prepare_clone.html)
-- [gitoxide crate-status.md](https://github.com/GitoxideLabs/gitoxide/blob/main/crate-status.md) -- clone/fetch complete, pull not implemented
-- [Cargo `-Zgitoxide` tracking issue](https://github.com/rust-lang/cargo/issues/11813) -- Cargo still migrating from git2 to gix
-- [gitoxide discussion #1381](https://github.com/GitoxideLabs/gitoxide/discussions/1381) -- maintainer recommends git2 over gix for write workflows
-- [git2 crate (v0.20.4)](https://crates.io/crates/git2)
-- [git2-rs GitHub](https://github.com/rust-lang/git2-rs)
-- [Cargo git source cache naming](https://users.rust-lang.org/t/origin-of-hash-in-folder-name-for-cargo-git-dependencies/110930)
-- [serde-evolve crate](https://crates.io/crates/serde-evolve)
-- [version-migrate-macro crate](https://crates.io/crates/version-migrate-macro)
-- [Rust Cookbook: External Commands](https://rust-lang-nursery.github.io/rust-cookbook/os/external.html)
+- [dialoguer 0.12.0 docs](https://docs.rs/dialoguer/0.12.0/dialoguer/) -- feature flags and API reference
+- [tabled 0.20.0 docs](https://docs.rs/tabled/0.20.0/tabled/) -- table rendering API
+- [Comparison of Rust CLI Prompts](https://fadeevab.com/comparison-of-rust-cli-prompts/) -- evaluated alternatives (cliclack, inquire, promptly)
+- Existing codebase: `status.rs:185-191` and `lib.rs:1128-1134` for established tabled usage patterns
+- `cargo search dialoguer` / `cargo search tabled` -- verified both at latest versions (2026-04-16)
 
 ---
 
-*Stack analysis: 2026-04-10*
+*Stack analysis: 2026-04-16*
