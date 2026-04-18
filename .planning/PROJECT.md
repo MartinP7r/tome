@@ -35,22 +35,30 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active
 
-- [ ] Merged KNOWN_DIRECTORIES registry replacing KNOWN_SOURCES + KNOWN_TARGETS
-- [ ] Auto-discovery with role auto-assignment from registry
-- [ ] Summary table (name | path | type | role) before confirmation
-- [ ] Custom directory addition with role selection
-- [ ] Remove find_source_target_overlaps() dead code
+- [ ] Validate wizard output against `Config::validate()` before save (prevent invalid type/role combos)
+- [ ] Detect circular library paths (library_dir overlapping distribution directories)
+- [ ] Test coverage for the interactive wizard flow
+- [ ] Migrate `show_directory_summary()` from manual println to `tabled`
+- [ ] Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
 
-## Current Milestone: v0.7 Wizard Rewrite
+### Previously Validated (re-verified in v0.7 research)
 
-**Goal:** Rewrite `tome init` wizard to use the unified directory model, replacing the legacy source/target mental model.
+- ✓ Merged `KNOWN_DIRECTORIES` registry (shipped silently in v0.6, now formally validated)
+- ✓ Auto-discovery with role auto-assignment
+- ✓ Summary table before confirmation
+- ✓ Custom directory addition with role selection
+- ✓ Removed `find_source_target_overlaps()` dead code
+
+## Current Milestone: v0.7 Wizard Hardening
+
+**Goal:** Close the correctness gaps found between shipped wizard code and the original WIZ-01–05 intent: validation, circular path detection, test coverage, and polish.
 
 **Target features:**
-- Merged `KNOWN_DIRECTORIES` registry (replaces `KNOWN_SOURCES` + `KNOWN_TARGETS`)
-- Auto-discovery with role auto-assignment from registry
-- Summary table before confirmation
-- Custom directory addition with role selection
-- Remove `find_source_target_overlaps()` dead code
+- Config validation before save (catch invalid type/role combos the wizard struct-building path bypassed)
+- Circular path detection (library_dir inside a synced/target directory)
+- Test coverage for wizard's non-interactive paths (registry lookup, auto-discovery, config assembly)
+- `tabled` migration for summary display
+- Registry expansion for tools missing in KNOWN_DIRECTORIES
 
 ### Known Gaps (deferred from v0.6)
 

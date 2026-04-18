@@ -50,19 +50,20 @@ Deferred to future releases.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| WHARD-01 | TBD | Pending |
-| WHARD-02 | TBD | Pending |
-| WHARD-03 | TBD | Pending |
-| WHARD-04 | TBD | Pending |
-| WHARD-05 | TBD | Pending |
-| WHARD-06 | TBD | Pending |
-| WHARD-07 | TBD | Pending |
-| WHARD-08 | TBD | Pending |
+| WHARD-01 | Phase 4 | Pending |
+| WHARD-02 | Phase 4 | Pending |
+| WHARD-03 | Phase 4 | Pending |
+| WHARD-04 | Phase 5 | Pending |
+| WHARD-05 | Phase 5 | Pending |
+| WHARD-06 | Phase 5 | Pending |
+| WHARD-07 | Phase 6 | Pending |
+| WHARD-08 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 8 total
-- Mapped to phases: TBD (filled by roadmap)
+- Mapped to phases: 8 (100%)
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-18 after v0.7 milestone research*
+*Traceability updated: 2026-04-18 after roadmap creation*
