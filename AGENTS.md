@@ -4,21 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI agents 
 
 ## Current State
 
-**v0.3.3 released** — Portable Library milestone shipped: `tome.lock` lockfile, per-machine preferences via `machine.toml`, `tome update` command with lockfile diffing and interactive triage, connector architecture with data-driven targets. Unified home directory restructured to `~/.tome/`. Next up: **v0.4.1 Browse + Validation** (`tome browse`, `tome lint`, frontmatter parsing) and **v0.4.2 Format Transforms** (rules/instructions syncing, pluggable transform pipeline, Copilot/Cursor/Windsurf format support).
+**v0.6.0 (unreleased)** — Unified Directory Model milestone complete. Config uses `[directories.*]` BTreeMap replacing separate `[[sources]]` + `[targets.*]`. Git-backed skill repos with shallow clone, ref pinning, SHA in lockfile. Per-directory skill filtering (`enabled`/`disabled` in `machine.toml`). CLI commands: `tome add`, `tome remove`, `tome reassign`, `tome fork`. Browse TUI: adaptive theming, fuzzy match highlighting, scrollbar, markdown preview, help overlay. Known gap: wizard rewrite (WIZ-01–05) deferred.
 
 ## Quick Reference
 
 | Document | Purpose |
 |----------|---------|
-| `ROADMAP.md` | Version-by-version feature roadmap (v0.1.x → v0.7) |
 | `CHANGELOG.md` | Release history and what changed per version |
 | `docs/src/architecture.md` | Detailed sync pipeline and module breakdown |
 | `docs/src/test-setup.md` | Test architecture, module coverage, CI pipeline |
 | `docs/src/configuration.md` | TOML config format and examples |
 | `docs/src/commands.md` | CLI command reference |
-| `docs/src/tool-landscape.md` | Research: AI tool config layers across 7+ tools |
-| `docs/src/frontmatter-compatibility.md` | SKILL.md frontmatter spec across platforms |
-| `docs/src/agent-skills-invocation-syntax-research.md` | Research: skill invocation syntax across tools |
+| `.planning/PROJECT.md` | Project context, requirements, decisions |
+| `.planning/ROADMAP.md` | Milestone roadmap and phase tracking |
 
 ## Non-Interactive Shell Commands
 
@@ -136,20 +134,25 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source), broken symlinks from targets, and disabled skill symlinks from target directories. Interactive in TTY mode; auto-removes with warning otherwise.
 
 **Other modules:**
-- `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Auto-discovers known source locations (see `KNOWN_SOURCES` in `wizard.rs` for the full list).
-- `config.rs` — TOML config at `~/.tome/tome.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion.
+- `wizard.rs` — Interactive `tome init` setup using `dialoguer`. Auto-discovers known directory locations. (Note: still uses legacy source/target model — wizard rewrite deferred.)
+- `config.rs` — TOML config at `~/.tome/tome.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion. `DirectoryName`, `DirectoryType`, `DirectoryRole`, `DirectoryConfig` types.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
-- `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing source paths; optionally repairs.
-- `status.rs` — Read-only summary of library, sources, targets, and health. Single-pass directory scan for efficiency.
+- `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing directory paths; interactive per-item repair for orphans.
+- `status.rs` — Read-only summary of library, directories, and health. Single-pass directory scan for efficiency.
 - `lockfile.rs` — Generates and loads `tome.lock` files. Each entry records skill name, content hash, source, and provenance metadata. Uses atomic temp+rename writes.
-- `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks a `disabled` set of skill names and a `disabled_targets` set of target names. Uses atomic temp+rename writes.
+- `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks `disabled` skill set, `disabled_directories` set, and per-directory `enabled`/`disabled` skill lists. Uses atomic temp+rename writes.
 - `update.rs` — Implements `tome update`: loads the previous lockfile, diffs against current state, presents changes interactively, and offers to disable unwanted new skills.
-- `paths.rs` — Defines `TomePaths` (bundles `tome_home` and `library_dir` to prevent parameter swaps). Also provides symlink path utilities: resolves relative symlink targets and checks symlink destinations.
+- `paths.rs` — Defines `TomePaths` (bundles `tome_home`, `library_dir`, `config_dir` to prevent parameter swaps). Also provides symlink path utilities.
+- `git.rs` — Git clone/update for `type = "git"` directories. Shallow clones to `~/.tome/repos/<sha256>/`, ref pinning (branch/tag/rev), SHA reading.
+- `add.rs` — `tome add <url>`: registers a git directory in config from a URL.
+- `remove.rs` — `tome remove <name>`: plan/render/execute pattern for directory removal with full cleanup.
+- `reassign.rs` — `tome reassign` and `tome fork`: plan/render/execute pattern for changing skill provenance.
+- `browse/` — TUI browser (`tome browse`): `app.rs` (state/keys), `ui.rs` (ratatui rendering), `theme.rs` (adaptive dark/light), `fuzzy.rs` (nucleo-matcher), `markdown.rs` (preview rendering).
 
 ## Key Patterns
 
-- **Two-tier model**: Sources →(consolidate)→ Library →(distribute)→ Targets. The library is the source of truth. Managed skills (from package managers) are symlinked from library → source dir; local skills are copied into the library. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. Unix-only.
-- **Targets are data-driven**: `config::targets` is a `BTreeMap<TargetName, TargetConfig>` — any tool can be added as a target without code changes. The wizard uses a `KnownTarget` registry for auto-discovery of common tools.
+- **Two-tier model**: Discovery dirs →(consolidate)→ Library →(distribute)→ Distribution dirs. The library is the source of truth. Managed skills (from package managers) are symlinked from library → source dir; local skills are copied into the library. Distribution to targets uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. Unix-only.
+- **Directories are data-driven**: `config::directories` is a `BTreeMap<DirectoryName, DirectoryConfig>` — any tool can be added as a directory with a role without code changes.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
 - **Error handling**: `anyhow` for the application. Missing sources/paths produce warnings (stderr) rather than hard errors.
 
@@ -297,7 +300,7 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 **tome v0.6 — Unified Directory Model**
 
-tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from sources, consolidates them into a central library, and distributes them to target tools via symlinks. v0.6 replaces the artificial source/target split with a unified directory model where each configured directory declares its relationship to tome.
+tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. v0.6 shipped the unified directory model where each configured directory declares its type and role.
 
 **Core Value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. One config, one library, every tool.
 
@@ -397,9 +400,9 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - Lowercase snake_case: `tmp_dir`, `source_path`, `skill_name`
 - Single-letter loop variables acceptable in short contexts: `for (k, v) in...`
 - Collection variables use plural forms: `sources`, `targets`, `skills`, `directories`
-- PascalCase for struct/enum names: `SkillName`, `TargetName`, `DiscoveredSkill`, `SkillOrigin`, `SyncReport`
+- PascalCase for struct/enum names: `SkillName`, `DirectoryName`, `DiscoveredSkill`, `SkillOrigin`, `SyncReport`
 - Newtype wrappers use transparent repr: `pub struct SkillName(String);`
-- Enums descriptive and specific: `SourceType::ClaudePlugins`, `SkillOrigin::Managed { provenance }`
+- Enums descriptive and specific: `DirectoryType::ClaudePlugins`, `SkillOrigin::Managed { provenance }`
 ## Code Style
 - `cargo fmt` (rustfmt default settings)
 - No explicit `.rustfmt.toml` — uses Rust edition 2024 defaults
@@ -447,7 +450,7 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - No barrel re-exports (no `pub use`)
 - Crate root (`lib.rs`) explicitly lists all modules and re-exports key types
 ## Type Safety
-- Used for domain types to prevent mixing (e.g., `SkillName`, `TargetName`, `ContentHash`)
+- Used for domain types to prevent mixing (e.g., `SkillName`, `DirectoryName`, `ContentHash`)
 - Provides validation at construction time
 - Implements `AsRef<str>`, `Display`, `Borrow<str>` for ergonomics
 - Custom `Deserialize` impl validates on deserialization
@@ -483,7 +486,7 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - Used by: Entry point only
 - Purpose: Load, validate, and manage TOML config files
 - Location: `crates/tome/src/config.rs`, `crates/tome/src/paths.rs`, `crates/tome/src/machine.rs`
-- Contains: `Config` (sources/targets), `TargetName`, `SkillName`, `TomePaths` (path bundling), `MachinePrefs` (per-machine disable lists)
+- Contains: `Config` (directories), `DirectoryName`, `SkillName`, `TomePaths` (path bundling), `MachinePrefs` (per-machine disable lists)
 - Depends on: `serde`, file I/O, tilde expansion
 - Used by: All domain operations
 - Purpose: Scan sources and identify available skills
@@ -541,11 +544,11 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - Examples: `crates/tome/src/discover.rs` (SkillName type)
 - Pattern: Newtype wrapper with `new()` constructor, lenient validation (rejects empty + path separators), strict convention checking (lowercase + digits + hyphens)
 - Purpose: Validated, type-safe target identifier
-- Examples: `crates/tome/src/config.rs` (TargetName type)
+- Examples: `crates/tome/src/config.rs` (DirectoryName type)
 - Pattern: Same as SkillName; prevents accidental string parameter mixing
 - Purpose: Enum-based source discovery strategy
-- Examples: `crates/tome/src/config.rs` (SourceType enum)
-- Pattern: Variants = ClaudePlugins (plugin-based), Directory (flat walkdir). Determines consolidation strategy.
+- Examples: `crates/tome/src/config.rs` (DirectoryType enum)
+- Pattern: Variants = ClaudePlugins (plugin-based), Directory (flat walkdir), Git (remote repo). Determines consolidation strategy.
 - Purpose: Bundle tome_home + library_dir + config_dir to prevent swaps
 - Examples: `crates/tome/src/paths.rs` (TomePaths struct)
 - Pattern: Newtype-like pattern; absolute path validation in constructor; smart config_dir detection (either tome_home or tome_home/.tome/)
@@ -567,7 +570,7 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - Responsibilities: Orchestrate the full pipeline: discover → consolidate → triage → distribute → cleanup → save
 - Location: `crates/tome/src/wizard.rs::run(dry_run)`
 - Triggers: `tome init`
-- Responsibilities: Interactive setup with dialoguer; auto-discovers known source/target locations; writes config
+- Responsibilities: Interactive setup with dialoguer; auto-discovers known directory locations; writes config
 - Location: `crates/tome/src/browse/mod.rs::browse(skills, manifest)`
 - Triggers: `tome browse`
 - Responsibilities: Launch ratatui TUI; display skill list with fuzzy search; show metadata (source, path, sync timestamp)
