@@ -35,7 +35,10 @@
   2. User who picks a `library_dir` that overlaps a Synced/Target directory sees an error suggesting a non-overlapping location and the config is not written
   3. User who picks a `library_dir` that is a subdirectory of a synced directory sees a circular-symlink validation error before save
   4. A successful `tome init` still round-trips: the written config passes `Config::validate()` and reloads without changes
-**Plans**: TBD
+**Plans**: 3 plans
+- [x] 04-01-validate-error-template-PLAN.md — Upgrade existing `Config::validate()` errors to the D-10 Conflict+Why+Suggestion template
+- [ ] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
+- [ ] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
 
 ### Phase 5: Wizard Test Coverage
 **Goal**: Wizard logic is testable without a TTY and has enforced coverage of valid/invalid combinations
@@ -66,6 +69,6 @@
 | 1. Unified Directory Foundation | v0.6 | 3/5 | Complete | 2026-04-14 |
 | 2. Git Sources & Selection | v0.6 | 4/4 | Complete | 2026-04-15 |
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
-| 4. Wizard Correctness | v0.7 | 0/0 | Not started | — |
+| 4. Wizard Correctness | v0.7 | 0/3 | Planned | — |
 | 5. Wizard Test Coverage | v0.7 | 0/0 | Not started | — |
 | 6. Display Polish & Docs | v0.7 | 0/0 | Not started | — |
