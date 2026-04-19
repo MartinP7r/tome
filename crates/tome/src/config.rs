@@ -391,6 +391,55 @@ impl Config {
             }
         }
 
+        // --- Path overlap between library_dir and distribution directories ---
+        // D-01/D-02/D-04/D-06/D-07: lexical, tilde-aware, trailing-separator-normalized.
+        // Scope (D-05): library_dir vs each distribution directory (Synced or Target).
+        let lib = expand_tilde(&self.library_dir)?;
+        for (name, dir) in self.distribution_dirs() {
+            let dist = expand_tilde(&dir.path)?;
+            let role_desc = dir.role().description();
+
+            // Case A: exact equality (also tolerates a trailing '/' on either side)
+            if lib == dist
+                || lib.to_string_lossy().trim_end_matches('/')
+                    == dist.to_string_lossy().trim_end_matches('/')
+            {
+                anyhow::bail!(
+                    "library_dir overlaps distribution directory '{name}'\n\
+                     Conflict: library_dir ({}) is the same path as directory '{name}' ({})\n\
+                     Why: this directory has role {role_desc}; tome would try to distribute the library into itself, creating a self-loop at sync time.\n\
+                     hint: choose a library_dir outside any distribution directory, such as '~/.tome/skills'.",
+                    lib.display(),
+                    dist.display(),
+                );
+            }
+
+            // Case B: library_dir is inside the distribution directory (WHARD-03 circular case)
+            if path_contains(&dist, &lib) {
+                anyhow::bail!(
+                    "library_dir is inside distribution directory '{name}' (circular symlink risk)\n\
+                     Conflict: library_dir ({}) is a subdirectory of directory '{name}' ({})\n\
+                     Why: directory '{name}' has role {role_desc}; tome would distribute the library back into a directory that contains it, producing circular symlinks at distribute time.\n\
+                     hint: move library_dir outside '{}' — for example, '~/.tome/skills'.",
+                    lib.display(),
+                    dist.display(),
+                    dist.display(),
+                );
+            }
+
+            // Case C: the distribution directory is inside library_dir
+            if path_contains(&lib, &dist) {
+                anyhow::bail!(
+                    "distribution directory '{name}' is inside library_dir\n\
+                     Conflict: directory '{name}' ({}) is a subdirectory of library_dir ({})\n\
+                     Why: directory '{name}' has role {role_desc}; tome would distribute library contents into a directory that already lives inside the library, producing a self-loop at sync time.\n\
+                     hint: move library_dir to a location outside '{name}' — for example, '~/.tome/skills'.",
+                    dist.display(),
+                    lib.display(),
+                );
+            }
+        }
+
         Ok(())
     }
 
@@ -445,6 +494,26 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     } else {
         Ok(path.to_path_buf())
     }
+}
+
+/// Check whether `ancestor` is a path-prefix of `descendant` (or equal),
+/// with trailing-separator normalization so that `/foo/bar` does NOT contain
+/// `/foo/barbaz`.
+///
+/// Lexical only — no canonicalization. Both inputs must already be
+/// tilde-expanded by the caller (D-07).
+fn path_contains(ancestor: &Path, descendant: &Path) -> bool {
+    // Strip trailing separator so component-wise comparison is correct
+    // even when the user writes "/foo/bar/" in config.
+    let a: &Path = ancestor
+        .to_str()
+        .map(|s| Path::new(s.trim_end_matches('/')))
+        .unwrap_or(ancestor);
+    let d: &Path = descendant
+        .to_str()
+        .map(|s| Path::new(s.trim_end_matches('/')))
+        .unwrap_or(descendant);
+    d == a || d.starts_with(a)
 }
 
 /// Default tome home directory.
@@ -1386,6 +1455,117 @@ role = "target"
         assert!(
             msg.contains("Synced (skills discovered here AND distributed here)"),
             "missing role parenthetical: {msg}"
+        );
+    }
+
+    // --- save_checked tests (WHARD-01) ---
+
+    #[test]
+    fn save_checked_rejects_role_type_conflict() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/lib-sc-1"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp/src"),
+                    directory_type: DirectoryType::Git,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.save_checked(&path).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("Target (skills distributed here, not discovered here)"),
+            "expected role parenthetical, got: {err}"
+        );
+        assert!(
+            !path.exists(),
+            "save_checked must not write on validation failure"
+        );
+    }
+
+    #[test]
+    fn save_checked_rejects_library_overlap() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/shared-sc"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("shared").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp/shared-sc"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Synced),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.save_checked(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Conflict:"), "missing Conflict: {msg}");
+        assert!(msg.contains("hint:"), "missing hint: {msg}");
+        assert!(
+            !path.exists(),
+            "save_checked must not write on validation failure"
+        );
+    }
+
+    #[test]
+    fn save_checked_writes_valid_config_and_reloads_unchanged() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/lib-sc-ok"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("ok").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp/ok"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Synced),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                },
+            )]),
+            ..Default::default()
+        };
+        config.save_checked(&path).expect("valid config must save");
+        assert!(path.exists(), "file must exist after save_checked");
+
+        // Reload and re-emit: must be byte-equal to the on-disk file.
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        let reloaded = Config::load(&path).expect("saved config must reload");
+        let reemitted = toml::to_string_pretty(&reloaded).unwrap();
+        assert_eq!(on_disk, reemitted, "saved file must round-trip exactly");
+    }
+
+    #[test]
+    fn save_checked_does_not_mutate_caller() {
+        // Caller's library_dir uses tilde; save_checked must not rewrite it in the caller's Config.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let config = Config {
+            library_dir: PathBuf::from("~/some/lib-not-real"),
+            ..Default::default()
+        };
+        let _ = config.save_checked(&path); // may fail on library_dir-is-a-file or succeed; irrelevant
+        assert_eq!(
+            config.library_dir,
+            PathBuf::from("~/some/lib-not-real"),
+            "save_checked must operate on a clone and leave the caller untouched"
         );
     }
 }
