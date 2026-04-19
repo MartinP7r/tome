@@ -813,11 +813,13 @@ bogus = true
             ..Default::default()
         };
         let err = config.validate().unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string()
-                .contains("Managed role is only valid with claude-plugins type"),
-            "unexpected error: {err}"
+            msg.contains("Managed (read-only, owned by package manager)"),
+            "missing role description: {msg}"
         );
+        assert!(msg.contains("directory"), "missing type name: {msg}");
+        assert!(msg.contains("hint:"), "missing hint line: {msg}");
     }
 
     #[test]
@@ -838,11 +840,13 @@ bogus = true
             ..Default::default()
         };
         let err = config.validate().unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string()
-                .contains("Target role is not valid with git type"),
-            "unexpected error: {err}"
+            msg.contains("Target (skills distributed here, not discovered here)"),
+            "missing role description: {msg}"
         );
+        assert!(msg.contains("git"), "missing type name: {msg}");
+        assert!(msg.contains("hint:"), "missing hint line: {msg}");
     }
 
     #[test]
@@ -863,11 +867,37 @@ bogus = true
             ..Default::default()
         };
         let err = config.validate().unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string()
-                .contains("branch/tag/rev fields are only valid with git type"),
-            "unexpected error: {err}"
+            msg.contains("branch") || msg.contains("tag") || msg.contains("rev"),
+            "missing git-field mention: {msg}"
         );
+        assert!(msg.contains("git"), "missing type name: {msg}");
+        assert!(msg.contains("hint:"), "missing hint line: {msg}");
+    }
+
+    #[test]
+    fn validate_rejects_subdir_with_non_git_type() {
+        let config = Config {
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("/tmp"),
+                    directory_type: DirectoryType::Directory,
+                    role: None,
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: Some("nested".to_string()),
+                },
+            )]),
+            ..Default::default()
+        };
+        let err = config.validate().unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("subdir"), "missing 'subdir': {msg}");
+        assert!(msg.contains("git"), "missing type name: {msg}");
+        assert!(msg.contains("hint:"), "missing hint line: {msg}");
     }
 
     #[test]
