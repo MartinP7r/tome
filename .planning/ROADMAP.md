@@ -37,7 +37,7 @@
   4. A successful `tome init` still round-trips: the written config passes `Config::validate()` and reloads without changes
 **Plans**: 3 plans
 - [x] 04-01-validate-error-template-PLAN.md — Upgrade existing `Config::validate()` errors to the D-10 Conflict+Why+Suggestion template
-- [ ] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
+- [x] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
 - [ ] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
 
 ### Phase 5: Wizard Test Coverage

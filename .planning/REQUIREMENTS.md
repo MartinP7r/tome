@@ -10,8 +10,8 @@ Requirements for v0.7 release. Each maps to roadmap phases. The wizard code itse
 ### Wizard Correctness
 
 - [x] **WHARD-01**: Wizard assembles in-memory `Config`, then validates it via `Config::validate()` (or TOML round-trip) before calling `config.save()`. Invalid type/role combinations produced by the role-editing loop or custom directory flow must be rejected with a clear error, not silently written.
-- [ ] **WHARD-02**: Wizard detects when `library_dir` overlaps with any distribution directory (Synced or Target role) and refuses to save. Error message should suggest a non-overlapping library location.
-- [ ] **WHARD-03**: Wizard detects when `library_dir` is a subdirectory of a synced directory (circular symlink risk at distribute time) and surfaces this as a validation error before save.
+- [x] **WHARD-02**: Wizard detects when `library_dir` overlaps with any distribution directory (Synced or Target role) and refuses to save. Error message should suggest a non-overlapping library location.
+- [x] **WHARD-03**: Wizard detects when `library_dir` is a subdirectory of a synced directory (circular symlink risk at distribute time) and surfaces this as a validation error before save.
 
 ### Wizard Test Coverage
 
@@ -51,8 +51,8 @@ Deferred to future releases.
 | Requirement | Phase | Status |
 |-------------|-------|--------|
 | WHARD-01 | Phase 4 | Complete |
-| WHARD-02 | Phase 4 | Pending |
-| WHARD-03 | Phase 4 | Pending |
+| WHARD-02 | Phase 4 | Complete |
+| WHARD-03 | Phase 4 | Complete |
 | WHARD-04 | Phase 5 | Pending |
 | WHARD-05 | Phase 5 | Pending |
 | WHARD-06 | Phase 5 | Pending |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.7
 milestone_name: Wizard Hardening
 status: executing
-stopped_at: Completed 04-01-validate-error-template-PLAN.md
-last_updated: "2026-04-19T05:42:22.150Z"
+stopped_at: Completed 04-02-library-overlap-validation-PLAN.md
+last_updated: "2026-04-19T05:49:51.525Z"
 last_activity: 2026-04-19
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 3
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 ## Current Position
 
 Phase: 04 (wizard-correctness) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-19
 
@@ -50,6 +50,7 @@ Roadmap-specific:
 - Split v0.7 into three phases instead of two (research-suggested Correctness + Polish) to give test-coverage work its own verifiable boundary. Tests depend on Phase 4's pure-function extraction and must pass before polish lands.
 - Phase 6 absorbs both display polish (WHARD-07) and the doc housekeeping (WHARD-08) since they are small and share a "milestone-close" character.
 - [Phase 04]: D-10 Conflict+Why+Suggestion error template applied to all four Config::validate() bail! sites; D-11 role parentheticals routed through DirectoryRole::description()
+- [Phase 04-wizard-correctness]: [Phase 04-02]: Lexical path-overlap detection (no canonicalize) in Config::validate; path_contains helper private to config module; Source-role nesting intentionally allowed (D-05)
 
 ### Pending Todos
 
@@ -61,6 +62,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-19T05:42:22.146Z
-Stopped at: Completed 04-01-validate-error-template-PLAN.md
+Last session: 2026-04-19T05:49:51.522Z
+Stopped at: Completed 04-02-library-overlap-validation-PLAN.md
 Resume file: None
