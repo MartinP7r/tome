@@ -496,8 +496,8 @@ impl Config {
             toml::to_string_pretty(&expanded).context("failed to serialize config (pre-check)")?;
         let reparsed: Config =
             toml::from_str(&emitted).context("round-trip: generated TOML did not reparse")?;
-        let reemitted = toml::to_string_pretty(&reparsed)
-            .context("failed to serialize config (round-trip)")?;
+        let reemitted =
+            toml::to_string_pretty(&reparsed).context("failed to serialize config (round-trip)")?;
         anyhow::ensure!(
             emitted == reemitted,
             "round-trip mismatch: serialized config differs after parse+reserialize — this is a serde bug in a tome type, not a user error.\n\

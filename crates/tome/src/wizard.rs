@@ -305,7 +305,21 @@ pub fn run(dry_run: bool) -> Result<Config> {
 
     if dry_run {
         println!("  (dry run -- not saving)");
-        let toml_str = toml::to_string_pretty(&config)?;
+        // D-07/D-08/D-09: validate the same way a real save would, but without
+        // writing to disk. Use a clone so we can expand tildes without mutating
+        // the original Config (which might be returned to the caller).
+        let mut expanded = config.clone();
+        expanded
+            .expand_tildes()
+            .context("wizard dry-run: tilde expansion failed")?;
+        expanded
+            .validate()
+            .context("wizard dry-run: configuration is invalid")?;
+        let toml_str = toml::to_string_pretty(&expanded)
+            .context("wizard dry-run: failed to serialize config")?;
+        // Defense-in-depth (D-03): reparse to confirm round-trip integrity.
+        let _: Config =
+            toml::from_str(&toml_str).context("wizard dry-run: generated TOML did not reparse")?;
         println!();
         println!("{}", style("Generated config:").bold());
         println!("{}", toml_str);
@@ -314,7 +328,11 @@ pub fn run(dry_run: bool) -> Result<Config> {
         .default(true)
         .interact()?
     {
-        config.save(&config_path)?;
+        // D-01/D-03/D-07/D-08: expand → validate → round-trip → save.
+        // On any failure, return Err — no retry loop (D-08/D-09).
+        config
+            .save_checked(&config_path)
+            .context("wizard save aborted: configuration is invalid")?;
         println!("{} Config saved!", style("done").green());
 
         // Offer to git-init the tome home directory for backup tracking
