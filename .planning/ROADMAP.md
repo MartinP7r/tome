@@ -20,7 +20,7 @@
 
 ### v0.7 Wizard Hardening
 
-- [ ] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save
+- [x] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save (completed 2026-04-19)
 - [ ] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage
 - [ ] **Phase 6: Display Polish & Docs** — Summary table uses `tabled`; PROJECT.md validates WIZ-01–05 shipped/hardened
 
@@ -38,7 +38,7 @@
 **Plans**: 3 plans
 - [x] 04-01-validate-error-template-PLAN.md — Upgrade existing `Config::validate()` errors to the D-10 Conflict+Why+Suggestion template
 - [x] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
-- [ ] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
+- [x] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
 
 ### Phase 5: Wizard Test Coverage
 **Goal**: Wizard logic is testable without a TTY and has enforced coverage of valid/invalid combinations
@@ -69,6 +69,6 @@
 | 1. Unified Directory Foundation | v0.6 | 3/5 | Complete | 2026-04-14 |
 | 2. Git Sources & Selection | v0.6 | 4/4 | Complete | 2026-04-15 |
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
-| 4. Wizard Correctness | v0.7 | 0/3 | Planned | — |
+| 4. Wizard Correctness | v0.7 | 3/3 | Complete   | 2026-04-19 |
 | 5. Wizard Test Coverage | v0.7 | 0/0 | Not started | — |
 | 6. Display Polish & Docs | v0.7 | 0/0 | Not started | — |

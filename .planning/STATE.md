@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.7
 milestone_name: Wizard Hardening
-status: executing
-stopped_at: Completed 04-02-library-overlap-validation-PLAN.md
-last_updated: "2026-04-19T05:49:51.525Z"
+status: verifying
+stopped_at: Completed 04-03-wizard-save-hardening-PLAN.md
+last_updated: "2026-04-19T05:50:41.100Z"
 last_activity: 2026-04-19
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-18)
 
 Phase: 04 (wizard-correctness) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-19
 
 Progress: [░░░░░░░░░░] 0% (0/3 phases complete)
@@ -51,6 +51,8 @@ Roadmap-specific:
 - Phase 6 absorbs both display polish (WHARD-07) and the doc housekeeping (WHARD-08) since they are small and share a "milestone-close" character.
 - [Phase 04]: D-10 Conflict+Why+Suggestion error template applied to all four Config::validate() bail! sites; D-11 role parentheticals routed through DirectoryRole::description()
 - [Phase 04-wizard-correctness]: [Phase 04-02]: Lexical path-overlap detection (no canonicalize) in Config::validate; path_contains helper private to config module; Source-role nesting intentionally allowed (D-05)
+- [Phase 04-wizard-correctness]: [Phase 04]: D-03 TOML round-trip check in Config::save_checked compares emitted strings for byte equality rather than deriving PartialEq on Config (avoids cascade)
+- [Phase 04-wizard-correctness]: [Phase 04]: save_checked operates on a clone; caller's tilde-shaped Config paths are preserved
 
 ### Pending Todos
 
@@ -62,6 +64,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-04-19T05:49:51.522Z
-Stopped at: Completed 04-02-library-overlap-validation-PLAN.md
+Last session: 2026-04-19T05:50:41.096Z
+Stopped at: Completed 04-03-wizard-save-hardening-PLAN.md
 Resume file: None
