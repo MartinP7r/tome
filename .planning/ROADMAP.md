@@ -49,7 +49,11 @@
   2. An integration test runs `tome init --dry-run --no-input` and asserts the generated config passes validation and round-trips through TOML unchanged
   3. Every `(DirectoryType, DirectoryRole)` combination the wizard can produce has a test: valid combos save successfully; invalid combos are rejected by the Phase 4 validation path
   4. CI (ubuntu + macos) passes with the new tests as non-optional gates
-**Plans**: TBD
+**Plans**: 4 plans
+- [ ] 05-01-no-input-plumbing-and-assemble-config-PLAN.md — Plumb `--no-input` through `wizard::run`; extract `pub(crate) fn assemble_config`; remove `lib.rs:164-165` bail (WHARD-04/05 prerequisite)
+- [ ] 05-02-pure-helper-unit-tests-PLAN.md — Unit tests for `find_known_directories_in`, `KNOWN_DIRECTORIES` registry invariants, and `assemble_config` (WHARD-04)
+- [ ] 05-03-init-integration-test-PLAN.md — Integration tests for `tome init --dry-run --no-input` on empty + seeded HOME (WHARD-05)
+- [ ] 05-04-combo-matrix-test-PLAN.md — Table-driven `(DirectoryType, DirectoryRole)` cross-product — 12 combos derived from `valid_roles()` (WHARD-06)
 
 ### Phase 6: Display Polish & Docs
 **Goal**: Wizard summary renders cleanly on any terminal width and v0.7 scope is marked complete in project docs
@@ -70,5 +74,5 @@
 | 2. Git Sources & Selection | v0.6 | 4/4 | Complete | 2026-04-15 |
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
 | 4. Wizard Correctness | v0.7 | 3/3 | Complete   | 2026-04-19 |
-| 5. Wizard Test Coverage | v0.7 | 0/0 | Not started | — |
+| 5. Wizard Test Coverage | v0.7 | 0/4 | Not started | — |
 | 6. Display Polish & Docs | v0.7 | 0/0 | Not started | — |
