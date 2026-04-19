@@ -32,7 +32,7 @@ jobs:
       - run: cargo doc --no-deps
       - run: cp -r target/doc docs/book/api
       - run: cp -r docs/visuals docs/book/visuals
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: docs/book
       - id: deploy
