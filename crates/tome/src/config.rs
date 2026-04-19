@@ -344,16 +344,26 @@ impl Config {
             if role == DirectoryRole::Managed && dir.directory_type != DirectoryType::ClaudePlugins
             {
                 anyhow::bail!(
-                    "directory '{}': Managed role is only valid with claude-plugins type",
-                    name
+                    "directory '{name}': role/type conflict\n\
+                     Conflict: role is {} but type is '{}'\n\
+                     Why: the Managed role means skills are owned by a package manager; only the claude-plugins type is known to behave this way, so any other type with Managed would be sync'd incorrectly.\n\
+                     hint: either change type to 'claude-plugins', or change role to {} or {}.",
+                    DirectoryRole::Managed.description(),
+                    dir.directory_type,
+                    DirectoryRole::Synced.description(),
+                    DirectoryRole::Source.description(),
                 );
             }
 
             // Target role invalid with Git type
             if role == DirectoryRole::Target && dir.directory_type == DirectoryType::Git {
                 anyhow::bail!(
-                    "directory '{}': Target role is not valid with git type",
-                    name
+                    "directory '{name}': role/type conflict\n\
+                     Conflict: role is {} but type is 'git'\n\
+                     Why: the Target role means skills are distributed into this directory, but git-type directories are remote clones that tome must not write skills into — pushing symlinks into a git clone would clash with the working tree.\n\
+                     hint: change role to {} (git repos are read-only skill sources).",
+                    DirectoryRole::Target.description(),
+                    DirectoryRole::Source.description(),
                 );
             }
 
@@ -361,16 +371,22 @@ impl Config {
             let has_git_fields = dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
             if has_git_fields && dir.directory_type != DirectoryType::Git {
                 anyhow::bail!(
-                    "directory '{}': branch/tag/rev fields are only valid with git type",
-                    name
+                    "directory '{name}': git ref fields on non-git directory\n\
+                     Conflict: branch/tag/rev is set but type is '{}'\n\
+                     Why: branch, tag, and rev pin a remote git clone to a specific commit; they have no meaning for a local directory or a claude-plugins cache.\n\
+                     hint: either change type to 'git', or remove the branch/tag/rev fields from this directory.",
+                    dir.directory_type,
                 );
             }
 
             // subdir only valid with Git type
             if dir.subdir.is_some() && dir.directory_type != DirectoryType::Git {
                 anyhow::bail!(
-                    "directory '{}': 'subdir' is only valid for git-type directories",
-                    name
+                    "directory '{name}': subdir on non-git directory\n\
+                     Conflict: subdir is set but type is '{}'\n\
+                     Why: subdir scopes skill discovery to a sub-path within a remote git clone; for a plain directory you can just point 'path' at the sub-path directly.\n\
+                     hint: either change type to 'git', or remove 'subdir' and adjust 'path' to point where skills actually live.",
+                    dir.directory_type,
                 );
             }
         }
