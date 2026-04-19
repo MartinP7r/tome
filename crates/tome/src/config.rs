@@ -1222,4 +1222,170 @@ role = "target"
     // TOME_HOME env var tests are covered by integration tests in cli.rs,
     // since set_var/remove_var are unsafe in Rust 2024 edition and env var
     // mutation in unit tests causes data races with parallel test execution.
+
+    // --- Overlap tests (WHARD-02 / WHARD-03) ---
+
+    fn dir_cfg(path: &str, dt: DirectoryType, role: Option<DirectoryRole>) -> DirectoryConfig {
+        DirectoryConfig {
+            path: PathBuf::from(path),
+            directory_type: dt,
+            role,
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_library_equals_distribution() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/shared"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("shared").unwrap(),
+                dir_cfg(
+                    "/tmp/shared",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Synced),
+                ),
+            )]),
+            ..Default::default()
+        };
+        let msg = config.validate().unwrap_err().to_string();
+        assert!(msg.contains("Conflict:"), "missing Conflict line: {msg}");
+        assert!(msg.contains("shared"), "missing directory name: {msg}");
+        assert!(
+            msg.contains("Synced (skills discovered here AND distributed here)"),
+            "missing role parenthetical: {msg}"
+        );
+        assert!(msg.contains("hint:"), "missing hint: {msg}");
+    }
+
+    #[test]
+    fn validate_rejects_library_inside_synced_dir() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/outer/inner"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("outer").unwrap(),
+                dir_cfg(
+                    "/tmp/outer",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Synced),
+                ),
+            )]),
+            ..Default::default()
+        };
+        let msg = config.validate().unwrap_err().to_string();
+        assert!(msg.contains("circular"), "missing 'circular': {msg}");
+        assert!(msg.contains("symlink"), "missing 'symlink': {msg}");
+        assert!(
+            msg.contains("Synced (skills discovered here AND distributed here)"),
+            "missing role parenthetical: {msg}"
+        );
+        assert!(msg.contains("hint:"), "missing hint: {msg}");
+    }
+
+    #[test]
+    fn validate_rejects_target_inside_library() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/outer"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("inner-target").unwrap(),
+                dir_cfg(
+                    "/tmp/outer/inner",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Target),
+                ),
+            )]),
+            ..Default::default()
+        };
+        let msg = config.validate().unwrap_err().to_string();
+        assert!(msg.contains("Conflict:"), "missing Conflict line: {msg}");
+        assert!(
+            msg.contains("Target (skills distributed here, not discovered here)"),
+            "missing role parenthetical: {msg}"
+        );
+        assert!(msg.contains("hint:"), "missing hint: {msg}");
+    }
+
+    #[test]
+    fn validate_accepts_sibling_paths_not_false_positive() {
+        // /tmp/foo and /tmp/foobar are siblings, not nested.
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/foo"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("foobar").unwrap(),
+                dir_cfg(
+                    "/tmp/foobar",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Synced),
+                ),
+            )]),
+            ..Default::default()
+        };
+        config
+            .validate()
+            .expect("sibling paths must not trigger overlap");
+    }
+
+    #[test]
+    fn validate_rejects_equality_despite_trailing_separator() {
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/lib/"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("lib").unwrap(),
+                dir_cfg(
+                    "/tmp/lib",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Synced),
+                ),
+            )]),
+            ..Default::default()
+        };
+        let msg = config.validate().unwrap_err().to_string();
+        assert!(msg.contains("Conflict:"), "missing Conflict line: {msg}");
+    }
+
+    #[test]
+    fn validate_accepts_source_role_inside_library() {
+        // Source dirs don't participate in distribution — no self-loop risk (D-05).
+        let config = Config {
+            library_dir: PathBuf::from("/tmp/outer"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("inner-source").unwrap(),
+                dir_cfg(
+                    "/tmp/outer/inner",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Source),
+                ),
+            )]),
+            ..Default::default()
+        };
+        config
+            .validate()
+            .expect("Source-role nesting must not trigger overlap");
+    }
+
+    #[test]
+    fn validate_rejects_tilde_equal_paths() {
+        // Both library_dir and directory path use tilde; must expand before compare.
+        let config = Config {
+            library_dir: PathBuf::from("~/.tome/skills"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("same").unwrap(),
+                dir_cfg(
+                    "~/.tome/skills",
+                    DirectoryType::Directory,
+                    Some(DirectoryRole::Synced),
+                ),
+            )]),
+            ..Default::default()
+        };
+        let msg = config.validate().unwrap_err().to_string();
+        assert!(msg.contains("Conflict:"), "missing Conflict line: {msg}");
+        assert!(
+            msg.contains("Synced (skills discovered here AND distributed here)"),
+            "missing role parenthetical: {msg}"
+        );
+    }
 }
