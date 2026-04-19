@@ -465,12 +465,55 @@ impl Config {
     }
 
     /// Expand `~` in all path fields.
-    fn expand_tildes(&mut self) -> Result<()> {
+    pub(crate) fn expand_tildes(&mut self) -> Result<()> {
         self.library_dir = expand_tilde(&self.library_dir)?;
         for dir in self.directories.values_mut() {
             dir.path = expand_tilde(&dir.path)?;
         }
         Ok(())
+    }
+
+    /// Save config, but first run the same expand + validate pipeline that
+    /// `Config::load()` runs, followed by a TOML round-trip equality check
+    /// (D-03: defence in depth — catches serde drift such as a field that
+    /// accidentally disappears across a serialize/deserialize cycle).
+    ///
+    /// Returns `Err` without writing anything if any stage fails.
+    ///
+    /// Call this instead of `save()` from the wizard or any other code that
+    /// produces a Config in-memory rather than loading it from disk.
+    pub fn save_checked(&self, path: &Path) -> Result<()> {
+        // Mirror Config::load order: expand → validate.
+        // We operate on a clone so the caller's Config is not mutated.
+        let mut expanded = self.clone();
+        expanded.expand_tildes()?;
+        expanded.validate()?;
+
+        // TOML round-trip (D-03): serialize, parse back, re-serialize,
+        // compare the two TOML strings for byte equality. If they differ,
+        // a field has been silently dropped or rewritten by serde.
+        let emitted =
+            toml::to_string_pretty(&expanded).context("failed to serialize config (pre-check)")?;
+        let reparsed: Config =
+            toml::from_str(&emitted).context("round-trip: generated TOML did not reparse")?;
+        let reemitted = toml::to_string_pretty(&reparsed)
+            .context("failed to serialize config (round-trip)")?;
+        anyhow::ensure!(
+            emitted == reemitted,
+            "round-trip mismatch: serialized config differs after parse+reserialize — this is a serde bug in a tome type, not a user error.\n\
+             Conflict: emit/reparse produced different TOML\n\
+             Why: a field is not reversibly (de)serializable; saving would lose data.\n\
+             hint: report this as a tome bug and share the generated output below.\n\
+             --- first emit ---\n{emitted}\n--- second emit ---\n{reemitted}"
+        );
+
+        // Safe to save — write the same bytes we verified.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        std::fs::write(path, &emitted)
+            .with_context(|| format!("failed to write {}", path.display()))
     }
 }
 
