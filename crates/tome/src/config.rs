@@ -151,8 +151,11 @@ pub enum DirectoryRole {
 }
 
 impl DirectoryRole {
-    /// Human-readable description with plain-english explanation.
-    /// Per D-04/D-05: every user-facing display includes a parenthetical.
+    /// Human-readable description used in validation error messages.
+    ///
+    /// The parenthetical ("Managed (read-only, owned by package manager)") is
+    /// load-bearing: validator errors assert on this substring, so both the
+    /// kind and the hint render identically.
     pub fn description(&self) -> &'static str {
         match self {
             DirectoryRole::Managed => "Managed (read-only, owned by package manager)",
@@ -322,21 +325,19 @@ impl Config {
             .with_context(|| format!("failed to write {}", path.display()))
     }
 
-    /// Read-only view of the directory entries.
+    /// Read-only accessors for the `pub(crate)` fields.
     ///
-    /// Exposed for external consumers (integration tests, future APIs) that
-    /// cannot reach the `pub(crate)` field directly. Returns a reference —
-    /// callers get cheap immutable access without forcing a clone.
+    /// External-crate consumers (integration tests, future library APIs) cannot
+    /// reach `pub(crate)` fields, so these methods expose `&T` views without
+    /// widening field visibility or forcing a clone.
     pub fn directories(&self) -> &BTreeMap<DirectoryName, DirectoryConfig> {
         &self.directories
     }
 
-    /// Read-only view of the library directory path.
     pub fn library_dir(&self) -> &Path {
         &self.library_dir
     }
 
-    /// Read-only view of the excluded skill names.
     pub fn exclude(&self) -> &BTreeSet<SkillName> {
         &self.exclude
     }
@@ -436,8 +437,10 @@ impl Config {
         }
 
         // --- Path overlap between library_dir and distribution directories ---
-        // D-01/D-02/D-04/D-06/D-07: lexical, tilde-aware, trailing-separator-normalized.
-        // Scope (D-05): library_dir vs each distribution directory (Synced or Target).
+        // Lexical only: tilde-expand both sides, normalize trailing '/', compare
+        // without hitting the filesystem. Scope is library_dir vs each
+        // distribution (Synced or Target) directory — Source dirs are read-only
+        // and never written to, so they cannot self-loop at sync time.
         let lib = expand_tilde(&self.library_dir)?;
         for (name, dir) in self.distribution_dirs() {
             let dist = expand_tilde(&dir.path)?;
@@ -458,7 +461,8 @@ impl Config {
                 );
             }
 
-            // Case B: library_dir is inside the distribution directory (WHARD-03 circular case)
+            // Case B: library_dir is inside the distribution directory — the
+            // "library lives inside a synced tree" circular-symlink case.
             if path_contains(&dist, &lib) {
                 anyhow::bail!(
                     "library_dir is inside distribution directory '{name}' (circular symlink risk)\n\
@@ -519,7 +523,7 @@ impl Config {
 
     /// Save config, but first run the same expand + validate pipeline that
     /// `Config::load()` runs, followed by a TOML round-trip equality check
-    /// (D-03: defence in depth — catches serde drift such as a field that
+    /// (defense in depth — catches serde drift such as a field that
     /// accidentally disappears across a serialize/deserialize cycle).
     ///
     /// Returns `Err` without writing anything if any stage fails.
@@ -533,9 +537,9 @@ impl Config {
         expanded.expand_tildes()?;
         expanded.validate()?;
 
-        // TOML round-trip (D-03): serialize, parse back, re-serialize,
-        // compare the two TOML strings for byte equality. If they differ,
-        // a field has been silently dropped or rewritten by serde.
+        // TOML round-trip: serialize, parse back, re-serialize, compare the
+        // two TOML strings for byte equality. If they differ, a field has
+        // been silently dropped or rewritten by serde.
         let emitted =
             toml::to_string_pretty(&expanded).context("failed to serialize config (pre-check)")?;
         let reparsed: Config =
@@ -588,7 +592,7 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
 /// `/foo/barbaz`.
 ///
 /// Lexical only — no canonicalization. Both inputs must already be
-/// tilde-expanded by the caller (D-07).
+/// tilde-expanded by the caller.
 fn path_contains(ancestor: &Path, descendant: &Path) -> bool {
     // Strip trailing separator so component-wise comparison is correct
     // even when the user writes "/foo/bar/" in config.
@@ -1379,7 +1383,7 @@ role = "target"
     // since set_var/remove_var are unsafe in Rust 2024 edition and env var
     // mutation in unit tests causes data races with parallel test execution.
 
-    // --- Overlap tests (WHARD-02 / WHARD-03) ---
+    // --- Overlap tests (library_dir vs distribution directories) ---
 
     fn dir_cfg(path: &str, dt: DirectoryType, role: Option<DirectoryRole>) -> DirectoryConfig {
         DirectoryConfig {
@@ -1504,7 +1508,7 @@ role = "target"
 
     #[test]
     fn validate_accepts_source_role_inside_library() {
-        // Source dirs don't participate in distribution — no self-loop risk (D-05).
+        // Source dirs don't participate in distribution — no self-loop risk.
         let config = Config {
             library_dir: PathBuf::from("/tmp/outer"),
             directories: BTreeMap::from([(
@@ -1545,7 +1549,7 @@ role = "target"
         );
     }
 
-    // --- save_checked tests (WHARD-01) ---
+    // --- save_checked tests ---
 
     #[test]
     fn save_checked_rejects_role_type_conflict() {
@@ -1656,15 +1660,17 @@ role = "target"
         );
     }
 
-    // --- Cross-product (DirectoryType, DirectoryRole) matrix (WHARD-06) ---
+    // --- Cross-product (DirectoryType, DirectoryRole) matrix ---
     //
-    // Per D-07/D-08/D-09:
-    //   - Every combination is tested, no exclusions.
-    //   - Expected pass/fail is derived from `DirectoryType::valid_roles().contains(&role)`,
-    //     not a hand-written table — so drift between the wizard's role picker
-    //     and the validator is impossible.
-    //   - Invalid combos must produce an error message containing the role's
-    //     description() substring (Phase 4 D-10/D-11 Conflict+Why+Suggestion format).
+    // Every combination is tested, no exclusions. Expected pass/fail is
+    // derived from `DirectoryType::valid_roles().contains(&role)` at runtime,
+    // NOT a hand-written table — this means drift between the wizard's role
+    // picker and the validator is impossible: update valid_roles() and the
+    // expectations update automatically.
+    //
+    // Invalid combos additionally assert the error message contains the role's
+    // description() substring plus the literal "hint:" — the same
+    // Conflict+Why+Suggestion shape produced by the other validator bails.
 
     const ALL_TYPES_FOR_MATRIX: [DirectoryType; 3] = [
         DirectoryType::ClaudePlugins,
@@ -1723,7 +1729,7 @@ role = "target"
             for role in &ALL_ROLES_FOR_MATRIX {
                 let combo = (dir_type.clone(), role.clone());
                 tested.push(combo.clone());
-                // D-08: derive pass/fail from valid_roles() at runtime — no hand-written table.
+                // Derive pass/fail from valid_roles() at runtime — no hand-written table.
                 let should_pass = dir_type.valid_roles().contains(role);
 
                 if should_pass {
@@ -1808,8 +1814,8 @@ role = "target"
     #[test]
     fn combo_matrix_invalid_error_mentions_role_description() {
         // For every INVALID (type, role), Config::validate() must produce an error
-        // message containing the role's description() substring (D-09) AND the word
-        // "hint:" (Phase 4 D-10 Conflict+Why+Suggestion template).
+        // message containing the role's description() substring AND the literal
+        // "hint:" — the Conflict+Why+Suggestion shape used by the validator.
         // This is stable against wording tweaks that don't remove the role-description
         // parenthetical or the hint line.
 
@@ -1817,7 +1823,7 @@ role = "target"
 
         for dir_type in &ALL_TYPES_FOR_MATRIX {
             for role in &ALL_ROLES_FOR_MATRIX {
-                // D-08: derive invalid set from valid_roles() at runtime.
+                // Derive the invalid set from valid_roles() at runtime.
                 if dir_type.valid_roles().contains(role) {
                     continue;
                 }

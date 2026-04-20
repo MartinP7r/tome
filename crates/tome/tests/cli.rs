@@ -3020,11 +3020,12 @@ fn no_input_flag_skips_all_prompts() {
 
 #[test]
 fn init_with_no_input_and_dry_run_succeeds() {
-    // Phase 5 Plan 01 removed the `cannot use --no-input` bail from the Init
-    // branch. `tome init --no-input --dry-run` is now the primary headless
-    // smoke path — Plan 05-03 will extend this with stdout-parsing assertions.
-    // Here we just assert exit 0 with an isolated HOME so auto-discovery is
-    // deterministic (empty HOME → no known directories discovered).
+    // Headless smoke: `tome init --no-input --dry-run` must run the wizard to
+    // completion without any TTY and print the `Generated config:` marker.
+    // HOME is isolated to a TempDir so auto-discovery is deterministic
+    // (empty HOME → no known directories). Richer assertions on the emitted
+    // TOML live in `init_dry_run_no_input_empty_home` and
+    // `init_dry_run_no_input_seeded_home`.
     let tmp = TempDir::new().unwrap();
     tome()
         .env("HOME", tmp.path())
@@ -3711,17 +3712,18 @@ fn test_fork_dry_run() {
 }
 
 // --------------------------------------------------------------------------
-// Wizard integration tests (WHARD-05)
+// Wizard integration tests
 //
-// These tests drive `tome init --dry-run --no-input` end-to-end with HOME
-// overridden to a TempDir. They confirm:
-//   - the --no-input plumbing from Plan 05-01 works (no bail, no dialoguer)
+// These tests drive `tome init --dry-run --no-input` (and one save-path
+// variant without --dry-run) end-to-end with HOME overridden to a TempDir.
+// They confirm:
+//   - the wizard runs headlessly without hitting a TTY
 //   - the generated config passes Config::validate()
 //   - the generated config round-trips through TOML byte-equal
 //
 // Crate-boundary note: this file is a separate crate from `tome`, so Config
-// state is read via `pub fn` accessors (directories(), library_dir(), exclude())
-// added by Plan 05-01 Part D. `pub(crate)` field access would NOT compile here.
+// state is read via the `pub fn` accessors directories(), library_dir(),
+// exclude() — `pub(crate)` field access does not compile here.
 // --------------------------------------------------------------------------
 
 use tome::config::{Config, DirectoryName, DirectoryRole, DirectoryType};
@@ -3740,8 +3742,8 @@ fn parse_generated_config(stdout: &str) -> Config {
         .unwrap_or_else(|e| panic!("generated TOML did not parse: {e}\n---\n{body}"))
 }
 
-/// Assert a Config round-trips: serialize, parse back, re-serialize, compare bytes.
-/// Mirrors `Config::save_checked`'s round-trip guard (D-03).
+/// Assert a Config round-trips: serialize, parse back, re-serialize, compare
+/// bytes. Mirrors `Config::save_checked`'s round-trip guard.
 fn assert_config_roundtrips(config: &Config) {
     let emitted = toml::to_string_pretty(config).expect("serialize Config");
     let reparsed: Config = toml::from_str(&emitted).expect("reparse Config");
@@ -3777,34 +3779,28 @@ fn init_dry_run_no_input_empty_home() {
 
     let config = parse_generated_config(&stdout);
 
-    // 1. directories is empty (nothing auto-discovered). Use the pub accessor —
-    //    the pub(crate) field is not reachable from this (external) test crate.
     assert!(
         config.directories().is_empty(),
         "expected empty directories on empty HOME, got: {:?}",
         config.directories().keys().collect::<Vec<_>>(),
     );
 
-    // 2. library_dir is the expanded default (HOME/.tome/skills). Accessor returns &Path.
     assert_eq!(
         config.library_dir(),
         tmp.path().join(".tome/skills").as_path(),
         "library_dir should be <HOME>/.tome/skills after tilde expansion",
     );
 
-    // 3. exclude set is empty (D-01 default).
     assert!(
         config.exclude().is_empty(),
         "expected empty exclude set, got: {:?}",
         config.exclude(),
     );
 
-    // 4. Config::validate() passes (WHARD-05 acceptance criterion).
     config.validate().unwrap_or_else(|e| {
         panic!("generated config failed Config::validate(): {e:#}\nstdout:\n{stdout}")
     });
 
-    // 5. TOML round-trip is byte-equal (WHARD-05 acceptance criterion).
     assert_config_roundtrips(&config);
 }
 
@@ -3836,7 +3832,6 @@ fn init_dry_run_no_input_seeded_home() {
 
     let config = parse_generated_config(&stdout);
 
-    // 1. Both entries present. directories() returns &BTreeMap<DirectoryName, DirectoryConfig>.
     assert_eq!(
         config.directories().len(),
         2,
@@ -3845,9 +3840,8 @@ fn init_dry_run_no_input_seeded_home() {
         config.directories().keys().collect::<Vec<_>>(),
     );
 
-    // 2. claude-plugins entry: ClaudePlugins type, Managed role, expanded path.
-    //    `DirectoryConfig::role` field is pub(crate) — use the pub `role()` method.
-    //    `DirectoryConfig::path` and `DirectoryConfig::directory_type` are already pub.
+    // claude-plugins entry: ClaudePlugins type, Managed role, expanded path.
+    // role() is the accessor (field is pub(crate)); path + directory_type are pub.
     let plugins = config
         .directories()
         .get(&DirectoryName::new("claude-plugins").unwrap())
@@ -3865,7 +3859,7 @@ fn init_dry_run_no_input_seeded_home() {
         "claude-plugins path should be <HOME>/.claude/plugins after tilde expansion",
     );
 
-    // 3. claude-skills entry: Directory type, Synced role, expanded path.
+    // claude-skills entry: Directory type, Synced role, expanded path.
     let skills = config
         .directories()
         .get(&DirectoryName::new("claude-skills").unwrap())
@@ -3883,19 +3877,16 @@ fn init_dry_run_no_input_seeded_home() {
         "claude-skills path should be <HOME>/.claude/skills after tilde expansion",
     );
 
-    // 4. library_dir is the expanded default. library_dir() returns &Path.
     assert_eq!(
         config.library_dir(),
         tmp.path().join(".tome/skills").as_path(),
         "library_dir should be <HOME>/.tome/skills after tilde expansion",
     );
 
-    // 5. Config::validate() passes.
     config.validate().unwrap_or_else(|e| {
         panic!("generated config failed Config::validate(): {e:#}\nstdout:\n{stdout}")
     });
 
-    // 6. TOML round-trip is byte-equal.
     assert_config_roundtrips(&config);
 }
 
@@ -3904,14 +3895,14 @@ fn init_no_input_writes_config_and_reloads() {
     // End-to-end save path: `tome init --no-input` (no --dry-run) runs the wizard
     // → assemble_config → save_checked → writes tome.toml → post-init sync().
     // A future regression in save_checked, post-init sync, or the no_input save
-    // branch at wizard.rs:331-342 would slip past the dry-run integration tests
-    // above; this test closes that gap.
+    // branch in wizard::run would slip past the dry-run tests above.
     //
     // Invariants:
     //   - exit 0
     //   - $TOME_HOME/tome.toml exists after the run
-    //   - Config::load on the written file yields a valid Config (validate() ok)
-    //   - directories()/library_dir()/exclude() match the D-01 defaults on empty HOME
+    //   - Config::load on the written file yields a valid Config
+    //   - directories()/library_dir()/exclude() match the headless defaults
+    //     on empty HOME (include-all, ~/.tome/skills expanded, empty exclude)
     //   - written file round-trips byte-equal through toml::{to_string_pretty, from_str}
     let tmp = TempDir::new().unwrap();
     let tome_home = tmp.path().join(".tome");
@@ -3939,12 +3930,15 @@ fn init_no_input_writes_config_and_reloads() {
     );
 
     let loaded = Config::load(&config_path).unwrap_or_else(|e| {
-        panic!("Config::load on wizard-written file failed: {e:#}\nfile:\n{}", std::fs::read_to_string(&config_path).unwrap_or_default())
+        panic!(
+            "Config::load on wizard-written file failed: {e:#}\nfile:\n{}",
+            std::fs::read_to_string(&config_path).unwrap_or_default()
+        )
     });
 
-    loaded.validate().unwrap_or_else(|e| {
-        panic!("reloaded config failed Config::validate(): {e:#}")
-    });
+    loaded
+        .validate()
+        .unwrap_or_else(|e| panic!("reloaded config failed Config::validate(): {e:#}"));
 
     // Empty HOME → no auto-discovered known dirs.
     assert!(
@@ -3953,14 +3947,14 @@ fn init_no_input_writes_config_and_reloads() {
         loaded.directories().keys().collect::<Vec<_>>(),
     );
 
-    // save_checked expands ~ before writing (so the on-disk TOML holds absolute paths
-    // that don't rely on the caller's HOME). The wizard uses the D-01 default
-    // `~/.tome/skills`, which expands to <HOME>/.tome/skills — here <HOME> is the
-    // TempDir we set via the HOME env var above.
+    // save_checked expands ~ before writing (so the on-disk TOML holds absolute
+    // paths that don't rely on the caller's HOME). The wizard's headless
+    // default is `~/.tome/skills`, which expands to <HOME>/.tome/skills where
+    // <HOME> is the TempDir we set via the HOME env var above.
     assert_eq!(
         loaded.library_dir(),
         tmp.path().join(".tome/skills").as_path(),
-        "library_dir should be the expanded D-01 default (<HOME>/.tome/skills)",
+        "library_dir should be the expanded default (<HOME>/.tome/skills)",
     );
 
     assert!(loaded.exclude().is_empty(), "expected empty exclude set");

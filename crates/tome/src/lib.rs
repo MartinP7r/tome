@@ -1661,9 +1661,10 @@ mod tests {
 
     #[test]
     fn init_with_no_input_does_not_bail_from_lib_run() {
-        // Guard against re-introduction of the bail removed in Phase 5 Plan 01.
-        // We do not invoke wizard::run (it opens a TTY); we only assert the
-        // source of lib.rs no longer contains the bail call.
+        // Guard against re-introduction of the `tome init requires interactive
+        // input` bail in the Init branch. A real integration test of
+        // `tome init --no-input` lives in tests/cli.rs; this source-grep test
+        // is a cheap compile-time-ish belt-and-braces.
         //
         // The needle is split across two concatenated string literals so this
         // test's source itself does not match its own search string — otherwise
@@ -1672,7 +1673,7 @@ mod tests {
         let needle = concat!("anyhow::bail!(\"tome init requires", " interactive input");
         assert!(
             !src.contains(needle),
-            "lib.rs still contains the removed bail — Phase 5 Plan 01 regression"
+            "lib.rs still contains the removed `tome init requires interactive input` bail"
         );
     }
 }

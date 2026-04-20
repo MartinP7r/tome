@@ -125,10 +125,12 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
 /// Run the interactive setup wizard.
 ///
 /// When `no_input` is true, every dialoguer prompt is replaced with its
-/// documented default (per Phase 5 D-01): select all auto-discovered known
-/// directories, library = `~/.tome/skills`, empty exclusions, no role edits,
-/// no custom directories, no git init. Dry-run and save paths behave the same
-/// as interactive mode — `no_input` only affects how prompts are resolved.
+/// documented default: select all auto-discovered known directories,
+/// library = `~/.tome/skills`, empty exclusions, no role edits, no custom
+/// directories, save accepted, skip git-init-for-backup (a one-line `note:`
+/// is printed to stderr pointing at `tome backup init`). Dry-run and save
+/// paths behave the same as interactive mode — `no_input` only affects how
+/// prompts are resolved.
 pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     println!();
     println!("{}", style("Welcome to tome setup!").bold().cyan());
@@ -180,7 +182,7 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     step_divider("Summary");
     show_directory_summary(&directories);
 
-    // Offer to edit roles (skipped entirely under --no-input per D-01)
+    // Offer to edit roles (skipped entirely under --no-input)
     #[allow(clippy::while_immutable_condition)]
     // no_input is a const gate; loop exits on user input via break
     while !no_input {
@@ -231,7 +233,7 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
         show_directory_summary(&directories);
     }
 
-    // Offer to add custom directories (skipped entirely under --no-input per D-01)
+    // Offer to add custom directories (skipped entirely under --no-input)
     #[allow(clippy::while_immutable_condition)]
     // no_input is a const gate; loop exits on user input via break
     while !no_input {
@@ -310,9 +312,9 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
 
     if dry_run {
         println!("  (dry run -- not saving)");
-        // D-07/D-08/D-09: validate the same way a real save would, but without
-        // writing to disk. Use a clone so we can expand tildes without mutating
-        // the original Config (which might be returned to the caller).
+        // Dry-run validates the same way a real save would, but without writing
+        // to disk. Use a clone so we can expand tildes without mutating the
+        // original Config (which is returned to the caller).
         let mut expanded = config.clone();
         expanded
             .expand_tildes()
@@ -322,7 +324,8 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
             .context("wizard dry-run: configuration is invalid")?;
         let toml_str = toml::to_string_pretty(&expanded)
             .context("wizard dry-run: failed to serialize config")?;
-        // Defense-in-depth (D-03): reparse to confirm round-trip integrity.
+        // Defense in depth: reparse to confirm round-trip integrity before
+        // telling the user "this config would save cleanly".
         let _: Config =
             toml::from_str(&toml_str).context("wizard dry-run: generated TOML did not reparse")?;
         println!();
@@ -334,8 +337,8 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
             .default(true)
             .interact()?
     {
-        // D-01/D-03/D-07/D-08: expand → validate → round-trip → save.
-        // On any failure, return Err — no retry loop (D-08/D-09).
+        // save_checked runs expand → validate → TOML round-trip → write.
+        // On any failure, return Err — no retry loop.
         config
             .save_checked(&config_path)
             .context("wizard save aborted: configuration is invalid")?;
@@ -371,7 +374,7 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
 }
 
 // ---------------------------------------------------------------------------
-// Pure config assembly (WHARD-04 — unit-testable without dialoguer)
+// Pure config assembly — unit-testable without dialoguer
 // ---------------------------------------------------------------------------
 
 /// Assemble the final `Config` from wizard-produced inputs.
@@ -452,7 +455,7 @@ fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, Direc
             .collect();
 
         let selections: Vec<usize> = if no_input {
-            // D-01: include all auto-discovered directories.
+            // --no-input default: include all auto-discovered directories.
             (0..found.len()).collect()
         } else {
             MultiSelect::new()
@@ -504,7 +507,7 @@ fn configure_library(no_input: bool) -> Result<PathBuf> {
     ];
 
     let path = if no_input {
-        // D-01: default library = ~/.tome/skills
+        // --no-input default: library = ~/.tome/skills
         default
     } else {
         let selection = Select::new()
@@ -539,7 +542,7 @@ fn configure_exclusions(
 
     let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
     let selections: Vec<usize> = if no_input {
-        // D-01: empty exclusions.
+        // --no-input default: empty exclusions.
         Vec::new()
     } else {
         // Cap visible rows to terminal height minus some overhead for prompt/chrome
@@ -799,7 +802,7 @@ mod tests {
         assert_eq!(found[0].0.name, "claude-skills");
     }
 
-    // --- assemble_config tests (WHARD-04) ---
+    // --- assemble_config tests ---
 
     fn test_dir(path: &str, kind: DirectoryType, role: DirectoryRole) -> DirectoryConfig {
         DirectoryConfig {
