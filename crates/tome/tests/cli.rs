@@ -3019,12 +3019,26 @@ fn no_input_flag_skips_all_prompts() {
 }
 
 #[test]
-fn init_with_no_input_fails() {
+fn init_with_no_input_and_dry_run_succeeds() {
+    // Phase 5 Plan 01 removed the `cannot use --no-input` bail from the Init
+    // branch. `tome init --no-input --dry-run` is now the primary headless
+    // smoke path — Plan 05-03 will extend this with stdout-parsing assertions.
+    // Here we just assert exit 0 with an isolated HOME so auto-discovery is
+    // deterministic (empty HOME → no known directories discovered).
+    let tmp = TempDir::new().unwrap();
     tome()
-        .args(["--no-input", "init"])
+        .env("HOME", tmp.path())
+        .env("NO_COLOR", "1")
+        .args([
+            "--tome-home",
+            &tmp.path().display().to_string(),
+            "--no-input",
+            "--dry-run",
+            "init",
+        ])
         .assert()
-        .failure()
-        .stderr(predicate::str::contains("cannot use --no-input"));
+        .success()
+        .stdout(predicate::str::contains("Generated config:"));
 }
 
 #[test]

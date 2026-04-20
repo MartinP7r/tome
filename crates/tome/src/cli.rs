@@ -74,7 +74,9 @@ pub enum Command {
     },
 
     /// Interactive wizard to configure sources and targets
-    #[command(after_help = "Examples:\n  tome init")]
+    #[command(
+        after_help = "Examples:\n  tome init\n  tome init --dry-run\n  tome init --no-input\n  tome init --dry-run --no-input"
+    )]
     Init,
 
     /// Discover, consolidate, and distribute skills

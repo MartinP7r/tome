@@ -161,9 +161,6 @@ pub fn run(cli: Cli) -> Result<()> {
     let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
-        if cli.no_input {
-            anyhow::bail!("tome init requires interactive input — cannot use --no-input");
-        }
         if let Err(e) = Config::load_or_default(effective_config.as_deref()) {
             eprintln!(
                 "warning: existing config is malformed ({}), the wizard will create a new one",
@@ -171,12 +168,20 @@ pub fn run(cli: Cli) -> Result<()> {
             );
         }
         let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
-        let config = wizard::run(cli.dry_run)?;
+        let config = wizard::run(cli.dry_run, cli.no_input)?;
         config.validate()?;
         if !cli.dry_run {
-            let paths = TomePaths::new(tome_home, config.library_dir.clone())?;
+            // Expand `~` in library_dir before passing to TomePaths, which
+            // requires absolute paths. The wizard preserves tilde-shaped paths
+            // so the on-disk TOML stays portable; here we resolve them for the
+            // post-init sync call.
+            let mut expanded = config.clone();
+            expanded
+                .expand_tildes()
+                .context("failed to expand ~ in wizard-produced config")?;
+            let paths = TomePaths::new(tome_home, expanded.library_dir.clone())?;
             sync(
-                &config,
+                &expanded,
                 &paths,
                 SyncOptions {
                     dry_run: cli.dry_run,
@@ -1652,5 +1657,22 @@ mod tests {
     fn resolve_config_path_none_returns_none() {
         let result = resolve_config_path(None, None).unwrap();
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn init_with_no_input_does_not_bail_from_lib_run() {
+        // Guard against re-introduction of the bail removed in Phase 5 Plan 01.
+        // We do not invoke wizard::run (it opens a TTY); we only assert the
+        // source of lib.rs no longer contains the bail call.
+        //
+        // The needle is split across two concatenated string literals so this
+        // test's source itself does not match its own search string — otherwise
+        // `include_str!` would see the sentinel here and always fail.
+        let src = include_str!("lib.rs");
+        let needle = concat!("anyhow::bail!(\"tome init requires", " interactive input");
+        assert!(
+            !src.contains(needle),
+            "lib.rs still contains the removed bail — Phase 5 Plan 01 regression"
+        );
     }
 }

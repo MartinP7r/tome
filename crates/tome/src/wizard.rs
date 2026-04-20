@@ -123,7 +123,13 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
 // ---------------------------------------------------------------------------
 
 /// Run the interactive setup wizard.
-pub fn run(dry_run: bool) -> Result<Config> {
+///
+/// When `no_input` is true, every dialoguer prompt is replaced with its
+/// documented default (per Phase 5 D-01): select all auto-discovered known
+/// directories, library = `~/.tome/skills`, empty exclusions, no role edits,
+/// no custom directories, no git init. Dry-run and save paths behave the same
+/// as interactive mode — `no_input` only affects how prompts are resolved.
+pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     println!();
     println!("{}", style("Welcome to tome setup!").bold().cyan());
     println!("This wizard will help you configure your skill directories.");
@@ -142,7 +148,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
     println!();
 
     // Step 1: Auto-discover and select directories
-    let mut directories = configure_directories()?;
+    let mut directories = configure_directories(no_input)?;
 
     // Discover skills now so step 3 can offer an exclusion picker
     let discovered = {
@@ -165,17 +171,19 @@ pub fn run(dry_run: bool) -> Result<Config> {
     };
 
     // Step 2: Choose library location
-    let library_dir = configure_library()?;
+    let library_dir = configure_library(no_input)?;
 
     // Step 3: Exclusions
-    let exclude = configure_exclusions(&discovered)?;
+    let exclude = configure_exclusions(&discovered, no_input)?;
 
     // Step 4: Summary table
     step_divider("Summary");
     show_directory_summary(&directories);
 
-    // Offer to edit roles
-    loop {
+    // Offer to edit roles (skipped entirely under --no-input per D-01)
+    #[allow(clippy::while_immutable_condition)]
+    // no_input is a const gate; loop exits on user input via break
+    while !no_input {
         let edit = Confirm::new()
             .with_prompt("Would you like to edit any directory's role?")
             .default(false)
@@ -223,8 +231,10 @@ pub fn run(dry_run: bool) -> Result<Config> {
         show_directory_summary(&directories);
     }
 
-    // Offer to add custom directories
-    loop {
+    // Offer to add custom directories (skipped entirely under --no-input per D-01)
+    #[allow(clippy::while_immutable_condition)]
+    // no_input is a const gate; loop exits on user input via break
+    while !no_input {
         let add = Confirm::new()
             .with_prompt("Add a custom directory?")
             .default(false)
@@ -289,12 +299,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
 
     println!();
 
-    let config = Config {
-        library_dir,
-        exclude,
-        directories,
-        ..Default::default()
-    };
+    let config = assemble_config(directories, library_dir, exclude);
 
     // Save config
     let config_path = default_config_path()?;
@@ -323,10 +328,11 @@ pub fn run(dry_run: bool) -> Result<Config> {
         println!();
         println!("{}", style("Generated config:").bold());
         println!("{}", toml_str);
-    } else if Confirm::new()
-        .with_prompt("Save configuration?")
-        .default(true)
-        .interact()?
+    } else if no_input
+        || Confirm::new()
+            .with_prompt("Save configuration?")
+            .default(true)
+            .interact()?
     {
         // D-01/D-03/D-07/D-08: expand → validate → round-trip → save.
         // On any failure, return Err — no retry loop (D-08/D-09).
@@ -339,7 +345,7 @@ pub fn run(dry_run: bool) -> Result<Config> {
         let tome_home = config_path
             .parent()
             .expect("config path should have a parent");
-        if !tome_home.join(".git").exists() {
+        if !no_input && !tome_home.join(".git").exists() {
             let do_init = Confirm::new()
                 .with_prompt("Initialize a git repo for backup tracking?")
                 .default(false)
@@ -352,6 +358,32 @@ pub fn run(dry_run: bool) -> Result<Config> {
     }
 
     Ok(config)
+}
+
+// ---------------------------------------------------------------------------
+// Pure config assembly (WHARD-04 — unit-testable without dialoguer)
+// ---------------------------------------------------------------------------
+
+/// Assemble the final `Config` from wizard-produced inputs.
+///
+/// Pure function: no dialoguer, no filesystem, no env access. Called once at
+/// the end of `run()` and driven directly by unit tests (see `wizard.rs::tests`).
+///
+/// Inputs:
+/// - `directories`: map of selected directories (auto-discovered + custom)
+/// - `library_dir`: library location (tilde-shaped or absolute; not expanded here)
+/// - `exclude`: skill names to exclude
+pub(crate) fn assemble_config(
+    directories: BTreeMap<DirectoryName, DirectoryConfig>,
+    library_dir: PathBuf,
+    exclude: std::collections::BTreeSet<crate::discover::SkillName>,
+) -> Config {
+    Config {
+        library_dir,
+        exclude,
+        directories,
+        ..Config::default()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +422,7 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
     println!();
 }
 
-fn configure_directories() -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
+fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
     step_divider("Step 1: Directories");
 
     let found = find_known_directories()?;
@@ -409,14 +441,19 @@ fn configure_directories() -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
             })
             .collect();
 
-        let selections = MultiSelect::new()
-            .with_prompt(
-                "Found these directories -- select which to include\n  (space to toggle, enter to confirm)",
-            )
-            .items(&labels)
-            .defaults(&vec![true; found.len()])
-            .report(false)
-            .interact()?;
+        let selections: Vec<usize> = if no_input {
+            // D-01: include all auto-discovered directories.
+            (0..found.len()).collect()
+        } else {
+            MultiSelect::new()
+                .with_prompt(
+                    "Found these directories -- select which to include\n  (space to toggle, enter to confirm)",
+                )
+                .items(&labels)
+                .defaults(&vec![true; found.len()])
+                .report(false)
+                .interact()?
+        };
 
         for &idx in &selections {
             let (kd, _path) = &found[idx];
@@ -446,7 +483,7 @@ fn configure_directories() -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
     Ok(directories)
 }
 
-fn configure_library() -> Result<PathBuf> {
+fn configure_library(no_input: bool) -> Result<PathBuf> {
     step_divider("Step 2: Library location");
 
     let default = PathBuf::from("~/.tome/skills");
@@ -456,17 +493,22 @@ fn configure_library() -> Result<PathBuf> {
         "Custom path...".to_string(),
     ];
 
-    let selection = Select::new()
-        .with_prompt("Where should the skill library live?")
-        .items(&options)
-        .default(0)
-        .interact()?;
-
-    let path = if selection == 0 {
+    let path = if no_input {
+        // D-01: default library = ~/.tome/skills
         default
     } else {
-        let custom: String = Input::new().with_prompt("Library path").interact_text()?;
-        crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(custom))?)
+        let selection = Select::new()
+            .with_prompt("Where should the skill library live?")
+            .items(&options)
+            .default(0)
+            .interact()?;
+
+        if selection == 0 {
+            default
+        } else {
+            let custom: String = Input::new().with_prompt("Library path").interact_text()?;
+            crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(custom))?)
+        }
     };
 
     println!();
@@ -475,6 +517,7 @@ fn configure_library() -> Result<PathBuf> {
 
 fn configure_exclusions(
     skills: &[crate::discover::DiscoveredSkill],
+    no_input: bool,
 ) -> Result<std::collections::BTreeSet<crate::discover::SkillName>> {
     step_divider("Step 3: Exclusions");
 
@@ -485,14 +528,19 @@ fn configure_exclusions(
     }
 
     let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
-    // Cap visible rows to terminal height minus some overhead for prompt/chrome
-    let max_rows = Term::stderr().size().0.saturating_sub(6).max(5) as usize;
-    let selections = MultiSelect::new()
-        .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
-        .items(&labels)
-        .defaults(&vec![false; labels.len()])
-        .max_length(max_rows)
-        .interact()?;
+    let selections: Vec<usize> = if no_input {
+        // D-01: empty exclusions.
+        Vec::new()
+    } else {
+        // Cap visible rows to terminal height minus some overhead for prompt/chrome
+        let max_rows = Term::stderr().size().0.saturating_sub(6).max(5) as usize;
+        MultiSelect::new()
+            .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
+            .items(&labels)
+            .defaults(&vec![false; labels.len()])
+            .max_length(max_rows)
+            .interact()?
+    };
 
     let exclude = selections
         .iter()
