@@ -4,14 +4,14 @@
 
 - **GitHub Issues** track product intent, roadmap placement, and user-visible scope.
 - **OpenSpec** tracks the change proposal, requirements, design notes, and implementation checklist.
-- **Beads** tracks live execution state: what is ready, what is claimed, what is blocked, and what is done.
+- **GSD** (`.planning/` + `/gsd:*` commands) tracks phase and plan execution state — what's been researched, discussed, planned, executed, and verified.
 - **Git commits / PRs** are the implementation evidence.
 
 This is meant to improve traceability, not create process theater. If the workflow becomes bureaucratic sludge, scale it back.
 
 ## When to Use This Workflow
 
-Use the full OpenSpec + Beads flow for:
+Use the full OpenSpec + GSD flow for:
 
 - new features
 - significant refactors
@@ -26,11 +26,11 @@ You do **not** need the full workflow for:
 - narrowly scoped internal cleanups
 - mechanical edits with no design impact
 
-For small fixes, issue → code → PR is fine.
+For small fixes, issue → code → PR is fine. `/gsd:quick` or `/gsd:fast` can be used for small-but-structured work without the full planning overhead.
 
 ## Role of Each Layer
 
-## GitHub Issues
+### GitHub Issues
 
 Use GitHub Issues for:
 
@@ -41,7 +41,7 @@ Use GitHub Issues for:
 
 GitHub Issues answer: **why does this work exist at all?**
 
-## OpenSpec
+### OpenSpec
 
 Use OpenSpec for:
 
@@ -62,7 +62,7 @@ openspec/changes/<change-id>/
 └── specs/<capability>/spec.md
 ```
 
-### Core OpenSpec flow
+#### Core OpenSpec flow
 
 ```bash
 # create a new change scaffold
@@ -80,34 +80,52 @@ openspec validate <change-id>
 openspec archive <change-id>
 ```
 
-## Beads
+### GSD
 
-Use Beads for:
+Use GSD for:
 
-- turning an OpenSpec task checklist into live executable tasks
-- claiming work
-- tracking dependencies / blocking relationships
-- recording closure notes tied to implementation
+- turning a milestone into phases, and phases into executable plans
+- tracking which plans are ready, in progress, and done
+- recording verification outcomes tied to implementation
+- advancing STATE.md across phase transitions
 
-Beads answers: **what should be worked on next, who owns it, and what already landed?**
+GSD answers: **what should be worked on next, who's working on it, and what already landed?**
+
+Core artifacts live under `.planning/`:
+
+```text
+.planning/
+├── PROJECT.md         # core value, constraints, decisions, requirements
+├── ROADMAP.md         # milestones, phases, status
+├── REQUIREMENTS.md    # requirement IDs and traceability
+├── STATE.md           # current focus, current phase/plan
+└── phases/<NN>-<name>/
+    ├── <NN>-CONTEXT.md
+    ├── <NN>-<MM>-<slug>-PLAN.md
+    ├── <NN>-<MM>-<slug>-SUMMARY.md   (created when the plan completes)
+    └── <NN>-VERIFICATION.md          (created by the verifier when the phase completes)
+```
 
 Minimal command flow used in `tome`:
 
 ```bash
-# see unblocked work
-bd ready
+# see current state and next actions
+/gsd:progress
 
-# inspect a task
-bd show <task-id>
+# gather phase context, then plan, then execute
+/gsd:discuss-phase <N>
+/gsd:plan-phase <N>
+/gsd:execute-phase <N>
 
-# claim work
-bd update <task-id> --claim
+# verify manually when needed
+/gsd:verify-work <N>
 
-# close work with an implementation note
-bd close <task-id> "Done in commit <sha>"
+# capture follow-up ideas without leaving flow
+/gsd:add-backlog "<idea>"
+/gsd:note "<short note>"
 ```
 
-When creating Beads tasks from an OpenSpec change, set `spec_id` to the OpenSpec change id.
+When creating a GSD phase that implements an OpenSpec change, reference the OpenSpec change id in the phase CONTEXT.md and in commit/PR footers.
 
 ## Default Flow for Significant Changes
 
@@ -118,8 +136,8 @@ When creating Beads tasks from an OpenSpec change, set `spec_id` to the OpenSpec
    - `design.md`
    - `tasks.md`
    - any relevant spec delta files
-4. Create **Beads** tasks for the executable work items.
-5. Use `bd ready` / `bd update --claim` / `bd close` during implementation.
+4. Bring the work into **GSD** by adding a phase to `.planning/ROADMAP.md` (or creating a new milestone with `/gsd:new-milestone`).
+5. Use `/gsd:plan-phase` and `/gsd:execute-phase` to drive implementation. Each plan's `SUMMARY.md` becomes the per-plan closure note; the phase's `VERIFICATION.md` is the phase-level sign-off.
 6. Land code in normal git commits / PRs.
 7. Archive the OpenSpec change when the work is complete.
 
@@ -127,20 +145,14 @@ When creating Beads tasks from an OpenSpec change, set `spec_id` to the OpenSpec
 
 For meaningful changes, link the layers explicitly.
 
-### In Beads
-
-- set `spec_id` to the OpenSpec change id
-- use task descriptions that reference the actual repo artifact being changed
-- close tasks with a note that includes the commit hash when possible
-
 ### In commits or PR descriptions
 
 Include the IDs when they exist:
 
 ```text
 Refs #123
-OpenSpec: document-openspec-beads-workflow
-Beads: tome-8vs.1
+OpenSpec: <change-id>
+Phase: <N>-<phase-name>
 ```
 
 Recommended PR footer shape:
@@ -148,7 +160,8 @@ Recommended PR footer shape:
 ```text
 Closes #123
 OpenSpec: <change-id>
-Beads: <task-id>[, <task-id>...]
+Phase: .planning/phases/<NN>-<phase-name>/
+Requirements: <ID>, <ID>, ...
 ```
 
 This gives a practical audit trail across backlog, planning, execution, and code history.
@@ -157,7 +170,7 @@ This gives a practical audit trail across backlog, planning, execution, and code
 
 - **GitHub Issue** = backlog / business reason
 - **OpenSpec** = requirements + design + checklist
-- **Beads** = execution state
+- **GSD** = execution state (phases, plans, verification)
 - **git / PR** = shipped evidence
 
-Don’t stack ceremony for its own sake. Use the minimum structure needed to stop future-you from asking, “What the hell were we doing here?”
+Don't stack ceremony for its own sake. Use the minimum structure needed to stop future-you from asking, "What the hell were we doing here?"
