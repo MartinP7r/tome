@@ -38,7 +38,11 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub machine: Option<PathBuf>,
 
-    /// Disable all interactive prompts (implies --no-triage for sync)
+    /// Disable all interactive prompts — takes the default at every prompt.
+    ///
+    /// For `tome init`, this also skips the optional git-init-for-backup step
+    /// (run `tome backup init` separately if you want that). For `tome sync`,
+    /// this implies `--no-triage`.
     #[arg(long, global = true)]
     pub no_input: bool,
 }

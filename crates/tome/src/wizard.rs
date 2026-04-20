@@ -345,14 +345,24 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
         let tome_home = config_path
             .parent()
             .expect("config path should have a parent");
-        if !no_input && !tome_home.join(".git").exists() {
-            let do_init = Confirm::new()
-                .with_prompt("Initialize a git repo for backup tracking?")
-                .default(false)
-                .interact()?;
-            if do_init {
-                crate::backup::init(tome_home, false)
-                    .unwrap_or_else(|e| eprintln!("warning: backup init failed: {e}"));
+        if !tome_home.join(".git").exists() {
+            if no_input {
+                // Surface the skipped step so CI/script users aren't surprised
+                // when `tome backup list` later reports "not a git repo".
+                eprintln!(
+                    "{} skipped git-init for backup tracking (--no-input). Run {} to enable.",
+                    style("note:").cyan(),
+                    style("tome backup init").bold(),
+                );
+            } else {
+                let do_init = Confirm::new()
+                    .with_prompt("Initialize a git repo for backup tracking?")
+                    .default(false)
+                    .interact()?;
+                if do_init {
+                    crate::backup::init(tome_home, false)
+                        .unwrap_or_else(|e| eprintln!("warning: backup init failed: {e}"));
+                }
             }
         }
     }
