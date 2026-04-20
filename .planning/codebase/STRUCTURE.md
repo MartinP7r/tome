@@ -51,7 +51,6 @@
 ├── openspec/                            # OpenSpec tracking
 │   ├── changes/                         # Change proposals
 │   └── specs/                           # Detailed specifications
-├── .beads/                              # Beads issue tracking
 ├── .claude/                             # Claude-specific config
 ├── .planning/                           # GSD planning directory
 │   └── codebase/                        # GSD codebase docs (ARCHITECTURE.md, STRUCTURE.md, etc.)
@@ -211,11 +210,6 @@
 - Purpose: Cargo build artifacts
 - Generated: Yes (cargo build output)
 - Committed: No (.gitignore'd)
-
-**.beads/:**
-- Purpose: Beads issue database (git-backed)
-- Generated: No (manually tracked)
-- Committed: Yes
 
 **.planning/codebase/:**
 - Purpose: GSD analysis documents

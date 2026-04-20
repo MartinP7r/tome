@@ -91,19 +91,22 @@ Use GSD for:
 
 GSD answers: **what should be worked on next, who's working on it, and what already landed?**
 
-Core artifacts live under `.planning/`:
+Selected artifacts under `.planning/` (list is non-exhaustive — GSD adds files as new workflows are used):
 
 ```text
 .planning/
-├── PROJECT.md         # core value, constraints, decisions, requirements
-├── ROADMAP.md         # milestones, phases, status
-├── REQUIREMENTS.md    # requirement IDs and traceability
-├── STATE.md           # current focus, current phase/plan
+├── PROJECT.md                          # core value, constraints, decisions, requirements
+├── ROADMAP.md                          # milestones, phases, status
+├── REQUIREMENTS.md                     # requirement IDs and traceability
+├── STATE.md                            # current focus, current phase/plan
 └── phases/<NN>-<name>/
-    ├── <NN>-CONTEXT.md
-    ├── <NN>-<MM>-<slug>-PLAN.md
-    ├── <NN>-<MM>-<slug>-SUMMARY.md   (created when the plan completes)
-    └── <NN>-VERIFICATION.md          (created by the verifier when the phase completes)
+    ├── <NN>-CONTEXT.md                 # context gathered before planning
+    ├── <NN>-RESEARCH.md                # technical approach research (when created)
+    ├── <NN>-DISCUSSION-LOG.md          # /gsd:discuss-phase transcript (when created)
+    ├── <NN>-UI-SPEC.md                 # UI/UX design contract for frontend phases (when created)
+    ├── <NN>-<MM>-<slug>-PLAN.md        # executable plan per wave/task
+    ├── <NN>-<MM>-<slug>-SUMMARY.md     # created when each plan completes
+    └── <NN>-VERIFICATION.md            # created by the verifier when the phase completes
 ```
 
 Minimal command flow used in `tome`:
@@ -143,25 +146,23 @@ When creating a GSD phase that implements an OpenSpec change, reference the Open
 
 ## Traceability Convention
 
-For meaningful changes, link the layers explicitly.
+For meaningful changes, link the layers explicitly. Don't invent a new footer shape per PR — use one of the two forms used in recent merged PRs:
 
-### In commits or PR descriptions
-
-Include the IDs when they exist:
+**Small / incremental PRs** — a one-liner in the commit body is enough:
 
 ```text
 Refs #123
 OpenSpec: <change-id>
-Phase: <N>-<phase-name>
 ```
 
-Recommended PR footer shape:
+**Phase-closing PRs** — add a `## Traceability` section in the PR body:
 
 ```text
-Closes #123
-OpenSpec: <change-id>
-Phase: .planning/phases/<NN>-<phase-name>/
-Requirements: <ID>, <ID>, ...
+## Traceability
+
+- Requirements: WHARD-04, WHARD-05, WHARD-06
+- Phase artifacts: .planning/phases/05-wizard-test-coverage/
+- OpenSpec: <change-id>   (if an OpenSpec change exists)
 ```
 
 This gives a practical audit trail across backlog, planning, execution, and code history.

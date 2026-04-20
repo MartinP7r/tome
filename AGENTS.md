@@ -47,9 +47,9 @@ cp -rf source dest          # NOT: cp -r source dest
 - Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.4.1, v0.4.2, v0.5, etc.)
 - Project board: **"tome Execution Board"** on GitHub Projects
 - Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
-- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → Beads execution tasks → implementation → archive/close
+- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → GSD phase/plans → implementation → archive/close
 - Reference doc: `docs/src/development-workflow.md`
-- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + Beads overhead
+- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + GSD overhead
 
 ## Tech Stack
 
@@ -81,20 +81,26 @@ openspec archive <change-id>
 For meaningful changes, link the layers when they exist:
 - GitHub issue: `#123`
 - OpenSpec change: `<change-id>`
-- Beads task: `tome-xyz` / `tome-xyz.1`
+- GSD phase: `.planning/phases/<NN>-<name>/`
+- Requirement IDs: as defined in `.planning/REQUIREMENTS.md`
 - Commit / PR: implementation evidence
 
-Suggested commit body or PR footer:
+Commit-body / PR-footer shapes used in recent PRs (pick one — don't invent a new shape):
 ```text
 Refs #123
 OpenSpec: <change-id>
-Beads: <task-id>[, <task-id>...]
+```
+or, for PRs that close a phase:
+```text
+## Traceability
+- Requirements: WHARD-04, WHARD-05, WHARD-06
+- Phase artifacts: .planning/phases/05-wizard-test-coverage/
 ```
 
 This repo uses:
 - **GitHub Issues** for backlog / roadmap intent
 - **OpenSpec** for requirements + design + checklist
-- **Beads** for execution state
+- **GSD** (`.planning/` + `/gsd:*` commands) for phase/plan execution state
 - **git / PRs** for shipped evidence
 
 ## Build & Development Commands
@@ -189,7 +195,7 @@ This project uses **GitHub Issues** for backlog and roadmap intent, and **GSD** 
 
 1. **File follow-up issues** — Open GitHub issues (or add `/gsd:add-backlog` entries) for anything discovered that won't ship in this session.
 2. **Run quality gates** — `make ci` (fmt-check, clippy -D warnings, tests) if code changed.
-3. **Update planning artifacts** — Mark completed plans/phases in `.planning/` (GSD's `phase complete` CLI does this automatically after `/gsd:execute-phase`).
+3. **Update planning artifacts** — Mark completed plans/phases in `.planning/`. `/gsd:execute-phase` handles this automatically on success; otherwise update STATE.md and ROADMAP.md manually.
 4. **PUSH TO REMOTE** — This is MANDATORY:
    ```bash
    git push
