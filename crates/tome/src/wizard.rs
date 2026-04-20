@@ -665,4 +665,306 @@ mod tests {
             vec![DirectoryRole::Managed]
         );
     }
+
+    #[test]
+    fn known_directories_default_role_matches_type() {
+        // For every entry, the registry's `default_role` must equal what
+        // DirectoryType::default_role() returns for that entry's type.
+        // Prevents silent drift when new entries are added or enum semantics change.
+        for kd in KNOWN_DIRECTORIES {
+            assert_eq!(
+                kd.default_role,
+                kd.directory_type.default_role(),
+                "entry '{}': default_role {:?} disagrees with DirectoryType::default_role() for type {:?}",
+                kd.name,
+                kd.default_role,
+                kd.directory_type,
+            );
+        }
+    }
+
+    #[test]
+    fn known_directories_default_role_is_in_valid_roles() {
+        // Every KNOWN_DIRECTORIES default_role must be accepted by its type's valid_roles().
+        // If this fails, `tome init` would produce a Config that Config::validate() rejects.
+        for kd in KNOWN_DIRECTORIES {
+            let valid = kd.directory_type.valid_roles();
+            assert!(
+                valid.contains(&kd.default_role),
+                "entry '{}': default_role {:?} not in valid_roles for type {:?} ({:?})",
+                kd.name,
+                kd.default_role,
+                kd.directory_type,
+                valid,
+            );
+        }
+    }
+
+    #[test]
+    fn find_known_directories_in_discovers_every_registry_entry() {
+        // Seed HOME with one instance of every registry entry's default_path,
+        // then assert find_known_directories_in returns exactly KNOWN_DIRECTORIES.len()
+        // results and each expected name appears exactly once.
+        let tmp = TempDir::new().unwrap();
+        for kd in KNOWN_DIRECTORIES {
+            std::fs::create_dir_all(tmp.path().join(kd.default_path)).unwrap();
+        }
+
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        assert_eq!(
+            found.len(),
+            KNOWN_DIRECTORIES.len(),
+            "expected {} entries, got {}: {:?}",
+            KNOWN_DIRECTORIES.len(),
+            found.len(),
+            found.iter().map(|(kd, _)| kd.name).collect::<Vec<_>>(),
+        );
+
+        let mut found_names: Vec<&str> = found.iter().map(|(kd, _)| kd.name).collect();
+        found_names.sort();
+        let mut expected_names: Vec<&str> = KNOWN_DIRECTORIES.iter().map(|kd| kd.name).collect();
+        expected_names.sort();
+        assert_eq!(found_names, expected_names);
+
+        // Returned PathBufs are absolute and point under tmp.path().
+        for (kd, path) in &found {
+            assert!(
+                path.is_absolute(),
+                "entry '{}' path not absolute: {:?}",
+                kd.name,
+                path
+            );
+            assert!(
+                path.starts_with(tmp.path()),
+                "entry '{}' path {:?} not inside TempDir {:?}",
+                kd.name,
+                path,
+                tmp.path(),
+            );
+        }
+    }
+
+    #[test]
+    fn find_known_directories_in_discovers_multiple_entries() {
+        // Seed two known paths and assert exactly those two come back.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".claude/skills")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codex/skills")).unwrap();
+
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        let names: std::collections::BTreeSet<&str> = found.iter().map(|(kd, _)| kd.name).collect();
+
+        assert_eq!(
+            found.len(),
+            2,
+            "expected 2 entries, got {}: {:?}",
+            found.len(),
+            names
+        );
+        assert!(
+            names.contains("claude-skills"),
+            "missing claude-skills: {:?}",
+            names
+        );
+        assert!(names.contains("codex"), "missing codex: {:?}", names);
+    }
+
+    #[test]
+    fn find_known_directories_in_mixed_dir_and_file() {
+        // .claude/skills is a valid directory; .codex/skills exists as a file, not a dir.
+        // Expect exactly one result: the real directory, with the file-path silently skipped.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".claude/skills")).unwrap();
+        std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+        std::fs::write(tmp.path().join(".codex/skills"), "i am a file").unwrap();
+
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        assert_eq!(
+            found.len(),
+            1,
+            "expected 1 entry, got {}: {:?}",
+            found.len(),
+            found.iter().map(|(kd, _)| kd.name).collect::<Vec<_>>(),
+        );
+        assert_eq!(found[0].0.name, "claude-skills");
+    }
+
+    // --- assemble_config tests (WHARD-04) ---
+
+    fn test_dir(path: &str, kind: DirectoryType, role: DirectoryRole) -> DirectoryConfig {
+        DirectoryConfig {
+            path: PathBuf::from(path),
+            directory_type: kind,
+            role: Some(role),
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+        }
+    }
+
+    #[test]
+    fn assemble_config_empty_inputs_produces_empty_config() {
+        let config = assemble_config(
+            BTreeMap::new(),
+            PathBuf::from("~/.tome/skills"),
+            std::collections::BTreeSet::new(),
+        );
+        assert!(config.directories.is_empty());
+        assert!(config.exclude.is_empty());
+        assert_eq!(config.library_dir, PathBuf::from("~/.tome/skills"));
+    }
+
+    #[test]
+    fn assemble_config_single_entry_is_preserved() {
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-skills").unwrap(),
+            test_dir(
+                "~/.claude/skills",
+                DirectoryType::Directory,
+                DirectoryRole::Synced,
+            ),
+        );
+
+        let config = assemble_config(
+            dirs,
+            PathBuf::from("~/.tome/skills"),
+            std::collections::BTreeSet::new(),
+        );
+
+        assert_eq!(config.directories.len(), 1);
+        let entry = config
+            .directories
+            .get("claude-skills")
+            .expect("claude-skills must be present");
+        assert_eq!(entry.path, PathBuf::from("~/.claude/skills"));
+        assert_eq!(entry.directory_type, DirectoryType::Directory);
+        assert_eq!(entry.role(), DirectoryRole::Synced);
+    }
+
+    #[test]
+    fn assemble_config_multi_entry_preserves_all() {
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-plugins").unwrap(),
+            test_dir(
+                "~/.claude/plugins",
+                DirectoryType::ClaudePlugins,
+                DirectoryRole::Managed,
+            ),
+        );
+        dirs.insert(
+            DirectoryName::new("claude-skills").unwrap(),
+            test_dir(
+                "~/.claude/skills",
+                DirectoryType::Directory,
+                DirectoryRole::Synced,
+            ),
+        );
+        dirs.insert(
+            DirectoryName::new("codex").unwrap(),
+            test_dir(
+                "~/.codex/skills",
+                DirectoryType::Directory,
+                DirectoryRole::Synced,
+            ),
+        );
+
+        let config = assemble_config(
+            dirs,
+            PathBuf::from("~/.tome/skills"),
+            std::collections::BTreeSet::new(),
+        );
+
+        assert_eq!(config.directories.len(), 3);
+        assert!(config.directories.contains_key("claude-plugins"));
+        assert!(config.directories.contains_key("claude-skills"));
+        assert!(config.directories.contains_key("codex"));
+        assert_eq!(
+            config
+                .directories
+                .get("claude-plugins")
+                .unwrap()
+                .directory_type,
+            DirectoryType::ClaudePlugins,
+        );
+    }
+
+    #[test]
+    fn assemble_config_custom_entry_alongside_known() {
+        // Custom dir has a non-registry name but a valid identifier.
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-skills").unwrap(),
+            test_dir(
+                "~/.claude/skills",
+                DirectoryType::Directory,
+                DirectoryRole::Synced,
+            ),
+        );
+        dirs.insert(
+            DirectoryName::new("my-custom").unwrap(),
+            test_dir(
+                "~/work/team-skills",
+                DirectoryType::Directory,
+                DirectoryRole::Source,
+            ),
+        );
+
+        let config = assemble_config(
+            dirs,
+            PathBuf::from("~/.tome/skills"),
+            std::collections::BTreeSet::new(),
+        );
+
+        assert_eq!(config.directories.len(), 2);
+        let custom = config.directories.get("my-custom").unwrap();
+        assert_eq!(custom.path, PathBuf::from("~/work/team-skills"));
+        assert_eq!(custom.directory_type, DirectoryType::Directory);
+        assert_eq!(custom.role(), DirectoryRole::Source);
+    }
+
+    #[test]
+    fn assemble_config_exclusions_preserved() {
+        let mut exclude = std::collections::BTreeSet::new();
+        exclude.insert(crate::discover::SkillName::new("skill-a").unwrap());
+        exclude.insert(crate::discover::SkillName::new("skill-b").unwrap());
+
+        let config = assemble_config(
+            BTreeMap::new(),
+            PathBuf::from("~/.tome/skills"),
+            exclude.clone(),
+        );
+
+        assert_eq!(config.exclude.len(), 2);
+        for name in &exclude {
+            assert!(
+                config.exclude.contains(name),
+                "exclude set missing {:?}",
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn assemble_config_library_dir_passed_through_verbatim() {
+        // assemble_config does NOT expand tildes or collapse home paths — it's a pure
+        // plumbing helper. Verify it leaves library_dir byte-identical to input.
+        let lib_tilde = PathBuf::from("~/custom/location");
+        let config = assemble_config(
+            BTreeMap::new(),
+            lib_tilde.clone(),
+            std::collections::BTreeSet::new(),
+        );
+        assert_eq!(config.library_dir, lib_tilde);
+
+        let lib_abs = PathBuf::from("/opt/skills");
+        let config = assemble_config(
+            BTreeMap::new(),
+            lib_abs.clone(),
+            std::collections::BTreeSet::new(),
+        );
+        assert_eq!(config.library_dir, lib_abs);
+    }
 }
