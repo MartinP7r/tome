@@ -3898,3 +3898,73 @@ fn init_dry_run_no_input_seeded_home() {
     // 6. TOML round-trip is byte-equal.
     assert_config_roundtrips(&config);
 }
+
+#[test]
+fn init_no_input_writes_config_and_reloads() {
+    // End-to-end save path: `tome init --no-input` (no --dry-run) runs the wizard
+    // → assemble_config → save_checked → writes tome.toml → post-init sync().
+    // A future regression in save_checked, post-init sync, or the no_input save
+    // branch at wizard.rs:331-342 would slip past the dry-run integration tests
+    // above; this test closes that gap.
+    //
+    // Invariants:
+    //   - exit 0
+    //   - $TOME_HOME/tome.toml exists after the run
+    //   - Config::load on the written file yields a valid Config (validate() ok)
+    //   - directories()/library_dir()/exclude() match the D-01 defaults on empty HOME
+    //   - written file round-trips byte-equal through toml::{to_string_pretty, from_str}
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    let config_path = tome_home.join("tome.toml");
+
+    let output = tome()
+        .args(["init", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(
+        output.status.success(),
+        "tome init --no-input failed.\nstdout:\n{stdout}\nstderr:\n{stderr}",
+    );
+
+    assert!(
+        config_path.exists(),
+        "expected tome.toml at {} after `tome init --no-input`, but nothing was written",
+        config_path.display(),
+    );
+
+    let loaded = Config::load(&config_path).unwrap_or_else(|e| {
+        panic!("Config::load on wizard-written file failed: {e:#}\nfile:\n{}", std::fs::read_to_string(&config_path).unwrap_or_default())
+    });
+
+    loaded.validate().unwrap_or_else(|e| {
+        panic!("reloaded config failed Config::validate(): {e:#}")
+    });
+
+    // Empty HOME → no auto-discovered known dirs.
+    assert!(
+        loaded.directories().is_empty(),
+        "expected empty directories on empty HOME, got: {:?}",
+        loaded.directories().keys().collect::<Vec<_>>(),
+    );
+
+    // save_checked expands ~ before writing (so the on-disk TOML holds absolute paths
+    // that don't rely on the caller's HOME). The wizard uses the D-01 default
+    // `~/.tome/skills`, which expands to <HOME>/.tome/skills — here <HOME> is the
+    // TempDir we set via the HOME env var above.
+    assert_eq!(
+        loaded.library_dir(),
+        tmp.path().join(".tome/skills").as_path(),
+        "library_dir should be the expanded D-01 default (<HOME>/.tome/skills)",
+    );
+
+    assert!(loaded.exclude().is_empty(), "expected empty exclude set");
+
+    // Round-trip parity on the written file.
+    assert_config_roundtrips(&loaded);
+}
