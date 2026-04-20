@@ -322,6 +322,25 @@ impl Config {
             .with_context(|| format!("failed to write {}", path.display()))
     }
 
+    /// Read-only view of the directory entries.
+    ///
+    /// Exposed for external consumers (integration tests, future APIs) that
+    /// cannot reach the `pub(crate)` field directly. Returns a reference —
+    /// callers get cheap immutable access without forcing a clone.
+    pub fn directories(&self) -> &BTreeMap<DirectoryName, DirectoryConfig> {
+        &self.directories
+    }
+
+    /// Read-only view of the library directory path.
+    pub fn library_dir(&self) -> &Path {
+        &self.library_dir
+    }
+
+    /// Read-only view of the excluded skill names.
+    pub fn exclude(&self) -> &BTreeSet<SkillName> {
+        &self.exclude
+    }
+
     /// Validate config for common misconfigurations.
     ///
     /// Checks:
