@@ -367,6 +367,31 @@ impl Config {
                 );
             }
 
+            // Catch-all: enforce the DirectoryType::valid_roles() contract.
+            // The specific Managed-only and Target-not-on-Git rejections above
+            // produce tailored hints for their common cases; this fallback
+            // covers the remaining valid_roles()-violating combos so the
+            // validator never disagrees with the wizard's role-picker filter.
+            //
+            // Examples this catches (not already caught above):
+            //   - ClaudePlugins + Synced / Source / Target
+            //   - Git + Synced
+            let valid = dir.directory_type.valid_roles();
+            if !valid.contains(&role) {
+                let valid_descriptions: Vec<&'static str> =
+                    valid.iter().map(|r| r.description()).collect();
+                anyhow::bail!(
+                    "directory '{name}': role/type conflict\n\
+                     Conflict: role is {} but type is '{}' accepts only: {}\n\
+                     Why: each directory type has a fixed set of roles it supports; other combinations would be sync'd incorrectly.\n\
+                     hint: change role to one of: {}.",
+                    role.description(),
+                    dir.directory_type,
+                    valid_descriptions.join(", "),
+                    valid_descriptions.join(" or "),
+                );
+            }
+
             // Git fields only valid with Git type
             let has_git_fields = dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
             if has_git_fields && dir.directory_type != DirectoryType::Git {
@@ -1610,5 +1635,197 @@ role = "target"
             PathBuf::from("~/some/lib-not-real"),
             "save_checked must operate on a clone and leave the caller untouched"
         );
+    }
+
+    // --- Cross-product (DirectoryType, DirectoryRole) matrix (WHARD-06) ---
+    //
+    // Per D-07/D-08/D-09:
+    //   - Every combination is tested, no exclusions.
+    //   - Expected pass/fail is derived from `DirectoryType::valid_roles().contains(&role)`,
+    //     not a hand-written table — so drift between the wizard's role picker
+    //     and the validator is impossible.
+    //   - Invalid combos must produce an error message containing the role's
+    //     description() substring (Phase 4 D-10/D-11 Conflict+Why+Suggestion format).
+
+    const ALL_TYPES_FOR_MATRIX: [DirectoryType; 3] = [
+        DirectoryType::ClaudePlugins,
+        DirectoryType::Directory,
+        DirectoryType::Git,
+    ];
+    const ALL_ROLES_FOR_MATRIX: [DirectoryRole; 4] = [
+        DirectoryRole::Managed,
+        DirectoryRole::Synced,
+        DirectoryRole::Source,
+        DirectoryRole::Target,
+    ];
+
+    /// Build a Config containing exactly one directory entry with the given
+    /// (type, role) pair. library_dir and the entry path are placed under
+    /// different subdirs of `tmp` to avoid triggering the library-overlap
+    /// check in Config::validate — we want role/type failures to surface cleanly.
+    ///
+    /// The helper deliberately leaves branch/tag/rev/subdir as None for ALL
+    /// types (including Git) because those fields have their own validation
+    /// paths; this matrix isolates role/type conflicts only.
+    fn build_single_entry_config(
+        tmp: &std::path::Path,
+        dir_type: DirectoryType,
+        role: DirectoryRole,
+    ) -> Config {
+        let library_dir = tmp.join("lib");
+        let entry_path = tmp.join("entry");
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new("combo").unwrap(),
+            DirectoryConfig {
+                path: entry_path,
+                directory_type: dir_type,
+                role: Some(role),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+        Config {
+            library_dir,
+            directories,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn combo_matrix_all_type_role_pairs() {
+        // Iterate the full 3×4 cross-product. Track every combo we touch so
+        // the final assertion proves exhaustiveness.
+        let mut tested = Vec::new();
+
+        for dir_type in &ALL_TYPES_FOR_MATRIX {
+            for role in &ALL_ROLES_FOR_MATRIX {
+                let combo = (dir_type.clone(), role.clone());
+                tested.push(combo.clone());
+                // D-08: derive pass/fail from valid_roles() at runtime — no hand-written table.
+                let should_pass = dir_type.valid_roles().contains(role);
+
+                if should_pass {
+                    // Valid combo: save_checked to a fresh TempDir, reload,
+                    // and confirm the entry's type + role survived the round-trip.
+                    let tmp = tempfile::TempDir::new().unwrap();
+                    let path = tmp.path().join("tome.toml");
+                    let config =
+                        build_single_entry_config(tmp.path(), dir_type.clone(), role.clone());
+
+                    config.save_checked(&path).unwrap_or_else(|e| {
+                        panic!(
+                            "expected VALID combo ({:?}, {:?}) to save, but got: {e:#}",
+                            dir_type, role,
+                        )
+                    });
+                    assert!(
+                        path.exists(),
+                        "save_checked reported success but file missing for combo ({:?}, {:?})",
+                        dir_type,
+                        role,
+                    );
+
+                    let reloaded = Config::load(&path).unwrap_or_else(|e| {
+                        panic!(
+                            "saved VALID combo ({:?}, {:?}) failed to reload: {e:#}",
+                            dir_type, role,
+                        )
+                    });
+                    let entry = reloaded
+                        .directories
+                        .get("combo")
+                        .expect("reloaded Config missing 'combo' entry");
+                    assert_eq!(
+                        &entry.directory_type, dir_type,
+                        "reloaded type drifted for combo ({:?}, {:?})",
+                        dir_type, role,
+                    );
+                    assert_eq!(
+                        entry.role(),
+                        role.clone(),
+                        "reloaded role drifted for combo ({:?}, {:?})",
+                        dir_type,
+                        role,
+                    );
+                } else {
+                    // Invalid combo: validate() must return Err.
+                    // We call validate() directly (no TempDir needed) because the
+                    // library-overlap check is path-based and we want to isolate
+                    // the role/type rejection.
+                    //
+                    // Idiomatic pattern matching the sibling test below:
+                    // `.err().unwrap_or_else(|| panic!(...))` — no custom extension
+                    // trait. The std idiom reads cleanly and matches existing style.
+                    let tmp_unused =
+                        std::path::PathBuf::from(format!("/tmp/combo-{:?}-{:?}", dir_type, role));
+                    let config =
+                        build_single_entry_config(&tmp_unused, dir_type.clone(), role.clone());
+                    let _err = config.validate().err().unwrap_or_else(|| {
+                        panic!(
+                            "expected INVALID combo ({:?}, {:?}) to fail validate(), but it succeeded",
+                            dir_type, role,
+                        )
+                    });
+                    // The sibling test `combo_matrix_invalid_error_mentions_role_description`
+                    // asserts the error's contents; here we only care that validate()
+                    // produced Err for every invalid combo.
+                }
+            }
+        }
+
+        // Exhaustiveness guard: we touched every cell of the 3×4 grid.
+        assert_eq!(
+            tested.len(),
+            ALL_TYPES_FOR_MATRIX.len() * ALL_ROLES_FOR_MATRIX.len(),
+            "matrix should test exactly {} combos, got {}",
+            ALL_TYPES_FOR_MATRIX.len() * ALL_ROLES_FOR_MATRIX.len(),
+            tested.len(),
+        );
+    }
+
+    #[test]
+    fn combo_matrix_invalid_error_mentions_role_description() {
+        // For every INVALID (type, role), Config::validate() must produce an error
+        // message containing the role's description() substring (D-09) AND the word
+        // "hint:" (Phase 4 D-10 Conflict+Why+Suggestion template).
+        // This is stable against wording tweaks that don't remove the role-description
+        // parenthetical or the hint line.
+
+        let tmp_unused = std::path::PathBuf::from("/tmp/does-not-need-to-exist");
+
+        for dir_type in &ALL_TYPES_FOR_MATRIX {
+            for role in &ALL_ROLES_FOR_MATRIX {
+                // D-08: derive invalid set from valid_roles() at runtime.
+                if dir_type.valid_roles().contains(role) {
+                    continue;
+                }
+
+                let config = build_single_entry_config(&tmp_unused, dir_type.clone(), role.clone());
+                let err = config.validate().err().unwrap_or_else(|| {
+                    panic!(
+                        "INVALID combo ({:?}, {:?}) passed validate() — validator bug",
+                        dir_type, role,
+                    )
+                });
+                let msg = err.to_string();
+
+                assert!(
+                    msg.contains(role.description()),
+                    "error for combo ({:?}, {:?}) missing role description {:?}: {msg}",
+                    dir_type,
+                    role,
+                    role.description(),
+                );
+                assert!(
+                    msg.contains("hint:"),
+                    "error for combo ({:?}, {:?}) missing 'hint:' line: {msg}",
+                    dir_type,
+                    role,
+                );
+            }
+        }
     }
 }
