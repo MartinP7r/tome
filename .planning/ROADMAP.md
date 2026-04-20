@@ -21,7 +21,7 @@
 ### v0.7 Wizard Hardening
 
 - [x] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save (completed 2026-04-19)
-- [ ] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage
+- [x] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage (completed 2026-04-20)
 - [ ] **Phase 6: Display Polish & Docs** — Summary table uses `tabled`; PROJECT.md validates WIZ-01–05 shipped/hardened
 
 ## Phase Details
