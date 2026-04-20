@@ -16,7 +16,7 @@ Requirements for v0.7 release. Each maps to roadmap phases. The wizard code itse
 ### Wizard Test Coverage
 
 - [x] **WHARD-04**: Pure (non-interactive) wizard helpers have unit test coverage: `find_known_directories_in`, registry lookup (`KNOWN_DIRECTORIES`), `DirectoryType::default_role`, and config assembly from a set of selected directories.
-- [ ] **WHARD-05**: Integration test that runs the wizard in `--dry-run` mode with `--no-input` and asserts the generated config passes `Config::validate()` and round-trips through TOML without changes.
+- [x] **WHARD-05**: Integration test that runs the wizard in `--dry-run` mode with `--no-input` and asserts the generated config passes `Config::validate()` and round-trips through TOML without changes.
 - [ ] **WHARD-06**: Test for every `(DirectoryType, DirectoryRole)` combination that could be produced by the wizard — valid combos save successfully, invalid combos error with WHARD-01's validation path.
 
 ### Wizard Display Polish
@@ -54,7 +54,7 @@ Deferred to future releases.
 | WHARD-02 | Phase 4 | Complete |
 | WHARD-03 | Phase 4 | Complete |
 | WHARD-04 | Phase 5 | Complete |
-| WHARD-05 | Phase 5 | Pending |
+| WHARD-05 | Phase 5 | Complete |
 | WHARD-06 | Phase 5 | Pending |
 | WHARD-07 | Phase 6 | Pending |
 | WHARD-08 | Phase 6 | Pending |

@@ -52,7 +52,7 @@
 **Plans**: 4 plans
 - [x] 05-01-no-input-plumbing-and-assemble-config-PLAN.md — Plumb `--no-input` through `wizard::run`; extract `pub(crate) fn assemble_config`; remove `lib.rs:164-165` bail (WHARD-04/05 prerequisite)
 - [x] 05-02-pure-helper-unit-tests-PLAN.md — Unit tests for `find_known_directories_in`, `KNOWN_DIRECTORIES` registry invariants, and `assemble_config` (WHARD-04)
-- [ ] 05-03-init-integration-test-PLAN.md — Integration tests for `tome init --dry-run --no-input` on empty + seeded HOME (WHARD-05)
+- [x] 05-03-init-integration-test-PLAN.md — Integration tests for `tome init --dry-run --no-input` on empty + seeded HOME (WHARD-05)
 - [x] 05-04-combo-matrix-test-PLAN.md — Table-driven `(DirectoryType, DirectoryRole)` cross-product — 12 combos derived from `valid_roles()` (WHARD-06)
 
 ### Phase 6: Display Polish & Docs
