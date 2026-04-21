@@ -21,7 +21,7 @@ Requirements for v0.7 release. Each maps to roadmap phases. The wizard code itse
 
 ### Wizard Display Polish
 
-- [ ] **WHARD-07**: `show_directory_summary()` uses `tabled` instead of manual `println!` column formatting, matching the pattern in `status.rs`. Handles long paths gracefully (truncation or wrapping) without breaking the column layout.
+- [x] **WHARD-07**: `show_directory_summary()` uses `tabled` instead of manual `println!` column formatting, matching the pattern in `status.rs`. Handles long paths gracefully (truncation or wrapping) without breaking the column layout.
 
 ### Documentation
 
@@ -56,7 +56,7 @@ Deferred to future releases.
 | WHARD-04 | Phase 5 | Complete |
 | WHARD-05 | Phase 5 | Complete |
 | WHARD-06 | Phase 5 | Complete |
-| WHARD-07 | Phase 6 | Pending |
+| WHARD-07 | Phase 6 | Complete |
 | WHARD-08 | Phase 6 | Complete |
 
 **Coverage:**
