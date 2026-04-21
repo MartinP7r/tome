@@ -25,7 +25,7 @@ Requirements for v0.7 release. Each maps to roadmap phases. The wizard code itse
 
 ### Documentation
 
-- [ ] **WHARD-08**: WIZ-01 through WIZ-05 marked validated in PROJECT.md with a note that they shipped in v0.6 and were hardened in v0.7.
+- [x] **WHARD-08**: WIZ-01 through WIZ-05 marked validated in PROJECT.md with a note that they shipped in v0.6 and were hardened in v0.7.
 
 ## v2 Requirements
 
@@ -57,7 +57,7 @@ Deferred to future releases.
 | WHARD-05 | Phase 5 | Complete |
 | WHARD-06 | Phase 5 | Complete |
 | WHARD-07 | Phase 6 | Pending |
-| WHARD-08 | Phase 6 | Pending |
+| WHARD-08 | Phase 6 | Complete |
 
 **Coverage:**
 - v1 requirements: 8 total
