@@ -20,8 +20,8 @@
 
 ### v0.7 Wizard Hardening
 
-- [ ] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save
-- [ ] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage
+- [x] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save (completed 2026-04-19)
+- [x] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage (completed 2026-04-20)
 - [ ] **Phase 6: Display Polish & Docs** — Summary table uses `tabled`; PROJECT.md validates WIZ-01–05 shipped/hardened
 
 ## Phase Details
@@ -35,7 +35,10 @@
   2. User who picks a `library_dir` that overlaps a Synced/Target directory sees an error suggesting a non-overlapping location and the config is not written
   3. User who picks a `library_dir` that is a subdirectory of a synced directory sees a circular-symlink validation error before save
   4. A successful `tome init` still round-trips: the written config passes `Config::validate()` and reloads without changes
-**Plans**: TBD
+**Plans**: 3 plans
+- [x] 04-01-validate-error-template-PLAN.md — Upgrade existing `Config::validate()` errors to the D-10 Conflict+Why+Suggestion template
+- [x] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
+- [x] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
 
 ### Phase 5: Wizard Test Coverage
 **Goal**: Wizard logic is testable without a TTY and has enforced coverage of valid/invalid combinations
@@ -46,7 +49,11 @@
   2. An integration test runs `tome init --dry-run --no-input` and asserts the generated config passes validation and round-trips through TOML unchanged
   3. Every `(DirectoryType, DirectoryRole)` combination the wizard can produce has a test: valid combos save successfully; invalid combos are rejected by the Phase 4 validation path
   4. CI (ubuntu + macos) passes with the new tests as non-optional gates
-**Plans**: TBD
+**Plans**: 4 plans
+- [x] 05-01-no-input-plumbing-and-assemble-config-PLAN.md — Plumb `--no-input` through `wizard::run`; extract `pub(crate) fn assemble_config`; remove `lib.rs:164-165` bail (WHARD-04/05 prerequisite)
+- [x] 05-02-pure-helper-unit-tests-PLAN.md — Unit tests for `find_known_directories_in`, `KNOWN_DIRECTORIES` registry invariants, and `assemble_config` (WHARD-04)
+- [x] 05-03-init-integration-test-PLAN.md — Integration tests for `tome init --dry-run --no-input` on empty + seeded HOME (WHARD-05)
+- [x] 05-04-combo-matrix-test-PLAN.md — Table-driven `(DirectoryType, DirectoryRole)` cross-product — 12 combos derived from `valid_roles()` (WHARD-06)
 
 ### Phase 6: Display Polish & Docs
 **Goal**: Wizard summary renders cleanly on any terminal width and v0.7 scope is marked complete in project docs
@@ -66,6 +73,6 @@
 | 1. Unified Directory Foundation | v0.6 | 3/5 | Complete | 2026-04-14 |
 | 2. Git Sources & Selection | v0.6 | 4/4 | Complete | 2026-04-15 |
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
-| 4. Wizard Correctness | v0.7 | 0/0 | Not started | — |
-| 5. Wizard Test Coverage | v0.7 | 0/0 | Not started | — |
+| 4. Wizard Correctness | v0.7 | 3/3 | Complete   | 2026-04-19 |
+| 5. Wizard Test Coverage | v0.7 | 0/4 | Not started | — |
 | 6. Display Polish & Docs | v0.7 | 0/0 | Not started | — |

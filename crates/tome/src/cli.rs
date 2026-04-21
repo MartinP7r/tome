@@ -38,7 +38,11 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub machine: Option<PathBuf>,
 
-    /// Disable all interactive prompts (implies --no-triage for sync)
+    /// Disable all interactive prompts — takes the default at every prompt.
+    ///
+    /// For `tome init`, this also skips the optional git-init-for-backup step
+    /// (run `tome backup init` separately if you want that). For `tome sync`,
+    /// this implies `--no-triage`.
     #[arg(long, global = true)]
     pub no_input: bool,
 }
@@ -74,7 +78,9 @@ pub enum Command {
     },
 
     /// Interactive wizard to configure sources and targets
-    #[command(after_help = "Examples:\n  tome init")]
+    #[command(
+        after_help = "Examples:\n  tome init\n  tome init --dry-run\n  tome init --no-input\n  tome init --dry-run --no-input"
+    )]
     Init,
 
     /// Discover, consolidate, and distribute skills

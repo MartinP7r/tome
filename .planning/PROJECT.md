@@ -35,11 +35,16 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active
 
-- [ ] Validate wizard output against `Config::validate()` before save (prevent invalid type/role combos)
-- [ ] Detect circular library paths (library_dir overlapping distribution directories)
-- [ ] Test coverage for the interactive wizard flow
 - [ ] Migrate `show_directory_summary()` from manual println to `tabled`
 - [ ] Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
+
+### Validated in v0.7
+
+- ✓ Validate wizard output against `Config::validate()` before save — Phase 4 (WHARD-01)
+- ✓ Detect overlap between `library_dir` and distribution directories (Cases A/B/C) — Phase 4 (WHARD-02, WHARD-03)
+- ✓ Pure wizard helpers (`find_known_directories_in`, `KNOWN_DIRECTORIES` registry, `assemble_config`) have unit test coverage — Phase 5 (WHARD-04)
+- ✓ Headless `tome init --no-input` integration test validates generated config round-trips — Phase 5 (WHARD-05)
+- ✓ Exhaustive `(DirectoryType, DirectoryRole)` matrix test locks in `valid_roles()` ↔ `validate()` agreement — Phase 5 (WHARD-06)
 
 ### Previously Validated (re-verified in v0.7 research)
 
@@ -107,4 +112,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-18 — v0.7 milestone started*
+*Last updated: 2026-04-20 — Phase 5 (Wizard Test Coverage) complete — pure helpers and `tome init --no-input` now have unit + integration test coverage; combo matrix locks in `valid_roles()` ↔ `validate()` agreement*
