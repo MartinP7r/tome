@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — v0.7 Wizard Hardening
+
+- Migrated `tome init` directory summary table to `tabled` with `Style::rounded()` borders and terminal-width-aware truncation via `Width::truncate(..).priority(PriorityMax::right())`. Long paths (including git-repo clones under `~/.tome/repos/<sha>/`) now render cleanly on narrow terminals without breaking column alignment. (WHARD-07)
+- Marked WIZ-01 through WIZ-05 as validated / hardened in `PROJECT.md`; removed the stale "Known Gaps (deferred from v0.6)" entry. Phases 4 + 5 of v0.7 already closed the correctness gaps (validation, overlap detection, test coverage); this update reflects that in the project docs. (WHARD-08)
+
 ### Breaking Changes — v0.6 Unified Directory Model
 
 The `[[sources]]` and `[targets.*]` config sections have been replaced by a single
