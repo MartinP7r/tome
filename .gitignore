@@ -1,10 +1,2 @@
 /target
 /docs/book/
-
-# Dolt database files (added by bd init)
-.dolt/
-*.db
-*.bak
-
-# Beads / Dolt files (added by bd init)
-.beads-credential-key

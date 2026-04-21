@@ -47,9 +47,9 @@ cp -rf source dest          # NOT: cp -r source dest
 - Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.4.1, v0.4.2, v0.5, etc.)
 - Project board: **"tome Execution Board"** on GitHub Projects
 - Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
-- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → Beads execution tasks → implementation → archive/close
+- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → GSD phase/plans → implementation → archive/close
 - Reference doc: `docs/src/development-workflow.md`
-- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + Beads overhead
+- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + GSD overhead
 
 ## Tech Stack
 
@@ -81,20 +81,26 @@ openspec archive <change-id>
 For meaningful changes, link the layers when they exist:
 - GitHub issue: `#123`
 - OpenSpec change: `<change-id>`
-- Beads task: `tome-xyz` / `tome-xyz.1`
+- GSD phase: `.planning/phases/<NN>-<name>/`
+- Requirement IDs: as defined in `.planning/REQUIREMENTS.md`
 - Commit / PR: implementation evidence
 
-Suggested commit body or PR footer:
+Commit-body / PR-footer shapes used in recent PRs (pick one — don't invent a new shape):
 ```text
 Refs #123
 OpenSpec: <change-id>
-Beads: <task-id>[, <task-id>...]
+```
+or, for PRs that close a phase:
+```text
+## Traceability
+- Requirements: WHARD-04, WHARD-05, WHARD-06
+- Phase artifacts: .planning/phases/05-wizard-test-coverage/
 ```
 
 This repo uses:
 - **GitHub Issues** for backlog / roadmap intent
 - **OpenSpec** for requirements + design + checklist
-- **Beads** for execution state
+- **GSD** (`.planning/` + `/gsd:*` commands) for phase/plan execution state
 - **git / PRs** for shipped evidence
 
 ## Build & Development Commands
@@ -172,128 +178,38 @@ Releases are managed by [cargo-dist](https://opensource.axo.dev/cargo-dist/). Th
 
 **Important:** When bumping `cargo-dist-version` in `Cargo.toml`, always run `cargo dist init` afterwards to regenerate `release.yml`. We use `allow-dirty = ["ci"]` to tolerate Dependabot action bumps, but cargo-dist upgrades may require real workflow changes that won't be applied automatically.
 
-<!-- BEGIN BEADS INTEGRATION v:1 profile:full hash:f65d5d33 -->
-## Issue Tracking with bd (beads)
+## Issue Tracking
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+This project uses **GitHub Issues** for backlog and roadmap intent, and **GSD** (`.planning/` + `/gsd:*` commands) for phase-level execution state. Do NOT create markdown TODOs or parallel task trackers — they fall out of sync.
 
-### Why bd?
-
-- Dependency-aware: Track blockers and relationships between issues
-- Git-friendly: Dolt-powered version control with native sync
-- Agent-optimized: JSON output, ready work detection, discovered-from links
-- Prevents duplicate tracking systems and confusion
-
-### Quick Start
-
-**Check for ready work:**
-
-```bash
-bd ready --json
-```
-
-**Create new issues:**
-
-```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
-```
-
-**Claim and update:**
-
-```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
-```
-
-**Complete work:**
-
-```bash
-bd close bd-42 --reason "Completed" --json
-```
-
-### Issue Types
-
-- `bug` - Something broken
-- `feature` - New functionality
-- `task` - Work item (tests, docs, refactoring)
-- `epic` - Large feature with subtasks
-- `chore` - Maintenance (dependencies, tooling)
-
-### Priorities
-
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
-
-### Workflow for AI Agents
-
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-
-### Quality
-- Use `--acceptance` and `--design` fields when creating issues
-- Use `--validate` to check description completeness
-
-### Lifecycle
-- `bd defer <id>` / `bd supersede <id>` for issue management
-- `bd stale` / `bd orphans` / `bd lint` for hygiene
-- `bd human <id>` to flag for human decisions
-- `bd formula list` / `bd mol pour <name>` for structured workflows
-
-### Auto-Sync
-
-bd automatically syncs via Dolt:
-
-- Each write auto-commits to Dolt history
-- Use `bd dolt push`/`bd dolt pull` for remote sync
-- No manual export/import needed!
-
-### Important Rules
-
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
-- ❌ Do NOT create markdown TODO lists
-- ❌ Do NOT use external issue trackers
-- ❌ Do NOT duplicate tracking systems
-
-For more details, see README.md and docs/QUICKSTART.md.
+- **Backlog / product intent**: GitHub Issues + Milestones (`gh issue create`, project board "tome Execution Board")
+- **Milestone/phase execution**: GSD planning artifacts under `.planning/` (ROADMAP.md, PROJECT.md, STATE.md, REQUIREMENTS.md) and the `/gsd:*` commands (`/gsd:progress`, `/gsd:plan-phase`, `/gsd:execute-phase`, `/gsd:verify-work`)
+- **Substantial changes** also flow through OpenSpec — see `docs/src/development-workflow.md`
+- **Small fixes** (typos, tiny bugs, narrowly scoped cleanups) do NOT need full OpenSpec + GSD overhead — issue → code → PR is fine
 
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**When ending a work session**, work is NOT complete until `git push` succeeds.
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+1. **File follow-up issues** — Open GitHub issues (or add `/gsd:add-backlog` entries) for anything discovered that won't ship in this session.
+2. **Run quality gates** — `make ci` (fmt-check, clippy -D warnings, tests) if code changed.
+3. **Update planning artifacts** — Mark completed plans/phases in `.planning/`. `/gsd:execute-phase` handles this automatically on success; otherwise update STATE.md and ROADMAP.md manually.
+4. **PUSH TO REMOTE** — This is MANDATORY:
    ```bash
-   git pull --rebase
-   bd dolt push
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+5. **Clean up** — Clear stashes, prune remote branches.
+6. **Verify** — All changes committed AND pushed.
+7. **Hand off** — Provide context for the next session.
 
 **CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-
-<!-- END BEADS INTEGRATION -->
+- Work is NOT complete until `git push` succeeds.
+- NEVER stop before pushing — that leaves work stranded locally.
+- NEVER say "ready to push when you are" — YOU must push.
+- If push fails, resolve and retry until it succeeds.
 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
