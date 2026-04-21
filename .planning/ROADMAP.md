@@ -63,7 +63,9 @@
   1. User running `tome init` sees the directory summary rendered via `tabled` with `Style::rounded()`, matching the visual language of `tome status`
   2. Long paths (e.g., git repo clones under `~/.tome/repos/<sha>/`) render without breaking column alignment — either truncated or wrapped, never overflowing
   3. `PROJECT.md` lists WIZ-01 through WIZ-05 as validated with a note that they shipped in v0.6 and were hardened in v0.7
-**Plans**: TBD
+**Plans**: 2 plans
+- [ ] 06-01-wizard-summary-tabled-PLAN.md — Migrate `wizard::show_directory_summary` to `tabled` with `Style::rounded()` and terminal-width-aware truncation; add `terminal_size` crate dep (WHARD-07)
+- [ ] 06-02-project-md-wiz-closure-PLAN.md — Mark WIZ-01–05 as validated/hardened in `.planning/PROJECT.md`, remove stale "Known Gaps" bullet, update footer, add CHANGELOG entry (WHARD-08)
 **UI hint**: yes
 
 ## Progress
@@ -75,4 +77,4 @@
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
 | 4. Wizard Correctness | v0.7 | 3/3 | Complete   | 2026-04-19 |
 | 5. Wizard Test Coverage | v0.7 | 0/4 | Not started | — |
-| 6. Display Polish & Docs | v0.7 | 0/0 | Not started | — |
+| 6. Display Polish & Docs | v0.7 | 0/2 | Not started | — |
