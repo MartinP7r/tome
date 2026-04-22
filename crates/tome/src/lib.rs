@@ -71,7 +71,6 @@ pub struct SyncReport {
     pub distributions: Vec<DistributeResult>,
     pub cleanup: CleanupResult,
     pub removed_from_targets: usize,
-    pub warnings: Vec<String>,
 }
 
 /// Create a spinner with a consistent style.
@@ -938,7 +937,6 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         distributions: distribute_results,
         cleanup: cleanup_result,
         removed_from_targets,
-        warnings,
     };
 
     if !quiet {
