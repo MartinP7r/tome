@@ -35,8 +35,8 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active
 
-- [ ] Migrate `show_directory_summary()` from manual println to `tabled`
 - [ ] Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
+- [ ] Cut `v0.7.0` release via `make release VERSION=0.7.0` (Homebrew formula bump picks up wizard hardening)
 
 ### Validated in v0.7
 
@@ -66,16 +66,11 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 *v0.7 hardening deliverables:* (a) `Config::validate()` path-overlap checks (Phase 4), (b) `Config::save_checked` with TOML round-trip (Phase 4), (c) `--no-input` plumbing (Phase 5), (d) unit + integration test coverage for pure wizard helpers (Phase 5), (e) 12-combo validation matrix (Phase 5), (f) `tabled` summary migration (Phase 6).
 
-## Current Milestone: v0.7 Wizard Hardening
+## Current State
 
-**Goal:** Close the correctness gaps found between shipped wizard code and the original WIZ-01–05 intent: validation, circular path detection, test coverage, and polish.
+**v0.7 Wizard Hardening shipped 2026-04-22** — all 8 requirements (WHARD-01 through WHARD-08) delivered across Phases 4–6 (9 plans). The wizard now refuses invalid configs at save time, has unit + integration + combo-matrix test coverage, and renders its summary via `tabled` with rounded borders. See [`milestones/v0.7-ROADMAP.md`](milestones/v0.7-ROADMAP.md) for the archived milestone.
 
-**Target features:**
-- Config validation before save (catch invalid type/role combos the wizard struct-building path bypassed)
-- Circular path detection (library_dir inside a synced/target directory)
-- Test coverage for wizard's non-interactive paths (registry lookup, auto-discovery, config assembly)
-- `tabled` migration for summary display
-- Registry expansion for tools missing in KNOWN_DIRECTORIES
+**Next:** `v0.7.0` release cut via `make release`, then `/gsd:new-milestone` to scope v0.8.
 
 ### Out of Scope
 
@@ -87,11 +82,11 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 ## Context
 
-tome is at v0.6.1 with ~20k lines of Rust across 20+ source modules in a single crate. The unified directory model eliminated the source/target config split. Git-backed skill repos are supported with shallow clones and ref pinning.
+tome is at Cargo.toml `0.6.2` pending the v0.7.0 release cut. Codebase: ~21.8k lines of Rust across 20+ source modules in a single crate. v0.6 introduced the unified directory model; v0.7 hardened the wizard surface around it.
 
-The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS.
+The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS. 525 tests total (417 unit + 108 integration).
 
-Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git).
+Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git). `Config::save_checked` enforces expand → `validate()` → TOML round-trip → write; no invalid config can reach disk.
 
 ## Constraints
 
@@ -113,11 +108,15 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 | Plan/render/execute pattern for destructive commands | Separation of planning from execution | ✓ Good — reused for remove, reassign, fork |
 | Manifest-based circular prevention | Replaces `shares_tool_root()` path heuristic | ✓ Good — more reliable |
 | Git env clearing pattern | Every `Command::new("git")` clears GIT_DIR etc. | ✓ Good — prevents nesting bugs |
-| Defer wizard rewrite (WIZ-01–05) | Old wizard still works; low priority | ⚠️ Revisit — tech debt |
+| Defer wizard rewrite (WIZ-01–05) | Old wizard still works; low priority | ✓ Resolved v0.7 — kept existing wizard code, hardened in-place (validation + tests + tabled polish) instead of rewriting |
+| D-10 Conflict+Why+Suggestion error template (v0.7 Phase 4) | Validation errors should name what conflicts, explain why, and suggest a fix | ✓ Good — applied to all 4 `Config::validate()` bail sites |
+| TOML round-trip byte-equality over `PartialEq` (v0.7 Phase 4) | Avoids deriving PartialEq cascade across all config types; compares emitted strings | ✓ Good — `Config::save_checked` enforces in ~20 lines |
+| `--no-input` flag over separate non-interactive binary (v0.7 Phase 5) | One wizard, two modes — integration tests drive the same code path users run | ✓ Good — 12-combo matrix test possible because of this |
+| `tabled` `Style::rounded()` for wizard summary, `Style::blank()` stays for `tome status` (v0.7 Phase 6) | Ceremonial one-shot summary deserves visual weight; repeated inspection wants lightweight | ✓ Good — matching pattern not required |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-21 — Phase 6 (Display Polish & Docs) complete — wizard summary migrated to `tabled` (WHARD-07); WIZ-01–05 marked validated as hardened in v0.7 (WHARD-08)*
+*Last updated: 2026-04-22 — v0.7 Wizard Hardening milestone shipped (Phases 4-6, WHARD-01..08). Ready for `make release VERSION=0.7.0`.*

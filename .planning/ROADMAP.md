@@ -3,7 +3,8 @@
 ## Milestones
 
 - ✅ **v0.6 Unified Directory Model** — Phases 1-3 (shipped 2026-04-16) — [archive](milestones/v0.6-ROADMAP.md)
-- 🚧 **v0.7 Wizard Hardening** — Phases 4-6 (active since 2026-04-18)
+- ✅ **v0.7 Wizard Hardening** — Phases 4-6 (shipped 2026-04-22) — [archive](milestones/v0.7-ROADMAP.md)
+- 📋 **v0.8** — TBD (run `/gsd:new-milestone` to plan)
 
 ## Phases
 
@@ -14,59 +15,24 @@
 - [x] Phase 2: Git Sources & Selection (4/4 plans) — git clone/update, per-dir filtering, tome remove
 - [x] Phase 3: Import, Reassignment & Browse Polish (2/2 plans) — tome add/reassign/fork, browse TUI polish
 
-**Known gaps:** WIZ-01 through WIZ-05 (wizard rewrite) deferred — old wizard code still functional.
+**Known gaps:** WIZ-01 through WIZ-05 (wizard rewrite) deferred — closed as "hardened" in v0.7.
 
 </details>
 
-### v0.7 Wizard Hardening
+<details>
+<summary>✅ v0.7 Wizard Hardening (Phases 4-6) — SHIPPED 2026-04-22</summary>
 
-- [x] **Phase 4: Wizard Correctness** — Wizard rejects invalid configs and circular library paths before save (completed 2026-04-19)
-- [x] **Phase 5: Wizard Test Coverage** — Pure helpers and config assembly have unit + integration test coverage (completed 2026-04-20)
-- [ ] **Phase 6: Display Polish & Docs** — Summary table uses `tabled`; PROJECT.md validates WIZ-01–05 shipped/hardened
+- [x] Phase 4: Wizard Correctness (3/3 plans) — `Config::validate()` Conflict+Why+Suggestion errors, library↔distribution overlap detection (Cases A/B/C), `Config::save_checked` expand→validate→round-trip→write pipeline (WHARD-01/02/03)
+- [x] Phase 5: Wizard Test Coverage (4/4 plans) — `--no-input` plumbing + `assemble_config` helper extraction, pure-helper unit tests, `tome init --dry-run --no-input` integration tests, 12-combo `(DirectoryType, DirectoryRole)` matrix (WHARD-04/05/06)
+- [x] Phase 6: Display Polish & Docs (2/2 plans) — wizard summary migrated to `tabled::Table` with `Style::rounded()` + `PriorityMax::right()` truncation, PROJECT.md "Hardened in v0.7" subsection, CHANGELOG WHARD-07/08 entries (WHARD-07/08)
 
-## Phase Details
+**Closed WIZ-01..05:** v0.6's known wizard gaps are now shipped AND hardened.
 
-### Phase 4: Wizard Correctness
-**Goal**: Wizard cannot save a config that would fail at sync time
-**Depends on**: Phase 3 (v0.6 unified directory model shipped)
-**Requirements**: WHARD-01, WHARD-02, WHARD-03
-**Success Criteria** (what must be TRUE):
-  1. User running `tome init` with an invalid type/role combo (e.g., Git + Target) sees a clear validation error and the config is not written to disk
-  2. User who picks a `library_dir` that overlaps a Synced/Target directory sees an error suggesting a non-overlapping location and the config is not written
-  3. User who picks a `library_dir` that is a subdirectory of a synced directory sees a circular-symlink validation error before save
-  4. A successful `tome init` still round-trips: the written config passes `Config::validate()` and reloads without changes
-**Plans**: 3 plans
-- [x] 04-01-validate-error-template-PLAN.md — Upgrade existing `Config::validate()` errors to the D-10 Conflict+Why+Suggestion template
-- [x] 04-02-library-overlap-validation-PLAN.md — Add Cases A/B/C overlap detection between `library_dir` and distribution dirs (WHARD-02/03)
-- [x] 04-03-wizard-save-hardening-PLAN.md — Wizard save path calls `Config::save_checked` (expand → validate → round-trip → write); dry-run branch validates too (WHARD-01)
+</details>
 
-### Phase 5: Wizard Test Coverage
-**Goal**: Wizard logic is testable without a TTY and has enforced coverage of valid/invalid combinations
-**Depends on**: Phase 4
-**Requirements**: WHARD-04, WHARD-05, WHARD-06
-**Success Criteria** (what must be TRUE):
-  1. `cargo test` exercises unit tests for `find_known_directories_in`, `KNOWN_DIRECTORIES` registry lookup, `DirectoryType::default_role`, and pure config-assembly helpers
-  2. An integration test runs `tome init --dry-run --no-input` and asserts the generated config passes validation and round-trips through TOML unchanged
-  3. Every `(DirectoryType, DirectoryRole)` combination the wizard can produce has a test: valid combos save successfully; invalid combos are rejected by the Phase 4 validation path
-  4. CI (ubuntu + macos) passes with the new tests as non-optional gates
-**Plans**: 4 plans
-- [x] 05-01-no-input-plumbing-and-assemble-config-PLAN.md — Plumb `--no-input` through `wizard::run`; extract `pub(crate) fn assemble_config`; remove `lib.rs:164-165` bail (WHARD-04/05 prerequisite)
-- [x] 05-02-pure-helper-unit-tests-PLAN.md — Unit tests for `find_known_directories_in`, `KNOWN_DIRECTORIES` registry invariants, and `assemble_config` (WHARD-04)
-- [x] 05-03-init-integration-test-PLAN.md — Integration tests for `tome init --dry-run --no-input` on empty + seeded HOME (WHARD-05)
-- [x] 05-04-combo-matrix-test-PLAN.md — Table-driven `(DirectoryType, DirectoryRole)` cross-product — 12 combos derived from `valid_roles()` (WHARD-06)
+### 📋 v0.8 (Not yet planned)
 
-### Phase 6: Display Polish & Docs
-**Goal**: Wizard summary renders cleanly on any terminal width and v0.7 scope is marked complete in project docs
-**Depends on**: Phase 5
-**Requirements**: WHARD-07, WHARD-08
-**Success Criteria** (what must be TRUE):
-  1. User running `tome init` sees the directory summary rendered via `tabled` with `Style::rounded()`, matching the visual language of `tome status`
-  2. Long paths (e.g., git repo clones under `~/.tome/repos/<sha>/`) render without breaking column alignment — either truncated or wrapped, never overflowing
-  3. `PROJECT.md` lists WIZ-01 through WIZ-05 as validated with a note that they shipped in v0.6 and were hardened in v0.7
-**Plans**: 2 plans
-- [x] 06-01-wizard-summary-tabled-PLAN.md — Migrate `wizard::show_directory_summary` to `tabled` with `Style::rounded()` and terminal-width-aware truncation; add `terminal_size` crate dep (WHARD-07)
-- [x] 06-02-project-md-wiz-closure-PLAN.md — Mark WIZ-01–05 as validated/hardened in `.planning/PROJECT.md`, remove stale "Known Gaps" bullet, update footer, add CHANGELOG entry (WHARD-08)
-**UI hint**: yes
+Run `/gsd:new-milestone` to scope the next milestone. Candidate themes tracked in `.planning/PROJECT.md` (Active Requirements section).
 
 ## Progress
 
@@ -75,6 +41,6 @@
 | 1. Unified Directory Foundation | v0.6 | 3/5 | Complete | 2026-04-14 |
 | 2. Git Sources & Selection | v0.6 | 4/4 | Complete | 2026-04-15 |
 | 3. Import, Reassignment & Browse Polish | v0.6 | 2/2 | Complete | 2026-04-16 |
-| 4. Wizard Correctness | v0.7 | 3/3 | Complete   | 2026-04-19 |
-| 5. Wizard Test Coverage | v0.7 | 0/4 | Not started | — |
-| 6. Display Polish & Docs | v0.7 | 0/2 | Not started | — |
+| 4. Wizard Correctness | v0.7 | 3/3 | Complete | 2026-04-19 |
+| 5. Wizard Test Coverage | v0.7 | 4/4 | Complete | 2026-04-20 |
+| 6. Display Polish & Docs | v0.7 | 2/2 | Complete | 2026-04-22 |
