@@ -508,7 +508,7 @@ fn scan_for_skills(
                         },
                         Err(e) => {
                             warnings.push(format!(
-                                "could not read SKILL.md for {}/{}: {}",
+                                "could not read SKILL.md in source '{}' at {}: {}",
                                 source_name,
                                 skill_dir.display(),
                                 e
