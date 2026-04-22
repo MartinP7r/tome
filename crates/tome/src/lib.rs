@@ -596,6 +596,25 @@ fn resolve_git_directories(
         return resolved;
     }
 
+    // Read HEAD sha and warn (not silently swallow) when the cache is
+    // unreadable — without the warning the lockfile would record
+    // git_commit_sha: null, falsely claiming "no provenance".
+    let read_sha_or_warn = |cache_dir: &Path, name: &DirectoryName| -> Option<String> {
+        match git::read_head_sha(cache_dir) {
+            Ok(sha) => Some(sha),
+            Err(e) => {
+                if !quiet {
+                    eprintln!(
+                        "warning: could not read HEAD sha for '{}' cache at {}: {e}",
+                        name,
+                        cache_dir.display()
+                    );
+                }
+                None
+            }
+        }
+    };
+
     for (name, dir_config) in &config.directories {
         if dir_config.directory_type != DirectoryType::Git {
             continue;
@@ -609,7 +628,7 @@ fn resolve_git_directories(
             // In dry-run, use cached path if it exists, skip otherwise
             if already_cloned {
                 let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
-                let sha = git::read_head_sha(&cache_dir).ok();
+                let sha = read_sha_or_warn(&cache_dir, name);
                 resolved.insert(name.clone(), (effective, sha));
             }
             continue;
@@ -654,7 +673,7 @@ fn resolve_git_directories(
         match result {
             Ok(()) => {
                 let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
-                let sha = git::read_head_sha(&cache_dir).ok();
+                let sha = read_sha_or_warn(&cache_dir, name);
                 resolved.insert(name.clone(), (effective, sha));
             }
             Err(e) => {
@@ -667,7 +686,7 @@ fn resolve_git_directories(
                         );
                     }
                     let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
-                    let sha = git::read_head_sha(&cache_dir).ok();
+                    let sha = read_sha_or_warn(&cache_dir, name);
                     resolved.insert(name.clone(), (effective, sha));
                 } else if !quiet {
                     eprintln!(
