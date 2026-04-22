@@ -9,6 +9,9 @@ use console::{Term, style};
 use dialoguer::{Confirm, Input, MultiSelect, Select};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use tabled::Table;
+use tabled::settings::{Format, Modify, Style, Width, object::Rows, peaker::PriorityMax};
+use terminal_size::{Width as TermWidth, terminal_size};
 
 use crate::config::{
     Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, default_config_path,
@@ -415,23 +418,40 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
         println!("  (no directories configured)");
         return;
     }
-    // Header
-    println!(
-        "  {:<20} {:<35} {:<16} {}",
-        style("Name").bold(),
-        style("Path").bold(),
-        style("Type").bold(),
-        style("Role").bold(),
-    );
+
+    // Build rows: header + one row per directory entry.
+    // Column order per D-02: NAME / TYPE / ROLE / PATH.
+    let mut rows: Vec<[String; 4]> = Vec::with_capacity(directories.len() + 1);
+    rows.push([
+        "NAME".to_string(),
+        "TYPE".to_string(),
+        "ROLE".to_string(),
+        "PATH".to_string(),
+    ]);
     for (name, cfg) in directories {
-        println!(
-            "  {:<20} {:<35} {:<16} {}",
-            name,
-            cfg.path.display(),
-            cfg.directory_type,
-            cfg.role().description(),
-        );
+        rows.push([
+            name.to_string(),
+            cfg.directory_type.to_string(),
+            cfg.role().description().to_string(),
+            crate::paths::collapse_home(&cfg.path),
+        ]);
     }
+
+    // Detect terminal width; fall back to 80 columns on non-TTY / piped output (D-05).
+    let term_cols: usize = terminal_size()
+        .map(|(TermWidth(w), _)| w as usize)
+        .unwrap_or(80);
+
+    // Style::rounded() is a deliberate aesthetic divergence from status.rs's
+    // Style::blank(): tome init is a one-shot ceremonial summary (D-01).
+    // Width::truncate + PriorityMax::right() shrinks the widest column first —
+    // in practice the PATH column, which can hold git-repo clone paths (D-04).
+    let table = Table::from_iter(rows)
+        .with(Style::rounded())
+        .with(Modify::new(Rows::first()).with(Format::content(|s| style(s).bold().to_string())))
+        .with(Width::truncate(term_cols).priority(PriorityMax::right()))
+        .to_string();
+    println!("{table}");
     println!();
 }
 

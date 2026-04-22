@@ -54,6 +54,18 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ Custom directory addition with role selection
 - ✓ Removed `find_source_target_overlaps()` dead code
 
+### Hardened in v0.7
+
+The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked validation, circular-path detection, and test coverage. v0.7 closed those gaps. All items are now shipped AND hardened — Shipped v0.6, hardened v0.7 (Phases 4+5).
+
+- ✓ **WIZ-01** — Merged `KNOWN_DIRECTORIES` registry replacing the split `KNOWN_SOURCES` / `KNOWN_TARGETS` arrays. Shipped v0.6, hardened v0.7: formal unit-test coverage for registry invariants and `find_known_directories_in` (Phase 5 / WHARD-04).
+- ✓ **WIZ-02** — Auto-discovery with role auto-assignment (ClaudePlugins→Managed, Directory→Synced, Git→Source) at wizard time. Shipped v0.6, hardened v0.7: `(DirectoryType, DirectoryRole)` combo-matrix test locks in `valid_roles()` ↔ `Config::validate()` agreement across all 12 combos (Phase 5 / WHARD-06).
+- ✓ **WIZ-03** — Custom directory addition with role selection during `tome init`. Shipped v0.6, hardened v0.7: invalid type/role combos are now rejected by `Config::validate()` before `save()` instead of being silently written (Phase 4 / WHARD-01).
+- ✓ **WIZ-04** — Summary table before confirmation. Shipped v0.6, hardened v0.7: migrated to `tabled` with `Style::rounded()` and terminal-width-aware truncation (Phase 6 / WHARD-07).
+- ✓ **WIZ-05** — Removal of the legacy source/target split mental model, including dead-code cleanup of `find_source_target_overlaps()`. Shipped v0.6, hardened v0.7: replaced with `Config::validate()` Cases A/B/C path-overlap detection and `Config::save_checked` TOML round-trip (Phase 4 / WHARD-02/03).
+
+*v0.7 hardening deliverables:* (a) `Config::validate()` path-overlap checks (Phase 4), (b) `Config::save_checked` with TOML round-trip (Phase 4), (c) `--no-input` plumbing (Phase 5), (d) unit + integration test coverage for pure wizard helpers (Phase 5), (e) 12-combo validation matrix (Phase 5), (f) `tabled` summary migration (Phase 6).
+
 ## Current Milestone: v0.7 Wizard Hardening
 
 **Goal:** Close the correctness gaps found between shipped wizard code and the original WIZ-01–05 intent: validation, circular path detection, test coverage, and polish.
@@ -64,10 +76,6 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - Test coverage for wizard's non-interactive paths (registry lookup, auto-discovery, config assembly)
 - `tabled` migration for summary display
 - Registry expansion for tools missing in KNOWN_DIRECTORIES
-
-### Known Gaps (deferred from v0.6)
-
-- WIZ-01 through WIZ-05: Wizard rewrite with merged `KNOWN_DIRECTORIES` registry. The old wizard code still works but uses the legacy source/target mental model. Low priority since `tome init` is a one-time operation.
 
 ### Out of Scope
 
@@ -112,4 +120,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-20 — Phase 5 (Wizard Test Coverage) complete — pure helpers and `tome init --no-input` now have unit + integration test coverage; combo matrix locks in `valid_roles()` ↔ `validate()` agreement*
+*Last updated: 2026-04-21 — Phase 6 (Display Polish & Docs) complete — wizard summary migrated to `tabled` (WHARD-07); WIZ-01–05 marked validated as hardened in v0.7 (WHARD-08)*
