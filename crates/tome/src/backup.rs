@@ -156,8 +156,12 @@ pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()
         println!("Would restore library to {}", target);
         return Ok(());
     }
-    // Auto-snapshot current state before restoring
-    let _ = snapshot(repo_dir, Some("pre-restore auto-snapshot"), false);
+    // Auto-snapshot current state before restoring — propagating failure
+    // here is intentional: the safety snapshot is the user's only recovery
+    // path if the restore was accidental. Without it we must not proceed
+    // with the destructive `git checkout`.
+    snapshot(repo_dir, Some("pre-restore auto-snapshot"), false)
+        .context("failed to create pre-restore safety snapshot — aborting restore to protect current state")?;
     // Restore files from target ref
     git_success(repo_dir, &["checkout", target, "--", "."])?;
     println!(
