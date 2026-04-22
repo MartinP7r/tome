@@ -147,7 +147,10 @@ pub(crate) fn list(repo_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
 /// Restore the tome home to a previous snapshot.
 ///
 /// Automatically creates a pre-restore snapshot of the current state before
-/// checking out files from the target ref.
+/// checking out files from the target ref. Returns an error — and aborts
+/// before the destructive checkout — if the pre-restore snapshot cannot be
+/// created (the snapshot is the user's only recovery path if the restore
+/// was accidental).
 pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
     if !has_repo(repo_dir) {
         anyhow::bail!("no backup repo found — run `tome backup init` first");
@@ -411,6 +414,54 @@ mod tests {
         // File should be back to original content
         let content = std::fs::read_to_string(lib_dir.join("skill.md")).unwrap();
         assert_eq!(content, "original");
+    }
+
+    #[test]
+    fn restore_bails_when_pre_snapshot_fails() {
+        // Regression guard: pre-restore safety snapshot failure MUST abort the
+        // destructive checkout. If someone ever replaces the `?` with
+        // `let _ = snapshot(...)` again, this test fails.
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        init_test_repo(&lib_dir);
+
+        // Commit a file (this becomes the restore target)
+        std::fs::write(lib_dir.join("skill.md"), "v1-committed").unwrap();
+        snapshot(&lib_dir, Some("v1"), false).unwrap();
+
+        // Modify the file in the working tree (so restore has something to revert)
+        std::fs::write(lib_dir.join("skill.md"), "v2-modified-uncommitted").unwrap();
+
+        // Install a pre-commit hook that always fails — this forces the
+        // pre-restore safety snapshot to fail.
+        let hooks_dir = lib_dir.join(".git/hooks");
+        std::fs::create_dir_all(&hooks_dir).unwrap();
+        let hook = hooks_dir.join("pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Attempt restore — should bail BEFORE checkout.
+        let result = restore(&lib_dir, "HEAD", false);
+        assert!(
+            result.is_err(),
+            "restore should have failed when pre-snapshot failed"
+        );
+        let err_msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            err_msg.contains("pre-restore safety snapshot"),
+            "error should mention safety snapshot context, got: {err_msg}"
+        );
+
+        // Working tree must still hold the uncommitted modification —
+        // the destructive checkout did NOT run.
+        let content = std::fs::read_to_string(lib_dir.join("skill.md")).unwrap();
+        assert_eq!(
+            content, "v2-modified-uncommitted",
+            "restore must not have checked out over the working tree when the safety snapshot failed"
+        );
     }
 
     #[test]
