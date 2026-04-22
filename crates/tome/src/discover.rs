@@ -506,7 +506,15 @@ fn scan_for_skills(
                                 None
                             }
                         },
-                        Err(_) => None, // File not readable — already validated by scan
+                        Err(e) => {
+                            warnings.push(format!(
+                                "could not read SKILL.md for {}/{}: {}",
+                                source_name,
+                                skill_dir.display(),
+                                e
+                            ));
+                            None
+                        }
                     };
 
                     skills.push(DiscoveredSkill {
