@@ -1055,7 +1055,7 @@ fn render_sync_report(report: &SyncReport) {
     for dr in &report.distributions {
         println!(
             "  {}: {} linked, {} unchanged{}{}{}",
-            style(&dr.target_name).bold(),
+            style(&dr.directory_name).bold(),
             style(dr.changed).cyan(),
             dr.unchanged,
             skipped_note(dr.skipped),
