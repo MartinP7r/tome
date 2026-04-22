@@ -21,8 +21,6 @@ pub struct DistributeResult {
     /// Skills skipped because they originate from the same directory (prevents circular symlinks).
     pub skipped_managed: usize,
     pub directory_name: DirectoryName,
-    /// Deprecated: alias for `directory_name`. Kept for lib.rs until plan 01-05.
-    pub target_name: DirectoryName,
 }
 
 /// Distribute skills from the library to a configured directory.
@@ -48,7 +46,6 @@ pub fn distribute_to_directory(
     }
 
     let mut result = DistributeResult {
-        target_name: dir_name.clone(),
         directory_name: dir_name.clone(),
         changed: 0,
         unchanged: 0,
