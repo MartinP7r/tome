@@ -1,3 +1,11 @@
+[files]
+extend-exclude = [
+  # Vendored mdbook-mermaid assets — minified JS with short identifiers
+  # (`Ue`, `Tpe`, `bve`, etc.) that typos flags as misspellings.
+  "mermaid.min.js",
+  "mermaid-init.js",
+]
+
 [default.extend-words]
 ratatui = "ratatui"
 Invokable = "Invokable"

@@ -34,22 +34,24 @@ tome status
 
 ## How It Works
 
+Every directory you configure — package-manager caches, per-tool skill dirs, git-hosted skill repos — lives under a single `[directories.*]` map in `tome.toml` with a *role* that tells tome how it participates in the pipeline.
+
 ```mermaid
 graph LR
-    subgraph Sources
-        S1["Plugin cache<br/>(23 skills)"]
-        S2["~/.claude/skills<br/>(8 skills)"]
-        S3["~/my-skills<br/>(18 skills)"]
+    subgraph Sources["Sources (roles: Managed / Synced / Source)"]
+        S1["<b>claude-plugins</b><br/>type: claude-plugins<br/>~/.claude/plugins"]
+        S2["<b>claude-skills</b><br/>type: directory<br/>~/.claude/skills"]
+        S3["<b>team-skills</b><br/>type: git<br/>github.com/org/skills"]
     end
 
-    subgraph Library
-        L["Consolidated<br/>skill library<br/>(copies + symlinks)"]
+    subgraph Library["Library — ~/.tome/skills"]
+        L["Consolidated skill library<br/>(copies for local, symlinks for managed)"]
     end
 
-    subgraph Targets
-        T1["Antigravity<br/>(symlinks)"]
-        T2["Codex<br/>(symlinks)"]
-        T3["OpenClaw<br/>(symlinks)"]
+    subgraph Targets["Targets (roles: Synced / Target)"]
+        T1["<b>codex</b><br/>~/.codex/skills"]
+        T2["<b>antigravity</b><br/>~/.gemini/antigravity/skills"]
+        T3["<b>cursor</b><br/>~/.cursor/skills"]
     end
 
     S1 --> L
@@ -60,10 +62,12 @@ graph LR
     L --> T3
 ```
 
-1. **Discover** — Scan configured sources for `*/SKILL.md` directories
-2. **Consolidate** — Gather skills into a central library: local skills are copied, managed (plugin) skills are symlinked; deduplicates with first source winning
-3. **Distribute** — Create symlinks in each target tool's skills directory (respects per-machine disabled list)
-4. **Cleanup** — Remove stale entries and broken symlinks from library and targets
+1. **Discover** — Scan every configured directory (types: `claude-plugins`, `directory`, `git`) for `*/SKILL.md` subdirs
+2. **Consolidate** — Gather skills into `~/.tome/skills`: local skills are copied, managed (package-manager) skills are symlinked back to their source; first-seen-wins on name conflicts
+3. **Distribute** — Create symlinks in each distribution directory (respects per-machine disabled/enabled filters)
+4. **Cleanup** — Remove stale entries and broken symlinks from both library and distribution dirs
+
+> **v0.6+ unified directory model:** A directory can be *both* a source and a target (role: `Synced`). Discovery and distribution are determined by role, not by separate config sections. See [architecture](./architecture.md) for details.
 
 ## License
 
