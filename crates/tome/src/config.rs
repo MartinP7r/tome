@@ -634,7 +634,7 @@ pub fn default_tome_home() -> Result<PathBuf> {
 }
 
 /// Read `tome_home` from the machine-level config at `~/.config/tome/config.toml`.
-fn read_config_tome_home() -> Result<Option<PathBuf>> {
+pub(crate) fn read_config_tome_home() -> Result<Option<PathBuf>> {
     let config_path = dirs::home_dir()
         .context("could not determine home directory")?
         .join(".config/tome/config.toml");
@@ -677,6 +677,100 @@ pub fn resolve_config_dir(tome_home: &Path) -> PathBuf {
 pub fn default_config_path() -> Result<PathBuf> {
     let home = default_tome_home()?;
     Ok(resolve_config_dir(&home).join("tome.toml"))
+}
+
+/// Where the resolved `tome_home` came from in the resolution chain.
+///
+/// Used by the `tome init` WUX-04 info line to tell the user which branch
+/// produced the path they are about to populate (e.g. "from TOME_HOME env"
+/// vs "from default"). Also used by the wizard to decide whether to prompt
+/// for a custom tome_home on greenfield (WUX-01 gates on Default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
+pub(crate) enum TomeHomeSource {
+    /// Provided via the `--tome-home` CLI flag.
+    CliTomeHome,
+    /// Derived from the `--config` CLI flag (tome_home = parent of config file).
+    CliConfig,
+    /// Picked up from the `TOME_HOME` environment variable.
+    EnvVar,
+    /// Read from `~/.config/tome/config.toml` `tome_home` key.
+    XdgConfig,
+    /// No signal provided — falling back to `~/.tome/`.
+    Default,
+}
+
+impl TomeHomeSource {
+    /// Short, user-facing label describing which branch produced this `tome_home`.
+    ///
+    /// These exact strings are asserted by the WUX-04 integration tests; any
+    /// change here will also need to flow through those tests.
+    #[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::CliTomeHome => "--tome-home flag",
+            Self::CliConfig => "--config flag",
+            Self::EnvVar => "TOME_HOME env",
+            Self::XdgConfig => "~/.config/tome/config.toml",
+            Self::Default => "default",
+        }
+    }
+}
+
+/// Like [`crate::resolve_tome_home`] but also reports the resolution source.
+///
+/// Used by the `tome init` entry point to print the WUX-04 info line and
+/// (via later plans) to gate the greenfield tome_home prompt on `Default`.
+///
+/// Resolution order mirrors [`resolve_tome_home`](crate::resolve_tome_home)
+/// and [`default_tome_home`] exactly, split apart so each branch is attributable:
+/// 1. `--tome-home` flag (`CliTomeHome`)
+/// 2. `--config` flag (`CliConfig`; tome_home = parent of config file)
+/// 3. `TOME_HOME` env var, non-empty (`EnvVar`)
+/// 4. `~/.config/tome/config.toml` `tome_home` key (`XdgConfig`)
+/// 5. `~/.tome/` (`Default`)
+#[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
+pub(crate) fn resolve_tome_home_with_source(
+    cli_tome_home: Option<&Path>,
+    cli_config: Option<&Path>,
+) -> Result<(PathBuf, TomeHomeSource)> {
+    if let Some(p) = cli_tome_home {
+        let expanded = expand_tilde(p)?;
+        anyhow::ensure!(
+            expanded.is_absolute(),
+            "--tome-home path '{}' must be an absolute path",
+            p.display()
+        );
+        return Ok((expanded, TomeHomeSource::CliTomeHome));
+    }
+    if let Some(p) = cli_config {
+        anyhow::ensure!(
+            p.is_absolute(),
+            "config path '{}' must be an absolute path",
+            p.display()
+        );
+        let parent = p.parent().context("config path has no parent directory")?;
+        return Ok((parent.to_path_buf(), TomeHomeSource::CliConfig));
+    }
+    match std::env::var("TOME_HOME") {
+        Ok(val) if !val.is_empty() => {
+            return Ok((expand_tilde(Path::new(&val))?, TomeHomeSource::EnvVar));
+        }
+        Ok(_) => {}
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            anyhow::bail!("TOME_HOME environment variable contains invalid Unicode");
+        }
+    }
+    if let Some(path) = read_config_tome_home()? {
+        return Ok((path, TomeHomeSource::XdgConfig));
+    }
+    Ok((
+        dirs::home_dir()
+            .context("could not determine home directory")?
+            .join(".tome"),
+        TomeHomeSource::Default,
+    ))
 }
 
 // =============================================================================
@@ -1909,11 +2003,13 @@ role = "target"
         with_env(
             &[
                 ("HOME", Some(home.as_os_str())),
-                ("TOME_HOME", Some(std::ffi::OsStr::new("/should/be/ignored"))),
+                (
+                    "TOME_HOME",
+                    Some(std::ffi::OsStr::new("/should/be/ignored")),
+                ),
             ],
             || {
-                let (path, src) =
-                    resolve_tome_home_with_source(Some(&custom), None).unwrap();
+                let (path, src) = resolve_tome_home_with_source(Some(&custom), None).unwrap();
                 assert_eq!(path, custom);
                 assert_eq!(src, TomeHomeSource::CliTomeHome);
                 assert_eq!(src.label(), "--tome-home flag");
@@ -1932,11 +2028,13 @@ role = "target"
         with_env(
             &[
                 ("HOME", Some(home.as_os_str())),
-                ("TOME_HOME", Some(std::ffi::OsStr::new("/should/be/ignored"))),
+                (
+                    "TOME_HOME",
+                    Some(std::ffi::OsStr::new("/should/be/ignored")),
+                ),
             ],
             || {
-                let (path, src) =
-                    resolve_tome_home_with_source(None, Some(&cfg_file)).unwrap();
+                let (path, src) = resolve_tome_home_with_source(None, Some(&cfg_file)).unwrap();
                 assert_eq!(path, cfg_dir);
                 assert_eq!(src, TomeHomeSource::CliConfig);
                 assert_eq!(src.label(), "--config flag");
@@ -2014,8 +2112,7 @@ role = "target"
         with_env(
             &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
             || {
-                let err =
-                    resolve_tome_home_with_source(Some(relative), None).unwrap_err();
+                let err = resolve_tome_home_with_source(Some(relative), None).unwrap_err();
                 let msg = err.to_string();
                 assert!(
                     msg.contains("must be an absolute path"),
