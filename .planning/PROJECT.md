@@ -33,10 +33,23 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ `tome reassign` / `tome fork` — change skill provenance — v0.6
 - ✓ Browse TUI polish (theming, scrollbar, fuzzy highlighting, markdown preview) — v0.6
 
-### Active
+### Active (v0.8)
 
-- [ ] Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
-- [ ] Cut `v0.7.0` release via `make release VERSION=0.7.0` (Homebrew formula bump picks up wizard hardening)
+- [ ] **WUX-01** Wizard prompts for `tome_home` on greenfield (#453)
+- [ ] **WUX-02** Wizard detects existing `.tome/` config (brownfield: use / edit / reinitialize) (#453)
+- [ ] **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup (#453)
+- [ ] **WUX-04** Wizard prints resolved `tome_home` up-front as info line (#453)
+- [ ] **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write (#453)
+- [ ] **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413)
+- [ ] **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414)
+- [ ] **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449)
+
+### Backlog (not in v0.8)
+
+- Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
+- v0.7.1 hotfix (PR #455): tabled ANSI width fix — prerequisite patch release
+- v0.7.2 quick wins (#456 library default derivation, #457 tilde preservation on save) — prereq patch release
+- v0.9 scope: cross-machine config portability via machine.toml path overrides (#458)
 
 ### Validated in v0.7
 
@@ -66,11 +79,27 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 *v0.7 hardening deliverables:* (a) `Config::validate()` path-overlap checks (Phase 4), (b) `Config::save_checked` with TOML round-trip (Phase 4), (c) `--no-input` plumbing (Phase 5), (d) unit + integration test coverage for pure wizard helpers (Phase 5), (e) 12-combo validation matrix (Phase 5), (f) `tabled` summary migration (Phase 6).
 
-## Current State
+## Current Milestone: v0.8 Wizard UX & Safety Hardening
 
-**v0.7 Wizard Hardening shipped 2026-04-22** — all 8 requirements (WHARD-01 through WHARD-08) delivered across Phases 4–6 (9 plans). The wizard now refuses invalid configs at save time, has unit + integration + combo-matrix test coverage, and renders its summary via `tabled` with rounded borders. See [`milestones/v0.7-ROADMAP.md`](milestones/v0.7-ROADMAP.md) for the archived milestone.
+**Goal:** Close the new-machine / dotfiles-sync UX gap on the wizard and address the P0 safety refactors from the v0.7 whole-codebase review that didn't fit in the v0.7.1 hotfix.
 
-**Next:** `v0.7.0` release cut via `make release`, then `/gsd:new-milestone` to scope v0.8.
+**Target features:**
+- Wizard prompts for `tome_home` on new machines; detects existing `.tome/` configs and offers use / edit / reinitialize flows (brownfield support)
+- Wizard surfaces the resolved `tome_home` up-front and offers to persist via XDG config (`~/.config/tome/config.toml`)
+- Wizard detects and cleans up the legacy pre-v0.6 `~/.config/tome/config.toml` file (silent ignore is a footgun)
+- `remove::execute` aggregates partial-cleanup failures and reports them — no more silent "success" when symlinks fail to delete
+- Browse UI's `open` and `copy path` actions work cross-platform (currently macOS-only with silent no-op on Linux)
+- `relocate.rs` surfaces `fs::read_link` failures instead of silently dropping them
+
+**Scope anchor:** Epic issue [#459](https://github.com/MartinP7r/tome/issues/459)
+
+**Key context:**
+- v0.7.1 (tabled ANSI width hotfix) and v0.7.2 (library_dir default + tilde preservation, #456/#457) are patch cuts that precede this milestone
+- v0.9 will tackle cross-machine config portability via machine.toml path overrides (#458) — larger design, intentionally deferred
+
+### Shipped in v0.7 (1-line recap)
+
+v0.7 Wizard Hardening — 8 requirements (WHARD-01..08) across Phases 4-6, shipped 2026-04-22. Archive: [`milestones/v0.7-ROADMAP.md`](milestones/v0.7-ROADMAP.md). Wizard now refuses invalid configs at save time; 525 tests passing; summary renders via `tabled` with rounded borders.
 
 ### Out of Scope
 
@@ -119,4 +148,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-22 — v0.7 Wizard Hardening milestone shipped (Phases 4-6, WHARD-01..08). Ready for `make release VERSION=0.7.0`.*
+*Last updated: 2026-04-23 — v0.8 Wizard UX & Safety Hardening milestone started (see issue #459 epic). v0.7.0 shipped; v0.7.1 hotfix (PR #455) and v0.7.2 quick wins (#456/#457) precede v0.8 phase execution.*

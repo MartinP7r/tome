@@ -1,0 +1,90 @@
+# Requirements: tome v0.8 — Wizard UX & Safety Hardening
+
+**Defined:** 2026-04-23
+**Scope anchor:** Epic [#459](https://github.com/MartinP7r/tome/issues/459)
+**Core Value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
+
+## Milestone context
+
+v0.7 Wizard Hardening closed the correctness gaps in the wizard (validation, test coverage, tabled summary). v0.8 closes the **UX gaps** surfaced after v0.7.0 shipped:
+
+- Users on new machines have no idea `TOME_HOME` / `~/.config/tome/config.toml` / `--tome-home` exist — wizard silently picks `~/.tome/`
+- Users with existing `.tome/` synced via dotfiles have no brownfield flow — `tome init` would overwrite
+- Users with legacy pre-v0.6 `~/.config/tome/config.toml` cruft get no warning — file is silently ignored
+
+v0.8 also picks up **P0 safety refactors** from the v0.7 `/pr-review-toolkit` whole-codebase review that didn't fit the v0.7.1 patch window:
+
+- `remove::execute` reports "success" even when partial cleanup fails (#413)
+- Browse UI's `open`/`copy path` actions are macOS-only with silent no-op on Linux (#414)
+- `relocate.rs` silently drops `fs::read_link` errors (#449)
+
+## v1 Requirements
+
+Requirements for v0.8 release. Grouped by category. Each maps to roadmap phases.
+
+### Wizard UX (WUX)
+
+Greenfield / brownfield / legacy-cleanup flows for `tome init` on any machine state.
+
+- [ ] **WUX-01**: On a greenfield machine (no `TOME_HOME` env, no XDG config, no explicit `--tome-home` flag, no existing `.tome/tome.toml`), wizard prompts the user to choose `tome_home` location (default: `~/.tome/`, custom: user input with validation)
+- [ ] **WUX-02**: On a brownfield machine (existing `tome.toml` detected at the resolved `tome_home`), wizard shows a summary of the found config (directory count, library_dir, last-modified date) and offers: **use existing** (exit wizard, suggest `tome sync`), **edit existing** (wizard with current values pre-filled), **reinitialize** (backup existing + overwrite), or **cancel**
+- [ ] **WUX-03**: Wizard detects a legacy pre-v0.6 `~/.config/tome/config.toml` file (identified by presence of `[[sources]]` or `[targets.*]` sections) and offers to delete or move aside with a clear warning that the file is ignored by current tome
+- [ ] **WUX-04**: Wizard prints a 1-line "resolved tome_home" info message at start, before Step 1 prompts, so users see which path the wizard is about to populate
+- [ ] **WUX-05**: When the user selects a custom `tome_home` in WUX-01, wizard offers to persist the choice by writing `~/.config/tome/config.toml` with a `tome_home = "..."` field (so subsequent `tome sync` / `tome status` / editor integrations find it without needing `TOME_HOME` env var)
+
+### Safety refactors (SAFE)
+
+Partial-failure visibility and cross-platform correctness for commands reviewed in the v0.7 codebase audit.
+
+- [ ] **SAFE-01**: `remove::execute` aggregates partial-cleanup failures (symlinks, library dirs, library symlinks) into a `RemoveResult` struct and the caller surfaces them — either via non-zero exit or a distinct "⚠ N operations failed" summary line that cannot be mistaken for success
+- [ ] **SAFE-02**: Browse UI's `DetailAction::ViewSource` (currently `open`) and `DetailAction::CopyPath` (currently `sh -c ... | pbcopy`) work on Linux via platform-aware fallbacks (`xdg-open`, `wl-copy`/`xclip`) OR via a cross-platform crate like `arboard`; failures surface in the TUI status bar instead of being discarded by `let _ = ...`
+- [ ] **SAFE-03**: `relocate.rs::93` (and sibling sites found via grep for `std::fs::read_link(..).ok()`) surface symlink-read failures as warnings to stderr instead of silently returning `None` and recording no provenance
+
+## v2 Requirements
+
+Deferred to future releases.
+
+### Cross-machine config portability (v0.9)
+
+- **PORT-01**: `machine.toml` accepts `[directory_overrides.<name>]` entries that override the corresponding `[directories.<name>].path` in `tome.toml` at load time
+- **PORT-02**: `Config::load_with_overrides` merges machine overrides after `expand_tildes` and before `validate` (so validation runs on the final resolved paths)
+- **PORT-03**: Override targeting an unknown directory name produces a warning (typo hint); override producing an invalid merged config produces a dedicated error that points at `machine.toml` not `tome.toml`
+- **PORT-04**: `tome status` and `tome doctor` indicate which directories have overrides applied on this machine
+
+See issue #458 for design discussion.
+
+### Wizard/config polish (later)
+
+- **KNOWN-DIR-EXPAND**: Expand `KNOWN_DIRECTORIES` registry with Cursor, Windsurf, Aider (v2 requirements WREG-01/02/03 from v0.7 research)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| `TOME_HOME` env var injection into shell rc | Shell-specific; XDG config file achieves the same outcome in a shell-agnostic way (WUX-05) |
+| Auto-delete legacy `~/.config/tome/config.toml` | File may contain user-valued data; warn + prompt is safer (D-4) |
+| Wizard brownfield "merge" mode (combine existing + new entries) | Error-prone; edit + reinit are sufficient (WUX-02) |
+| Migration tool from pre-v0.6 config → v0.6 | Single-user project; documented migration path already exists (shipped in v0.6) |
+| Cross-OS path rewriting (`/Users/` ↔ `/home/`) | Deferred to v0.9 via machine.toml overrides (PORT-01..04) |
+
+## Traceability
+
+| Requirement | Phase | GitHub Issue | Status |
+|-------------|-------|--------------|--------|
+| WUX-01 | TBD | #453 (A) | Not started |
+| WUX-02 | TBD | #453 (C) | Not started |
+| WUX-03 | TBD | #453 (D) | Not started |
+| WUX-04 | TBD | #453 (E) | Not started |
+| WUX-05 | TBD | #453 (A cont.) | Not started |
+| SAFE-01 | TBD | #413 | Not started |
+| SAFE-02 | TBD | #414 | Not started |
+| SAFE-03 | TBD | #449 | Not started |
+
+**Coverage:**
+- v1 requirements: 8 total
+- Mapped to phases: 0/8 (awaiting roadmapper)
+- Unmapped: 8
+
+---
+*Requirements defined: 2026-04-23 following v0.8 milestone scoping per epic #459*
+*Traceability will be filled by `/gsd:new-milestone` roadmapper spawn*
