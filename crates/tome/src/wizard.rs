@@ -1481,4 +1481,62 @@ mod tests {
             PathBuf::from("/tmp/zzz-test-custom-tome-home/skills")
         );
     }
+
+    // -------------------------------------------------------------------
+    // WUX-02: brownfield_decision + backup_brownfield_config
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn brownfield_decision_no_input_returns_use_existing_for_valid_config() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        std::fs::write(&path, "library_dir = \"~/.tome/skills\"\n[directories]\n").unwrap();
+        let cfg: Result<Config> = Config::load(&path);
+        assert!(cfg.is_ok(), "seed config should parse: {:?}", cfg);
+
+        let action = brownfield_decision(&path, &cfg, /* no_input = */ true).unwrap();
+        assert_eq!(action, BrownfieldAction::UseExisting);
+    }
+
+    #[test]
+    fn brownfield_decision_no_input_returns_cancel_for_invalid_config() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        std::fs::write(&path, "this is [[[ not valid toml").unwrap();
+        let cfg: Result<Config> = Config::load(&path);
+        assert!(cfg.is_err(), "seed should fail to parse");
+
+        let action = brownfield_decision(&path, &cfg, /* no_input = */ true).unwrap();
+        assert_eq!(action, BrownfieldAction::Cancel);
+    }
+
+    #[test]
+    fn backup_brownfield_config_copies_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let original_content = "library_dir = \"~/.tome/skills\"\n";
+        std::fs::write(&path, original_content).unwrap();
+
+        let backup_path = backup_brownfield_config(&path).unwrap();
+        assert!(backup_path.exists(), "backup file should exist");
+        assert!(
+            path.exists(),
+            "original should still exist (copy, not rename)"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&backup_path).unwrap(),
+            original_content,
+            "backup should have identical content"
+        );
+        assert!(
+            backup_path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("tome.toml.backup-"),
+            "backup filename must start with tome.toml.backup-: {:?}",
+            backup_path.file_name()
+        );
+    }
 }
