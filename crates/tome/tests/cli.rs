@@ -3962,3 +3962,130 @@ fn init_no_input_writes_config_and_reloads() {
     // Round-trip parity on the written file.
     assert_config_roundtrips(&loaded);
 }
+
+// -----------------------------------------------------------------------------
+// WUX-04: `tome init` prints the resolved tome_home info line up front.
+// -----------------------------------------------------------------------------
+//
+// These tests lock in the behavior that every `tome init` invocation prints a
+// one-line "resolved tome_home: <path> (from <source>)" message BEFORE any
+// wizard Step 1 prompt output. The source label accurately reflects the
+// resolution branch: --tome-home flag, --config flag, TOME_HOME env, XDG
+// config, or default. The info line is emitted in both interactive and
+// --no-input modes (it is informational, not a prompt).
+
+#[test]
+fn init_prints_resolved_tome_home_with_default_source() {
+    // No TOME_HOME set, HOME has no ~/.config/tome/config.toml → Default source.
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("resolved tome_home:"),
+        "stdout missing resolved tome_home line:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("(from default)"),
+        "stdout missing '(from default)' source label:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_prints_resolved_tome_home_with_env_source() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("(from TOME_HOME env)"),
+        "stdout missing '(from TOME_HOME env)' label:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(tome_home.display().to_string().as_str()),
+        "stdout missing TOME_HOME path:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_prints_resolved_tome_home_with_flag_source() {
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-home");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("(from --tome-home flag)"),
+        "stdout missing '--tome-home flag' label:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_resolved_tome_home_line_precedes_step_prompts() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    let resolved_idx = stdout
+        .find("resolved tome_home:")
+        .expect("missing info line");
+    let step1_idx = stdout.find("Step 1").expect("missing Step 1 prompt header");
+    assert!(
+        resolved_idx < step1_idx,
+        "resolved tome_home line must come BEFORE Step 1.\n\
+         resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstdout:\n{stdout}"
+    );
+}
