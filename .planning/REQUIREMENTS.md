@@ -71,20 +71,20 @@ See issue #458 for design discussion.
 
 | Requirement | Phase | GitHub Issue | Status |
 |-------------|-------|--------------|--------|
-| WUX-01 | TBD | #453 (A) | Not started |
-| WUX-02 | TBD | #453 (C) | Not started |
-| WUX-03 | TBD | #453 (D) | Not started |
-| WUX-04 | TBD | #453 (E) | Not started |
-| WUX-05 | TBD | #453 (A cont.) | Not started |
-| SAFE-01 | TBD | #413 | Not started |
-| SAFE-02 | TBD | #414 | Not started |
-| SAFE-03 | TBD | #449 | Not started |
+| WUX-01 | Phase 7 | #453 (A) | Not started |
+| WUX-02 | Phase 7 | #453 (C) | Not started |
+| WUX-03 | Phase 7 | #453 (D) | Not started |
+| WUX-04 | Phase 7 | #453 (E) | Not started |
+| WUX-05 | Phase 7 | #453 (A cont.) | Not started |
+| SAFE-01 | Phase 8 | #413 | Not started |
+| SAFE-02 | Phase 8 | #414 | Not started |
+| SAFE-03 | Phase 8 | #449 | Not started |
 
 **Coverage:**
 - v1 requirements: 8 total
-- Mapped to phases: 0/8 (awaiting roadmapper)
-- Unmapped: 8
+- Mapped to phases: 8/8 ✓
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-23 following v0.8 milestone scoping per epic #459*
-*Traceability will be filled by `/gsd:new-milestone` roadmapper spawn*
+*Traceability filled by `/gsd:new-milestone` roadmapper spawn 2026-04-23*

@@ -2,12 +2,12 @@
 gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
-status: defining_requirements
-stopped_at: Milestone v0.8 started — requirements defined, roadmap pending
+status: planning
+stopped_at: Roadmap created — Phase 7 ready to plan via /gsd:plan-phase 7
 last_updated: "2026-04-23T00:00:00Z"
 last_activity: 2026-04-23
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -26,16 +26,18 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: Not started (defining requirements)
+Phase: 7 — Wizard UX (Greenfield / Brownfield / Legacy) — not started
 Plan: —
-Status: Defining requirements
-Last activity: 2026-04-23 — Milestone v0.8 started
+Status: Planning (roadmap done, phase plans pending)
+Last activity: 2026-04-23 — Roadmap created (Phases 7-8)
 
-Progress: [░░░░░░░░░░] 0% (requirements defined, roadmap pending)
+Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
 
 ## Performance Metrics
 
 - Requirements defined: 8 (v1 — 5 WUX + 3 SAFE)
+- Requirements mapped to phases: 8/8 ✓
+- Phases: 2 (Phase 7 WUX, Phase 8 SAFE)
 - Scope anchor: GitHub issue #459 (epic)
 - Prerequisites (not in v0.8): v0.7.1 (PR #455) + v0.7.2 (#456, #457) — both patch releases
 
@@ -58,8 +60,9 @@ v0.8-specific decisions (from epic #459):
 ### Pending Todos
 
 - **First:** merge PR #455 + ship v0.7.1 via `make release VERSION=0.7.1`
-- **Then:** ship v0.7.2 patch with #456 + #457 (small scope, could bundle with v0.8 Phase 1 or ship separately)
-- **Then:** `/gsd:plan-phase 7` to decompose the first v0.8 phase (wizard UX)
+- **Then:** ship v0.7.2 patch with #456 + #457 (small scope, could bundle with v0.8 Phase 7 or ship separately)
+- **Then:** `/gsd:plan-phase 7` to decompose the first v0.8 phase (Wizard UX)
+- **Then:** `/gsd:plan-phase 8` for the safety refactors
 
 ### Blockers/Concerns
 
@@ -68,6 +71,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-23 — `/gsd:new-milestone v0.8`
-Stopped at: Milestone v0.8 defined (PROJECT.md + STATE.md + REQUIREMENTS.md); roadmap pending roadmapper spawn
-Resume file: None (next step is `/gsd:plan-phase 7` after roadmap lands)
+Last session: 2026-04-23 — roadmapper spawn for v0.8
+Stopped at: ROADMAP.md + REQUIREMENTS.md traceability updated; Phase 7 ready to plan
+Resume file: None (next step is `/gsd:plan-phase 7`)
