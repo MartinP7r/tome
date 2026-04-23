@@ -4340,3 +4340,146 @@ fn init_derived_library_default_under_custom_tome_home() {
         config.library_dir()
     );
 }
+
+// ---------------------------------------------------------------------------
+// WUX-02: Brownfield decision
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the observable behavior that:
+// - Under --no-input with a valid existing tome.toml, the file is left
+//   byte-identical AND no post-init sync runs (use-existing path).
+// - Under --no-input with an invalid existing tome.toml, init exits cleanly
+//   (exit 0, Cancel path) and the file is unchanged.
+// - When BOTH a brownfield tome.toml AND a legacy XDG file exist, both
+//   cleanup headers fire and both files remain unchanged under --no-input.
+//
+// The interactive branches (Edit/Reinit) are covered by unit tests on the
+// individual helpers per 07-RESEARCH.md § Pitfall 5 (dialoguer prompts hang
+// in headless CI).
+
+#[test]
+fn init_brownfield_no_input_keeps_existing() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let seed = "library_dir = \"~/.tome/skills\"\n[directories]\n";
+    std::fs::write(&config_path, seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"]) // NOT --dry-run — we want the actual no-op path
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init should succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Existing config detected"),
+        "stdout missing brownfield summary:\n{stdout}"
+    );
+
+    // File must be byte-identical
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(
+        after, seed,
+        "brownfield --no-input must not modify existing config"
+    );
+
+    // No sync side-effect: library dir should not be created
+    let library = tmp.path().join(".tome/skills");
+    assert!(
+        !library.exists(),
+        "use-existing path must not run post-init sync (library dir present at {})",
+        library.display()
+    );
+}
+
+#[test]
+fn init_brownfield_invalid_config_no_input_cancels() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let seed = "this is [[[ not valid toml";
+    std::fs::write(&config_path, seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    // Must exit 0 (clean cancel), not an error
+    assert!(
+        output.status.success(),
+        "invalid-config no-input path should cancel cleanly (exit 0); stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("invalid:") || stdout.contains("cancelled"),
+        "stdout should indicate invalid config or cancellation:\n{stdout}"
+    );
+
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(
+        after, seed,
+        "invalid-config no-input must not modify the file"
+    );
+}
+
+#[test]
+fn init_brownfield_with_legacy_runs_both_cleanups() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let brownfield_seed = "library_dir = \"~/.tome/skills\"\n[directories]\n";
+    std::fs::write(&config_path, brownfield_seed).unwrap();
+
+    let xdg_dir = tmp.path().join(".config/tome");
+    let xdg_file = xdg_dir.join("config.toml");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    let legacy_seed = "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+    std::fs::write(&xdg_file, legacy_seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Both cleanup paths ran and printed their headers
+    assert!(
+        stdout.contains("Legacy pre-v0.6 config detected"),
+        "stdout missing legacy warning:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Existing config detected"),
+        "stdout missing brownfield summary:\n{stdout}"
+    );
+
+    // Both files unchanged under --no-input
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        brownfield_seed
+    );
+    assert_eq!(std::fs::read_to_string(&xdg_file).unwrap(), legacy_seed);
+}
