@@ -2118,4 +2118,74 @@ role = "target"
             },
         );
     }
+
+    // -----------------------------------------------------------------------
+    // WUX-05: write_xdg_tome_home helper — atomic merge-write
+    // -----------------------------------------------------------------------
+    //
+    // These tests lock in that `write_xdg_tome_home` creates the XDG file,
+    // preserves other keys (merge-preserve, not clobber), collapses paths to
+    // `~/`-form for portability, and writes atomically via temp+rename.
+
+    #[test]
+    fn write_xdg_tome_home_creates_new_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let xdg = tmp.path().join(".config/tome/config.toml");
+            assert!(xdg.is_file(), "XDG file should be created");
+            let content = std::fs::read_to_string(&xdg).unwrap();
+            let table: toml::Table = content.parse().unwrap();
+            let tome_home = table.get("tome_home").and_then(|v| v.as_str()).unwrap();
+            // Path is under HOME → collapsed form
+            assert_eq!(tome_home, "~/dotfiles/tome");
+        });
+    }
+
+    #[test]
+    fn write_xdg_tome_home_preserves_other_keys() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let xdg = tmp.path().join(".config/tome/config.toml");
+            std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+            std::fs::write(
+                &xdg,
+                "other_key = \"preserve-me\"\ntome_home = \"~/old\"\n",
+            )
+            .unwrap();
+
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let content = std::fs::read_to_string(&xdg).unwrap();
+            let table: toml::Table = content.parse().unwrap();
+            // tome_home overwritten
+            assert_eq!(
+                table.get("tome_home").and_then(|v| v.as_str()),
+                Some("~/dotfiles/tome")
+            );
+            // other_key preserved
+            assert_eq!(
+                table.get("other_key").and_then(|v| v.as_str()),
+                Some("preserve-me")
+            );
+        });
+    }
+
+    #[test]
+    fn write_xdg_tome_home_is_atomic() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let tmp_file = tmp.path().join(".config/tome/config.toml.tmp");
+            assert!(
+                !tmp_file.exists(),
+                "temp file should be removed after successful rename"
+            );
+        });
+    }
 }
