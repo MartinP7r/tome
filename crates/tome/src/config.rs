@@ -668,8 +668,6 @@ pub(crate) fn read_config_tome_home() -> Result<Option<PathBuf>> {
 ///
 /// Used by the wizard Step 0 (WUX-05) when the user chose a custom `tome_home` and
 /// accepted the persist-prompt.
-// Wired up in Task 2 of plan 07-03; suppression removed when the wizard calls it.
-#[allow(dead_code)]
 pub(crate) fn write_xdg_tome_home(tome_home: &Path) -> Result<()> {
     let home = dirs::home_dir().context("could not determine home directory")?;
     let path = home.join(".config/tome/config.toml");

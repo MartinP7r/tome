@@ -14,7 +14,7 @@ use tabled::settings::{Format, Modify, Style, Width, object::Rows, peaker::Prior
 use terminal_size::{Width as TermWidth, terminal_size};
 
 use crate::config::{
-    Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, default_config_path,
+    Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, TomeHomeSource,
     expand_tilde,
 };
 
@@ -134,7 +134,12 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
 /// is printed to stderr pointing at `tome backup init`). Dry-run and save
 /// paths behave the same as interactive mode — `no_input` only affects how
 /// prompts are resolved.
-pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
+pub(crate) fn run(
+    dry_run: bool,
+    no_input: bool,
+    tome_home: &Path,
+    tome_home_source: TomeHomeSource,
+) -> Result<Config> {
     println!();
     println!("{}", style("Welcome to tome setup!").bold().cyan());
     println!("This wizard will help you configure your skill directories.");
@@ -151,6 +156,69 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     println!("  Managed skills are symlinked instead. Each tool receives symlinks");
     println!("  into the library -- your originals are never touched.");
     println!();
+
+    // Step 0: Greenfield tome_home prompt (WUX-01)
+    // Only runs when:
+    // - the user has NOT already indicated a tome_home (flag, env, or XDG),
+    // - AND we're not in --no-input mode.
+    // If the user picks a custom path, also offer to persist via XDG (WUX-05).
+    //
+    // Use a distinct local name `chosen_tome_home` (not `tome_home`) so the
+    // owned buffer never shadows the `&Path` parameter (avoids clippy::shadow_same).
+    let mut chosen_tome_home = tome_home.to_path_buf();
+    if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
+        step_divider("Step 0: Tome home location");
+        let default_home = dirs::home_dir()
+            .context("could not determine home directory")?
+            .join(".tome");
+        let options = vec![
+            format!("{} (default)", crate::paths::collapse_home(&default_home)),
+            "Custom path...".to_string(),
+        ];
+        let selection = Select::new()
+            .with_prompt("Where should tome_home live?")
+            .items(&options)
+            .default(0)
+            .interact()?;
+        if selection == 1 {
+            let custom: String = Input::<String>::new()
+                .with_prompt("tome_home path")
+                .validate_with(|s: &String| -> std::result::Result<(), String> {
+                    let path = PathBuf::from(s);
+                    let expanded =
+                        expand_tilde(&path).map_err(|_| "could not expand ~".to_string())?;
+                    if !expanded.is_absolute() {
+                        return Err("must be absolute".to_string());
+                    }
+                    if expanded.exists() && !expanded.is_dir() {
+                        return Err("path exists but is not a directory".to_string());
+                    }
+                    Ok(())
+                })
+                .interact_text()?;
+            chosen_tome_home = expand_tilde(&PathBuf::from(custom))?;
+
+            // WUX-05: offer to persist custom choice to XDG
+            let persist = Confirm::new()
+                .with_prompt(
+                    "Persist this choice to ~/.config/tome/config.toml?\n  \
+                     (otherwise subsequent `tome sync`/`tome status` need TOME_HOME=... or --tome-home=...)",
+                )
+                .default(true)
+                .interact()?;
+            if persist {
+                crate::config::write_xdg_tome_home(&chosen_tome_home)?;
+                println!(
+                    "  {} Wrote tome_home to ~/.config/tome/config.toml",
+                    style("done").green()
+                );
+            }
+        }
+        println!();
+    }
+    // Downstream helpers take `&Path`; rebind a borrow under the name they expect.
+    // `chosen_tome_home` equals the incoming parameter unless Step 0 chose a custom path.
+    let tome_home: &Path = &chosen_tome_home;
 
     // Step 1: Auto-discover and select directories
     let mut directories = configure_directories(no_input)?;
@@ -176,7 +244,7 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     };
 
     // Step 2: Choose library location
-    let library_dir = configure_library(no_input)?;
+    let library_dir = configure_library(no_input, tome_home)?;
 
     // Step 3: Exclusions
     let exclude = configure_exclusions(&discovered, no_input)?;
@@ -307,7 +375,11 @@ pub fn run(dry_run: bool, no_input: bool) -> Result<Config> {
     let config = assemble_config(directories, library_dir, exclude);
 
     // Save config
-    let config_path = default_config_path()?;
+    // Save path is derived from the resolved tome_home threaded in from lib.rs,
+    // not from default_config_path() (which would re-probe TOME_HOME+XDG and may
+    // disagree with what sync() uses below). This fixes the latent bug where the
+    // wizard could display a save path that differed from the one sync() used.
+    let config_path = crate::config::resolve_config_dir(tome_home).join("tome.toml");
     println!(
         "Config will be saved to: {}",
         style(config_path.display()).cyan()
@@ -516,10 +588,12 @@ fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, Direc
     Ok(directories)
 }
 
-fn configure_library(no_input: bool) -> Result<PathBuf> {
+fn configure_library(no_input: bool, tome_home: &Path) -> Result<PathBuf> {
     step_divider("Step 2: Library location");
 
-    let default = PathBuf::from("~/.tome/skills");
+    // Default library = <tome_home>/skills, collapsed to ~/ form when possible
+    // for TOML portability (matches existing tilde preservation convention).
+    let default = crate::paths::collapse_home_path(&tome_home.join("skills"));
 
     let options = vec![
         format!("{} (default)", default.display()),
