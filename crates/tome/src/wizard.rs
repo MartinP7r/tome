@@ -1000,4 +1000,177 @@ mod tests {
         );
         assert_eq!(config.library_dir, lib_abs);
     }
+
+    // --- has_legacy_sections -------------------------------------------------
+
+    #[test]
+    fn has_legacy_sections_returns_none_for_missing_file() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("nope.toml");
+        assert_eq!(has_legacy_sections(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn has_legacy_sections_detects_sources_array() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n",
+        )
+        .unwrap();
+        assert_eq!(has_legacy_sections(&path).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn has_legacy_sections_detects_targets_table() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "[targets.claude]\npath = \"~/.claude/skills\"\n").unwrap();
+        assert_eq!(has_legacy_sections(&path).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn has_legacy_sections_detects_both_sources_and_targets() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n\n\
+             [targets.claude]\npath = \"~/.claude/skills\"\n",
+        )
+        .unwrap();
+        assert_eq!(has_legacy_sections(&path).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn has_legacy_sections_ignores_v0_6_only_tome_home() {
+        // Critical false-positive protection: v0.6+ users who hand-wrote the XDG
+        // file with only the tome_home key must NOT be flagged as legacy.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "tome_home = \"~/dotfiles/tome\"\n").unwrap();
+        assert_eq!(has_legacy_sections(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn has_legacy_sections_ignores_malformed_toml() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(&path, "this is [[[ not valid toml").unwrap();
+        // Graceful no-op — return Ok(None), do not crash.
+        assert_eq!(has_legacy_sections(&path).unwrap(), None);
+    }
+
+    #[test]
+    fn has_legacy_sections_ignores_comment_with_sources_substring() {
+        // Comment mentioning [[sources]] must not trigger a false positive —
+        // we parse TOML, not grep. Comments are stripped post-parse.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            "# TODO: migrate [[sources]] to [directories.*]\n\
+             tome_home = \"~/.tome\"\n",
+        )
+        .unwrap();
+        assert_eq!(has_legacy_sections(&path).unwrap(), None);
+    }
+
+    // --- detect_machine_state ------------------------------------------------
+
+    #[test]
+    fn detect_machine_state_greenfield() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join(".tome");
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::Greenfield));
+    }
+
+    #[test]
+    fn detect_machine_state_brownfield_at_tome_home_root() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join(".tome");
+        std::fs::create_dir_all(&tome_home).unwrap();
+        // Minimal valid v0.6 config
+        std::fs::write(
+            tome_home.join("tome.toml"),
+            "library_dir = \"~/.tome/skills\"\n[directories]\n",
+        )
+        .unwrap();
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::Brownfield { .. }));
+    }
+
+    #[test]
+    fn detect_machine_state_brownfield_at_dotted_subdir() {
+        // `resolve_config_dir` picks `<tome_home>/.tome/` when that subdir has
+        // a tome.toml (custom-repo layout).
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join("dotfiles/tome");
+        let subdir = tome_home.join(".tome");
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(
+            subdir.join("tome.toml"),
+            "library_dir = \"~/.tome/skills\"\n[directories]\n",
+        )
+        .unwrap();
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::Brownfield { .. }));
+    }
+
+    #[test]
+    fn detect_machine_state_legacy_only() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join(".tome");
+        let xdg = home.join(".config/tome/config.toml");
+        std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &xdg,
+            "[[sources]]\nname = \"x\"\npath = \"/tmp\"\ntype = \"directory\"\n",
+        )
+        .unwrap();
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::Legacy { .. }));
+    }
+
+    #[test]
+    fn detect_machine_state_brownfield_with_legacy() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join(".tome");
+        std::fs::create_dir_all(&tome_home).unwrap();
+        std::fs::write(
+            tome_home.join("tome.toml"),
+            "library_dir = \"~/.tome/skills\"\n[directories]\n",
+        )
+        .unwrap();
+        let xdg = home.join(".config/tome/config.toml");
+        std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+        std::fs::write(
+            &xdg,
+            "[[sources]]\nname = \"x\"\npath = \"/tmp\"\ntype = \"directory\"\n",
+        )
+        .unwrap();
+
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::BrownfieldWithLegacy { .. }));
+    }
+
+    #[test]
+    fn detect_machine_state_v0_6_only_xdg_is_greenfield() {
+        // XDG file exists with only `tome_home = "..."` — NOT legacy.
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path();
+        let tome_home = home.join(".tome");
+        let xdg = home.join(".config/tome/config.toml");
+        std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+        std::fs::write(&xdg, "tome_home = \"~/.tome\"\n").unwrap();
+        let state = detect_machine_state(home, &tome_home).unwrap();
+        assert!(matches!(state, MachineState::Greenfield));
+    }
 }
