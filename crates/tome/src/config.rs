@@ -656,6 +656,52 @@ pub(crate) fn read_config_tome_home() -> Result<Option<PathBuf>> {
     }
 }
 
+/// Write (merge) `tome_home = <collapsed-path>` into `~/.config/tome/config.toml`.
+///
+/// Semantics:
+/// - If the file does not exist: create parent dir, write a new TOML with just `tome_home`.
+/// - If the file exists: parse as `toml::Table`, insert/overwrite the `tome_home` key,
+///   preserve all other keys, write back. Comments are NOT preserved (toml crate limitation).
+/// - The value is stored in `~/`-collapsed form (via `paths::collapse_home_path`) so the
+///   file is portable across machines. `read_config_tome_home` tilde-expands on read.
+/// - Write is atomic via temp+rename, matching the pattern in `machine.rs` / `lockfile.rs`.
+///
+/// Used by the wizard Step 0 (WUX-05) when the user chose a custom `tome_home` and
+/// accepted the persist-prompt.
+// Wired up in Task 2 of plan 07-03; suppression removed when the wizard calls it.
+#[allow(dead_code)]
+pub(crate) fn write_xdg_tome_home(tome_home: &Path) -> Result<()> {
+    let home = dirs::home_dir().context("could not determine home directory")?;
+    let path = home.join(".config/tome/config.toml");
+
+    let mut table: toml::Table = if path.is_file() {
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?
+            .parse()
+            .with_context(|| format!("invalid TOML in {}", path.display()))?
+    } else {
+        toml::Table::new()
+    };
+
+    let collapsed = crate::paths::collapse_home_path(tome_home);
+    table.insert(
+        "tome_home".into(),
+        toml::Value::String(collapsed.to_string_lossy().into_owned()),
+    );
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let tmp = path.with_extension("toml.tmp");
+    let content = toml::to_string_pretty(&table).context("serialize XDG config")?;
+    std::fs::write(&tmp, &content).with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()))?;
+    Ok(())
+}
+
 /// Resolve the config directory for a given tome home.
 ///
 /// Uses smart detection: if `tome_home/.tome/tome.toml` exists, config lives
@@ -2150,11 +2196,7 @@ role = "target"
         with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
             let xdg = tmp.path().join(".config/tome/config.toml");
             std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
-            std::fs::write(
-                &xdg,
-                "other_key = \"preserve-me\"\ntome_home = \"~/old\"\n",
-            )
-            .unwrap();
+            std::fs::write(&xdg, "other_key = \"preserve-me\"\ntome_home = \"~/old\"\n").unwrap();
 
             let custom = tmp.path().join("dotfiles/tome");
             write_xdg_tome_home(&custom).unwrap();
