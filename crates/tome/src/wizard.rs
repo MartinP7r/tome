@@ -716,9 +716,9 @@ fn find_known_directories_in(home: &Path) -> Result<Vec<(&'static KnownDirectory
 /// `Result<Config>` field wraps `anyhow::Error`, which is intentionally
 /// non-cloneable and non-equatable. Callers should only pattern-match on
 /// variants, not compare states.
-// Brownfield variant fields are only read in plan 04 (WUX-02 brownfield
-// dispatch); the intermediate suppression below keeps this plan clippy-clean
-// under `-D warnings` and will be removed when plan 04 lands.
+// The Brownfield variants' fields are consumed by the lib.rs Command::Init
+// dispatcher (wired up in plan 04 Task 3); intermediate suppression keeps each
+// commit clippy-clean under `-D warnings` and will be removed in Task 3.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum MachineState {
@@ -883,6 +883,162 @@ pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Resul
         _ => unreachable!("Select returned out-of-range index"),
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Brownfield decision (WUX-02)
+// ---------------------------------------------------------------------------
+
+/// User's choice for how to handle an existing tome.toml at the resolved tome_home.
+// Wired up in Task 3 (lib.rs dispatcher) — intermediate suppression keeps this
+// commit clippy-clean under `-D warnings`.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum BrownfieldAction {
+    /// Exit the wizard cleanly, leaving the existing file untouched. Default for --no-input.
+    UseExisting,
+    /// Run the wizard with existing values pre-filled. Preserves custom directories.
+    Edit,
+    /// Back up the existing file to `tome.toml.backup-<unix-ts>` and run wizard as greenfield.
+    Reinit,
+    /// Exit the wizard without sync; print a short confirmation line to stdout.
+    Cancel,
+}
+
+/// Display the brownfield summary and prompt the user for an action.
+///
+/// - `no_input=true` returns `UseExisting` (D-3 locked decision — safest for the
+///   dotfiles-sync workflow) when the existing config parses successfully, or
+///   `Cancel` when it does not (no silent advance with invalid config in headless
+///   mode — the user must investigate).
+/// - Otherwise, `Select` with default=0 (UseExisting) for parseable configs, or a
+///   reduced `[Reinitialize, Cancel]` menu for unparseable configs.
+// Wired up in Task 3 (lib.rs dispatcher) — intermediate suppression keeps this
+// commit clippy-clean under `-D warnings`.
+#[allow(dead_code)]
+pub(crate) fn brownfield_decision(
+    existing_config_path: &Path,
+    existing_config: &Result<Config>,
+    no_input: bool,
+) -> Result<BrownfieldAction> {
+    step_divider("Existing config detected");
+    println!(
+        "  {} {}",
+        style("path:").bold(),
+        style(existing_config_path.display()).cyan()
+    );
+    match existing_config {
+        Ok(c) => {
+            println!("  directories: {}", c.directories().len());
+            println!(
+                "  library_dir: {}",
+                crate::paths::collapse_home(c.library_dir())
+            );
+            // Last-modified summary; relative-friendly.
+            if let Ok(meta) = std::fs::metadata(existing_config_path)
+                && let Ok(mtime) = meta.modified()
+                && let Ok(dur) = std::time::SystemTime::now().duration_since(mtime)
+            {
+                println!("  last modified: {} ago", format_duration(dur));
+            }
+        }
+        Err(e) => {
+            println!("  {} {:#}", style("invalid:").red(), e);
+            println!("  ('use existing' and 'edit' unavailable while config is invalid)");
+        }
+    }
+    println!();
+
+    // --no-input: D-3 says default = UseExisting. But refuse to default when
+    // the config doesn't parse — in headless mode, advancing with an invalid
+    // config would be surprising. Return Cancel so the caller exits cleanly
+    // and the user investigates.
+    if no_input {
+        return Ok(if existing_config.is_ok() {
+            BrownfieldAction::UseExisting
+        } else {
+            BrownfieldAction::Cancel
+        });
+    }
+
+    // Interactive: offer different menus based on whether the config parses.
+    if existing_config.is_ok() {
+        let items = [
+            "Use existing (exit wizard, run `tome sync`)",
+            "Edit existing (pre-fill wizard with current values)",
+            "Reinitialize (backup + overwrite)",
+            "Cancel",
+        ];
+        let selection = Select::new()
+            .with_prompt("What do you want to do?")
+            .items(items)
+            .default(0)
+            .interact()?;
+        Ok(match selection {
+            0 => BrownfieldAction::UseExisting,
+            1 => BrownfieldAction::Edit,
+            2 => BrownfieldAction::Reinit,
+            3 => BrownfieldAction::Cancel,
+            _ => unreachable!("Select returned out-of-range index"),
+        })
+    } else {
+        // No "use existing" or "edit" when parse failed.
+        let items = ["Reinitialize (backup + overwrite)", "Cancel"];
+        let idx = Select::new()
+            .with_prompt("What do you want to do?")
+            .items(items)
+            .default(0)
+            .interact()?;
+        Ok(if idx == 0 {
+            BrownfieldAction::Reinit
+        } else {
+            BrownfieldAction::Cancel
+        })
+    }
+}
+
+/// Best-effort human-readable duration for the brownfield last-modified display.
+// Wired up in Task 3 via brownfield_decision; intermediate suppression keeps
+// this commit clippy-clean.
+#[allow(dead_code)]
+fn format_duration(dur: std::time::Duration) -> String {
+    let secs = dur.as_secs();
+    if secs < 60 {
+        format!("{secs}s")
+    } else if secs < 3600 {
+        format!("{}m", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h", secs / 3600)
+    } else {
+        format!("{}d", secs / 86400)
+    }
+}
+
+/// Copy `existing_config_path` to `<parent>/tome.toml.backup-<unix-ts>`.
+///
+/// Uses copy (not rename) so that a Cancel later in the flow leaves the original
+/// intact. Returns the backup path so callers can surface it to the user.
+// Wired up in Task 3 (lib.rs Reinit dispatch) — intermediate suppression keeps
+// this commit clippy-clean.
+#[allow(dead_code)]
+pub(crate) fn backup_brownfield_config(existing_config_path: &Path) -> Result<PathBuf> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before UNIX epoch")?
+        .as_secs();
+    let backup_name = format!("tome.toml.backup-{ts}");
+    let parent = existing_config_path
+        .parent()
+        .context("existing config path has no parent directory")?;
+    let backup_path = parent.join(&backup_name);
+    std::fs::copy(existing_config_path, &backup_path).with_context(|| {
+        format!(
+            "failed to copy {} -> {}",
+            existing_config_path.display(),
+            backup_path.display()
+        )
+    })?;
+    Ok(backup_path)
 }
 
 #[cfg(test)]
