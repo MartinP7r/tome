@@ -621,6 +621,116 @@ fn find_known_directories_in(home: &Path) -> Result<Vec<(&'static KnownDirectory
     Ok(found)
 }
 
+// ---------------------------------------------------------------------------
+// Machine state detection (WUX-03 legacy config + future brownfield dispatch)
+// ---------------------------------------------------------------------------
+
+/// The machine state the wizard is running against.
+///
+/// Probes the filesystem for:
+/// - `tome.toml` at the resolved tome_home config dir
+///   (via [`crate::config::resolve_config_dir`])
+/// - `~/.config/tome/config.toml` for pre-v0.6 `[[sources]]` / `[targets.*]`
+///   sections that v0.6+ silently ignores
+///
+/// Returned by [`detect_machine_state`]. Consumed by the `tome init` dispatcher
+/// in `lib.rs`. Plan 04 (WUX-02) will extend the match to act on the
+/// Brownfield variants; plan 02 (this plan, WUX-03) only handles the
+/// `Legacy` and `BrownfieldWithLegacy` variants.
+///
+/// Note: `MachineState` cannot derive `Clone` or `PartialEq` because the
+/// `Result<Config>` field wraps `anyhow::Error`, which is intentionally
+/// non-cloneable and non-equatable. Callers should only pattern-match on
+/// variants, not compare states.
+// Some variant fields are only read in later plans (plan 04 wires up
+// Brownfield dispatch; Legacy's `legacy_path` is read in Task 2 of this plan
+// after the lib.rs wire-up). Intermediate commits need the suppression to
+// stay clippy-clean under `-D warnings`; Task 2 removes it.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) enum MachineState {
+    /// No tome.toml at tome_home; no legacy XDG config with [[sources]]/[targets.*].
+    Greenfield,
+    /// tome.toml exists at tome_home; no legacy XDG file.
+    Brownfield {
+        existing_config_path: PathBuf,
+        existing_config: Result<Config>,
+    },
+    /// Legacy pre-v0.6 XDG config detected; no brownfield tome.toml at tome_home.
+    Legacy { legacy_path: PathBuf },
+    /// Both brownfield AND legacy present. Handled in order: legacy first,
+    /// then brownfield (plan 04 will wire up the brownfield branch).
+    BrownfieldWithLegacy {
+        existing_config_path: PathBuf,
+        existing_config: Result<Config>,
+        legacy_path: PathBuf,
+    },
+}
+
+/// Classify the machine state by probing two filesystem locations.
+///
+/// `home` is passed explicitly (not sourced from `dirs::home_dir()`) so unit
+/// tests can isolate via `TempDir`. Production callers pass
+/// `dirs::home_dir()?`.
+///
+/// Resolution:
+/// - brownfield: `resolve_config_dir(tome_home).join("tome.toml")` exists
+/// - legacy: `home/.config/tome/config.toml` contains `[[sources]]` or
+///   `[targets.*]` (parsed, not substring-matched — see
+///   [`has_legacy_sections`])
+// Wired up in Task 2 of this plan (lib.rs Command::Init dispatch).
+#[allow(dead_code)]
+pub(crate) fn detect_machine_state(home: &Path, tome_home: &Path) -> Result<MachineState> {
+    let config_path = crate::config::resolve_config_dir(tome_home).join("tome.toml");
+    let legacy_path = home.join(".config/tome/config.toml");
+
+    let brownfield = config_path.is_file();
+    let legacy = has_legacy_sections(&legacy_path)?;
+
+    Ok(match (brownfield, legacy) {
+        (false, None) => MachineState::Greenfield,
+        (true, None) => MachineState::Brownfield {
+            existing_config: Config::load(&config_path),
+            existing_config_path: config_path,
+        },
+        (false, Some(legacy_path)) => MachineState::Legacy { legacy_path },
+        (true, Some(legacy_path)) => MachineState::BrownfieldWithLegacy {
+            existing_config: Config::load(&config_path),
+            existing_config_path: config_path,
+            legacy_path,
+        },
+    })
+}
+
+/// Returns `Some(path)` if the XDG file at `path` exists, parses as TOML, and
+/// contains either a top-level `sources` array-of-tables or a `targets` table
+/// — the pre-v0.6 schema that v0.6+ silently ignores.
+///
+/// Returns `None` for:
+/// - missing file
+/// - malformed TOML (graceful degradation — the user can clean up manually)
+/// - v0.6+ shape (e.g. only `tome_home = "..."` and/or `[directories.*]`)
+///
+/// This function MUST parse (not substring-match) so that comments like
+/// `# TODO: re-add [[sources]]` do not false-positive.
+// Called from `detect_machine_state`; the top-level function is itself
+// un-called until Task 2 wires it into lib.rs. Wired up in Task 2.
+#[allow(dead_code)]
+fn has_legacy_sections(path: &Path) -> Result<Option<PathBuf>> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    // Malformed TOML: treat as "can't tell, not legacy". Do not crash the wizard.
+    let Ok(table) = content.parse::<toml::Table>() else {
+        return Ok(None);
+    };
+    let has_sources = table.get("sources").is_some_and(|v| v.is_array());
+    let has_targets = table.get("targets").is_some_and(|v| v.is_table());
+    Ok((has_sources || has_targets).then(|| path.to_path_buf()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
