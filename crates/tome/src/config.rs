@@ -686,7 +686,6 @@ pub fn default_config_path() -> Result<PathBuf> {
 /// vs "from default"). Also used by the wizard to decide whether to prompt
 /// for a custom tome_home on greenfield (WUX-01 gates on Default).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
 pub(crate) enum TomeHomeSource {
     /// Provided via the `--tome-home` CLI flag.
     CliTomeHome,
@@ -705,7 +704,6 @@ impl TomeHomeSource {
     ///
     /// These exact strings are asserted by the WUX-04 integration tests; any
     /// change here will also need to flow through those tests.
-    #[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::CliTomeHome => "--tome-home flag",
@@ -729,7 +727,6 @@ impl TomeHomeSource {
 /// 3. `TOME_HOME` env var, non-empty (`EnvVar`)
 /// 4. `~/.config/tome/config.toml` `tome_home` key (`XdgConfig`)
 /// 5. `~/.tome/` (`Default`)
-#[allow(dead_code)] // Wired into `Command::Init` in Task 2 of this plan.
 pub(crate) fn resolve_tome_home_with_source(
     cli_tome_home: Option<&Path>,
     cli_config: Option<&Path>,

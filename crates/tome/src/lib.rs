@@ -166,7 +166,21 @@ pub fn run(cli: Cli) -> Result<()> {
                 e
             );
         }
-        let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
+        // WUX-04: surface the resolved tome_home + its source BEFORE any
+        // wizard prompts so the user can Ctrl-C if the wrong path is about
+        // to be populated (e.g. a stray `TOME_HOME=/wrong/path` in their
+        // shell rc). Printed in both interactive and --no-input modes.
+        //
+        // `tome_home_source` is intentionally bound here; later plans in
+        // this phase will consume it to gate greenfield prompts (WUX-01).
+        let (tome_home, tome_home_source) =
+            config::resolve_tome_home_with_source(cli.tome_home.as_deref(), cli.config.as_deref())?;
+        println!();
+        println!(
+            "resolved tome_home: {} (from {})",
+            style(tome_home.display()).cyan(),
+            tome_home_source.label()
+        );
         let config = wizard::run(cli.dry_run, cli.no_input)?;
         config.validate()?;
         if !cli.dry_run {
