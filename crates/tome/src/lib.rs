@@ -181,6 +181,22 @@ pub fn run(cli: Cli) -> Result<()> {
             style(tome_home.display()).cyan(),
             tome_home_source.label()
         );
+
+        // WUX-03: Detect and handle legacy pre-v0.6 ~/.config/tome/config.toml.
+        // The legacy file is silently ignored by v0.6+ (only its `tome_home`
+        // key is read); this warns the user and offers cleanup.
+        let home = dirs::home_dir().context("could not determine home directory")?;
+        let machine_state = wizard::detect_machine_state(&home, &tome_home)?;
+        if let wizard::MachineState::Legacy { legacy_path }
+        | wizard::MachineState::BrownfieldWithLegacy { legacy_path, .. } = &machine_state
+        {
+            wizard::handle_legacy_cleanup(legacy_path, cli.no_input)?;
+        }
+        // TODO(plan 04): replace with full match on machine_state for
+        // brownfield dispatch. For now the Brownfield variants fall through
+        // to the existing wizard flow unchanged.
+        let _ = machine_state;
+
         let config = wizard::run(cli.dry_run, cli.no_input)?;
         config.validate()?;
         if !cli.dry_run {

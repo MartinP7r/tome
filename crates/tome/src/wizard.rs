@@ -642,10 +642,9 @@ fn find_known_directories_in(home: &Path) -> Result<Vec<(&'static KnownDirectory
 /// `Result<Config>` field wraps `anyhow::Error`, which is intentionally
 /// non-cloneable and non-equatable. Callers should only pattern-match on
 /// variants, not compare states.
-// Some variant fields are only read in later plans (plan 04 wires up
-// Brownfield dispatch; Legacy's `legacy_path` is read in Task 2 of this plan
-// after the lib.rs wire-up). Intermediate commits need the suppression to
-// stay clippy-clean under `-D warnings`; Task 2 removes it.
+// Brownfield variant fields are only read in plan 04 (WUX-02 brownfield
+// dispatch); the intermediate suppression below keeps this plan clippy-clean
+// under `-D warnings` and will be removed when plan 04 lands.
 #[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum MachineState {
@@ -678,8 +677,6 @@ pub(crate) enum MachineState {
 /// - legacy: `home/.config/tome/config.toml` contains `[[sources]]` or
 ///   `[targets.*]` (parsed, not substring-matched — see
 ///   [`has_legacy_sections`])
-// Wired up in Task 2 of this plan (lib.rs Command::Init dispatch).
-#[allow(dead_code)]
 pub(crate) fn detect_machine_state(home: &Path, tome_home: &Path) -> Result<MachineState> {
     let config_path = crate::config::resolve_config_dir(tome_home).join("tome.toml");
     let legacy_path = home.join(".config/tome/config.toml");
@@ -713,9 +710,6 @@ pub(crate) fn detect_machine_state(home: &Path, tome_home: &Path) -> Result<Mach
 ///
 /// This function MUST parse (not substring-match) so that comments like
 /// `# TODO: re-add [[sources]]` do not false-positive.
-// Called from `detect_machine_state`; the top-level function is itself
-// un-called until Task 2 wires it into lib.rs. Wired up in Task 2.
-#[allow(dead_code)]
 fn has_legacy_sections(path: &Path) -> Result<Option<PathBuf>> {
     if !path.is_file() {
         return Ok(None);
@@ -729,6 +723,92 @@ fn has_legacy_sections(path: &Path) -> Result<Option<PathBuf>> {
     let has_sources = table.get("sources").is_some_and(|v| v.is_array());
     let has_targets = table.get("targets").is_some_and(|v| v.is_table());
     Ok((has_sources || has_targets).then(|| path.to_path_buf()))
+}
+
+/// Interactive handler for the [`MachineState::Legacy`] and
+/// [`MachineState::BrownfieldWithLegacy`] variants.
+///
+/// Prints a warning that the pre-v0.6 config file is ignored by current tome,
+/// then:
+/// - If `no_input` is `true`: emits a `note:` line to stderr and returns
+///   `Ok(())` — the file is left on disk unchanged.
+/// - Otherwise: prompts the user to pick one of 3 actions:
+///   1. Leave as-is (warn again next time)
+///   2. Move aside (rename to `config.toml.legacy-backup-<unix-ts>`)
+///   3. Delete permanently
+///
+/// The interactive default is action 2 (move-aside) — a user pressing Enter
+/// without reading gets the non-destructive backup rather than a no-op.
+/// Under `--no-input` the effective default is "leave" per plan spec
+/// (WUX-03 must-haves: "Under --no-input, the legacy file is left alone").
+pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Result<()> {
+    println!();
+    println!(
+        "{} Legacy pre-v0.6 config detected: {}",
+        style("warning:").yellow(),
+        style(legacy_path.display()).cyan()
+    );
+    println!("  This file contains [[sources]] or [targets.*] sections, which tome v0.6+");
+    println!("  does not read. It is silently ignored -- likely not what you want.");
+
+    if no_input {
+        eprintln!(
+            "{} skipped legacy cleanup (--no-input). Run `tome init` interactively to handle.",
+            style("note:").cyan()
+        );
+        return Ok(());
+    }
+
+    let items = [
+        "Leave as-is (warn again next time)",
+        "Move aside (rename to config.toml.legacy-backup-<timestamp>)",
+        "Delete permanently",
+    ];
+    let selection = Select::new()
+        .with_prompt("What do you want to do with it?")
+        .items(items)
+        .default(1) // move-aside — non-destructive, sorts friendly
+        .interact()?;
+
+    match selection {
+        0 => {
+            println!("  {} Left unchanged.", style("note:").cyan());
+        }
+        1 => {
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .context("system clock is before UNIX epoch")?
+                .as_secs();
+            let backup_name = format!("config.toml.legacy-backup-{ts}");
+            let backup_path = legacy_path
+                .parent()
+                .context("legacy path has no parent directory")?
+                .join(&backup_name);
+            std::fs::rename(legacy_path, &backup_path).with_context(|| {
+                format!(
+                    "failed to rename {} -> {}",
+                    legacy_path.display(),
+                    backup_path.display()
+                )
+            })?;
+            println!(
+                "  {} Moved to: {}",
+                style("done").green(),
+                style(backup_path.display()).cyan()
+            );
+        }
+        2 => {
+            std::fs::remove_file(legacy_path)
+                .with_context(|| format!("failed to delete {}", legacy_path.display()))?;
+            println!(
+                "  {} Deleted: {}",
+                style("done").green(),
+                style(legacy_path.display()).cyan()
+            );
+        }
+        _ => unreachable!("Select returned out-of-range index"),
+    }
+    Ok(())
 }
 
 #[cfg(test)]

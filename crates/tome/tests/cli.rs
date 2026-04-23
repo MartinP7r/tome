@@ -4107,8 +4107,7 @@ fn init_legacy_detected_no_input_leaves_file() {
     let xdg_dir = tmp.path().join(".config/tome");
     let xdg_file = xdg_dir.join("config.toml");
     std::fs::create_dir_all(&xdg_dir).unwrap();
-    let legacy_content =
-        "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+    let legacy_content = "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
     std::fs::write(&xdg_file, legacy_content).unwrap();
 
     let output = tome()
