@@ -197,7 +197,13 @@ pub fn run(cli: Cli) -> Result<()> {
         // to the existing wizard flow unchanged.
         let _ = machine_state;
 
-        let config = wizard::run(cli.dry_run, cli.no_input, &tome_home, tome_home_source)?;
+        let config = wizard::run(
+            cli.dry_run,
+            cli.no_input,
+            &tome_home,
+            tome_home_source,
+            None,
+        )?;
         config.validate()?;
         if !cli.dry_run {
             // Expand `~` in library_dir before passing to TomePaths, which

@@ -139,6 +139,7 @@ pub(crate) fn run(
     no_input: bool,
     tome_home: &Path,
     tome_home_source: TomeHomeSource,
+    prefill: Option<&Config>,
 ) -> Result<Config> {
     println!();
     println!("{}", style("Welcome to tome setup!").bold().cyan());
@@ -221,7 +222,7 @@ pub(crate) fn run(
     let tome_home: &Path = &chosen_tome_home;
 
     // Step 1: Auto-discover and select directories
-    let mut directories = configure_directories(no_input)?;
+    let mut directories = configure_directories(no_input, prefill.map(|c| c.directories()))?;
 
     // Discover skills now so step 3 can offer an exclusion picker
     let discovered = {
@@ -244,10 +245,10 @@ pub(crate) fn run(
     };
 
     // Step 2: Choose library location
-    let library_dir = configure_library(no_input, tome_home)?;
+    let library_dir = configure_library(no_input, tome_home, prefill.map(|c| c.library_dir()))?;
 
     // Step 3: Exclusions
-    let exclude = configure_exclusions(&discovered, no_input)?;
+    let exclude = configure_exclusions(&discovered, no_input, prefill.map(|c| c.exclude()))?;
 
     // Step 4: Summary table
     step_divider("Summary");
@@ -527,7 +528,10 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
     println!();
 }
 
-fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
+fn configure_directories(
+    no_input: bool,
+    prefill: Option<&BTreeMap<DirectoryName, DirectoryConfig>>,
+) -> Result<BTreeMap<DirectoryName, DirectoryConfig>> {
     step_divider("Step 1: Directories");
 
     let found = find_known_directories()?;
@@ -546,16 +550,33 @@ fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, Direc
             })
             .collect();
 
+        // Pre-select entries that are in the prefill map (WUX-02 edit mode).
+        // For a fresh wizard run (prefill = None), pre-select everything.
+        let defaults: Vec<bool> = found
+            .iter()
+            .map(|(kd, _)| match prefill {
+                Some(map) => DirectoryName::new(kd.name)
+                    .ok()
+                    .is_some_and(|n| map.contains_key(&n)),
+                None => true,
+            })
+            .collect();
+
         let selections: Vec<usize> = if no_input {
-            // --no-input default: include all auto-discovered directories.
-            (0..found.len()).collect()
+            // --no-input: include entries that were pre-selected above
+            // (everything for fresh, only prefilled entries for edit).
+            defaults
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &on)| if on { Some(i) } else { None })
+                .collect()
         } else {
             MultiSelect::new()
                 .with_prompt(
                     "Found these directories -- select which to include\n  (space to toggle, enter to confirm)",
                 )
                 .items(&labels)
-                .defaults(&vec![true; found.len()])
+                .defaults(&defaults)
                 .report(false)
                 .interact()?
         };
@@ -584,38 +605,62 @@ fn configure_directories(no_input: bool) -> Result<BTreeMap<DirectoryName, Direc
         );
     }
 
+    // Union with any prefill entries not already present from auto-discovery.
+    // This preserves custom directories (not in KNOWN_DIRECTORIES) through
+    // an "edit existing" flow — Pitfall 2 from 07-RESEARCH.md.
+    if let Some(prefill_map) = prefill {
+        for (name, cfg) in prefill_map {
+            directories
+                .entry(name.clone())
+                .or_insert_with(|| cfg.clone());
+        }
+    }
+
     println!();
     Ok(directories)
 }
 
-fn configure_library(no_input: bool, tome_home: &Path) -> Result<PathBuf> {
+fn configure_library(no_input: bool, tome_home: &Path, prefill: Option<&Path>) -> Result<PathBuf> {
     step_divider("Step 2: Library location");
 
     // Default library = <tome_home>/skills, collapsed to ~/ form when possible
     // for TOML portability (matches existing tilde preservation convention).
     let default = crate::paths::collapse_home_path(&tome_home.join("skills"));
 
-    let options = vec![
-        format!("{} (default)", default.display()),
-        "Custom path...".to_string(),
-    ];
+    // Under --no-input: use prefill if given (WUX-02 edit mode), else derived default.
+    if no_input {
+        return Ok(prefill.map(|p| p.to_path_buf()).unwrap_or(default));
+    }
 
-    let path = if no_input {
-        // --no-input default: library = ~/.tome/skills
-        default
+    // Interactive: build options. When prefill is present and differs from the
+    // derived default, offer it as a "current" leading choice.
+    let mut options: Vec<String> = Vec::new();
+    let mut paths: Vec<PathBuf> = Vec::new();
+    if let Some(prefilled) = prefill
+        && prefilled != default
+    {
+        options.push(format!(
+            "{} (current)",
+            crate::paths::collapse_home(prefilled)
+        ));
+        paths.push(prefilled.to_path_buf());
+    }
+    options.push(format!("{} (default)", default.display()));
+    paths.push(default.clone());
+    let custom_idx = options.len();
+    options.push("Custom path...".to_string());
+
+    let selection = Select::new()
+        .with_prompt("Where should the skill library live?")
+        .items(&options)
+        .default(0)
+        .interact()?;
+
+    let path = if selection == custom_idx {
+        let custom: String = Input::new().with_prompt("Library path").interact_text()?;
+        crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(custom))?)
     } else {
-        let selection = Select::new()
-            .with_prompt("Where should the skill library live?")
-            .items(&options)
-            .default(0)
-            .interact()?;
-
-        if selection == 0 {
-            default
-        } else {
-            let custom: String = Input::new().with_prompt("Library path").interact_text()?;
-            crate::paths::collapse_home_path(&expand_tilde(&PathBuf::from(custom))?)
-        }
+        paths[selection].clone()
     };
 
     println!();
@@ -625,29 +670,37 @@ fn configure_library(no_input: bool, tome_home: &Path) -> Result<PathBuf> {
 fn configure_exclusions(
     skills: &[crate::discover::DiscoveredSkill],
     no_input: bool,
+    prefill: Option<&std::collections::BTreeSet<crate::discover::SkillName>>,
 ) -> Result<std::collections::BTreeSet<crate::discover::SkillName>> {
     step_divider("Step 3: Exclusions");
 
     if skills.is_empty() {
         println!("  (no skills discovered yet -- exclusions can be added manually to config)");
         println!();
-        return Ok(std::collections::BTreeSet::new());
+        // Under empty skill list the prefill is the only source of exclusions.
+        return Ok(prefill.cloned().unwrap_or_default());
+    }
+
+    if no_input {
+        // --no-input: use prefill if given (WUX-02 edit mode), else empty.
+        return Ok(prefill.cloned().unwrap_or_default());
     }
 
     let labels: Vec<String> = skills.iter().map(|s| s.name.to_string()).collect();
-    let selections: Vec<usize> = if no_input {
-        // --no-input default: empty exclusions.
-        Vec::new()
-    } else {
-        // Cap visible rows to terminal height minus some overhead for prompt/chrome
-        let max_rows = Term::stderr().size().0.saturating_sub(6).max(5) as usize;
-        MultiSelect::new()
-            .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
-            .items(&labels)
-            .defaults(&vec![false; labels.len()])
-            .max_length(max_rows)
-            .interact()?
-    };
+    // Pre-select skills that are already in the prefill set.
+    let defaults: Vec<bool> = skills
+        .iter()
+        .map(|s| prefill.is_some_and(|p| p.contains(&s.name)))
+        .collect();
+
+    // Cap visible rows to terminal height minus some overhead for prompt/chrome
+    let max_rows = Term::stderr().size().0.saturating_sub(6).max(5) as usize;
+    let selections: Vec<usize> = MultiSelect::new()
+        .with_prompt("Select skills to exclude (space to toggle, enter to confirm)")
+        .items(&labels)
+        .defaults(&defaults)
+        .max_length(max_rows)
+        .interact()?;
 
     let exclude = selections
         .iter()
@@ -1625,13 +1678,13 @@ mod tests {
 
     #[test]
     fn configure_library_no_input_derives_from_tome_home() {
-        // Under --no-input, configure_library returns <tome_home>/skills (collapsed).
-        // With tome_home = /tmp/... (not under HOME), collapse_home_path is a no-op
-        // and we get the literal absolute path. This intentionally side-steps HOME
-        // expansion; the "collapse to ~/" case is covered by existing integration
-        // tests that use HOME-relative paths.
+        // Under --no-input with no prefill, configure_library returns
+        // <tome_home>/skills (collapsed). With tome_home = /tmp/... (not under
+        // HOME), collapse_home_path is a no-op and we get the literal absolute
+        // path. This intentionally side-steps HOME expansion; the "collapse to
+        // ~/" case is covered by existing integration tests.
         let custom = Path::new("/tmp/zzz-test-custom-tome-home");
-        let result = configure_library(true, custom).unwrap();
+        let result = configure_library(true, custom, None).unwrap();
         assert_eq!(
             result,
             PathBuf::from("/tmp/zzz-test-custom-tome-home/skills")
