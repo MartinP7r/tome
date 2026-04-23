@@ -7,16 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed — v0.7 Wizard Hardening
+## [0.7.0] - 2026-04-23
+
+The **v0.7 Wizard Hardening** milestone. The Phase 4–6 code shipped to users interim as v0.6.2 (on 2026-04-17); this release is the formal milestone cut and bundles the post-milestone safety patches on top. Users upgrading from v0.6.2 get the safety patches; users on v0.6.1 or earlier get the full wizard hardening surface.
+
+### Changed
 
 - Migrated `tome init` directory summary table to `tabled` with `Style::rounded()` borders and terminal-width-aware truncation via `Width::truncate(..).priority(PriorityMax::right())`. Long paths (including git-repo clones under `~/.tome/repos/<sha>/`) now render cleanly on narrow terminals without breaking column alignment. (WHARD-07)
-- Marked WIZ-01 through WIZ-05 as validated / hardened in `PROJECT.md`; removed the stale "Known Gaps (deferred from v0.6)" entry. Phases 4 + 5 of v0.7 already closed the correctness gaps (validation, overlap detection, test coverage); this update reflects that in the project docs. (WHARD-08)
+- Marked WIZ-01 through WIZ-05 as validated / hardened in `PROJECT.md`; removed the stale "Known Gaps (deferred from v0.6)" entry. Phases 4 + 5 closed the correctness gaps (validation, overlap detection, test coverage) and this release reflects that in the project docs. (WHARD-08)
+- `Config::validate()` now rejects invalid type/role combinations, library-vs-distribution path overlaps (Cases A/B/C), and circular library paths before save. All four validation bail sites use the Conflict/Why/Suggestion error template. (WHARD-01/02/03)
+- `Config::save_checked` enforces expand → validate → TOML round-trip → atomic write. The wizard save path and `--dry-run` branch share this pipeline, so invalid configs can no longer reach disk.
+- Removed deprecated internal APIs: `DistributeResult.target_name` alias and `SyncReport.warnings` field (no external impact — `DistributeResult` is not serialized to JSON).
 
-### Breaking Changes — v0.6 Unified Directory Model
+### Added
 
-The `[[sources]]` and `[targets.*]` config sections have been replaced by a single
-`[directories.*]` section. tome will refuse to parse old-format config files and
-show a migration hint.
+- `--no-input` flag now supported on `tome init` (previously bailed). Runs the wizard non-interactively using sensible defaults — required for CI smoke tests and headless provisioning.
+- Integration tests for `tome init --dry-run --no-input` on empty and seeded `HOME` directories, asserting the generated config validates and round-trips through TOML byte-equal.
+- Table-driven `(DirectoryType × DirectoryRole)` matrix test — exhaustive 12-combo coverage verifying `valid_roles()` ↔ `Config::validate()` agreement. (WHARD-04/05/06)
+- Regression test for `tome backup restore` bail-on-failure: `restore_bails_when_pre_snapshot_fails` guards against future simplification of the safety-snapshot propagation.
+
+### Fixed
+
+- `tome backup restore` now aborts if the pre-restore safety snapshot fails, instead of silently proceeding with the destructive `git checkout`. The safety snapshot is the user's only recovery path if a restore was accidental. (#415)
+- Warn on git cache HEAD-sha read failure instead of silently recording `git_commit_sha: null` in the lockfile (false "no provenance" claim). (#417)
+- Warn on SKILL.md read failure post-scan instead of silently dropping frontmatter metadata. `tome browse` no longer hides affected skills' descriptions. (#418)
+
+### Docs
+
+- Enable `mdbook-mermaid` preprocessor on GitHub Pages — all 10 existing mermaid diagrams across `introduction.md`, `test-setup.md`, and `tool-landscape.md` now render correctly (previously shown as raw code blocks). (#450)
+- Refresh introduction diagram to reflect the v0.6+ unified directory model with current tool names (Codex, Antigravity, Cursor) and type + role annotations.
+- Archive v0.7 milestone planning artifacts to `.planning/milestones/v0.7-ROADMAP.md` and `.planning/milestones/v0.7-REQUIREMENTS.md`.
+
+### Internal
+
+- `/pr-review-toolkit` whole-codebase review produced 36 prioritized findings; 5 shipped in this release (P0 safety fixes + 2 dead-code cleanups). 30 remaining findings filed as issues for v0.8 scoping.
+
+## [0.6.0] - 2026-04-16
+
+The **v0.6 Unified Directory Model** milestone. Phases 1–3 shipped (config type system + git sources + browse TUI polish). Interim patch releases v0.6.1 and v0.6.2 followed without formal CHANGELOG entries; v0.6.2 also carried the v0.7 Wizard Hardening code surface ahead of its formal v0.7.0 release.
+
+### Breaking Changes
+
+The `[[sources]]` and `[targets.*]` config sections have been replaced by a single `[directories.*]` section. tome will refuse to parse old-format config files and show a migration hint.
 
 **Before (v0.5):**
 ```toml
@@ -63,6 +95,15 @@ role = "target"
 - `synced` role = both source and target (discovered here AND distributed here)
 - `enabled`/`method`/`skills_dir` fields removed — `path` is the only location field
 - `disabled_targets` in `machine.toml` renamed to `disabled_directories`
+
+### Added
+
+- Git source type: `type = "git"` directories clone a remote repo into `~/.tome/repos/<sha256>/` with shallow clone, ref pinning (branch / tag / rev), and offline fallback to cached state.
+- Per-directory skill selection via `machine.toml`: `[directories.<name>]` blocks accept `enabled = [...]` allowlist OR `disabled = [...]` blocklist (mutually exclusive).
+- `tome add <url>` — register a git skill repo from URL.
+- `tome remove <name>` — remove a directory from config with full cleanup (symlinks, library entries, manifest, lockfile).
+- `tome reassign` / `tome fork` — change a skill's provenance between directories.
+- Browse TUI polish: adaptive dark/light theming, fuzzy-match highlighting, scrollbar, markdown preview rendering, and help overlay.
 
 ## [0.5.4] - 2026-04-10
 
@@ -270,7 +311,9 @@ role = "target"
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/MartinP7r/tome/compare/v0.6.2...v0.7.0
+[0.6.0]: https://github.com/MartinP7r/tome/compare/v0.5.4...v0.6.0
 [0.3.3]: https://github.com/MartinP7r/tome/compare/v0.3.2...v0.3.3
 [0.3.2]: https://github.com/MartinP7r/tome/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/MartinP7r/tome/compare/v0.3.0...v0.3.1
