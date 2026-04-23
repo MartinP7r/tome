@@ -1388,4 +1388,23 @@ mod tests {
             "content should be byte-identical after no_input handler, got: {content}"
         );
     }
+
+    // -------------------------------------------------------------------
+    // WUX-01: configure_library derives default from tome_home
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn configure_library_no_input_derives_from_tome_home() {
+        // Under --no-input, configure_library returns <tome_home>/skills (collapsed).
+        // With tome_home = /tmp/... (not under HOME), collapse_home_path is a no-op
+        // and we get the literal absolute path. This intentionally side-steps HOME
+        // expansion; the "collapse to ~/" case is covered by existing integration
+        // tests that use HOME-relative paths.
+        let custom = Path::new("/tmp/zzz-test-custom-tome-home");
+        let result = configure_library(true, custom).unwrap();
+        assert_eq!(
+            result,
+            PathBuf::from("/tmp/zzz-test-custom-tome-home/skills")
+        );
+    }
 }
