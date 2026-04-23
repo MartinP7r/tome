@@ -1283,4 +1283,29 @@ mod tests {
         let state = detect_machine_state(home, &tome_home).unwrap();
         assert!(matches!(state, MachineState::Greenfield));
     }
+
+    // --- handle_legacy_cleanup -----------------------------------------------
+
+    #[test]
+    fn handle_legacy_cleanup_no_input_leaves_file() {
+        // Under --no-input the handler must leave the file byte-identical and
+        // return Ok(()). Interactive branches (move-aside, delete) are NOT
+        // tested automatically — dialoguer prompts would hang in headless CI.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        let original = "[[sources]]\nname = \"x\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+        std::fs::write(&path, original).unwrap();
+
+        handle_legacy_cleanup(&path, /* no_input = */ true).unwrap();
+
+        assert!(
+            path.is_file(),
+            "file should still exist after no_input handler"
+        );
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(
+            content, original,
+            "content should be byte-identical after no_input handler, got: {content}"
+        );
+    }
 }

@@ -4089,3 +4089,115 @@ fn init_resolved_tome_home_line_precedes_step_prompts() {
          resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstdout:\n{stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// WUX-03: legacy pre-v0.6 ~/.config/tome/config.toml detection
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the behavior that `tome init` surfaces a warning when
+// it detects a pre-v0.6 XDG config containing `[[sources]]` or `[targets.*]`
+// sections, and that under `--no-input` the file is left untouched with a
+// `note:` line on stderr. False-positive protection: a v0.6+ XDG file with
+// only `tome_home = "..."` must NOT trigger the warning.
+
+#[test]
+fn init_legacy_detected_no_input_leaves_file() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    let xdg_dir = tmp.path().join(".config/tome");
+    let xdg_file = xdg_dir.join("config.toml");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    let legacy_content =
+        "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+    std::fs::write(&xdg_file, legacy_content).unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Warning appears on stdout (the `println!` in handle_legacy_cleanup).
+    assert!(
+        stdout.contains("Legacy pre-v0.6 config detected"),
+        "stdout missing legacy warning:\n{stdout}"
+    );
+    // Skip note appears on stderr.
+    assert!(
+        stderr.contains("skipped legacy cleanup"),
+        "stderr missing skipped-cleanup note:\n{stderr}"
+    );
+
+    // File must be byte-identical after the run.
+    let after = std::fs::read_to_string(&xdg_file).unwrap();
+    assert_eq!(after, legacy_content, "legacy file should be unchanged");
+}
+
+#[test]
+fn init_legacy_with_only_tome_home_not_flagged() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    let xdg_dir = tmp.path().join(".config/tome");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    // v0.6+ shape — should NOT trigger legacy warning.
+    std::fs::write(xdg_dir.join("config.toml"), "tome_home = \"~/somewhere\"\n").unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("Legacy pre-v0.6 config detected"),
+        "v0.6+-only XDG file should NOT trigger legacy warning. stdout:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("skipped legacy cleanup"),
+        "v0.6+-only XDG file should NOT trigger skip-note. stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn init_greenfield_no_legacy_warning() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Legacy pre-v0.6 config detected"),
+        "greenfield run should NOT show legacy warning. stdout:\n{stdout}"
+    );
+}
