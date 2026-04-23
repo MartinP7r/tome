@@ -50,7 +50,7 @@
 **Plans**: 4 plans
   - [x] 07-01-wux-04-resolved-tome-home-info-PLAN.md — print resolved tome_home + source label at start of tome init (WUX-04)
   - [x] 07-02-wux-03-legacy-config-detection-PLAN.md — MachineState + has_legacy_sections + legacy cleanup handler (WUX-03)
-  - [ ] 07-03-wux-01-05-tome-home-prompt-PLAN.md — Step 0 greenfield tome_home prompt + XDG persist (WUX-01, WUX-05)
+  - [x] 07-03-wux-01-05-tome-home-prompt-PLAN.md — Step 0 greenfield tome_home prompt + XDG persist (WUX-01, WUX-05)
   - [ ] 07-04-wux-02-brownfield-decision-PLAN.md — 4-way brownfield decision + prefill plumbing (WUX-02)
 **UI hint**: yes
 

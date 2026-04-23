@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: executing
-stopped_at: Completed 07-02-wux-03-legacy-config-detection-PLAN.md
-last_updated: "2026-04-23T12:21:30.431Z"
+stopped_at: Completed 07-03-wux-01-05-tome-home-prompt-PLAN.md
+last_updated: "2026-04-23T12:31:16.166Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 07 (wizard-ux-greenfield-brownfield-legacy) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-04-23
 
@@ -59,6 +59,7 @@ v0.8-specific decisions (from epic #459):
 - **D-4 (v0.8 scope):** Legacy `~/.config/tome/config.toml` detection = warn + offer delete, NOT silent auto-delete — file may contain user-valued data worth manual review.
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-04: additive resolve_tome_home_with_source — kept existing resolve_tome_home for non-init call sites; only Command::Init consumes the tagged variant
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-03: parse TOML (not substring-match) for legacy-schema detection; graceful no-op on malformed files; interactive default is move-aside (non-destructive backup); --no-input default is leave with stderr note
+- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-01/05: Step 0 gated on matches!(source, TomeHomeSource::Default) && !no_input; custom tome_home persisted to XDG via merge-preserve write; configure_library default derives from <tome_home>/skills; fixed wizard.rs:310 latent bug by using resolve_config_dir(tome_home)
 
 ### Pending Todos
 
@@ -74,6 +75,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-23T12:21:25.380Z
-Stopped at: Completed 07-02-wux-03-legacy-config-detection-PLAN.md
+Last session: 2026-04-23T12:31:16.163Z
+Stopped at: Completed 07-03-wux-01-05-tome-home-prompt-PLAN.md
 Resume file: None

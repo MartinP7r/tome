@@ -26,11 +26,11 @@ Requirements for v0.8 release. Grouped by category. Each maps to roadmap phases.
 
 Greenfield / brownfield / legacy-cleanup flows for `tome init` on any machine state.
 
-- [ ] **WUX-01**: On a greenfield machine (no `TOME_HOME` env, no XDG config, no explicit `--tome-home` flag, no existing `.tome/tome.toml`), wizard prompts the user to choose `tome_home` location (default: `~/.tome/`, custom: user input with validation)
+- [x] **WUX-01**: On a greenfield machine (no `TOME_HOME` env, no XDG config, no explicit `--tome-home` flag, no existing `.tome/tome.toml`), wizard prompts the user to choose `tome_home` location (default: `~/.tome/`, custom: user input with validation)
 - [ ] **WUX-02**: On a brownfield machine (existing `tome.toml` detected at the resolved `tome_home`), wizard shows a summary of the found config (directory count, library_dir, last-modified date) and offers: **use existing** (exit wizard, suggest `tome sync`), **edit existing** (wizard with current values pre-filled), **reinitialize** (backup existing + overwrite), or **cancel**
 - [x] **WUX-03**: Wizard detects a legacy pre-v0.6 `~/.config/tome/config.toml` file (identified by presence of `[[sources]]` or `[targets.*]` sections) and offers to delete or move aside with a clear warning that the file is ignored by current tome
 - [x] **WUX-04**: Wizard prints a 1-line "resolved tome_home" info message at start, before Step 1 prompts, so users see which path the wizard is about to populate
-- [ ] **WUX-05**: When the user selects a custom `tome_home` in WUX-01, wizard offers to persist the choice by writing `~/.config/tome/config.toml` with a `tome_home = "..."` field (so subsequent `tome sync` / `tome status` / editor integrations find it without needing `TOME_HOME` env var)
+- [x] **WUX-05**: When the user selects a custom `tome_home` in WUX-01, wizard offers to persist the choice by writing `~/.config/tome/config.toml` with a `tome_home = "..."` field (so subsequent `tome sync` / `tome status` / editor integrations find it without needing `TOME_HOME` env var)
 
 ### Safety refactors (SAFE)
 
