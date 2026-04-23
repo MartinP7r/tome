@@ -4200,3 +4200,143 @@ fn init_greenfield_no_legacy_warning() {
         "greenfield run should NOT show legacy warning. stdout:\n{stdout}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// WUX-01 / WUX-05: Step 0 greenfield tome_home prompt
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the observable behavior that:
+// - Under --no-input, the Step 0 prompt is skipped and no XDG config is written
+// - When the tome_home source is NOT Default (e.g. --tome-home flag), Step 0
+//   is skipped even when not --no-input
+// - The library default derives from the chosen tome_home (Pitfall 1 fix)
+//
+// The interactive branch of Step 0 is exercised by manual test only — see
+// 07-RESEARCH.md § Pitfall 5.
+
+#[test]
+fn init_greenfield_no_input_skips_step_0_prompt() {
+    // TomeHomeSource::Default + --no-input → Step 0 prompt must be skipped.
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Step 0:"),
+        "--no-input must skip Step 0 prompt, but stdout contains it:\n{stdout}"
+    );
+    // WUX-04 info line still prints (informational, not a prompt)
+    assert!(
+        stdout.contains("resolved tome_home:"),
+        "resolved tome_home line must still appear in --no-input mode:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_greenfield_no_input_does_not_write_xdg() {
+    // --no-input must NOT write to ~/.config/tome/config.toml even under greenfield.
+    // (07-RESEARCH.md § "Integration with no_input" — "Skip" row for WUX-05.)
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let xdg = tmp.path().join(".config/tome/config.toml");
+    assert!(
+        !xdg.exists(),
+        "--no-input must not write XDG config, but {} exists",
+        xdg.display()
+    );
+}
+
+#[test]
+fn init_with_flag_source_skips_step_0() {
+    // TomeHomeSource::CliTomeHome (from --tome-home flag) → Step 0 MUST be skipped
+    // even without --no-input, because the user already indicated a choice.
+    // We test via --no-input to keep the test headless; the key assertion is on
+    // the "Step 0:" header absence.
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-home");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Step 0:"),
+        "--tome-home flag (CliTomeHome source) must skip Step 0:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("(from --tome-home flag)"),
+        "source label should confirm flag branch:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_derived_library_default_under_custom_tome_home() {
+    // When tome_home = <tmp>/custom-tome (non-default), library default should
+    // derive as <tmp>/custom-tome/skills (NOT ~/.tome/skills). Tests the
+    // Pitfall 1 fix.
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-tome");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let config = parse_generated_config(&stdout);
+    // library_dir after tilde expansion should be under the custom tome_home,
+    // NOT under tmp/.tome/skills.
+    assert_eq!(
+        config.library_dir(),
+        custom.join("skills"),
+        "library default should derive from --tome-home, got {:?}",
+        config.library_dir()
+    );
+}
