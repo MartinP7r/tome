@@ -769,10 +769,6 @@ fn find_known_directories_in(home: &Path) -> Result<Vec<(&'static KnownDirectory
 /// `Result<Config>` field wraps `anyhow::Error`, which is intentionally
 /// non-cloneable and non-equatable. Callers should only pattern-match on
 /// variants, not compare states.
-// The Brownfield variants' fields are consumed by the lib.rs Command::Init
-// dispatcher (wired up in plan 04 Task 3); intermediate suppression keeps each
-// commit clippy-clean under `-D warnings` and will be removed in Task 3.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) enum MachineState {
     /// No tome.toml at tome_home; no legacy XDG config with [[sources]]/[targets.*].
@@ -943,9 +939,6 @@ pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Resul
 // ---------------------------------------------------------------------------
 
 /// User's choice for how to handle an existing tome.toml at the resolved tome_home.
-// Wired up in Task 3 (lib.rs dispatcher) — intermediate suppression keeps this
-// commit clippy-clean under `-D warnings`.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BrownfieldAction {
     /// Exit the wizard cleanly, leaving the existing file untouched. Default for --no-input.
@@ -966,9 +959,6 @@ pub(crate) enum BrownfieldAction {
 ///   mode — the user must investigate).
 /// - Otherwise, `Select` with default=0 (UseExisting) for parseable configs, or a
 ///   reduced `[Reinitialize, Cancel]` menu for unparseable configs.
-// Wired up in Task 3 (lib.rs dispatcher) — intermediate suppression keeps this
-// commit clippy-clean under `-D warnings`.
-#[allow(dead_code)]
 pub(crate) fn brownfield_decision(
     existing_config_path: &Path,
     existing_config: &Result<Config>,
@@ -1051,9 +1041,6 @@ pub(crate) fn brownfield_decision(
 }
 
 /// Best-effort human-readable duration for the brownfield last-modified display.
-// Wired up in Task 3 via brownfield_decision; intermediate suppression keeps
-// this commit clippy-clean.
-#[allow(dead_code)]
 fn format_duration(dur: std::time::Duration) -> String {
     let secs = dur.as_secs();
     if secs < 60 {
@@ -1071,9 +1058,6 @@ fn format_duration(dur: std::time::Duration) -> String {
 ///
 /// Uses copy (not rename) so that a Cancel later in the flow leaves the original
 /// intact. Returns the backup path so callers can surface it to the user.
-// Wired up in Task 3 (lib.rs Reinit dispatch) — intermediate suppression keeps
-// this commit clippy-clean.
-#[allow(dead_code)]
 pub(crate) fn backup_brownfield_config(existing_config_path: &Path) -> Result<PathBuf> {
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

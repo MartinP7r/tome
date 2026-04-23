@@ -192,17 +192,64 @@ pub fn run(cli: Cli) -> Result<()> {
         {
             wizard::handle_legacy_cleanup(legacy_path, cli.no_input)?;
         }
-        // TODO(plan 04): replace with full match on machine_state for
-        // brownfield dispatch. For now the Brownfield variants fall through
-        // to the existing wizard flow unchanged.
-        let _ = machine_state;
+
+        // WUX-02: Brownfield decision. When a tome.toml already exists at the
+        // resolved tome_home, present a summary and a 4-way choice:
+        //   UseExisting  → exit wizard, skip post-init sync
+        //   Edit         → launch wizard with existing values pre-filled
+        //   Reinit       → backup existing file and launch fresh wizard
+        //   Cancel       → exit cleanly (exit 0), no changes
+        // Non-brownfield states (Greenfield, Legacy-only) skip this block and
+        // proceed to the wizard with no prefill.
+        let prefill: Option<Config> = match &machine_state {
+            wizard::MachineState::Brownfield {
+                existing_config_path,
+                existing_config,
+            }
+            | wizard::MachineState::BrownfieldWithLegacy {
+                existing_config_path,
+                existing_config,
+                ..
+            } => {
+                let action = wizard::brownfield_decision(
+                    existing_config_path,
+                    existing_config,
+                    cli.no_input,
+                )?;
+                match action {
+                    wizard::BrownfieldAction::UseExisting => {
+                        println!("  Config unchanged. Run `tome sync` to apply.");
+                        return Ok(());
+                    }
+                    wizard::BrownfieldAction::Cancel => {
+                        println!("Wizard cancelled. Existing config left unchanged.");
+                        return Ok(());
+                    }
+                    wizard::BrownfieldAction::Reinit => {
+                        let backup = wizard::backup_brownfield_config(existing_config_path)?;
+                        println!(
+                            "  Backed up existing config to: {}",
+                            style(backup.display()).cyan()
+                        );
+                        None // proceed as greenfield
+                    }
+                    wizard::BrownfieldAction::Edit => match existing_config {
+                        Ok(c) => Some(c.clone()),
+                        Err(_) => unreachable!(
+                            "brownfield_decision does not offer Edit for unparseable configs"
+                        ),
+                    },
+                }
+            }
+            _ => None,
+        };
 
         let config = wizard::run(
             cli.dry_run,
             cli.no_input,
             &tome_home,
             tome_home_source,
-            None,
+            prefill.as_ref(),
         )?;
         config.validate()?;
         if !cli.dry_run {
