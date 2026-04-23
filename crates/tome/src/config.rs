@@ -1853,4 +1853,175 @@ role = "target"
             }
         }
     }
+
+    // --- TomeHomeSource + resolve_tome_home_with_source tests ---
+    //
+    // These tests manipulate process-wide env vars (TOME_HOME, HOME), so they
+    // are serialized via a local Mutex. `std::env::set_var`/`remove_var` are
+    // `unsafe` in edition 2024 because they are unsound under concurrent reads;
+    // the lock gives us a single-writer window within this test binary.
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_env<F, R>(vars: &[(&str, Option<&std::ffi::OsStr>)], f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<(String, Option<std::ffi::OsString>)> = vars
+            .iter()
+            .map(|(k, _)| ((*k).to_string(), std::env::var_os(k)))
+            .collect();
+        for (k, v) in vars {
+            match v {
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
+            }
+        }
+        let result = f();
+        for (k, v) in saved {
+            match v {
+                Some(val) => unsafe { std::env::set_var(&k, val) },
+                None => unsafe { std::env::remove_var(&k) },
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn tome_home_source_label_strings() {
+        assert_eq!(TomeHomeSource::CliTomeHome.label(), "--tome-home flag");
+        assert_eq!(TomeHomeSource::CliConfig.label(), "--config flag");
+        assert_eq!(TomeHomeSource::EnvVar.label(), "TOME_HOME env");
+        assert_eq!(
+            TomeHomeSource::XdgConfig.label(),
+            "~/.config/tome/config.toml"
+        );
+        assert_eq!(TomeHomeSource::Default.label(), "default");
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_prefers_cli_tome_home() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let custom = tmp.path().join("custom-home");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                ("TOME_HOME", Some(std::ffi::OsStr::new("/should/be/ignored"))),
+            ],
+            || {
+                let (path, src) =
+                    resolve_tome_home_with_source(Some(&custom), None).unwrap();
+                assert_eq!(path, custom);
+                assert_eq!(src, TomeHomeSource::CliTomeHome);
+                assert_eq!(src.label(), "--tome-home flag");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_cli_config_parent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let cfg_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let cfg_file = cfg_dir.join("tome.toml");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                ("TOME_HOME", Some(std::ffi::OsStr::new("/should/be/ignored"))),
+            ],
+            || {
+                let (path, src) =
+                    resolve_tome_home_with_source(None, Some(&cfg_file)).unwrap();
+                assert_eq!(path, cfg_dir);
+                assert_eq!(src, TomeHomeSource::CliConfig);
+                assert_eq!(src.label(), "--config flag");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_env_var() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let env_home = tmp.path().join("env-home");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                ("TOME_HOME", Some(env_home.as_os_str())),
+            ],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, env_home);
+                assert_eq!(src, TomeHomeSource::EnvVar);
+                assert_eq!(src.label(), "TOME_HOME env");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_xdg_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        // Seed XDG config at <HOME>/.config/tome/config.toml with a tome_home field.
+        let xdg_dir = home.join(".config/tome");
+        std::fs::create_dir_all(&xdg_dir).unwrap();
+        let xdg_tome_home = home.join("xdg-tome-home");
+        std::fs::write(
+            xdg_dir.join("config.toml"),
+            format!("tome_home = \"{}\"\n", xdg_tome_home.display()),
+        )
+        .unwrap();
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, xdg_tome_home);
+                assert_eq!(src, TomeHomeSource::XdgConfig);
+                assert_eq!(src.label(), "~/.config/tome/config.toml");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_falls_back_to_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, home.join(".tome"));
+                assert_eq!(src, TomeHomeSource::Default);
+                assert_eq!(src.label(), "default");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_rejects_relative_cli_tome_home() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let relative = Path::new("relative/custom");
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let err =
+                    resolve_tome_home_with_source(Some(relative), None).unwrap_err();
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("must be an absolute path"),
+                    "expected absolute-path error, got: {msg}"
+                );
+            },
+        );
+    }
 }
