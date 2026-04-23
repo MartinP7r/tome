@@ -35,11 +35,11 @@ Every AI coding tool on a developer's machine shares the same skill library with
 
 ### Active (v0.8)
 
-- [ ] **WUX-01** Wizard prompts for `tome_home` on greenfield (#453)
-- [ ] **WUX-02** Wizard detects existing `.tome/` config (brownfield: use / edit / reinitialize) (#453)
-- [ ] **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup (#453)
-- [ ] **WUX-04** Wizard prints resolved `tome_home` up-front as info line (#453)
-- [ ] **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write (#453)
+- [x] **WUX-01** Wizard prompts for `tome_home` on greenfield (#453) — *Validated in Phase 7 (2026-04-23)*
+- [x] **WUX-02** Wizard detects existing `.tome/` config (brownfield: use / edit / reinitialize) (#453) — *Validated in Phase 7 (2026-04-23)*
+- [x] **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup (#453) — *Validated in Phase 7 (2026-04-23)*
+- [x] **WUX-04** Wizard prints resolved `tome_home` up-front as info line (#453) — *Validated in Phase 7 (2026-04-23)*
+- [x] **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write (#453) — *Validated in Phase 7 (2026-04-23)*
 - [ ] **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413)
 - [ ] **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414)
 - [ ] **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449)
@@ -148,4 +148,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-23 — v0.8 Wizard UX & Safety Hardening milestone started (see issue #459 epic). v0.7.0 shipped; v0.7.1 hotfix (PR #455) and v0.7.2 quick wins (#456/#457) precede v0.8 phase execution.*
+*Last updated: 2026-04-23 — Phase 7 complete (Wizard UX: greenfield prompt, brownfield 4-way decision, legacy detection, resolved `tome_home` info line, XDG persistence). WUX-01..05 all shipped and validated. Phase 8 (Safety Refactors) next.*

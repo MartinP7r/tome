@@ -4,7 +4,7 @@ milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: verifying
 stopped_at: Completed 07-04-wux-02-brownfield-decision-PLAN.md — Phase 7 complete
-last_updated: "2026-04-23T12:45:02.879Z"
+last_updated: "2026-04-23T12:51:27.055Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 2
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 07 (wizard-ux-greenfield-brownfield-legacy) — EXECUTING
-Plan: 4 of 4
+Phase: 8
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-04-23
 

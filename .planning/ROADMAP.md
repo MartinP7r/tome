@@ -32,7 +32,7 @@
 
 ### v0.8 Wizard UX & Safety Hardening
 
-- [ ] **Phase 7: Wizard UX (Greenfield / Brownfield / Legacy)** — `tome init` handles new machines, existing configs, and pre-v0.6 cruft without surprises; resolved `tome_home` is surfaced up-front and optionally persisted via XDG config
+- [x] **Phase 7: Wizard UX (Greenfield / Brownfield / Legacy)** — `tome init` handles new machines, existing configs, and pre-v0.6 cruft without surprises; resolved `tome_home` is surfaced up-front and optionally persisted via XDG config *(completed 2026-04-23)*
 - [ ] **Phase 8: Safety Refactors (Partial-Failure Visibility & Cross-Platform)** — destructive commands surface partial failures; browse UI's external actions work on Linux; silent `fs::read_link(..).ok()` sites are replaced with surfaced warnings
 
 ## Phase Details
@@ -75,5 +75,5 @@
 | 4. Wizard Correctness | v0.7 | 3/3 | Complete | 2026-04-19 |
 | 5. Wizard Test Coverage | v0.7 | 4/4 | Complete | 2026-04-20 |
 | 6. Display Polish & Docs | v0.7 | 2/2 | Complete | 2026-04-22 |
-| 7. Wizard UX (Greenfield / Brownfield / Legacy) | v0.8 | 0/4 | Planned | — |
+| 7. Wizard UX (Greenfield / Brownfield / Legacy) | v0.8 | 4/4 | Complete | 2026-04-23 |
 | 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 0/? | Not started | — |

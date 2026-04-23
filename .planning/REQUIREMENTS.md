@@ -71,11 +71,11 @@ See issue #458 for design discussion.
 
 | Requirement | Phase | GitHub Issue | Status |
 |-------------|-------|--------------|--------|
-| WUX-01 | Phase 7 | #453 (A) | Not started |
-| WUX-02 | Phase 7 | #453 (C) | Not started |
-| WUX-03 | Phase 7 | #453 (D) | Not started |
-| WUX-04 | Phase 7 | #453 (E) | Not started |
-| WUX-05 | Phase 7 | #453 (A cont.) | Not started |
+| WUX-01 | Phase 7 | #453 (A) | Complete (2026-04-23) |
+| WUX-02 | Phase 7 | #453 (C) | Complete (2026-04-23) |
+| WUX-03 | Phase 7 | #453 (D) | Complete (2026-04-23) |
+| WUX-04 | Phase 7 | #453 (E) | Complete (2026-04-23) |
+| WUX-05 | Phase 7 | #453 (A cont.) | Complete (2026-04-23) |
 | SAFE-01 | Phase 8 | #413 | Not started |
 | SAFE-02 | Phase 8 | #414 | Not started |
 | SAFE-03 | Phase 8 | #449 | Not started |
