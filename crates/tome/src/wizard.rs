@@ -1666,6 +1666,91 @@ mod tests {
         assert_eq!(action, BrownfieldAction::Cancel);
     }
 
+    // -------------------------------------------------------------------
+    // WUX-02: prefill plumbing (Task 2)
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn configure_directories_preserves_custom_prefill() {
+        // A custom directory (not in KNOWN_DIRECTORIES) must survive through
+        // edit. Under --no-input with an empty HOME (no auto-discovery hits),
+        // the result map should include the prefill's custom entry.
+        use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
+
+        let mut prefill_map = std::collections::BTreeMap::new();
+        prefill_map.insert(
+            DirectoryName::new("my-team").unwrap(),
+            DirectoryConfig {
+                path: PathBuf::from("/tmp/my-team"),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Synced),
+                branch: None,
+                tag: None,
+                rev: None,
+                subdir: None,
+            },
+        );
+
+        // Point find_known_directories at an isolated empty HOME so
+        // auto-discovery doesn't match anything real on the dev machine.
+        // We can't set HOME directly (edition 2024 unsafe env), but we can
+        // call the pure `find_known_directories_in` through configure_directories
+        // by using an empty filesystem via a helper. The current configure_directories
+        // calls `find_known_directories()` which reads HOME; we accept this
+        // and assert on the inclusion of the custom entry (not strict equality).
+        let tmp = TempDir::new().unwrap();
+        let prev = std::env::var_os("HOME");
+        // SAFETY: single-threaded test context; we restore immediately after.
+        unsafe {
+            std::env::set_var("HOME", tmp.path());
+        }
+
+        let result = configure_directories(true, Some(&prefill_map));
+
+        // Restore HOME before any assertion can panic.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+
+        let result = result.unwrap();
+        assert!(
+            result.contains_key(&DirectoryName::new("my-team").unwrap()),
+            "custom directory 'my-team' should survive edit. Got: {:?}",
+            result.keys().collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn configure_library_no_input_uses_prefill() {
+        let prefilled = PathBuf::from("/custom/library");
+        let tome_home = Path::new("/tmp/any");
+        let result = configure_library(true, tome_home, Some(&prefilled)).unwrap();
+        assert_eq!(result, prefilled);
+    }
+
+    #[test]
+    fn configure_library_no_input_uses_derived_default_when_no_prefill() {
+        let tome_home = Path::new("/tmp/zzz-not-under-home");
+        let result = configure_library(true, tome_home, None).unwrap();
+        assert_eq!(result, PathBuf::from("/tmp/zzz-not-under-home/skills"));
+    }
+
+    #[test]
+    fn configure_exclusions_no_input_uses_prefill() {
+        use crate::discover::SkillName;
+        let mut prefill = std::collections::BTreeSet::new();
+        prefill.insert(SkillName::new("skill-a").unwrap());
+        prefill.insert(SkillName::new("skill-b").unwrap());
+
+        let result = configure_exclusions(&[], true, Some(&prefill)).unwrap();
+        assert_eq!(result.len(), 2);
+        assert!(result.contains(&SkillName::new("skill-a").unwrap()));
+        assert!(result.contains(&SkillName::new("skill-b").unwrap()));
+    }
+
     #[test]
     fn backup_brownfield_config_copies_file() {
         let tmp = TempDir::new().unwrap();
