@@ -2,8 +2,9 @@
 phase: 07-wizard-ux-greenfield-brownfield-legacy
 plan: 02
 type: execute
-wave: 1
-depends_on: []
+wave: 2
+depends_on:
+  - 07-01-wux-04-resolved-tome-home-info
 files_modified:
   - crates/tome/src/wizard.rs
   - crates/tome/src/lib.rs
@@ -468,9 +469,9 @@ Place it right after `detect_machine_state` (and the related functions from Task
 /// - If `no_input` is true: emit a `note:` line to stderr and return Ok(()) — leaves file alone.
 /// - Otherwise: prompt the user with 3 choices (leave / move aside / delete).
 ///
-/// Default action (both for no_input AND for the interactive prompt default) is "leave";
-/// move-aside is the interactive "default=1" so the user pressing Enter picks the safest
-/// non-destructive option without requiring manual arrow-key navigation.
+/// Default action: Leave (action 0) under --no-input; interactive default is
+/// Move Aside (action 1) for discoverability — a user pressing Enter without
+/// reading gets the non-destructive backup rather than a no-op.
 pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Result<()> {
     println!();
     println!(
@@ -721,6 +722,10 @@ fn init_greenfield_no_legacy_warning() {
 - Infrastructure delivered: `MachineState` enum + `detect_machine_state` available at `pub(crate)` visibility for plan 04 to consume
 - False-positive protection: v0.6+ XDG files and files with commented-out `[[sources]]` strings do NOT trigger the warning
 </success_criteria>
+
+<risks>
+- **Phase 7 plans must land together.** Plan 02 inserts `// TODO(plan 04): replace with full match on machine_state for brownfield dispatch.` into `lib.rs::Command::Init` as a provisional stub. Plan 04 replaces it with the full `match machine_state` dispatch. Do NOT merge Plan 02 alone — all four Phase 7 plans must land in the same PR (or in strict sequence on the same branch) before merging to main.
+</risks>
 
 <output>
 After completion, create `.planning/phases/07-wizard-ux-greenfield-brownfield-legacy/07-02-SUMMARY.md` with:

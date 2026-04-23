@@ -2,7 +2,7 @@
 phase: 07-wizard-ux-greenfield-brownfield-legacy
 plan: 04
 type: execute
-wave: 3
+wave: 4
 depends_on:
   - 07-01-wux-04-resolved-tome-home-info
   - 07-02-wux-03-legacy-config-detection

@@ -2,9 +2,10 @@
 phase: 07-wizard-ux-greenfield-brownfield-legacy
 plan: 03
 type: execute
-wave: 2
+wave: 3
 depends_on:
   - 07-01-wux-04-resolved-tome-home-info
+  - 07-02-wux-03-legacy-config-detection
 files_modified:
   - crates/tome/src/wizard.rs
   - crates/tome/src/config.rs
@@ -378,7 +379,10 @@ use crate::config::TomeHomeSource;
 // - the user has NOT already indicated a tome_home (flag, env, or XDG),
 // - AND we're not in --no-input mode.
 // If the user picks a custom path, also offer to persist via XDG (WUX-05).
-let mut tome_home = tome_home.to_path_buf();
+//
+// Use a distinct local name `chosen_tome_home` (not `tome_home`) so the
+// owned buffer never shadows the `&Path` parameter (avoids clippy::shadow_same).
+let mut chosen_tome_home = tome_home.to_path_buf();
 if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
     step_divider("Step 0: Tome home location");
     let default_home = dirs::home_dir()
@@ -408,7 +412,7 @@ if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
                 Ok(())
             })
             .interact_text()?;
-        tome_home = expand_tilde(&PathBuf::from(custom))?;
+        chosen_tome_home = expand_tilde(&PathBuf::from(custom))?;
 
         // WUX-05: offer to persist custom choice to XDG
         let persist = Confirm::new()
@@ -419,7 +423,7 @@ if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
             .default(true)
             .interact()?;
         if persist {
-            crate::config::write_xdg_tome_home(&tome_home)?;
+            crate::config::write_xdg_tome_home(&chosen_tome_home)?;
             println!(
                 "  {} Wrote tome_home to ~/.config/tome/config.toml",
                 style("done").green()
@@ -428,13 +432,15 @@ if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
     }
     println!();
 }
-let tome_home = tome_home.as_path();  // reborrow as &Path for downstream calls
+// Downstream helpers take `&Path`; rebind a borrow under the name they expect.
+// `chosen_tome_home` equals the incoming parameter unless Step 0 chose a custom path.
+let tome_home: &Path = &chosen_tome_home;
 ```
 
 Notes:
 - `expand_tilde`, `Select`, `Input`, `Confirm`, and `step_divider` are already imported at the top of wizard.rs — grep to confirm: `rg -n "use dialoguer|fn step_divider" crates/tome/src/wizard.rs`.
 - The `TomeHomeSource` import inside `run` is local-scoped with `use crate::config::TomeHomeSource;` at the top of the function; alternatively add it to the top-of-file imports.
-- The `let mut tome_home = tome_home.to_path_buf();` then `let tome_home = tome_home.as_path();` dance is the idiomatic way to rebind a parameter for interior mutation. If clippy objects to the shadowing, use a different local name like `chosen_tome_home`.
+- The owned buffer is named `chosen_tome_home` so it never shadows the `&Path` parameter; the final `let tome_home: &Path = &chosen_tome_home;` rebinds a borrow under the name downstream code expects. This sidesteps `clippy::shadow_same` up-front (no fallback required).
 - `validate_with` uses `Err(String)` (not `Err(&str)`) to satisfy newer dialoguer signatures — see RESEARCH.md § "Risk: Dialoguer Input::validate_with ... type quirks" line 562.
 
 **Part F — Unit test for configure_library default derivation:**
