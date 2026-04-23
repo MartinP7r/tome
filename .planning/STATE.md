@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
-status: executing
-stopped_at: Completed 07-03-wux-01-05-tome-home-prompt-PLAN.md
-last_updated: "2026-04-23T12:31:16.166Z"
+status: verifying
+stopped_at: Completed 07-04-wux-02-brownfield-decision-PLAN.md — Phase 7 complete
+last_updated: "2026-04-23T12:45:02.879Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 07 (wizard-ux-greenfield-brownfield-legacy) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-23
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
@@ -60,6 +60,7 @@ v0.8-specific decisions (from epic #459):
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-04: additive resolve_tome_home_with_source — kept existing resolve_tome_home for non-init call sites; only Command::Init consumes the tagged variant
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-03: parse TOML (not substring-match) for legacy-schema detection; graceful no-op on malformed files; interactive default is move-aside (non-destructive backup); --no-input default is leave with stderr note
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-01/05: Step 0 gated on matches!(source, TomeHomeSource::Default) && !no_input; custom tome_home persisted to XDG via merge-preserve write; configure_library default derives from <tome_home>/skills; fixed wizard.rs:310 latent bug by using resolve_config_dir(tome_home)
+- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-02: brownfield decision 4-way dispatch (UseExisting/Edit/Reinit/Cancel); --no-input + invalid config = Cancel (no silent advance); backup_brownfield_config uses copy-not-rename so Cancel-after-backup is safe; prefill union in configure_directories preserves custom dirs through edit (Pitfall 2 fix)
 
 ### Pending Todos
 
@@ -75,6 +76,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-23T12:31:16.163Z
-Stopped at: Completed 07-03-wux-01-05-tome-home-prompt-PLAN.md
+Last session: 2026-04-23T12:45:02.876Z
+Stopped at: Completed 07-04-wux-02-brownfield-decision-PLAN.md — Phase 7 complete
 Resume file: None
