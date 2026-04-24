@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: executing
-stopped_at: Completed 08-01-safe-01-remove-partial-failure-aggregation-PLAN.md
-last_updated: "2026-04-24T02:26:37.351Z"
+stopped_at: Completed 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md
+last_updated: "2026-04-24T02:36:49.347Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 08 (safety-refactors-partial-failure-visibility-cross-platform) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-24
 
@@ -63,6 +63,8 @@ v0.8-specific decisions (from epic #459):
 - [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-02: brownfield decision 4-way dispatch (UseExisting/Edit/Reinit/Cancel); --no-input + invalid config = Cancel (no silent advance); backup_brownfield_config uses copy-not-rename so Cancel-after-backup is safe; prefill union in configure_directories preserves custom dirs through edit (Pitfall 2 fix)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-01: RemoveResult.failures Vec<RemoveFailure> with typed FailureKind enum; Command::Remove surfaces grouped ⚠ K operations failed stderr block and returns Err on partial cleanup failures — exit ≠ 0 (closes #413)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-01: Integration test uses chmod 0o500 (not 0o000 per plan) — 0o000 causes plan() to bail before execute() partial-failure loop runs; 0o500 lets read_dir enumerate but blocks remove_file unlink
+- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
+- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
 
 ### Pending Todos
 
@@ -78,6 +80,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-24T02:26:37.349Z
-Stopped at: Completed 08-01-safe-01-remove-partial-failure-aggregation-PLAN.md
+Last session: 2026-04-24T02:36:49.345Z
+Stopped at: Completed 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md
 Resume file: None
