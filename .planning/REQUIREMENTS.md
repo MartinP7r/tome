@@ -76,9 +76,9 @@ See issue #458 for design discussion.
 | WUX-03 | Phase 7 | #453 (D) | Complete (2026-04-23) |
 | WUX-04 | Phase 7 | #453 (E) | Complete (2026-04-23) |
 | WUX-05 | Phase 7 | #453 (A cont.) | Complete (2026-04-23) |
-| SAFE-01 | Phase 8 | #413 | Not started |
-| SAFE-02 | Phase 8 | #414 | Not started |
-| SAFE-03 | Phase 8 | #449 | Not started |
+| SAFE-01 | Phase 8 | #413 | Complete (2026-04-24) |
+| SAFE-02 | Phase 8 | #414 | Complete (2026-04-24) |
+| SAFE-03 | Phase 8 | #449 | Complete (2026-04-24) |
 
 **Coverage:**
 - v1 requirements: 8 total

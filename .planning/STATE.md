@@ -4,7 +4,7 @@ milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: verifying
 stopped_at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
-last_updated: "2026-04-24T02:44:38.470Z"
+last_updated: "2026-04-24T03:44:52.668Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 2
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 08 (safety-refactors-partial-failure-visibility-cross-platform) — EXECUTING
-Plan: 3 of 3
+Phase: 08
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-04-24
 
