@@ -208,18 +208,49 @@ impl App {
         match action {
             DetailAction::ViewSource => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
-                    let _ = std::process::Command::new("open").arg(&path).spawn();
+                    // Dispatch the GUI-file-opener binary at compile time:
+                    // macOS ships `open`; Linux desktops ship `xdg-open` (GNOME,
+                    // KDE, XFCE de-facto standard). If it's missing on a minimal
+                    // system, spawn fails and the error surfaces via status_message.
+                    let binary = if cfg!(target_os = "macos") {
+                        "open"
+                    } else {
+                        "xdg-open"
+                    };
+                    match std::process::Command::new(binary).arg(&path).spawn() {
+                        Ok(_) => {
+                            self.status_message = Some(format!(
+                                "✓ Opened: {}",
+                                crate::paths::collapse_home(Path::new(&path))
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("⚠ Could not open: {e}"));
+                        }
+                    }
                 }
             }
             DetailAction::CopyPath => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
-                    let _ = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(format!(
-                            "echo -n '{}' | pbcopy",
-                            path.replace('\'', "'\\''")
-                        ))
-                        .status();
+                    // Use arboard for cross-platform clipboard access. Replaces
+                    // the prior macOS-only shelled-pipe invocation, which was also
+                    // a command-injection vector (paths with apostrophes could
+                    // escape the single-quote wrapping). arboard handles
+                    // Wayland/X11/macOS internally; construction can fail on
+                    // headless Linux over SSH, which surfaces via status_message.
+                    let result = arboard::Clipboard::new()
+                        .and_then(|mut cb| cb.set_text(path.clone()));
+                    match result {
+                        Ok(()) => {
+                            self.status_message = Some(format!(
+                                "✓ Copied: {}",
+                                crate::paths::collapse_home(Path::new(&path))
+                            ));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(format!("⚠ Could not copy: {e}"));
+                        }
+                    }
                 }
             }
             DetailAction::Disable | DetailAction::Enable => {
