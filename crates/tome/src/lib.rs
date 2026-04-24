@@ -404,26 +404,18 @@ pub fn run(cli: Cli) -> Result<()> {
             let lockfile = lockfile::generate(&manifest, &skills);
             lockfile::save(&lockfile, paths.config_dir())?;
 
-            println!(
-                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
-                style("✓").green(),
-                name,
-                result.library_entries_removed,
-                result.symlinks_removed,
-                if result.git_cache_removed {
-                    ", git cache"
-                } else {
-                    ""
-                },
-            );
-
-            // Surface partial-cleanup failures (SAFE-01 / #413). On empty
-            // failures the command still returns Ok(()) and behaves as before.
+            // Surface partial-cleanup failures FIRST so they can't be
+            // hidden by a ✓ success banner above them (scripted callers
+            // keying on stdout miss stderr signals; humans dismiss ⚠
+            // after reading ✓). On full success the success banner below
+            // prints; on partial failure the ⚠ block prints and we
+            // return Err (no success banner).
             if !result.failures.is_empty() {
                 let k = result.failures.len();
                 eprintln!(
-                    "{} {} operations failed — run {}:",
+                    "{} '{}' removed with {} operations failed — run {}:",
                     style("⚠").yellow(),
+                    name,
                     k,
                     style("`tome doctor`").bold(),
                 );
@@ -442,6 +434,20 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 return Err(anyhow::anyhow!("remove completed with {k} failures"));
             }
+
+            // Success path — full cleanup completed with no failures.
+            println!(
+                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
+                style("✓").green(),
+                name,
+                result.library_entries_removed,
+                result.symlinks_removed,
+                if result.git_cache_removed {
+                    ", git cache"
+                } else {
+                    ""
+                },
+            );
         }
         Command::Reassign { skill, to } => {
             let mut manifest = manifest::load(paths.config_dir())?;
