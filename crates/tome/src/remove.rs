@@ -70,9 +70,15 @@ pub(crate) struct RemoveResult {
     pub git_cache_removed: bool,
     /// Partial-cleanup failures that occurred during `execute`.
     ///
-    /// Empty on full success. Caller is responsible for surfacing these
-    /// (currently `Command::Remove` in `lib.rs`) — `execute` itself no
-    /// longer prints per-failure warnings.
+    /// Empty on full success. Caller is responsible for surfacing these;
+    /// `execute` itself does not print per-failure warnings.
+    ///
+    /// Post-condition: an entry in `failures` does NOT imply the
+    /// corresponding counter (e.g. `symlinks_removed`) is zero —
+    /// partial-success semantics mean counters reflect COMPLETED operations,
+    /// failures reflect INCOMPLETE ones, and the two are independent. If
+    /// 3 of 5 distribution symlinks removed successfully and 2 failed,
+    /// `symlinks_removed == 3` and `failures.len() == 2`.
     pub failures: Vec<RemoveFailure>,
 }
 

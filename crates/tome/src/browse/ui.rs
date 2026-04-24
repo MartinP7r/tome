@@ -355,11 +355,14 @@ fn render_status_bar(
     area: ratatui::layout::Rect,
     theme: &Theme,
 ) {
-    // If execute_action has set a status message, display it in place of
-    // the keybind line. `handle_key` clears this on the next keypress, so
-    // the message has any-key-dismisses semantics. Success (✓) renders in
-    // theme.accent; failure (⚠) in theme.alert. Glyph-prefix detection
-    // keeps the call site trivial — no new theme field needed.
+    // NOTE: as of phase 8, `status_message` is only set from DetailAction
+    // handlers, which leave the app in Mode::Detail — so this Normal-mode
+    // block is currently latent and exercises only when Normal-mode status
+    // sources are added (e.g., future bulk actions like "copied N paths").
+    // The block is kept so the invariant (any-key-dismisses in any mode)
+    // is preserved at the call site and the switch-on-severity logic lives
+    // in one place rather than being duplicated if/when Normal-mode sources
+    // appear.
     if let Some(msg) = &app.status_message {
         let style = if msg.starts_with('⚠') {
             Style::default().fg(theme.alert).bg(theme.status_bar_bg)

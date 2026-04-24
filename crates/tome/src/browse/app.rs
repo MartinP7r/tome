@@ -194,10 +194,15 @@ impl App {
 
     fn enter_detail_mode(&mut self) {
         self.mode = Mode::Detail;
+        // Disable/Enable is shown unconditionally — the action's current
+        // implementation (see `execute_action` below) just pops back to
+        // Normal mode because the browse module has no machine.toml
+        // handle. When a future change wires machine prefs into browse,
+        // this list should reflect the skill's actual disabled state
+        // (show Disable if enabled, Enable if disabled — never both).
         self.detail_actions = vec![
             DetailAction::ViewSource,
             DetailAction::CopyPath,
-            // TODO: toggle based on actual machine prefs disabled state
             DetailAction::Disable,
             DetailAction::Back,
         ];

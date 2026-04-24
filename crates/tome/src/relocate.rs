@@ -87,13 +87,18 @@ pub(crate) fn plan(
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
         let source_path = if entry.managed {
-            // For managed skills, read the symlink target to record the external
-            // source. We split the read and the result-handling so the Err arm
-            // is unit-testable (see `provenance_from_link_result`): passing a
-            // synthetic `io::Error` covers the warn+None behavior without having
-            // to engineer a real read_link failure, which on Unix is racy because
-            // `is_symlink()` and `read_link()` share the same parent-search
-            // permission gate.
+            // For managed skills, read the symlink target to record the
+            // external source (used to re-create the managed symlink at the
+            // new library_dir after move). An observable-but-recoverable IO
+            // error here deserves a stderr warning — not a silent "no
+            // provenance" data-loss as the original `.ok()` produced. Same
+            // rationale as the git-HEAD-sha warning shipped in the same
+            // milestone: surface the gap so the user can diagnose.
+            //
+            // Factored into `provenance_from_link_result` so the Err arm is
+            // directly unit-testable with a synthetic io::Error (Unix makes
+            // engineering a real post-is_symlink read_link failure racy —
+            // both syscalls share the parent-search permission gate).
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
                 provenance_from_link_result(std::fs::read_link(&link_path), &link_path)
@@ -121,6 +126,15 @@ pub(crate) fn plan(
             continue;
         }
         let mut count = 0usize;
+        // Best-effort enumeration: silently skip symlinks we can't read. A
+        // symlink that fails `read_link` here is either transient (filesystem
+        // race) or unreadable for a reason the user will hit separately when
+        // we try to recreate it. Warning on every unreadable symlink during a
+        // count loop would spam stderr for each target directory scanned;
+        // surface-at-execute-time (below, in `recreate_target_symlinks`) is
+        // where actionable diagnostics belong. Cf. the provenance-record
+        // comment above, which is NOT best-effort (missing provenance is a
+        // data-loss silent-drop, not a count undercount).
         if let Ok(entries) = std::fs::read_dir(skills_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
