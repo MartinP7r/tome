@@ -40,9 +40,9 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - [x] **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup (#453) — *Validated in Phase 7 (2026-04-23)*
 - [x] **WUX-04** Wizard prints resolved `tome_home` up-front as info line (#453) — *Validated in Phase 7 (2026-04-23)*
 - [x] **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write (#453) — *Validated in Phase 7 (2026-04-23)*
-- [ ] **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413)
-- [ ] **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414)
-- [ ] **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449)
+- [x] **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413) — *Validated in Phase 8 (2026-04-24)*
+- [x] **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414) — *Validated in Phase 8 (2026-04-24); Linux runtime behavior flagged in 08-HUMAN-UAT.md for hands-on verification*
+- [x] **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449) — *Validated in Phase 8 (2026-04-24)*
 
 ### Backlog (not in v0.8)
 
@@ -148,4 +148,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-23 — Phase 7 complete (Wizard UX: greenfield prompt, brownfield 4-way decision, legacy detection, resolved `tome_home` info line, XDG persistence). WUX-01..05 all shipped and validated. Phase 8 (Safety Refactors) next.*
+*Last updated: 2026-04-24 — Phase 8 complete (Safety Refactors: SAFE-01 partial-failure aggregation in `tome remove`, SAFE-02 cross-platform browse status bar with `arboard`, SAFE-03 explicit `read_link` warning in `relocate.rs`). v0.8 milestone complete — 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8. 576 tests passing. 2 Linux-runtime verification items tracked in 08-HUMAN-UAT.md for hands-on testing on Linux hardware.*
