@@ -42,12 +42,38 @@ impl RemovePlan {
     }
 }
 
+/// Which cleanup step produced a partial failure.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum FailureKind {
+    /// Distribution-dir symlink removal (step 1).
+    Symlink,
+    /// Local library directory removal (step 2, non-symlink branch).
+    LibraryDir,
+    /// Managed-skill library symlink removal (step 2, symlink branch).
+    LibrarySymlink,
+    /// Git repo cache removal (step 4).
+    GitCache,
+}
+
+/// A single partial-cleanup failure aggregated from `execute`.
+#[derive(Debug)]
+pub(crate) struct RemoveFailure {
+    pub path: PathBuf,
+    pub op: FailureKind,
+    pub error: std::io::Error,
+}
+
 /// Result of executing the remove plan.
 pub(crate) struct RemoveResult {
     pub symlinks_removed: usize,
     pub library_entries_removed: usize,
-    #[allow(dead_code)]
     pub git_cache_removed: bool,
+    /// Partial-cleanup failures that occurred during `execute`.
+    ///
+    /// Empty on full success. Caller is responsible for surfacing these
+    /// (currently `Command::Remove` in `lib.rs`) — `execute` itself no
+    /// longer prints per-failure warnings.
+    pub failures: Vec<RemoveFailure>,
 }
 
 /// Build a plan describing what `tome remove <name>` will do.
@@ -187,6 +213,7 @@ pub(crate) fn execute(
     let mut symlinks_removed = 0;
     let mut library_entries_removed = 0;
     let mut git_cache_removed = false;
+    let mut failures: Vec<RemoveFailure> = Vec::new();
 
     // 1. Remove symlinks from distribution directories
     for symlink in &plan.symlinks_to_remove {
@@ -261,6 +288,7 @@ pub(crate) fn execute(
         symlinks_removed,
         library_entries_removed,
         git_cache_removed,
+        failures,
     })
 }
 
