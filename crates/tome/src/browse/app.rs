@@ -238,8 +238,8 @@ impl App {
                     // escape the single-quote wrapping). arboard handles
                     // Wayland/X11/macOS internally; construction can fail on
                     // headless Linux over SSH, which surfaces via status_message.
-                    let result = arboard::Clipboard::new()
-                        .and_then(|mut cb| cb.set_text(path.clone()));
+                    let result =
+                        arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.clone()));
                     match result {
                         Ok(()) => {
                             self.status_message = Some(format!(
