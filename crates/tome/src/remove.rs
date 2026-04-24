@@ -414,6 +414,48 @@ mod tests {
     }
 
     #[test]
+    fn partial_failure_aggregates_symlink_error() {
+        let (tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        // Pre-delete the distribution symlink so std::fs::remove_file returns
+        // ENOENT during execute's step 1 loop — forcing a FailureKind::Symlink
+        // push without affecting the library-entry step which should still
+        // succeed.
+        let dist_symlink = tmp.path().join("target").join("my-skill");
+        assert_eq!(
+            p.symlinks_to_remove.len(),
+            1,
+            "fixture expected one dist symlink"
+        );
+        assert_eq!(p.symlinks_to_remove[0], dist_symlink);
+        std::fs::remove_file(&dist_symlink).ok();
+
+        let result = execute(&p, &mut config, &mut manifest, false).unwrap();
+
+        // Assert: exactly one Symlink failure, path matches the pre-deleted link.
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|f| f.op == FailureKind::Symlink),
+            "expected a FailureKind::Symlink failure, got: {:?}",
+            result.failures,
+        );
+        let symlink_failure = result
+            .failures
+            .iter()
+            .find(|f| f.op == FailureKind::Symlink)
+            .unwrap();
+        assert_eq!(symlink_failure.path, dist_symlink);
+
+        // Partial-failure semantics: the library entry (separate artifact)
+        // should still have been cleaned up.
+        assert_eq!(result.library_entries_removed, 1);
+        assert_eq!(result.symlinks_removed, 0);
+    }
+
+    #[test]
     fn execute_dry_run_preserves_state() {
         let (_tmp, mut config, paths, mut manifest) = make_test_setup();
         let p = plan("test-source", &config, &paths, &manifest).unwrap();
