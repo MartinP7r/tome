@@ -219,14 +219,15 @@ pub(crate) fn execute(
     for symlink in &plan.symlinks_to_remove {
         if dry_run {
             symlinks_removed += 1;
-        } else if let Err(e) = std::fs::remove_file(symlink) {
-            eprintln!(
-                "warning: failed to remove symlink {}: {}",
-                symlink.display(),
-                e
-            );
         } else {
-            symlinks_removed += 1;
+            match std::fs::remove_file(symlink) {
+                Ok(_) => symlinks_removed += 1,
+                Err(e) => failures.push(RemoveFailure {
+                    path: symlink.clone(),
+                    op: FailureKind::Symlink,
+                    error: e,
+                }),
+            }
         }
     }
 
@@ -235,24 +236,22 @@ pub(crate) fn execute(
         if dry_run {
             library_entries_removed += 1;
         } else if lib_path.is_symlink() {
-            if let Err(e) = std::fs::remove_file(lib_path) {
-                eprintln!(
-                    "warning: failed to remove library symlink {}: {}",
-                    lib_path.display(),
-                    e
-                );
-            } else {
-                library_entries_removed += 1;
+            match std::fs::remove_file(lib_path) {
+                Ok(_) => library_entries_removed += 1,
+                Err(e) => failures.push(RemoveFailure {
+                    path: lib_path.clone(),
+                    op: FailureKind::LibrarySymlink,
+                    error: e,
+                }),
             }
         } else if lib_path.is_dir() {
-            if let Err(e) = std::fs::remove_dir_all(lib_path) {
-                eprintln!(
-                    "warning: failed to remove library directory {}: {}",
-                    lib_path.display(),
-                    e
-                );
-            } else {
-                library_entries_removed += 1;
+            match std::fs::remove_dir_all(lib_path) {
+                Ok(_) => library_entries_removed += 1,
+                Err(e) => failures.push(RemoveFailure {
+                    path: lib_path.clone(),
+                    op: FailureKind::LibraryDir,
+                    error: e,
+                }),
             }
         }
     }
@@ -268,14 +267,15 @@ pub(crate) fn execute(
     if let Some(cache_path) = &plan.git_cache_path {
         if dry_run {
             git_cache_removed = true;
-        } else if let Err(e) = std::fs::remove_dir_all(cache_path) {
-            eprintln!(
-                "warning: failed to remove git cache {}: {}",
-                cache_path.display(),
-                e
-            );
         } else {
-            git_cache_removed = true;
+            match std::fs::remove_dir_all(cache_path) {
+                Ok(_) => git_cache_removed = true,
+                Err(e) => failures.push(RemoveFailure {
+                    path: cache_path.clone(),
+                    op: FailureKind::GitCache,
+                    error: e,
+                }),
+            }
         }
     }
 
