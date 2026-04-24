@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: verifying
-stopped_at: Completed 07-04-wux-02-brownfield-decision-PLAN.md — Phase 7 complete
-last_updated: "2026-04-23T12:51:27.055Z"
+stopped_at: Phase 8 context gathered
+last_updated: "2026-04-24T01:24:31.927Z"
 last_activity: 2026-04-23
 progress:
   total_phases: 2
@@ -76,6 +76,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-23T12:45:02.876Z
-Stopped at: Completed 07-04-wux-02-brownfield-decision-PLAN.md — Phase 7 complete
-Resume file: None
+Last session: 2026-04-24T01:24:31.924Z
+Stopped at: Phase 8 context gathered
+Resume file: .planning/phases/08-safety-refactors-partial-failure-visibility-cross-platform/08-CONTEXT.md
