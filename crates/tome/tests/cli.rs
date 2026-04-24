@@ -3372,6 +3372,89 @@ fn test_remove_no_input_without_force_fails() {
         .stderr(predicate::str::contains("use --force"));
 }
 
+#[cfg(unix)]
+#[test]
+fn remove_partial_failure_exits_nonzero_with_warning_marker() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Fixture: source dir with one skill, target dir (distribution) wired as
+    // a target role in config. After sync, the target contains a symlink to
+    // the library skill. We then chmod 0o000 the target directory so remove's
+    // step-1 loop (distribution symlinks) cannot enumerate / unlink inside.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    );
+
+    // Prime the library + target with a real symlink so the plan has
+    // something to try to remove in step 1.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    assert!(target_dir.join("my-skill").exists());
+
+    // Clamp the target dir to read+execute only: plan() can still read_dir
+    // it to enumerate the symlinks, but execute()'s remove_file call needs
+    // write permission on the parent dir and so hits EACCES — landing in
+    // the partial-failure path rather than bailing from plan().
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let output = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    // Restore permissions FIRST so TempDir::drop can clean up, BEFORE any
+    // assertions (Pitfall 2 from 08-RESEARCH.md).
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        !output.status.success(),
+        "remove should fail on chmod 0o000 target, got status: {:?}",
+        output.status,
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("⚠"),
+        "stderr missing ⚠ marker: {stderr}"
+    );
+    assert!(
+        stderr.contains("operations failed"),
+        "stderr missing 'operations failed': {stderr}"
+    );
+    assert!(
+        stderr.contains("remove completed with"),
+        "stderr missing anyhow error 'remove completed with': {stderr}"
+    );
+}
+
 // ── tome add integration tests ─────────────────────────────────────
 
 #[test]
