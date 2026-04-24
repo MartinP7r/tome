@@ -307,25 +307,44 @@ fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
     frame.render_widget(preview, body_chunks[1]);
 
     // -- Status bar for Detail mode --
-    let status = Line::from(vec![
-        Span::styled(
-            " Detail ",
-            Style::default()
-                .fg(theme.status_bar_fg)
-                .bg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            " j/k select  \u{23ce} run action  esc back",
-            Style::default()
-                .fg(theme.status_bar_fg)
-                .bg(theme.status_bar_bg),
-        ),
-        Span::styled(
-            " ".repeat(area.width as usize),
-            Style::default().bg(theme.status_bar_bg),
-        ),
-    ]);
+    // When execute_action has set a status message, render it in place of the
+    // usual Detail keybind line. Matches the same ✓/⚠ glyph-prefix → theme
+    // dispatch as render_status_bar (Normal mode), so the two call sites feel
+    // identical to the user across modes. Cleared by handle_key on next keypress.
+    let status = if let Some(msg) = &app.status_message {
+        let msg_style = if msg.starts_with('⚠') {
+            Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+        } else {
+            Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+        };
+        Line::from(vec![
+            Span::styled(format!(" {msg} "), msg_style),
+            Span::styled(
+                " ".repeat(area.width as usize),
+                Style::default().bg(theme.status_bar_bg),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                " Detail ",
+                Style::default()
+                    .fg(theme.status_bar_fg)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " j/k select  \u{23ce} run action  esc back",
+                Style::default()
+                    .fg(theme.status_bar_fg)
+                    .bg(theme.status_bar_bg),
+            ),
+            Span::styled(
+                " ".repeat(area.width as usize),
+                Style::default().bg(theme.status_bar_bg),
+            ),
+        ])
+    };
     frame.render_widget(Paragraph::new(status), chunks[1]);
 }
 
@@ -336,6 +355,26 @@ fn render_status_bar(
     area: ratatui::layout::Rect,
     theme: &Theme,
 ) {
+    // If execute_action has set a status message, display it in place of
+    // the keybind line. `handle_key` clears this on the next keypress, so
+    // the message has any-key-dismisses semantics. Success (✓) renders in
+    // theme.accent; failure (⚠) in theme.alert. Glyph-prefix detection
+    // keeps the call site trivial — no new theme field needed.
+    if let Some(msg) = &app.status_message {
+        let style = if msg.starts_with('⚠') {
+            Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+        } else {
+            Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+        };
+        let bg_style = Style::default().bg(theme.status_bar_bg);
+        let spans = vec![
+            Span::styled(format!(" {msg} "), style),
+            Span::styled(" ".repeat(width as usize), bg_style),
+        ];
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        return;
+    }
+
     let filtered = app.filtered_indices.len();
     let total = app.rows.len();
 
