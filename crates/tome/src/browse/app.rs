@@ -893,4 +893,49 @@ mod tests {
         assert_eq!(warn.severity, StatusSeverity::Warning);
         assert_eq!(warn.text, "⚠ Could not copy: permission denied");
     }
+
+    #[test]
+    fn status_message_set_by_view_source_and_cleared_by_any_key() {
+        // Lifecycle contract for DetailAction::ViewSource — symmetric to the
+        // CopyPath test above but exercises the `open`/`xdg-open` dispatch
+        // path. We accept either severity because the opener may or may not
+        // succeed depending on the host environment (open/xdg-open presence,
+        // path validity, display server). What we assert is:
+        //   1. ViewSource ALWAYS sets status_message (no silent no-op).
+        //   2. The message is a StatusMessage with a Success or Warning
+        //      severity and the matching glyph prefix.
+        //   3. The next keypress clears status_message to None.
+        //
+        // Prevents regressions where a future refactor swaps Success/Warning
+        // arms or skips status_message plumbing in the ViewSource path
+        // (symmetric to CopyPath but with its own set of format strings).
+        let (mut app, _tmp) = make_app(3);
+
+        app.execute_action(DetailAction::ViewSource);
+
+        let msg = app
+            .status_message
+            .as_ref()
+            .cloned()
+            .expect("status_message must be Some after ViewSource action");
+        match msg.severity {
+            StatusSeverity::Success => assert!(
+                msg.text.starts_with('✓'),
+                "Success severity must produce ✓ prefix; got: {}",
+                msg.text
+            ),
+            StatusSeverity::Warning => assert!(
+                msg.text.starts_with('⚠'),
+                "Warning severity must produce ⚠ prefix; got: {}",
+                msg.text
+            ),
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(
+            app.status_message.is_none(),
+            "status_message must be None after any key; was: {:?}",
+            app.status_message
+        );
+    }
 }

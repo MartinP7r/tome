@@ -517,4 +517,82 @@ mod tests {
         );
         assert!(!manifest.is_empty());
     }
+
+    /// Covers the lib.rs grouped-output formatting indirectly: populates TWO
+    /// FailureKind variants (DistributionSymlink + LibraryDir) in a single
+    /// execute() call, then asserts that:
+    /// - the failures vec contains both variants
+    /// - the counters correctly reflect partial success (both zero because
+    ///   neither step completed any operation)
+    ///
+    /// Pins the partial-success invariant across multiple variants and
+    /// ensures a future refactor that drops a `FailureKind` from the ALL
+    /// constant or label() map would not silently break grouped output
+    /// for the affected variant. Also covers FailureKind::label() for
+    /// every variant and the size of FailureKind::ALL.
+    #[cfg(unix)]
+    #[test]
+    fn partial_failure_aggregates_multiple_kinds() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        // Pre-delete the distribution symlink → DistributionSymlink
+        // failure on step 1 (remove_file returns ENOENT).
+        let dist_symlink = tmp.path().join("target").join("my-skill");
+        std::fs::remove_file(&dist_symlink).ok();
+
+        // chmod the LIBRARY PARENT to 0o500 (r-x) so step 2's
+        // remove_dir_all on library/my-skill fails with EACCES. The write
+        // bit on the parent is what's needed to unlink children; the
+        // search bit alone still lets is_dir() check the child.
+        // (remove_dir_all on a non-existent path returns Ok(()) in Rust,
+        // so the simpler "pre-delete" trick used elsewhere doesn't work
+        // here — we need a real filesystem-level permission denial.)
+        assert_eq!(p.library_paths.len(), 1, "fixture expected one lib path");
+        let library_parent = p.library_paths[0].parent().unwrap().to_path_buf();
+        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = execute(&p, &mut config, &mut manifest, false);
+
+        // CRITICAL: restore permissions BEFORE assertions so TempDir::drop
+        // can clean up even on panic (Pitfall 2 from 08-RESEARCH.md).
+        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = result.expect("execute should not error, only aggregate failures");
+
+        let has = |k: FailureKind| result.failures.iter().any(|f| f.kind == k);
+        assert!(
+            has(FailureKind::DistributionSymlink),
+            "expected DistributionSymlink failure, got: {:?}",
+            result.failures
+        );
+        assert!(
+            has(FailureKind::LibraryDir),
+            "expected LibraryDir failure (from EACCES on parent), got: {:?}",
+            result.failures
+        );
+
+        // Both counters zero — neither step completed.
+        assert_eq!(result.symlinks_removed, 0);
+        assert_eq!(result.library_entries_removed, 0);
+
+        // Cover FailureKind::label() exhaustively — pins user-visible label
+        // strings for every variant (a rename in one variant would fail here).
+        assert_eq!(
+            FailureKind::DistributionSymlink.label(),
+            "Distribution symlinks"
+        );
+        assert_eq!(FailureKind::LibraryDir.label(), "Library entries");
+        assert_eq!(FailureKind::LibrarySymlink.label(), "Library symlinks");
+        assert_eq!(FailureKind::GitCache.label(), "Git cache");
+
+        // Cover FailureKind::ALL — the consumer in lib.rs iterates this.
+        assert_eq!(FailureKind::ALL.len(), 4);
+        assert!(FailureKind::ALL.contains(&FailureKind::DistributionSymlink));
+        assert!(FailureKind::ALL.contains(&FailureKind::LibraryDir));
+        assert!(FailureKind::ALL.contains(&FailureKind::LibrarySymlink));
+        assert!(FailureKind::ALL.contains(&FailureKind::GitCache));
+    }
 }
