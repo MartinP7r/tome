@@ -765,4 +765,42 @@ mod tests {
         assert_eq!(app.sort_mode, SortMode::Source);
         assert_eq!(app.filtered_indices.len(), 10);
     }
+
+    #[test]
+    fn status_message_set_by_copy_path_and_cleared_by_any_key() {
+        // Lifecycle contract for the SAFE-02 status_message surface:
+        //   1. Executing a DetailAction (CopyPath here) must set
+        //      app.status_message to Some("✓ Copied: ...") on success OR
+        //      Some("⚠ Could not copy: ...") on failure — we accept either
+        //      prefix because headless CI runners (Linux over SSH, etc.)
+        //      may not have a clipboard service available, and per D-17/D-19
+        //      we do NOT introduce a `trait ClipboardBackend` to force one
+        //      branch.
+        //   2. Feeding any KeyEvent through handle_key must clear
+        //      status_message to None — the any-key-dismisses semantic
+        //      handle_key enforces as its first statement.
+        let (mut app, _tmp) = make_app(3);
+
+        // Step 1: execute CopyPath. arboard::Clipboard::new() may succeed or
+        // fail depending on the host environment; both paths set status_message.
+        app.execute_action(DetailAction::CopyPath);
+
+        assert!(
+            app.status_message.is_some(),
+            "status_message must be Some after CopyPath action"
+        );
+        let msg = app.status_message.as_ref().unwrap().clone();
+        assert!(
+            msg.starts_with('✓') || msg.starts_with('⚠'),
+            "expected ✓ or ⚠ prefix, got: {msg}"
+        );
+
+        // Step 2: any key clears the message.
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(
+            app.status_message.is_none(),
+            "status_message must be None after any key; was: {:?}",
+            app.status_message
+        );
+    }
 }
