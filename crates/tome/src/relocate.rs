@@ -87,11 +87,22 @@ pub(crate) fn plan(
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
         let source_path = if entry.managed {
-            // For managed skills, read the symlink target to record the external source
+            // For managed skills, read the symlink target to record the external source.
+            // Warn (don't silently swallow) when read_link fails — otherwise we'd falsely
+            // record "no provenance" for an entry whose symlink exists but couldn't be read.
+            // Mirrors the eprintln-warning pattern shipped in PR #448 (see lib.rs:728-742).
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                let raw_target = std::fs::read_link(&link_path).ok();
-                raw_target.map(|t| resolve_symlink_target(&link_path, &t))
+                match std::fs::read_link(&link_path) {
+                    Ok(raw_target) => Some(resolve_symlink_target(&link_path, &raw_target)),
+                    Err(e) => {
+                        eprintln!(
+                            "warning: could not read symlink at {}: {e}",
+                            link_path.display()
+                        );
+                        None
+                    }
+                }
             } else {
                 None
             }
