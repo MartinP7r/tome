@@ -236,7 +236,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     wizard::BrownfieldAction::Edit => match existing_config {
                         Ok(c) => Some(c.clone()),
                         Err(_) => unreachable!(
-                            "brownfield_decision does not offer Edit for unparseable configs"
+                            "brownfield_decision does not offer Edit for unparsable configs"
                         ),
                     },
                 }

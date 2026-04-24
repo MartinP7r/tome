@@ -958,7 +958,7 @@ pub(crate) enum BrownfieldAction {
 ///   `Cancel` when it does not (no silent advance with invalid config in headless
 ///   mode — the user must investigate).
 /// - Otherwise, `Select` with default=0 (UseExisting) for parseable configs, or a
-///   reduced `[Reinitialize, Cancel]` menu for unparseable configs.
+///   reduced `[Reinitialize, Cancel]` menu for unparsable configs.
 pub(crate) fn brownfield_decision(
     existing_config_path: &Path,
     existing_config: &Result<Config>,
