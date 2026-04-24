@@ -119,6 +119,13 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Any-key-dismisses semantics for status_message: the message stays
+        // visible until the user presses any key, then disappears on the next
+        // action. Mirrors the `?` help-overlay dismissal pattern (see Mode::Help
+        // branch below). Cleared unconditionally at the top so the lifetime
+        // contract is trivial — no mode-dependent paths.
+        self.status_message = None;
+
         match self.mode {
             Mode::Normal => self.handle_normal_key(key),
             Mode::Search => self.handle_search_key(key),
