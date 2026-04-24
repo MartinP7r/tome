@@ -308,17 +308,21 @@ fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
 
     // -- Status bar for Detail mode --
     // When execute_action has set a status message, render it in place of the
-    // usual Detail keybind line. Matches the same ✓/⚠ glyph-prefix → theme
-    // dispatch as render_status_bar (Normal mode), so the two call sites feel
-    // identical to the user across modes. Cleared by handle_key on next keypress.
+    // usual Detail keybind line. Switch on StatusSeverity for color dispatch —
+    // matches the same semantic as render_status_bar (Normal mode) so the two
+    // call sites feel identical to the user across modes. Cleared by
+    // handle_key on next keypress.
     let status = if let Some(msg) = &app.status_message {
-        let msg_style = if msg.starts_with('⚠') {
-            Style::default().fg(theme.alert).bg(theme.status_bar_bg)
-        } else {
-            Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+        let msg_style = match msg.severity {
+            super::app::StatusSeverity::Warning => {
+                Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+            }
+            super::app::StatusSeverity::Success => {
+                Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+            }
         };
         Line::from(vec![
-            Span::styled(format!(" {msg} "), msg_style),
+            Span::styled(format!(" {} ", msg.text), msg_style),
             Span::styled(
                 " ".repeat(area.width as usize),
                 Style::default().bg(theme.status_bar_bg),
@@ -364,14 +368,17 @@ fn render_status_bar(
     // in one place rather than being duplicated if/when Normal-mode sources
     // appear.
     if let Some(msg) = &app.status_message {
-        let style = if msg.starts_with('⚠') {
-            Style::default().fg(theme.alert).bg(theme.status_bar_bg)
-        } else {
-            Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+        let style = match msg.severity {
+            super::app::StatusSeverity::Warning => {
+                Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+            }
+            super::app::StatusSeverity::Success => {
+                Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+            }
         };
         let bg_style = Style::default().bg(theme.status_bar_bg);
         let spans = vec![
-            Span::styled(format!(" {msg} "), style),
+            Span::styled(format!(" {} ", msg.text), style),
             Span::styled(" ".repeat(width as usize), bg_style),
         ];
         frame.render_widget(Paragraph::new(Line::from(spans)), area);

@@ -13,6 +13,46 @@ pub enum Mode {
     Help,
 }
 
+/// Severity for ephemeral status-bar messages surfaced by DetailAction
+/// handlers. Replaces the prior stringly-typed severity inferred from the
+/// leading `⚠`/`✓` glyph of a `String`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusSeverity {
+    Success,
+    Warning,
+}
+
+/// A one-shot toast rendered in the status bar until the next keypress.
+///
+/// Stored as `Option<StatusMessage>` on `App`. Constructors apply the glyph
+/// prefix (`✓` / `⚠`) centrally so callers don't re-encode severity as a
+/// leading character, and the `ui.rs` consumer switches on `severity`
+/// directly instead of `starts_with('⚠')`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusMessage {
+    pub severity: StatusSeverity,
+    /// The glyph-prefixed text rendered in the status bar (e.g.
+    /// `"✓ Copied: /path"` or `"⚠ Could not open: ..."`). Pre-formatted so
+    /// the consumer just renders without rebuilding the prefix.
+    pub text: String,
+}
+
+impl StatusMessage {
+    pub fn success(body: impl Into<String>) -> Self {
+        StatusMessage {
+            severity: StatusSeverity::Success,
+            text: format!("✓ {}", body.into()),
+        }
+    }
+
+    pub fn warning(body: impl Into<String>) -> Self {
+        StatusMessage {
+            severity: StatusSeverity::Warning,
+            text: format!("⚠ {}", body.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortMode {
     Name,
@@ -86,7 +126,7 @@ pub struct App {
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
     pub theme: super::theme::Theme,
-    pub status_message: Option<String>,
+    pub status_message: Option<StatusMessage>,
 }
 
 impl App {
@@ -229,21 +269,24 @@ impl App {
                     };
                     match std::process::Command::new(binary).arg(&path).status() {
                         Ok(status) if status.success() => {
-                            self.status_message = Some(format!(
-                                "✓ Opened: {}",
+                            self.status_message = Some(StatusMessage::success(format!(
+                                "Opened: {}",
                                 crate::paths::collapse_home(Path::new(&path))
-                            ));
+                            )));
                         }
                         Ok(status) => {
                             let exit = status
                                 .code()
                                 .map(|c| c.to_string())
                                 .unwrap_or_else(|| "signal".into());
-                            self.status_message =
-                                Some(format!("⚠ {binary} exited {exit} for: {}", path));
+                            self.status_message = Some(StatusMessage::warning(format!(
+                                "{binary} exited {exit} for: {path}"
+                            )));
                         }
                         Err(e) => {
-                            self.status_message = Some(format!("⚠ Could not launch {binary}: {e}"));
+                            self.status_message = Some(StatusMessage::warning(format!(
+                                "Could not launch {binary}: {e}"
+                            )));
                         }
                     }
                 }
@@ -265,13 +308,14 @@ impl App {
                         arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.clone()));
                     match result {
                         Ok(()) => {
-                            self.status_message = Some(format!(
-                                "✓ Copied: {}",
+                            self.status_message = Some(StatusMessage::success(format!(
+                                "Copied: {}",
                                 crate::paths::collapse_home(Path::new(&path))
-                            ));
+                            )));
                         }
                         Err(e) => {
-                            self.status_message = Some(format!("⚠ Could not copy: {e}"));
+                            self.status_message =
+                                Some(StatusMessage::warning(format!("Could not copy: {e}")));
                         }
                     }
                 }
@@ -793,12 +837,11 @@ mod tests {
     fn status_message_set_by_copy_path_and_cleared_by_any_key() {
         // Lifecycle contract for the SAFE-02 status_message surface:
         //   1. Executing a DetailAction (CopyPath here) must set
-        //      app.status_message to Some("✓ Copied: ...") on success OR
-        //      Some("⚠ Could not copy: ...") on failure — we accept either
-        //      prefix because headless CI runners (Linux over SSH, etc.)
-        //      may not have a clipboard service available, and per D-17/D-19
-        //      we do NOT introduce a `trait ClipboardBackend` to force one
-        //      branch.
+        //      app.status_message to Some(StatusMessage { severity, text })
+        //      where severity is Success or Warning — we accept either
+        //      because headless CI runners (Linux over SSH, etc.) may not
+        //      have a clipboard service available, and per D-17/D-19 we do
+        //      NOT introduce a `trait ClipboardBackend` to force one branch.
         //   2. Feeding any KeyEvent through handle_key must clear
         //      status_message to None — the any-key-dismisses semantic
         //      handle_key enforces as its first statement.
@@ -808,14 +851,23 @@ mod tests {
         // fail depending on the host environment; both paths set status_message.
         app.execute_action(DetailAction::CopyPath);
 
+        let msg = app
+            .status_message
+            .as_ref()
+            .cloned()
+            .expect("status_message must be Some after CopyPath action");
         assert!(
-            app.status_message.is_some(),
-            "status_message must be Some after CopyPath action"
+            matches!(
+                msg.severity,
+                StatusSeverity::Success | StatusSeverity::Warning
+            ),
+            "expected Success or Warning severity, got: {:?}",
+            msg.severity
         );
-        let msg = app.status_message.as_ref().unwrap().clone();
         assert!(
-            msg.starts_with('✓') || msg.starts_with('⚠'),
-            "expected ✓ or ⚠ prefix, got: {msg}"
+            msg.text.starts_with('✓') || msg.text.starts_with('⚠'),
+            "constructor must prefix text with the severity glyph; got: {}",
+            msg.text
         );
 
         // Step 2: any key clears the message.
@@ -825,5 +877,20 @@ mod tests {
             "status_message must be None after any key; was: {:?}",
             app.status_message
         );
+    }
+
+    #[test]
+    fn status_message_success_and_warning_constructors_apply_glyph_prefix() {
+        // StatusMessage::success should prefix with ✓; StatusMessage::warning
+        // should prefix with ⚠. These glyphs are part of the contract between
+        // the constructor and ui.rs's rendering (which now switches on
+        // severity, not glyph — but the glyph is still what the user sees).
+        let ok = StatusMessage::success("Copied: /tmp/foo");
+        assert_eq!(ok.severity, StatusSeverity::Success);
+        assert_eq!(ok.text, "✓ Copied: /tmp/foo");
+
+        let warn = StatusMessage::warning("Could not copy: permission denied");
+        assert_eq!(warn.severity, StatusSeverity::Warning);
+        assert_eq!(warn.text, "⚠ Could not copy: permission denied");
     }
 }
