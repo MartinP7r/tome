@@ -3441,10 +3441,7 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("⚠"),
-        "stderr missing ⚠ marker: {stderr}"
-    );
+    assert!(stderr.contains("⚠"), "stderr missing ⚠ marker: {stderr}");
     assert!(
         stderr.contains("operations failed"),
         "stderr missing 'operations failed': {stderr}"

@@ -442,11 +442,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     FailureKind::LibrarySymlink,
                     FailureKind::GitCache,
                 ] {
-                    let group: Vec<&crate::remove::RemoveFailure> = result
-                        .failures
-                        .iter()
-                        .filter(|f| f.op == kind)
-                        .collect();
+                    let group: Vec<&crate::remove::RemoveFailure> =
+                        result.failures.iter().filter(|f| f.op == kind).collect();
                     if group.is_empty() {
                         continue;
                     }

@@ -435,10 +435,7 @@ mod tests {
 
         // Assert: exactly one Symlink failure, path matches the pre-deleted link.
         assert!(
-            result
-                .failures
-                .iter()
-                .any(|f| f.op == FailureKind::Symlink),
+            result.failures.iter().any(|f| f.op == FailureKind::Symlink),
             "expected a FailureKind::Symlink failure, got: {:?}",
             result.failures,
         );
