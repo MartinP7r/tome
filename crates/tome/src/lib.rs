@@ -413,10 +413,11 @@ pub fn run(cli: Cli) -> Result<()> {
             if !result.failures.is_empty() {
                 let k = result.failures.len();
                 eprintln!(
-                    "{} '{}' removed with {} operations failed — run {}:",
+                    "{} {} operations failed during remove of '{}' — config entry and \
+                     manifest retained so you can retry after addressing these. Run {}:",
                     style("⚠").yellow(),
-                    name,
                     k,
+                    name,
                     style("`tome doctor`").bold(),
                 );
 

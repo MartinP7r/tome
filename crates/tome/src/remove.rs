@@ -302,14 +302,9 @@ pub(crate) fn execute(
         }
     }
 
-    // 3. Remove manifest entries
-    if !dry_run {
-        for skill in &plan.skills {
-            manifest.remove(skill);
-        }
-    }
-
-    // 4. Remove cached git repo
+    // 4. Remove cached git repo (step 3/manifest cleanup is deferred to
+    //    after step 4 so we know the full failure state before deciding
+    //    whether to preserve config+manifest for retry).
     if let Some(cache_path) = &plan.git_cache_path {
         if dry_run {
             git_cache_removed = true;
@@ -325,8 +320,22 @@ pub(crate) fn execute(
         }
     }
 
-    // 5. Remove directory entry from config
-    if !dry_run {
+    // Partial-failure state preservation (I2, I3 from phase-8 PR review).
+    // If ANY cleanup step failed, preserve the config entry AND the
+    // manifest entries so the user can re-run `tome remove <name>` after
+    // addressing the underlying cause (e.g., fixing file permissions).
+    // Otherwise the user would be stuck: plan() bails with "directory
+    // not found in config" and `tome doctor` cannot re-register a
+    // vanished config entry — recovery would be manual `rm -rf`.
+    //
+    // On full success: remove manifest entries (step 3) and config
+    // entry (step 5) as before. dry_run preserves everything.
+    if !dry_run && failures.is_empty() {
+        // 3. Remove manifest entries
+        for skill in &plan.skills {
+            manifest.remove(skill);
+        }
+        // 5. Remove directory entry from config
         config.directories.remove(&plan.directory_name);
     }
 
@@ -499,6 +508,22 @@ mod tests {
         // should still have been cleaned up.
         assert_eq!(result.library_entries_removed, 1);
         assert_eq!(result.symlinks_removed, 0);
+
+        // I2/I3 retention: on partial failure, the config entry AND the
+        // manifest entries are preserved so the user can re-run
+        // `tome remove <name>` after addressing the failure. Without this,
+        // the user would be stuck: plan() bails with "not found in config"
+        // and there's no programmatic way to re-register it.
+        assert!(
+            config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap()),
+            "config entry must be retained on partial failure so retry works"
+        );
+        assert!(
+            !manifest.is_empty(),
+            "manifest entries must be retained on partial failure so retry sees the skills"
+        );
     }
 
     #[test]

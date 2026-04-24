@@ -3450,6 +3450,12 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
         stderr.contains("remove completed with"),
         "stderr missing anyhow error 'remove completed with': {stderr}"
     );
+    // I2/I3: user-facing message must mention retry path so they know
+    // config/manifest entries survived for a retry attempt.
+    assert!(
+        stderr.contains("retained") || stderr.contains("retry"),
+        "stderr missing retry guidance (I2/I3): {stderr}"
+    );
 }
 
 // ── tome add integration tests ─────────────────────────────────────
