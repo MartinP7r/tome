@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
-status: executing
-stopped_at: Completed 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md
-last_updated: "2026-04-24T02:36:49.347Z"
+status: verifying
+stopped_at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
+last_updated: "2026-04-24T02:44:38.470Z"
 last_activity: 2026-04-24
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 08 (safety-refactors-partial-failure-visibility-cross-platform) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-24
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
@@ -65,6 +65,7 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-01: Integration test uses chmod 0o500 (not 0o000 per plan) — 0o000 causes plan() to bail before execute() partial-failure loop runs; 0o500 lets read_dir enumerate but blocks remove_file unlink
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
+- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-03: relocate::plan() now surfaces read_link failures via eprintln warning mirroring PR #448's format verbatim; regression test uses chmod 0o000 + documents Unix platform caveat that is_symlink and read_link share the same parent-search permission (closes #449)
 
 ### Pending Todos
 
@@ -80,6 +81,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-24T02:36:49.345Z
-Stopped at: Completed 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md
+Last session: 2026-04-24T02:44:38.468Z
+Stopped at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
 Resume file: None

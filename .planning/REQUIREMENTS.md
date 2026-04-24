@@ -38,7 +38,7 @@ Partial-failure visibility and cross-platform correctness for commands reviewed 
 
 - [x] **SAFE-01**: `remove::execute` aggregates partial-cleanup failures (symlinks, library dirs, library symlinks) into a `RemoveResult` struct and the caller surfaces them — either via non-zero exit or a distinct "⚠ N operations failed" summary line that cannot be mistaken for success
 - [x] **SAFE-02**: Browse UI's `DetailAction::ViewSource` (currently `open`) and `DetailAction::CopyPath` (currently `sh -c ... | pbcopy`) work on Linux via platform-aware fallbacks (`xdg-open`, `wl-copy`/`xclip`) OR via a cross-platform crate like `arboard`; failures surface in the TUI status bar instead of being discarded by `let _ = ...`
-- [ ] **SAFE-03**: `relocate.rs::93` (and sibling sites found via grep for `std::fs::read_link(..).ok()`) surface symlink-read failures as warnings to stderr instead of silently returning `None` and recording no provenance
+- [x] **SAFE-03**: `relocate.rs::93` (and sibling sites found via grep for `std::fs::read_link(..).ok()`) surface symlink-read failures as warnings to stderr instead of silently returning `None` and recording no provenance
 
 ## v2 Requirements
 

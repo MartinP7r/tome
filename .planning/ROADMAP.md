@@ -66,7 +66,7 @@
 **Plans**: 3 plans
   - [x] 08-01-safe-01-remove-partial-failure-aggregation-PLAN.md — RemoveResult aggregates per-loop FailureKind records; lib.rs Command::Remove surfaces grouped '⚠ K operations failed' summary + exits non-zero (SAFE-01 / #413)
   - [x] 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md — arboard clipboard + cfg!-dispatched open/xdg-open + App.status_message rendered in browse status bar (SAFE-02 / #414)
-  - [ ] 08-03-safe-03-relocate-read-link-warning-PLAN.md — relocate.rs:93 explicit match + eprintln warning mirroring PR #448 pattern (SAFE-03 / #449)
+  - [x] 08-03-safe-03-relocate-read-link-warning-PLAN.md — relocate.rs:93 explicit match + eprintln warning mirroring PR #448 pattern (SAFE-03 / #449)
 
 ## Progress
 
