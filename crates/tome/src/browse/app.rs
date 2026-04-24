@@ -314,8 +314,24 @@ impl App {
                             )));
                         }
                         Err(e) => {
-                            self.status_message =
-                                Some(StatusMessage::warning(format!("Could not copy: {e}")));
+                            // Targeted remediation hints for the most common
+                            // failure modes (S6 from phase-8 PR review).
+                            // `ClipboardNotSupported` happens on headless
+                            // Linux (SSH without DISPLAY) and on platforms
+                            // lacking a clipboard backend at compile time.
+                            // Everything else falls through to raw Display.
+                            let msg = match &e {
+                                arboard::Error::ClipboardNotSupported => {
+                                    "Clipboard unavailable (headless or unsupported session)"
+                                        .to_string()
+                                }
+                                arboard::Error::ClipboardOccupied => {
+                                    "Clipboard busy (another app is holding it); try again"
+                                        .to_string()
+                                }
+                                other => format!("Could not copy: {other}"),
+                            };
+                            self.status_message = Some(StatusMessage::warning(msg));
                         }
                     }
                 }
