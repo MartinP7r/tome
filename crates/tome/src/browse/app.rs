@@ -208,24 +208,37 @@ impl App {
         match action {
             DetailAction::ViewSource => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
-                    // Dispatch the GUI-file-opener binary at compile time:
-                    // macOS ships `open`; Linux desktops ship `xdg-open` (GNOME,
-                    // KDE, XFCE de-facto standard). If it's missing on a minimal
-                    // system, spawn fails and the error surfaces via status_message.
+                    // Dispatch the GUI-file-opener binary at compile time: macOS
+                    // ships `open`; Linux desktops ship `xdg-open`. We use
+                    // `.status()` (blocking) rather than `.spawn()` so we can
+                    // observe non-zero exit codes — otherwise `xdg-open` silently
+                    // exiting on a headless box (no DISPLAY, no MIME handler)
+                    // would still report "✓ Opened" and lie to the user. Both
+                    // openers return quickly after dispatching to the system
+                    // handler, so the brief block is acceptable for a one-off
+                    // TUI action.
                     let binary = if cfg!(target_os = "macos") {
                         "open"
                     } else {
                         "xdg-open"
                     };
-                    match std::process::Command::new(binary).arg(&path).spawn() {
-                        Ok(_) => {
+                    match std::process::Command::new(binary).arg(&path).status() {
+                        Ok(status) if status.success() => {
                             self.status_message = Some(format!(
                                 "✓ Opened: {}",
                                 crate::paths::collapse_home(Path::new(&path))
                             ));
                         }
+                        Ok(status) => {
+                            let exit = status
+                                .code()
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "signal".into());
+                            self.status_message =
+                                Some(format!("⚠ {binary} exited {exit} for: {}", path));
+                        }
                         Err(e) => {
-                            self.status_message = Some(format!("⚠ Could not open: {e}"));
+                            self.status_message = Some(format!("⚠ Could not launch {binary}: {e}"));
                         }
                     }
                 }
@@ -233,11 +246,16 @@ impl App {
             DetailAction::CopyPath => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
                     // Use arboard for cross-platform clipboard access. Replaces
-                    // the prior macOS-only shelled-pipe invocation, which was also
-                    // a command-injection vector (paths with apostrophes could
-                    // escape the single-quote wrapping). arboard handles
-                    // Wayland/X11/macOS internally; construction can fail on
-                    // headless Linux over SSH, which surfaces via status_message.
+                    // the prior macOS-only shelled-pipe invocation, which was
+                    // also a command-injection vector (paths with apostrophes
+                    // could escape the single-quote wrapping). arboard is built
+                    // with `default-features = false, features = ["wayland-data-control"]`
+                    // so on Linux both X11 (via x11rb) and Wayland (via
+                    // wayland-data-control) backends are compiled in; `image-data`
+                    // is intentionally disabled to avoid pulling the `image`
+                    // crate (not needed — we only copy text). Construction can
+                    // still fail on headless Linux over SSH (no display server),
+                    // which surfaces via status_message.
                     let result =
                         arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.clone()));
                     match result {
