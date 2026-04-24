@@ -86,6 +86,7 @@ pub struct App {
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
     pub theme: super::theme::Theme,
+    pub status_message: Option<String>,
 }
 
 impl App {
@@ -110,6 +111,7 @@ impl App {
             detail_actions: Vec::new(),
             detail_selected: 0,
             theme: super::theme::Theme::detect(),
+            status_message: None,
         };
         app.apply_sort();
         app.refresh_preview();
