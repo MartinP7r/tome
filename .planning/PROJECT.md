@@ -49,7 +49,11 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
 - v0.7.1 hotfix (PR #455): tabled ANSI width fix — prerequisite patch release
 - v0.7.2 quick wins (#456 library default derivation, #457 tilde preservation on save) — prereq patch release
+- v0.8.1 hotfix: Phase 8 post-merge findings — partial-failure state window + silent git-skill drop (#461) — H1 is a genuine silent-drop of git-sourced skills from the regenerated lockfile in Remove/Reassign/Fork; H2 is the I2/I3 retention guarantee being voided by post-execute save failures; H3 is wording. Worth a patch release before v0.9.
+- v0.8.x polish: Phase 8 test coverage + wording + dead code (#462) — 5 items from the post-merge review (P1-P5): success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field.
+- v0.9 polish: Phase 8 type design + TUI architecture (#463) — 6 items (D1-D6): .status() TUI blocking, StatusMessage type redesign, clipboard auto-retry, FailureKind::ALL compile-enforcement, RemoveFailure::new justification, arboard drift hygiene.
 - v0.9 scope: cross-machine config portability via machine.toml path overrides (#458)
+- Pre-existing flaky test: `backup::tests::push_and_pull_roundtrip` — passes in isolation, intermittent in full suite. Worth a separate investigation pass.
 
 ### Validated in v0.7
 
@@ -148,4 +152,4 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-24 — Phase 8 complete (Safety Refactors: SAFE-01 partial-failure aggregation in `tome remove`, SAFE-02 cross-platform browse status bar with `arboard`, SAFE-03 explicit `read_link` warning in `relocate.rs`). v0.8 milestone complete — 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8. 576 tests passing. 2 Linux-runtime verification items tracked in 08-HUMAN-UAT.md for hands-on testing on Linux hardware.*
+*Last updated: 2026-04-24 — Phase 8 shipped via PR #460 (squash commit `b884c31` on main). v0.8 milestone complete — 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8. 581 tests passing (458 unit + 123 integration after post-merge PR review added 5 tests). 2 Linux-runtime verification items tracked in `08-HUMAN-UAT.md`. Post-merge review filed follow-up issues #461 (v0.8.1 hotfix candidates), #462 (v0.8.x polish), #463 (v0.9 polish) — see backlog section above.*
