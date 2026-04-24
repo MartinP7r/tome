@@ -87,22 +87,16 @@ pub(crate) fn plan(
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
         let source_path = if entry.managed {
-            // For managed skills, read the symlink target to record the external source.
-            // Warn (don't silently swallow) when read_link fails — otherwise we'd falsely
-            // record "no provenance" for an entry whose symlink exists but couldn't be read.
-            // Mirrors the eprintln-warning pattern shipped in PR #448 (see lib.rs:728-742).
+            // For managed skills, read the symlink target to record the external
+            // source. We split the read and the result-handling so the Err arm
+            // is unit-testable (see `provenance_from_link_result`): passing a
+            // synthetic `io::Error` covers the warn+None behavior without having
+            // to engineer a real read_link failure, which on Unix is racy because
+            // `is_symlink()` and `read_link()` share the same parent-search
+            // permission gate.
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                match std::fs::read_link(&link_path) {
-                    Ok(raw_target) => Some(resolve_symlink_target(&link_path, &raw_target)),
-                    Err(e) => {
-                        eprintln!(
-                            "warning: could not read symlink at {}: {e}",
-                            link_path.display()
-                        );
-                        None
-                    }
-                }
+                provenance_from_link_result(std::fs::read_link(&link_path), &link_path)
             } else {
                 None
             }
@@ -295,6 +289,28 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
 }
 
 // --- Internal helpers ---
+
+/// Translate a `read_link` result into a provenance `Option<PathBuf>`, warning
+/// on Err instead of silently dropping (SAFE-03 / #449).
+///
+/// This is factored out so the Err arm is directly unit-testable with a
+/// synthetic `io::Error` — on Unix, engineering a real `read_link` failure
+/// after a successful `is_symlink()` check is racy because both calls share the
+/// same parent-directory search-permission gate. Same rationale as the
+/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves a
+/// stderr line, not silent "no provenance" data loss.
+fn provenance_from_link_result(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
+    match raw {
+        Ok(raw_target) => Some(resolve_symlink_target(link_path, &raw_target)),
+        Err(e) => {
+            eprintln!(
+                "warning: could not read symlink at {}: {e}",
+                link_path.display()
+            );
+            None
+        }
+    }
+}
 
 /// Detect whether source and destination are on different filesystems.
 fn is_cross_filesystem(src: &Path, dst: &Path) -> bool {
@@ -806,29 +822,21 @@ mod tests {
         );
     }
 
-    /// Regression test for SAFE-03 (#449): when `read_link` on a managed-skill's
-    /// library symlink would fail, `plan()` must still succeed overall and record
-    /// `source_path: None` for that entry (instead of propagating the error or
-    /// silently claiming "no provenance" via the old `.ok()` drop).
+    /// Regression test for SAFE-03 (#449) covering the `is_symlink()`-false
+    /// branch: when the library-dir parent has no search permission,
+    /// `is_symlink()` returns false (Rust treats metadata errors as "not a
+    /// symlink") and `plan()` records `source_path: None` via the outer
+    /// `else { None }` arm — upholding the contract that plan() does not
+    /// propagate the error or silently claim "no provenance".
     ///
-    /// Trigger: `chmod 0o000` on the library_dir after the symlink is created, so
-    /// any filesystem operation that needs search on that parent returns `EACCES`.
-    ///
-    /// Caveat (Pitfall 3 from 08-RESEARCH.md): on Unix, both `Path::is_symlink()`
-    /// (via `lstat`) and `std::fs::read_link()` require the same "search" permission
-    /// on the symlink's parent directory. In practice this means the chmod trick
-    /// makes `is_symlink()` return `false` first (Rust's `is_symlink()` treats
-    /// metadata errors as "not a symlink"), so the test exits through the outer
-    /// `else { None }` branch rather than the new `Err` arm. The observable
-    /// side-effect asserted here (`source_path.is_none()` and `plan()` returns
-    /// `Ok`) still holds — it's the contract the SAFE-03 fix promises — and the
-    /// new `Err` arm is exercised in production whenever a true `read_link`
-    /// failure occurs between the `is_symlink()` check and the match (e.g., race
-    /// with another process, or filesystem-level EIO). Compile-time coverage of
-    /// the `Err` arm is provided by `cargo build`.
+    /// The new `read_link` Err arm added by SAFE-03 is covered separately by
+    /// `provenance_from_link_result_warns_and_returns_none_on_err` below. That
+    /// unit test uses a synthetic `io::Error` because engineering a real
+    /// `read_link` failure AFTER a successful `is_symlink()` check is racy on
+    /// Unix — both syscalls share the same parent-search permission gate.
     #[cfg(unix)]
     #[test]
-    fn read_link_failure_records_no_provenance() {
+    fn managed_symlink_unreadable_records_no_provenance() {
         use std::os::unix::fs::PermissionsExt;
 
         let tome_home = TempDir::new().unwrap();
@@ -898,6 +906,53 @@ mod tests {
              read_link Err arm or the outer is_symlink-false branch — both uphold SAFE-03's \
              contract); got {:?}",
             corrupt.source_path
+        );
+    }
+
+    /// Unit test covering the SAFE-03 (#449) `Err` arm of `read_link` directly.
+    ///
+    /// Passes a synthetic `io::Error` to `provenance_from_link_result` to verify
+    /// the warn+None behavior without engineering a real `read_link` failure
+    /// (which is racy on Unix — see `managed_symlink_unreadable_records_no_provenance`
+    /// for the contract-level test via the `is_symlink()`-false branch).
+    ///
+    /// The `eprintln!` output is visible in test output; this test asserts the
+    /// structural post-condition (returns `None`) — a regression that deletes
+    /// the `eprintln!` line would still fail code review but not this test. The
+    /// format string itself is pinned by the integration-style contract with
+    /// PR #448's git-HEAD-sha warning.
+    #[test]
+    fn provenance_from_link_result_warns_and_returns_none_on_err() {
+        let synthetic_err = std::io::Error::other("synthetic io failure for SAFE-03");
+        let fake_link = Path::new("/nonexistent/library/skill");
+
+        let result = provenance_from_link_result(Err(synthetic_err), fake_link);
+
+        assert!(
+            result.is_none(),
+            "Err arm must return None so plan() records source_path: None"
+        );
+    }
+
+    /// Unit test covering the SAFE-03 `Ok` arm: when `read_link` succeeds, the
+    /// resolver is applied and the result is `Some(resolved_target)`.
+    #[test]
+    fn provenance_from_link_result_returns_resolved_target_on_ok() {
+        let tmp = TempDir::new().unwrap();
+        let link_path = tmp.path().join("link");
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        unix_fs::symlink(&target, &link_path).unwrap();
+
+        // Simulate a successful read_link returning a raw relative target; the
+        // helper should apply `resolve_symlink_target` to canonicalize it.
+        let raw_target = std::fs::read_link(&link_path).unwrap();
+        let result = provenance_from_link_result(Ok(raw_target), &link_path);
+
+        let resolved = result.expect("Ok arm must return Some(resolved_target)");
+        assert_eq!(
+            resolved, target,
+            "helper must apply resolve_symlink_target to produce canonical target"
         );
     }
 
