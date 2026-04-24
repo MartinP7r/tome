@@ -806,6 +806,101 @@ mod tests {
         );
     }
 
+    /// Regression test for SAFE-03 (#449): when `read_link` on a managed-skill's
+    /// library symlink would fail, `plan()` must still succeed overall and record
+    /// `source_path: None` for that entry (instead of propagating the error or
+    /// silently claiming "no provenance" via the old `.ok()` drop).
+    ///
+    /// Trigger: `chmod 0o000` on the library_dir after the symlink is created, so
+    /// any filesystem operation that needs search on that parent returns `EACCES`.
+    ///
+    /// Caveat (Pitfall 3 from 08-RESEARCH.md): on Unix, both `Path::is_symlink()`
+    /// (via `lstat`) and `std::fs::read_link()` require the same "search" permission
+    /// on the symlink's parent directory. In practice this means the chmod trick
+    /// makes `is_symlink()` return `false` first (Rust's `is_symlink()` treats
+    /// metadata errors as "not a symlink"), so the test exits through the outer
+    /// `else { None }` branch rather than the new `Err` arm. The observable
+    /// side-effect asserted here (`source_path.is_none()` and `plan()` returns
+    /// `Ok`) still holds — it's the contract the SAFE-03 fix promises — and the
+    /// new `Err` arm is exercised in production whenever a true `read_link`
+    /// failure occurs between the `is_symlink()` check and the match (e.g., race
+    /// with another process, or filesystem-level EIO). Compile-time coverage of
+    /// the `Err` arm is provided by `cargo build`.
+    #[cfg(unix)]
+    #[test]
+    fn read_link_failure_records_no_provenance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tome_home = TempDir::new().unwrap();
+        let library_dir = tome_home.path().join("skills");
+        std::fs::create_dir_all(&library_dir).unwrap();
+
+        // External source the managed symlink points to.
+        let external_source = TempDir::new().unwrap();
+        let ext_skill_dir = external_source.path().join("corrupt-skill");
+        std::fs::create_dir_all(&ext_skill_dir).unwrap();
+        std::fs::write(ext_skill_dir.join("SKILL.md"), "# Corrupt\n").unwrap();
+
+        // Create managed symlink in library -> external source.
+        let link_path = library_dir.join("corrupt-skill");
+        unix_fs::symlink(&ext_skill_dir, &link_path).unwrap();
+        assert!(
+            link_path.is_symlink(),
+            "fixture setup: managed symlink should exist before chmod"
+        );
+
+        // Managed manifest entry for the corrupt-skill.
+        let hash = manifest::hash_directory(&ext_skill_dir).unwrap();
+        let mut manifest = manifest::Manifest::default();
+        manifest.insert(
+            SkillName::new("corrupt-skill").unwrap(),
+            SkillEntry::new(
+                ext_skill_dir.clone(),
+                "plugins".to_string(),
+                hash,
+                true, // managed
+            ),
+        );
+        manifest::save(&manifest, tome_home.path()).unwrap();
+
+        let config_path = tome_home.path().join("tome.toml");
+        let config = test_config(library_dir.clone(), BTreeMap::new());
+        config.save(&config_path).unwrap();
+
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library_dir.clone()).unwrap();
+        let new_dir = tome_home.path().join("new-skills");
+
+        // Engineer the "read_link cannot succeed" condition: remove all perms on the
+        // symlink's parent directory. See function-level doc comment for the
+        // cross-Unix semantic caveat.
+        std::fs::set_permissions(&library_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = plan(&config, &paths, &new_dir, &config_path);
+
+        // CRITICAL: restore permissions BEFORE any assertions so TempDir::drop can
+        // clean up even if an assertion panics (Pitfall 2 from 08-RESEARCH.md).
+        std::fs::set_permissions(&library_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let plan = result.expect("plan should succeed even when a managed symlink cannot be read");
+        let corrupt = plan
+            .skills
+            .iter()
+            .find(|s| s.name.as_str() == "corrupt-skill")
+            .expect("corrupt-skill should still be present in the plan");
+
+        assert!(
+            corrupt.is_managed,
+            "corrupt-skill manifest entry is managed"
+        );
+        assert!(
+            corrupt.source_path.is_none(),
+            "source_path must be None when the symlink cannot be read (either via the new \
+             read_link Err arm or the outer is_symlink-false branch — both uphold SAFE-03's \
+             contract); got {:?}",
+            corrupt.source_path
+        );
+    }
+
     #[test]
     fn plan_nonexistent_library_fails() {
         let tome_home = TempDir::new().unwrap();
