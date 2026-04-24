@@ -166,8 +166,91 @@ pub fn run(cli: Cli) -> Result<()> {
                 e
             );
         }
-        let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
-        let config = wizard::run(cli.dry_run, cli.no_input)?;
+        // WUX-04: surface the resolved tome_home + its source BEFORE any
+        // wizard prompts so the user can Ctrl-C if the wrong path is about
+        // to be populated (e.g. a stray `TOME_HOME=/wrong/path` in their
+        // shell rc). Printed in both interactive and --no-input modes.
+        //
+        // `tome_home_source` is intentionally bound here; later plans in
+        // this phase will consume it to gate greenfield prompts (WUX-01).
+        let (tome_home, tome_home_source) =
+            config::resolve_tome_home_with_source(cli.tome_home.as_deref(), cli.config.as_deref())?;
+        println!();
+        println!(
+            "resolved tome_home: {} (from {})",
+            style(tome_home.display()).cyan(),
+            tome_home_source.label()
+        );
+
+        // WUX-03: Detect and handle legacy pre-v0.6 ~/.config/tome/config.toml.
+        // The legacy file is silently ignored by v0.6+ (only its `tome_home`
+        // key is read); this warns the user and offers cleanup.
+        let home = dirs::home_dir().context("could not determine home directory")?;
+        let machine_state = wizard::detect_machine_state(&home, &tome_home)?;
+        if let wizard::MachineState::Legacy { legacy_path }
+        | wizard::MachineState::BrownfieldWithLegacy { legacy_path, .. } = &machine_state
+        {
+            wizard::handle_legacy_cleanup(legacy_path, cli.no_input)?;
+        }
+
+        // WUX-02: Brownfield decision. When a tome.toml already exists at the
+        // resolved tome_home, present a summary and a 4-way choice:
+        //   UseExisting  → exit wizard, skip post-init sync
+        //   Edit         → launch wizard with existing values pre-filled
+        //   Reinit       → backup existing file and launch fresh wizard
+        //   Cancel       → exit cleanly (exit 0), no changes
+        // Non-brownfield states (Greenfield, Legacy-only) skip this block and
+        // proceed to the wizard with no prefill.
+        let prefill: Option<Config> = match &machine_state {
+            wizard::MachineState::Brownfield {
+                existing_config_path,
+                existing_config,
+            }
+            | wizard::MachineState::BrownfieldWithLegacy {
+                existing_config_path,
+                existing_config,
+                ..
+            } => {
+                let action = wizard::brownfield_decision(
+                    existing_config_path,
+                    existing_config,
+                    cli.no_input,
+                )?;
+                match action {
+                    wizard::BrownfieldAction::UseExisting => {
+                        println!("  Config unchanged. Run `tome sync` to apply.");
+                        return Ok(());
+                    }
+                    wizard::BrownfieldAction::Cancel => {
+                        println!("Wizard cancelled. Existing config left unchanged.");
+                        return Ok(());
+                    }
+                    wizard::BrownfieldAction::Reinit => {
+                        let backup = wizard::backup_brownfield_config(existing_config_path)?;
+                        println!(
+                            "  Backed up existing config to: {}",
+                            style(backup.display()).cyan()
+                        );
+                        None // proceed as greenfield
+                    }
+                    wizard::BrownfieldAction::Edit => match existing_config {
+                        Ok(c) => Some(c.clone()),
+                        Err(_) => unreachable!(
+                            "brownfield_decision does not offer Edit for unparsable configs"
+                        ),
+                    },
+                }
+            }
+            _ => None,
+        };
+
+        let config = wizard::run(
+            cli.dry_run,
+            cli.no_input,
+            &tome_home,
+            tome_home_source,
+            prefill.as_ref(),
+        )?;
         config.validate()?;
         if !cli.dry_run {
             // Expand `~` in library_dir before passing to TomePaths, which
@@ -321,12 +404,50 @@ pub fn run(cli: Cli) -> Result<()> {
             let lockfile = lockfile::generate(&manifest, &skills);
             lockfile::save(&lockfile, paths.config_dir())?;
 
+            // Surface partial-cleanup failures FIRST so they can't be
+            // hidden by a ✓ success banner above them (scripted callers
+            // keying on stdout miss stderr signals; humans dismiss ⚠
+            // after reading ✓). On full success the success banner below
+            // prints; on partial failure the ⚠ block prints and we
+            // return Err (no success banner).
+            if !result.failures.is_empty() {
+                let k = result.failures.len();
+                eprintln!(
+                    "{} {} operations failed during remove of '{}' — config entry and \
+                     manifest retained so you can retry after addressing these. Run {}:",
+                    style("⚠").yellow(),
+                    k,
+                    name,
+                    style("`tome doctor`").bold(),
+                );
+
+                for kind in crate::remove::FailureKind::ALL {
+                    let group: Vec<&crate::remove::RemoveFailure> =
+                        result.failures.iter().filter(|f| f.kind == kind).collect();
+                    if group.is_empty() {
+                        continue;
+                    }
+                    eprintln!("  {} ({}):", kind.label(), group.len());
+                    for f in group {
+                        eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+                    }
+                }
+
+                return Err(anyhow::anyhow!("remove completed with {k} failures"));
+            }
+
+            // Success path — full cleanup completed with no failures.
             println!(
-                "\n{} Removed directory '{}': {} library entries, {} symlinks",
+                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
                 style("✓").green(),
                 name,
                 result.library_entries_removed,
                 result.symlinks_removed,
+                if result.git_cache_removed {
+                    ", git cache"
+                } else {
+                    ""
+                },
             );
         }
         Command::Reassign { skill, to } => {

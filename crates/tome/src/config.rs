@@ -634,7 +634,7 @@ pub fn default_tome_home() -> Result<PathBuf> {
 }
 
 /// Read `tome_home` from the machine-level config at `~/.config/tome/config.toml`.
-fn read_config_tome_home() -> Result<Option<PathBuf>> {
+pub(crate) fn read_config_tome_home() -> Result<Option<PathBuf>> {
     let config_path = dirs::home_dir()
         .context("could not determine home directory")?
         .join(".config/tome/config.toml");
@@ -654,6 +654,50 @@ fn read_config_tome_home() -> Result<Option<PathBuf>> {
         Some(_) => anyhow::bail!("tome_home in {} must be a string", config_path.display()),
         None => Ok(None),
     }
+}
+
+/// Write (merge) `tome_home = <collapsed-path>` into `~/.config/tome/config.toml`.
+///
+/// Semantics:
+/// - If the file does not exist: create parent dir, write a new TOML with just `tome_home`.
+/// - If the file exists: parse as `toml::Table`, insert/overwrite the `tome_home` key,
+///   preserve all other keys, write back. Comments are NOT preserved (toml crate limitation).
+/// - The value is stored in `~/`-collapsed form (via `paths::collapse_home_path`) so the
+///   file is portable across machines. `read_config_tome_home` tilde-expands on read.
+/// - Write is atomic via temp+rename, matching the pattern in `machine.rs` / `lockfile.rs`.
+///
+/// Used by the wizard Step 0 (WUX-05) when the user chose a custom `tome_home` and
+/// accepted the persist-prompt.
+pub(crate) fn write_xdg_tome_home(tome_home: &Path) -> Result<()> {
+    let home = dirs::home_dir().context("could not determine home directory")?;
+    let path = home.join(".config/tome/config.toml");
+
+    let mut table: toml::Table = if path.is_file() {
+        std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?
+            .parse()
+            .with_context(|| format!("invalid TOML in {}", path.display()))?
+    } else {
+        toml::Table::new()
+    };
+
+    let collapsed = crate::paths::collapse_home_path(tome_home);
+    table.insert(
+        "tome_home".into(),
+        toml::Value::String(collapsed.to_string_lossy().into_owned()),
+    );
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let tmp = path.with_extension("toml.tmp");
+    let content = toml::to_string_pretty(&table).context("serialize XDG config")?;
+    std::fs::write(&tmp, &content).with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, &path)
+        .with_context(|| format!("failed to rename {} -> {}", tmp.display(), path.display()))?;
+    Ok(())
 }
 
 /// Resolve the config directory for a given tome home.
@@ -677,6 +721,97 @@ pub fn resolve_config_dir(tome_home: &Path) -> PathBuf {
 pub fn default_config_path() -> Result<PathBuf> {
     let home = default_tome_home()?;
     Ok(resolve_config_dir(&home).join("tome.toml"))
+}
+
+/// Where the resolved `tome_home` came from in the resolution chain.
+///
+/// Used by the `tome init` WUX-04 info line to tell the user which branch
+/// produced the path they are about to populate (e.g. "from TOME_HOME env"
+/// vs "from default"). Also used by the wizard to decide whether to prompt
+/// for a custom tome_home on greenfield (WUX-01 gates on Default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TomeHomeSource {
+    /// Provided via the `--tome-home` CLI flag.
+    CliTomeHome,
+    /// Derived from the `--config` CLI flag (tome_home = parent of config file).
+    CliConfig,
+    /// Picked up from the `TOME_HOME` environment variable.
+    EnvVar,
+    /// Read from `~/.config/tome/config.toml` `tome_home` key.
+    XdgConfig,
+    /// No signal provided — falling back to `~/.tome/`.
+    Default,
+}
+
+impl TomeHomeSource {
+    /// Short, user-facing label describing which branch produced this `tome_home`.
+    ///
+    /// These exact strings are asserted by the WUX-04 integration tests; any
+    /// change here will also need to flow through those tests.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            Self::CliTomeHome => "--tome-home flag",
+            Self::CliConfig => "--config flag",
+            Self::EnvVar => "TOME_HOME env",
+            Self::XdgConfig => "~/.config/tome/config.toml",
+            Self::Default => "default",
+        }
+    }
+}
+
+/// Like [`crate::resolve_tome_home`] but also reports the resolution source.
+///
+/// Used by the `tome init` entry point to print the WUX-04 info line and
+/// (via later plans) to gate the greenfield tome_home prompt on `Default`.
+///
+/// Resolution order mirrors [`resolve_tome_home`](crate::resolve_tome_home)
+/// and [`default_tome_home`] exactly, split apart so each branch is attributable:
+/// 1. `--tome-home` flag (`CliTomeHome`)
+/// 2. `--config` flag (`CliConfig`; tome_home = parent of config file)
+/// 3. `TOME_HOME` env var, non-empty (`EnvVar`)
+/// 4. `~/.config/tome/config.toml` `tome_home` key (`XdgConfig`)
+/// 5. `~/.tome/` (`Default`)
+pub(crate) fn resolve_tome_home_with_source(
+    cli_tome_home: Option<&Path>,
+    cli_config: Option<&Path>,
+) -> Result<(PathBuf, TomeHomeSource)> {
+    if let Some(p) = cli_tome_home {
+        let expanded = expand_tilde(p)?;
+        anyhow::ensure!(
+            expanded.is_absolute(),
+            "--tome-home path '{}' must be an absolute path",
+            p.display()
+        );
+        return Ok((expanded, TomeHomeSource::CliTomeHome));
+    }
+    if let Some(p) = cli_config {
+        anyhow::ensure!(
+            p.is_absolute(),
+            "config path '{}' must be an absolute path",
+            p.display()
+        );
+        let parent = p.parent().context("config path has no parent directory")?;
+        return Ok((parent.to_path_buf(), TomeHomeSource::CliConfig));
+    }
+    match std::env::var("TOME_HOME") {
+        Ok(val) if !val.is_empty() => {
+            return Ok((expand_tilde(Path::new(&val))?, TomeHomeSource::EnvVar));
+        }
+        Ok(_) => {}
+        Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            anyhow::bail!("TOME_HOME environment variable contains invalid Unicode");
+        }
+    }
+    if let Some(path) = read_config_tome_home()? {
+        return Ok((path, TomeHomeSource::XdgConfig));
+    }
+    Ok((
+        dirs::home_dir()
+            .context("could not determine home directory")?
+            .join(".tome"),
+        TomeHomeSource::Default,
+    ))
 }
 
 // =============================================================================
@@ -1852,5 +1987,245 @@ role = "target"
                 );
             }
         }
+    }
+
+    // --- TomeHomeSource + resolve_tome_home_with_source tests ---
+    //
+    // These tests manipulate process-wide env vars (TOME_HOME, HOME), so they
+    // are serialized via a local Mutex. `std::env::set_var`/`remove_var` are
+    // `unsafe` in edition 2024 because they are unsound under concurrent reads;
+    // the lock gives us a single-writer window within this test binary.
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_env<F, R>(vars: &[(&str, Option<&std::ffi::OsStr>)], f: F) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<(String, Option<std::ffi::OsString>)> = vars
+            .iter()
+            .map(|(k, _)| ((*k).to_string(), std::env::var_os(k)))
+            .collect();
+        for (k, v) in vars {
+            match v {
+                Some(val) => unsafe { std::env::set_var(k, val) },
+                None => unsafe { std::env::remove_var(k) },
+            }
+        }
+        let result = f();
+        for (k, v) in saved {
+            match v {
+                Some(val) => unsafe { std::env::set_var(&k, val) },
+                None => unsafe { std::env::remove_var(&k) },
+            }
+        }
+        result
+    }
+
+    #[test]
+    fn tome_home_source_label_strings() {
+        assert_eq!(TomeHomeSource::CliTomeHome.label(), "--tome-home flag");
+        assert_eq!(TomeHomeSource::CliConfig.label(), "--config flag");
+        assert_eq!(TomeHomeSource::EnvVar.label(), "TOME_HOME env");
+        assert_eq!(
+            TomeHomeSource::XdgConfig.label(),
+            "~/.config/tome/config.toml"
+        );
+        assert_eq!(TomeHomeSource::Default.label(), "default");
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_prefers_cli_tome_home() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let custom = tmp.path().join("custom-home");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                (
+                    "TOME_HOME",
+                    Some(std::ffi::OsStr::new("/should/be/ignored")),
+                ),
+            ],
+            || {
+                let (path, src) = resolve_tome_home_with_source(Some(&custom), None).unwrap();
+                assert_eq!(path, custom);
+                assert_eq!(src, TomeHomeSource::CliTomeHome);
+                assert_eq!(src.label(), "--tome-home flag");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_cli_config_parent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let cfg_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&cfg_dir).unwrap();
+        let cfg_file = cfg_dir.join("tome.toml");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                (
+                    "TOME_HOME",
+                    Some(std::ffi::OsStr::new("/should/be/ignored")),
+                ),
+            ],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, Some(&cfg_file)).unwrap();
+                assert_eq!(path, cfg_dir);
+                assert_eq!(src, TomeHomeSource::CliConfig);
+                assert_eq!(src.label(), "--config flag");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_env_var() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let env_home = tmp.path().join("env-home");
+
+        with_env(
+            &[
+                ("HOME", Some(home.as_os_str())),
+                ("TOME_HOME", Some(env_home.as_os_str())),
+            ],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, env_home);
+                assert_eq!(src, TomeHomeSource::EnvVar);
+                assert_eq!(src.label(), "TOME_HOME env");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_uses_xdg_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        // Seed XDG config at <HOME>/.config/tome/config.toml with a tome_home field.
+        let xdg_dir = home.join(".config/tome");
+        std::fs::create_dir_all(&xdg_dir).unwrap();
+        let xdg_tome_home = home.join("xdg-tome-home");
+        std::fs::write(
+            xdg_dir.join("config.toml"),
+            format!("tome_home = \"{}\"\n", xdg_tome_home.display()),
+        )
+        .unwrap();
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, xdg_tome_home);
+                assert_eq!(src, TomeHomeSource::XdgConfig);
+                assert_eq!(src.label(), "~/.config/tome/config.toml");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_falls_back_to_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let (path, src) = resolve_tome_home_with_source(None, None).unwrap();
+                assert_eq!(path, home.join(".tome"));
+                assert_eq!(src, TomeHomeSource::Default);
+                assert_eq!(src.label(), "default");
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_tome_home_with_source_rejects_relative_cli_tome_home() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().to_path_buf();
+        let relative = Path::new("relative/custom");
+
+        with_env(
+            &[("HOME", Some(home.as_os_str())), ("TOME_HOME", None)],
+            || {
+                let err = resolve_tome_home_with_source(Some(relative), None).unwrap_err();
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("must be an absolute path"),
+                    "expected absolute-path error, got: {msg}"
+                );
+            },
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // WUX-05: write_xdg_tome_home helper — atomic merge-write
+    // -----------------------------------------------------------------------
+    //
+    // These tests lock in that `write_xdg_tome_home` creates the XDG file,
+    // preserves other keys (merge-preserve, not clobber), collapses paths to
+    // `~/`-form for portability, and writes atomically via temp+rename.
+
+    #[test]
+    fn write_xdg_tome_home_creates_new_file() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let xdg = tmp.path().join(".config/tome/config.toml");
+            assert!(xdg.is_file(), "XDG file should be created");
+            let content = std::fs::read_to_string(&xdg).unwrap();
+            let table: toml::Table = content.parse().unwrap();
+            let tome_home = table.get("tome_home").and_then(|v| v.as_str()).unwrap();
+            // Path is under HOME → collapsed form
+            assert_eq!(tome_home, "~/dotfiles/tome");
+        });
+    }
+
+    #[test]
+    fn write_xdg_tome_home_preserves_other_keys() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let xdg = tmp.path().join(".config/tome/config.toml");
+            std::fs::create_dir_all(xdg.parent().unwrap()).unwrap();
+            std::fs::write(&xdg, "other_key = \"preserve-me\"\ntome_home = \"~/old\"\n").unwrap();
+
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let content = std::fs::read_to_string(&xdg).unwrap();
+            let table: toml::Table = content.parse().unwrap();
+            // tome_home overwritten
+            assert_eq!(
+                table.get("tome_home").and_then(|v| v.as_str()),
+                Some("~/dotfiles/tome")
+            );
+            // other_key preserved
+            assert_eq!(
+                table.get("other_key").and_then(|v| v.as_str()),
+                Some("preserve-me")
+            );
+        });
+    }
+
+    #[test]
+    fn write_xdg_tome_home_is_atomic() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        with_env(&[("HOME", Some(tmp.path().as_os_str()))], || {
+            let custom = tmp.path().join("dotfiles/tome");
+            write_xdg_tome_home(&custom).unwrap();
+
+            let tmp_file = tmp.path().join(".config/tome/config.toml.tmp");
+            assert!(
+                !tmp_file.exists(),
+                "temp file should be removed after successful rename"
+            );
+        });
     }
 }

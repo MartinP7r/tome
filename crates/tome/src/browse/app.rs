@@ -13,6 +13,46 @@ pub enum Mode {
     Help,
 }
 
+/// Severity for ephemeral status-bar messages surfaced by DetailAction
+/// handlers. Replaces the prior stringly-typed severity inferred from the
+/// leading `⚠`/`✓` glyph of a `String`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusSeverity {
+    Success,
+    Warning,
+}
+
+/// A one-shot toast rendered in the status bar until the next keypress.
+///
+/// Stored as `Option<StatusMessage>` on `App`. Constructors apply the glyph
+/// prefix (`✓` / `⚠`) centrally so callers don't re-encode severity as a
+/// leading character, and the `ui.rs` consumer switches on `severity`
+/// directly instead of `starts_with('⚠')`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StatusMessage {
+    pub severity: StatusSeverity,
+    /// The glyph-prefixed text rendered in the status bar (e.g.
+    /// `"✓ Copied: /path"` or `"⚠ Could not open: ..."`). Pre-formatted so
+    /// the consumer just renders without rebuilding the prefix.
+    pub text: String,
+}
+
+impl StatusMessage {
+    pub fn success(body: impl Into<String>) -> Self {
+        StatusMessage {
+            severity: StatusSeverity::Success,
+            text: format!("✓ {}", body.into()),
+        }
+    }
+
+    pub fn warning(body: impl Into<String>) -> Self {
+        StatusMessage {
+            severity: StatusSeverity::Warning,
+            text: format!("⚠ {}", body.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SortMode {
     Name,
@@ -86,6 +126,7 @@ pub struct App {
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
     pub theme: super::theme::Theme,
+    pub status_message: Option<StatusMessage>,
 }
 
 impl App {
@@ -110,6 +151,7 @@ impl App {
             detail_actions: Vec::new(),
             detail_selected: 0,
             theme: super::theme::Theme::detect(),
+            status_message: None,
         };
         app.apply_sort();
         app.refresh_preview();
@@ -117,6 +159,13 @@ impl App {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) {
+        // Any-key-dismisses semantics for status_message: the message stays
+        // visible until the user presses any key, then disappears on the next
+        // action. Mirrors the `?` help-overlay dismissal pattern (see Mode::Help
+        // branch below). Cleared unconditionally at the top so the lifetime
+        // contract is trivial — no mode-dependent paths.
+        self.status_message = None;
+
         match self.mode {
             Mode::Normal => self.handle_normal_key(key),
             Mode::Search => self.handle_search_key(key),
@@ -185,10 +234,15 @@ impl App {
 
     fn enter_detail_mode(&mut self) {
         self.mode = Mode::Detail;
+        // Disable/Enable is shown unconditionally — the action's current
+        // implementation (see `execute_action` below) just pops back to
+        // Normal mode because the browse module has no machine.toml
+        // handle. When a future change wires machine prefs into browse,
+        // this list should reflect the skill's actual disabled state
+        // (show Disable if enabled, Enable if disabled — never both).
         self.detail_actions = vec![
             DetailAction::ViewSource,
             DetailAction::CopyPath,
-            // TODO: toggle based on actual machine prefs disabled state
             DetailAction::Disable,
             DetailAction::Back,
         ];
@@ -199,18 +253,87 @@ impl App {
         match action {
             DetailAction::ViewSource => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
-                    let _ = std::process::Command::new("open").arg(&path).spawn();
+                    // Dispatch the GUI-file-opener binary at compile time: macOS
+                    // ships `open`; Linux desktops ship `xdg-open`. We use
+                    // `.status()` (blocking) rather than `.spawn()` so we can
+                    // observe non-zero exit codes — otherwise `xdg-open` silently
+                    // exiting on a headless box (no DISPLAY, no MIME handler)
+                    // would still report "✓ Opened" and lie to the user. Both
+                    // openers return quickly after dispatching to the system
+                    // handler, so the brief block is acceptable for a one-off
+                    // TUI action.
+                    let binary = if cfg!(target_os = "macos") {
+                        "open"
+                    } else {
+                        "xdg-open"
+                    };
+                    match std::process::Command::new(binary).arg(&path).status() {
+                        Ok(status) if status.success() => {
+                            self.status_message = Some(StatusMessage::success(format!(
+                                "Opened: {}",
+                                crate::paths::collapse_home(Path::new(&path))
+                            )));
+                        }
+                        Ok(status) => {
+                            let exit = status
+                                .code()
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "signal".into());
+                            self.status_message = Some(StatusMessage::warning(format!(
+                                "{binary} exited {exit} for: {path}"
+                            )));
+                        }
+                        Err(e) => {
+                            self.status_message = Some(StatusMessage::warning(format!(
+                                "Could not launch {binary}: {e}"
+                            )));
+                        }
+                    }
                 }
             }
             DetailAction::CopyPath => {
                 if let Some((_, _, path)) = self.selected_row_meta() {
-                    let _ = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(format!(
-                            "echo -n '{}' | pbcopy",
-                            path.replace('\'', "'\\''")
-                        ))
-                        .status();
+                    // Use arboard for cross-platform clipboard access. Replaces
+                    // the prior macOS-only shelled-pipe invocation, which was
+                    // also a command-injection vector (paths with apostrophes
+                    // could escape the single-quote wrapping). arboard is built
+                    // with `default-features = false, features = ["wayland-data-control"]`
+                    // so on Linux both X11 (via x11rb) and Wayland (via
+                    // wayland-data-control) backends are compiled in; `image-data`
+                    // is intentionally disabled to avoid pulling the `image`
+                    // crate (not needed — we only copy text). Construction can
+                    // still fail on headless Linux over SSH (no display server),
+                    // which surfaces via status_message.
+                    let result =
+                        arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.clone()));
+                    match result {
+                        Ok(()) => {
+                            self.status_message = Some(StatusMessage::success(format!(
+                                "Copied: {}",
+                                crate::paths::collapse_home(Path::new(&path))
+                            )));
+                        }
+                        Err(e) => {
+                            // Targeted remediation hints for the most common
+                            // failure modes (S6 from phase-8 PR review).
+                            // `ClipboardNotSupported` happens on headless
+                            // Linux (SSH without DISPLAY) and on platforms
+                            // lacking a clipboard backend at compile time.
+                            // Everything else falls through to raw Display.
+                            let msg = match &e {
+                                arboard::Error::ClipboardNotSupported => {
+                                    "Clipboard unavailable (headless or unsupported session)"
+                                        .to_string()
+                                }
+                                arboard::Error::ClipboardOccupied => {
+                                    "Clipboard busy (another app is holding it); try again"
+                                        .to_string()
+                                }
+                                other => format!("Could not copy: {other}"),
+                            };
+                            self.status_message = Some(StatusMessage::warning(msg));
+                        }
+                    }
                 }
             }
             DetailAction::Disable | DetailAction::Enable => {
@@ -724,5 +847,111 @@ mod tests {
         app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::NONE));
         assert_eq!(app.sort_mode, SortMode::Source);
         assert_eq!(app.filtered_indices.len(), 10);
+    }
+
+    #[test]
+    fn status_message_set_by_copy_path_and_cleared_by_any_key() {
+        // Lifecycle contract for the SAFE-02 status_message surface:
+        //   1. Executing a DetailAction (CopyPath here) must set
+        //      app.status_message to Some(StatusMessage { severity, text })
+        //      where severity is Success or Warning — we accept either
+        //      because headless CI runners (Linux over SSH, etc.) may not
+        //      have a clipboard service available, and per D-17/D-19 we do
+        //      NOT introduce a `trait ClipboardBackend` to force one branch.
+        //   2. Feeding any KeyEvent through handle_key must clear
+        //      status_message to None — the any-key-dismisses semantic
+        //      handle_key enforces as its first statement.
+        let (mut app, _tmp) = make_app(3);
+
+        // Step 1: execute CopyPath. arboard::Clipboard::new() may succeed or
+        // fail depending on the host environment; both paths set status_message.
+        app.execute_action(DetailAction::CopyPath);
+
+        let msg = app
+            .status_message
+            .as_ref()
+            .cloned()
+            .expect("status_message must be Some after CopyPath action");
+        assert!(
+            matches!(
+                msg.severity,
+                StatusSeverity::Success | StatusSeverity::Warning
+            ),
+            "expected Success or Warning severity, got: {:?}",
+            msg.severity
+        );
+        assert!(
+            msg.text.starts_with('✓') || msg.text.starts_with('⚠'),
+            "constructor must prefix text with the severity glyph; got: {}",
+            msg.text
+        );
+
+        // Step 2: any key clears the message.
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(
+            app.status_message.is_none(),
+            "status_message must be None after any key; was: {:?}",
+            app.status_message
+        );
+    }
+
+    #[test]
+    fn status_message_success_and_warning_constructors_apply_glyph_prefix() {
+        // StatusMessage::success should prefix with ✓; StatusMessage::warning
+        // should prefix with ⚠. These glyphs are part of the contract between
+        // the constructor and ui.rs's rendering (which now switches on
+        // severity, not glyph — but the glyph is still what the user sees).
+        let ok = StatusMessage::success("Copied: /tmp/foo");
+        assert_eq!(ok.severity, StatusSeverity::Success);
+        assert_eq!(ok.text, "✓ Copied: /tmp/foo");
+
+        let warn = StatusMessage::warning("Could not copy: permission denied");
+        assert_eq!(warn.severity, StatusSeverity::Warning);
+        assert_eq!(warn.text, "⚠ Could not copy: permission denied");
+    }
+
+    #[test]
+    fn status_message_set_by_view_source_and_cleared_by_any_key() {
+        // Lifecycle contract for DetailAction::ViewSource — symmetric to the
+        // CopyPath test above but exercises the `open`/`xdg-open` dispatch
+        // path. We accept either severity because the opener may or may not
+        // succeed depending on the host environment (open/xdg-open presence,
+        // path validity, display server). What we assert is:
+        //   1. ViewSource ALWAYS sets status_message (no silent no-op).
+        //   2. The message is a StatusMessage with a Success or Warning
+        //      severity and the matching glyph prefix.
+        //   3. The next keypress clears status_message to None.
+        //
+        // Prevents regressions where a future refactor swaps Success/Warning
+        // arms or skips status_message plumbing in the ViewSource path
+        // (symmetric to CopyPath but with its own set of format strings).
+        let (mut app, _tmp) = make_app(3);
+
+        app.execute_action(DetailAction::ViewSource);
+
+        let msg = app
+            .status_message
+            .as_ref()
+            .cloned()
+            .expect("status_message must be Some after ViewSource action");
+        match msg.severity {
+            StatusSeverity::Success => assert!(
+                msg.text.starts_with('✓'),
+                "Success severity must produce ✓ prefix; got: {}",
+                msg.text
+            ),
+            StatusSeverity::Warning => assert!(
+                msg.text.starts_with('⚠'),
+                "Warning severity must produce ⚠ prefix; got: {}",
+                msg.text
+            ),
+        }
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE));
+        assert!(
+            app.status_message.is_none(),
+            "status_message must be None after any key; was: {:?}",
+            app.status_message
+        );
     }
 }

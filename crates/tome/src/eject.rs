@@ -33,6 +33,14 @@ pub(crate) fn plan(config: &Config, paths: &TomePaths) -> Result<EjectPlan> {
             continue;
         }
 
+        // Best-effort enumeration: silently skip symlinks we can't read. If
+        // read_link fails here the symlink is either transient (filesystem
+        // race) or fundamentally broken — in either case it's NOT one of
+        // "our" symlinks pointing into the library, so excluding it from
+        // eject is correct. Surfacing at eject time would produce noisy
+        // stderr on unrelated broken symlinks in the target dir. Contrast
+        // with SAFE-03 (relocate.rs provenance recording), where a read_link
+        // failure means silent data loss and deserves a warning.
         let mut symlinks = Vec::new();
         for entry in std::fs::read_dir(skills_dir)
             .with_context(|| format!("failed to read {}", skills_dir.display()))?

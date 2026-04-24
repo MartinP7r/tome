@@ -307,25 +307,48 @@ fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
     frame.render_widget(preview, body_chunks[1]);
 
     // -- Status bar for Detail mode --
-    let status = Line::from(vec![
-        Span::styled(
-            " Detail ",
-            Style::default()
-                .fg(theme.status_bar_fg)
-                .bg(theme.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            " j/k select  \u{23ce} run action  esc back",
-            Style::default()
-                .fg(theme.status_bar_fg)
-                .bg(theme.status_bar_bg),
-        ),
-        Span::styled(
-            " ".repeat(area.width as usize),
-            Style::default().bg(theme.status_bar_bg),
-        ),
-    ]);
+    // When execute_action has set a status message, render it in place of the
+    // usual Detail keybind line. Switch on StatusSeverity for color dispatch —
+    // matches the same semantic as render_status_bar (Normal mode) so the two
+    // call sites feel identical to the user across modes. Cleared by
+    // handle_key on next keypress.
+    let status = if let Some(msg) = &app.status_message {
+        let msg_style = match msg.severity {
+            super::app::StatusSeverity::Warning => {
+                Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+            }
+            super::app::StatusSeverity::Success => {
+                Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+            }
+        };
+        Line::from(vec![
+            Span::styled(format!(" {} ", msg.text), msg_style),
+            Span::styled(
+                " ".repeat(area.width as usize),
+                Style::default().bg(theme.status_bar_bg),
+            ),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(
+                " Detail ",
+                Style::default()
+                    .fg(theme.status_bar_fg)
+                    .bg(theme.accent)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " j/k select  \u{23ce} run action  esc back",
+                Style::default()
+                    .fg(theme.status_bar_fg)
+                    .bg(theme.status_bar_bg),
+            ),
+            Span::styled(
+                " ".repeat(area.width as usize),
+                Style::default().bg(theme.status_bar_bg),
+            ),
+        ])
+    };
     frame.render_widget(Paragraph::new(status), chunks[1]);
 }
 
@@ -336,6 +359,32 @@ fn render_status_bar(
     area: ratatui::layout::Rect,
     theme: &Theme,
 ) {
+    // NOTE: as of phase 8, `status_message` is only set from DetailAction
+    // handlers, which leave the app in Mode::Detail — so this Normal-mode
+    // block is currently latent and exercises only when Normal-mode status
+    // sources are added (e.g., future bulk actions like "copied N paths").
+    // The block is kept so the invariant (any-key-dismisses in any mode)
+    // is preserved at the call site and the switch-on-severity logic lives
+    // in one place rather than being duplicated if/when Normal-mode sources
+    // appear.
+    if let Some(msg) = &app.status_message {
+        let style = match msg.severity {
+            super::app::StatusSeverity::Warning => {
+                Style::default().fg(theme.alert).bg(theme.status_bar_bg)
+            }
+            super::app::StatusSeverity::Success => {
+                Style::default().fg(theme.accent).bg(theme.status_bar_bg)
+            }
+        };
+        let bg_style = Style::default().bg(theme.status_bar_bg);
+        let spans = vec![
+            Span::styled(format!(" {} ", msg.text), style),
+            Span::styled(" ".repeat(width as usize), bg_style),
+        ];
+        frame.render_widget(Paragraph::new(Line::from(spans)), area);
+        return;
+    }
+
     let filtered = app.filtered_indices.len();
     let total = app.rows.len();
 

@@ -3372,6 +3372,92 @@ fn test_remove_no_input_without_force_fails() {
         .stderr(predicate::str::contains("use --force"));
 }
 
+#[cfg(unix)]
+#[test]
+fn remove_partial_failure_exits_nonzero_with_warning_marker() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Fixture: source dir with one skill, target dir (distribution) wired as
+    // a target role in config. After sync, the target contains a symlink to
+    // the library skill. We then chmod 0o000 the target directory so remove's
+    // step-1 loop (distribution symlinks) cannot enumerate / unlink inside.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    );
+
+    // Prime the library + target with a real symlink so the plan has
+    // something to try to remove in step 1.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    assert!(target_dir.join("my-skill").exists());
+
+    // Clamp the target dir to read+execute only: plan() can still read_dir
+    // it to enumerate the symlinks, but execute()'s remove_file call needs
+    // write permission on the parent dir and so hits EACCES — landing in
+    // the partial-failure path rather than bailing from plan().
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let output = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    // Restore permissions FIRST so TempDir::drop can clean up, BEFORE any
+    // assertions (Pitfall 2 from 08-RESEARCH.md).
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(
+        !output.status.success(),
+        "remove should fail on chmod 0o000 target, got status: {:?}",
+        output.status,
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("⚠"), "stderr missing ⚠ marker: {stderr}");
+    assert!(
+        stderr.contains("operations failed"),
+        "stderr missing 'operations failed': {stderr}"
+    );
+    assert!(
+        stderr.contains("remove completed with"),
+        "stderr missing anyhow error 'remove completed with': {stderr}"
+    );
+    // I2/I3: user-facing message must mention retry path so they know
+    // config/manifest entries survived for a retry attempt.
+    assert!(
+        stderr.contains("retained") || stderr.contains("retry"),
+        "stderr missing retry guidance (I2/I3): {stderr}"
+    );
+}
+
 // ── tome add integration tests ─────────────────────────────────────
 
 #[test]
@@ -3961,4 +4047,525 @@ fn init_no_input_writes_config_and_reloads() {
 
     // Round-trip parity on the written file.
     assert_config_roundtrips(&loaded);
+}
+
+// -----------------------------------------------------------------------------
+// WUX-04: `tome init` prints the resolved tome_home info line up front.
+// -----------------------------------------------------------------------------
+//
+// These tests lock in the behavior that every `tome init` invocation prints a
+// one-line "resolved tome_home: <path> (from <source>)" message BEFORE any
+// wizard Step 1 prompt output. The source label accurately reflects the
+// resolution branch: --tome-home flag, --config flag, TOME_HOME env, XDG
+// config, or default. The info line is emitted in both interactive and
+// --no-input modes (it is informational, not a prompt).
+
+#[test]
+fn init_prints_resolved_tome_home_with_default_source() {
+    // No TOME_HOME set, HOME has no ~/.config/tome/config.toml → Default source.
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("resolved tome_home:"),
+        "stdout missing resolved tome_home line:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("(from default)"),
+        "stdout missing '(from default)' source label:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_prints_resolved_tome_home_with_env_source() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("(from TOME_HOME env)"),
+        "stdout missing '(from TOME_HOME env)' label:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(tome_home.display().to_string().as_str()),
+        "stdout missing TOME_HOME path:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_prints_resolved_tome_home_with_flag_source() {
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-home");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("(from --tome-home flag)"),
+        "stdout missing '--tome-home flag' label:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_resolved_tome_home_line_precedes_step_prompts() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    let resolved_idx = stdout
+        .find("resolved tome_home:")
+        .expect("missing info line");
+    let step1_idx = stdout.find("Step 1").expect("missing Step 1 prompt header");
+    assert!(
+        resolved_idx < step1_idx,
+        "resolved tome_home line must come BEFORE Step 1.\n\
+         resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstdout:\n{stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// WUX-03: legacy pre-v0.6 ~/.config/tome/config.toml detection
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the behavior that `tome init` surfaces a warning when
+// it detects a pre-v0.6 XDG config containing `[[sources]]` or `[targets.*]`
+// sections, and that under `--no-input` the file is left untouched with a
+// `note:` line on stderr. False-positive protection: a v0.6+ XDG file with
+// only `tome_home = "..."` must NOT trigger the warning.
+
+#[test]
+fn init_legacy_detected_no_input_leaves_file() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    let xdg_dir = tmp.path().join(".config/tome");
+    let xdg_file = xdg_dir.join("config.toml");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    let legacy_content = "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+    std::fs::write(&xdg_file, legacy_content).unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Warning appears on stdout (the `println!` in handle_legacy_cleanup).
+    assert!(
+        stdout.contains("Legacy pre-v0.6 config detected"),
+        "stdout missing legacy warning:\n{stdout}"
+    );
+    // Skip note appears on stderr.
+    assert!(
+        stderr.contains("skipped legacy cleanup"),
+        "stderr missing skipped-cleanup note:\n{stderr}"
+    );
+
+    // File must be byte-identical after the run.
+    let after = std::fs::read_to_string(&xdg_file).unwrap();
+    assert_eq!(after, legacy_content, "legacy file should be unchanged");
+}
+
+#[test]
+fn init_legacy_with_only_tome_home_not_flagged() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    let xdg_dir = tmp.path().join(".config/tome");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    // v0.6+ shape — should NOT trigger legacy warning.
+    std::fs::write(xdg_dir.join("config.toml"), "tome_home = \"~/somewhere\"\n").unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stdout.contains("Legacy pre-v0.6 config detected"),
+        "v0.6+-only XDG file should NOT trigger legacy warning. stdout:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("skipped legacy cleanup"),
+        "v0.6+-only XDG file should NOT trigger skip-note. stderr:\n{stderr}"
+    );
+}
+
+#[test]
+fn init_greenfield_no_legacy_warning() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Legacy pre-v0.6 config detected"),
+        "greenfield run should NOT show legacy warning. stdout:\n{stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// WUX-01 / WUX-05: Step 0 greenfield tome_home prompt
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the observable behavior that:
+// - Under --no-input, the Step 0 prompt is skipped and no XDG config is written
+// - When the tome_home source is NOT Default (e.g. --tome-home flag), Step 0
+//   is skipped even when not --no-input
+// - The library default derives from the chosen tome_home (Pitfall 1 fix)
+//
+// The interactive branch of Step 0 is exercised by manual test only — see
+// 07-RESEARCH.md § Pitfall 5.
+
+#[test]
+fn init_greenfield_no_input_skips_step_0_prompt() {
+    // TomeHomeSource::Default + --no-input → Step 0 prompt must be skipped.
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Step 0:"),
+        "--no-input must skip Step 0 prompt, but stdout contains it:\n{stdout}"
+    );
+    // WUX-04 info line still prints (informational, not a prompt)
+    assert!(
+        stdout.contains("resolved tome_home:"),
+        "resolved tome_home line must still appear in --no-input mode:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_greenfield_no_input_does_not_write_xdg() {
+    // --no-input must NOT write to ~/.config/tome/config.toml even under greenfield.
+    // (07-RESEARCH.md § "Integration with no_input" — "Skip" row for WUX-05.)
+    let tmp = TempDir::new().unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let xdg = tmp.path().join(".config/tome/config.toml");
+    assert!(
+        !xdg.exists(),
+        "--no-input must not write XDG config, but {} exists",
+        xdg.display()
+    );
+}
+
+#[test]
+fn init_with_flag_source_skips_step_0() {
+    // TomeHomeSource::CliTomeHome (from --tome-home flag) → Step 0 MUST be skipped
+    // even without --no-input, because the user already indicated a choice.
+    // We test via --no-input to keep the test headless; the key assertion is on
+    // the "Step 0:" header absence.
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-home");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Step 0:"),
+        "--tome-home flag (CliTomeHome source) must skip Step 0:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("(from --tome-home flag)"),
+        "source label should confirm flag branch:\n{stdout}"
+    );
+}
+
+#[test]
+fn init_derived_library_default_under_custom_tome_home() {
+    // When tome_home = <tmp>/custom-tome (non-default), library default should
+    // derive as <tmp>/custom-tome/skills (NOT ~/.tome/skills). Tests the
+    // Pitfall 1 fix.
+    let tmp = TempDir::new().unwrap();
+    let custom = tmp.path().join("custom-tome");
+
+    let output = tome()
+        .args([
+            "init",
+            "--dry-run",
+            "--no-input",
+            "--tome-home",
+            custom.to_str().unwrap(),
+        ])
+        .env("HOME", tmp.path())
+        .env_remove("TOME_HOME")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let config = parse_generated_config(&stdout);
+    // library_dir after tilde expansion should be under the custom tome_home,
+    // NOT under tmp/.tome/skills.
+    assert_eq!(
+        config.library_dir(),
+        custom.join("skills"),
+        "library default should derive from --tome-home, got {:?}",
+        config.library_dir()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// WUX-02: Brownfield decision
+// ---------------------------------------------------------------------------
+//
+// These tests lock in the observable behavior that:
+// - Under --no-input with a valid existing tome.toml, the file is left
+//   byte-identical AND no post-init sync runs (use-existing path).
+// - Under --no-input with an invalid existing tome.toml, init exits cleanly
+//   (exit 0, Cancel path) and the file is unchanged.
+// - When BOTH a brownfield tome.toml AND a legacy XDG file exist, both
+//   cleanup headers fire and both files remain unchanged under --no-input.
+//
+// The interactive branches (Edit/Reinit) are covered by unit tests on the
+// individual helpers per 07-RESEARCH.md § Pitfall 5 (dialoguer prompts hang
+// in headless CI).
+
+#[test]
+fn init_brownfield_no_input_keeps_existing() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let seed = "library_dir = \"~/.tome/skills\"\n[directories]\n";
+    std::fs::write(&config_path, seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"]) // NOT --dry-run — we want the actual no-op path
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init should succeed; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Existing config detected"),
+        "stdout missing brownfield summary:\n{stdout}"
+    );
+
+    // File must be byte-identical
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(
+        after, seed,
+        "brownfield --no-input must not modify existing config"
+    );
+
+    // No sync side-effect: library dir should not be created
+    let library = tmp.path().join(".tome/skills");
+    assert!(
+        !library.exists(),
+        "use-existing path must not run post-init sync (library dir present at {})",
+        library.display()
+    );
+}
+
+#[test]
+fn init_brownfield_invalid_config_no_input_cancels() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let seed = "this is [[[ not valid toml";
+    std::fs::write(&config_path, seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    // Must exit 0 (clean cancel), not an error
+    assert!(
+        output.status.success(),
+        "invalid-config no-input path should cancel cleanly (exit 0); stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("invalid:") || stdout.contains("cancelled"),
+        "stdout should indicate invalid config or cancellation:\n{stdout}"
+    );
+
+    let after = std::fs::read_to_string(&config_path).unwrap();
+    assert_eq!(
+        after, seed,
+        "invalid-config no-input must not modify the file"
+    );
+}
+
+#[test]
+fn init_brownfield_with_legacy_runs_both_cleanups() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    let config_path = tome_home.join("tome.toml");
+    let brownfield_seed = "library_dir = \"~/.tome/skills\"\n[directories]\n";
+    std::fs::write(&config_path, brownfield_seed).unwrap();
+
+    let xdg_dir = tmp.path().join(".config/tome");
+    let xdg_file = xdg_dir.join("config.toml");
+    std::fs::create_dir_all(&xdg_dir).unwrap();
+    let legacy_seed = "[[sources]]\nname = \"old\"\npath = \"/tmp\"\ntype = \"directory\"\n";
+    std::fs::write(&xdg_file, legacy_seed).unwrap();
+
+    let output = tome()
+        .args(["init", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Both cleanup paths ran and printed their headers
+    assert!(
+        stdout.contains("Legacy pre-v0.6 config detected"),
+        "stdout missing legacy warning:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Existing config detected"),
+        "stdout missing brownfield summary:\n{stdout}"
+    );
+
+    // Both files unchanged under --no-input
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        brownfield_seed
+    );
+    assert_eq!(std::fs::read_to_string(&xdg_file).unwrap(), legacy_seed);
 }

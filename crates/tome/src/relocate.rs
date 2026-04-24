@@ -87,11 +87,21 @@ pub(crate) fn plan(
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
         let source_path = if entry.managed {
-            // For managed skills, read the symlink target to record the external source
+            // For managed skills, read the symlink target to record the
+            // external source (used to re-create the managed symlink at the
+            // new library_dir after move). An observable-but-recoverable IO
+            // error here deserves a stderr warning — not a silent "no
+            // provenance" data-loss as the original `.ok()` produced. Same
+            // rationale as the git-HEAD-sha warning shipped in the same
+            // milestone: surface the gap so the user can diagnose.
+            //
+            // Factored into `provenance_from_link_result` so the Err arm is
+            // directly unit-testable with a synthetic io::Error (Unix makes
+            // engineering a real post-is_symlink read_link failure racy —
+            // both syscalls share the parent-search permission gate).
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                let raw_target = std::fs::read_link(&link_path).ok();
-                raw_target.map(|t| resolve_symlink_target(&link_path, &t))
+                provenance_from_link_result(std::fs::read_link(&link_path), &link_path)
             } else {
                 None
             }
@@ -116,6 +126,15 @@ pub(crate) fn plan(
             continue;
         }
         let mut count = 0usize;
+        // Best-effort enumeration: silently skip symlinks we can't read. A
+        // symlink that fails `read_link` here is either transient (filesystem
+        // race) or unreadable for a reason the user will hit separately when
+        // we try to recreate it. Warning on every unreadable symlink during a
+        // count loop would spam stderr for each target directory scanned;
+        // surface-at-execute-time (below, in `recreate_target_symlinks`) is
+        // where actionable diagnostics belong. Cf. the provenance-record
+        // comment above, which is NOT best-effort (missing provenance is a
+        // data-loss silent-drop, not a count undercount).
         if let Ok(entries) = std::fs::read_dir(skills_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -284,6 +303,28 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
 }
 
 // --- Internal helpers ---
+
+/// Translate a `read_link` result into a provenance `Option<PathBuf>`, warning
+/// on Err instead of silently dropping (SAFE-03 / #449).
+///
+/// This is factored out so the Err arm is directly unit-testable with a
+/// synthetic `io::Error` — on Unix, engineering a real `read_link` failure
+/// after a successful `is_symlink()` check is racy because both calls share the
+/// same parent-directory search-permission gate. Same rationale as the
+/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves a
+/// stderr line, not silent "no provenance" data loss.
+fn provenance_from_link_result(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
+    match raw {
+        Ok(raw_target) => Some(resolve_symlink_target(link_path, &raw_target)),
+        Err(e) => {
+            eprintln!(
+                "warning: could not read symlink at {}: {e}",
+                link_path.display()
+            );
+            None
+        }
+    }
+}
 
 /// Detect whether source and destination are on different filesystems.
 fn is_cross_filesystem(src: &Path, dst: &Path) -> bool {
@@ -792,6 +833,140 @@ mod tests {
         assert!(
             !is_cross_filesystem(&src, &dst),
             "paths on same tmpdir should be same filesystem"
+        );
+    }
+
+    /// Regression test for SAFE-03 (#449) covering the `is_symlink()`-false
+    /// branch: when the library-dir parent has no search permission,
+    /// `is_symlink()` returns false (Rust treats metadata errors as "not a
+    /// symlink") and `plan()` records `source_path: None` via the outer
+    /// `else { None }` arm — upholding the contract that plan() does not
+    /// propagate the error or silently claim "no provenance".
+    ///
+    /// The new `read_link` Err arm added by SAFE-03 is covered separately by
+    /// `provenance_from_link_result_warns_and_returns_none_on_err` below. That
+    /// unit test uses a synthetic `io::Error` because engineering a real
+    /// `read_link` failure AFTER a successful `is_symlink()` check is racy on
+    /// Unix — both syscalls share the same parent-search permission gate.
+    #[cfg(unix)]
+    #[test]
+    fn managed_symlink_unreadable_records_no_provenance() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tome_home = TempDir::new().unwrap();
+        let library_dir = tome_home.path().join("skills");
+        std::fs::create_dir_all(&library_dir).unwrap();
+
+        // External source the managed symlink points to.
+        let external_source = TempDir::new().unwrap();
+        let ext_skill_dir = external_source.path().join("corrupt-skill");
+        std::fs::create_dir_all(&ext_skill_dir).unwrap();
+        std::fs::write(ext_skill_dir.join("SKILL.md"), "# Corrupt\n").unwrap();
+
+        // Create managed symlink in library -> external source.
+        let link_path = library_dir.join("corrupt-skill");
+        unix_fs::symlink(&ext_skill_dir, &link_path).unwrap();
+        assert!(
+            link_path.is_symlink(),
+            "fixture setup: managed symlink should exist before chmod"
+        );
+
+        // Managed manifest entry for the corrupt-skill.
+        let hash = manifest::hash_directory(&ext_skill_dir).unwrap();
+        let mut manifest = manifest::Manifest::default();
+        manifest.insert(
+            SkillName::new("corrupt-skill").unwrap(),
+            SkillEntry::new(
+                ext_skill_dir.clone(),
+                "plugins".to_string(),
+                hash,
+                true, // managed
+            ),
+        );
+        manifest::save(&manifest, tome_home.path()).unwrap();
+
+        let config_path = tome_home.path().join("tome.toml");
+        let config = test_config(library_dir.clone(), BTreeMap::new());
+        config.save(&config_path).unwrap();
+
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library_dir.clone()).unwrap();
+        let new_dir = tome_home.path().join("new-skills");
+
+        // Engineer the "read_link cannot succeed" condition: remove all perms on the
+        // symlink's parent directory. See function-level doc comment for the
+        // cross-Unix semantic caveat.
+        std::fs::set_permissions(&library_dir, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = plan(&config, &paths, &new_dir, &config_path);
+
+        // CRITICAL: restore permissions BEFORE any assertions so TempDir::drop can
+        // clean up even if an assertion panics (Pitfall 2 from 08-RESEARCH.md).
+        std::fs::set_permissions(&library_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let plan = result.expect("plan should succeed even when a managed symlink cannot be read");
+        let corrupt = plan
+            .skills
+            .iter()
+            .find(|s| s.name.as_str() == "corrupt-skill")
+            .expect("corrupt-skill should still be present in the plan");
+
+        assert!(
+            corrupt.is_managed,
+            "corrupt-skill manifest entry is managed"
+        );
+        assert!(
+            corrupt.source_path.is_none(),
+            "source_path must be None when the symlink cannot be read (either via the new \
+             read_link Err arm or the outer is_symlink-false branch — both uphold SAFE-03's \
+             contract); got {:?}",
+            corrupt.source_path
+        );
+    }
+
+    /// Unit test covering the SAFE-03 (#449) `Err` arm of `read_link` directly.
+    ///
+    /// Passes a synthetic `io::Error` to `provenance_from_link_result` to verify
+    /// the warn+None behavior without engineering a real `read_link` failure
+    /// (which is racy on Unix — see `managed_symlink_unreadable_records_no_provenance`
+    /// for the contract-level test via the `is_symlink()`-false branch).
+    ///
+    /// The `eprintln!` output is visible in test output; this test asserts the
+    /// structural post-condition (returns `None`) — a regression that deletes
+    /// the `eprintln!` line would still fail code review but not this test. The
+    /// format string itself is pinned by the integration-style contract with
+    /// PR #448's git-HEAD-sha warning.
+    #[test]
+    fn provenance_from_link_result_warns_and_returns_none_on_err() {
+        let synthetic_err = std::io::Error::other("synthetic io failure for SAFE-03");
+        let fake_link = Path::new("/nonexistent/library/skill");
+
+        let result = provenance_from_link_result(Err(synthetic_err), fake_link);
+
+        assert!(
+            result.is_none(),
+            "Err arm must return None so plan() records source_path: None"
+        );
+    }
+
+    /// Unit test covering the SAFE-03 `Ok` arm: when `read_link` succeeds, the
+    /// resolver is applied and the result is `Some(resolved_target)`.
+    #[test]
+    fn provenance_from_link_result_returns_resolved_target_on_ok() {
+        let tmp = TempDir::new().unwrap();
+        let link_path = tmp.path().join("link");
+        let target = tmp.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        unix_fs::symlink(&target, &link_path).unwrap();
+
+        // Simulate a successful read_link returning a raw relative target; the
+        // helper should apply `resolve_symlink_target` to canonicalize it.
+        let raw_target = std::fs::read_link(&link_path).unwrap();
+        let result = provenance_from_link_result(Ok(raw_target), &link_path);
+
+        let resolved = result.expect("Ok arm must return Some(resolved_target)");
+        assert_eq!(
+            resolved, target,
+            "helper must apply resolve_symlink_target to produce canonical target"
         );
     }
 

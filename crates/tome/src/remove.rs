@@ -42,12 +42,84 @@ impl RemovePlan {
     }
 }
 
+/// Which cleanup step produced a partial failure.
+///
+/// Variants are documented by the structural dispatch predicate that emits
+/// them, not by step number — step numbering is implementation detail and
+/// reordering the steps in `execute()` must not require doc edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FailureKind {
+    /// Distribution-dir symlink removal — emitted when `remove_file` fails
+    /// while iterating `plan.symlinks_to_remove`.
+    DistributionSymlink,
+    /// Local library directory removal — emitted by the `remove_dir_all`
+    /// branch of library cleanup (dispatched by `lib_path.is_dir()`).
+    LibraryDir,
+    /// Managed-skill library symlink removal — emitted by the `remove_file`
+    /// branch of library cleanup (dispatched by `lib_path.is_symlink()`).
+    LibrarySymlink,
+    /// Git repo cache removal — emitted when `remove_dir_all` fails on the
+    /// plan's `git_cache_path`.
+    GitCache,
+}
+
+impl FailureKind {
+    /// All variants, in the order preferred for user-facing grouped output.
+    ///
+    /// Exposed as an associated constant so the `lib.rs` consumer doesn't
+    /// maintain a parallel hand-written array that could silently drop a
+    /// variant when new variants are added.
+    pub(crate) const ALL: [FailureKind; 4] = [
+        FailureKind::DistributionSymlink,
+        FailureKind::LibraryDir,
+        FailureKind::LibrarySymlink,
+        FailureKind::GitCache,
+    ];
+
+    /// Human-readable label used in the grouped failure summary.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            FailureKind::DistributionSymlink => "Distribution symlinks",
+            FailureKind::LibraryDir => "Library entries",
+            FailureKind::LibrarySymlink => "Library symlinks",
+            FailureKind::GitCache => "Git cache",
+        }
+    }
+}
+
+/// A single partial-cleanup failure aggregated from `execute`.
+#[derive(Debug)]
+pub(crate) struct RemoveFailure {
+    pub path: PathBuf,
+    pub kind: FailureKind,
+    pub error: std::io::Error,
+}
+
+impl RemoveFailure {
+    /// Construct a RemoveFailure. A single entry point for future invariants
+    /// (e.g., debug-only absolute-path assertions).
+    pub(crate) fn new(kind: FailureKind, path: PathBuf, error: std::io::Error) -> Self {
+        RemoveFailure { kind, path, error }
+    }
+}
+
 /// Result of executing the remove plan.
 pub(crate) struct RemoveResult {
     pub symlinks_removed: usize,
     pub library_entries_removed: usize,
-    #[allow(dead_code)]
     pub git_cache_removed: bool,
+    /// Partial-cleanup failures that occurred during `execute`.
+    ///
+    /// Empty on full success. Caller is responsible for surfacing these;
+    /// `execute` itself does not print per-failure warnings.
+    ///
+    /// Post-condition: an entry in `failures` does NOT imply the
+    /// corresponding counter (e.g. `symlinks_removed`) is zero —
+    /// partial-success semantics mean counters reflect COMPLETED operations,
+    /// failures reflect INCOMPLETE ones, and the two are independent. If
+    /// 3 of 5 distribution symlinks removed successfully and 2 failed,
+    /// `symlinks_removed == 3` and `failures.len() == 2`.
+    pub failures: Vec<RemoveFailure>,
 }
 
 /// Build a plan describing what `tome remove <name>` will do.
@@ -187,19 +259,21 @@ pub(crate) fn execute(
     let mut symlinks_removed = 0;
     let mut library_entries_removed = 0;
     let mut git_cache_removed = false;
+    let mut failures: Vec<RemoveFailure> = Vec::new();
 
     // 1. Remove symlinks from distribution directories
     for symlink in &plan.symlinks_to_remove {
         if dry_run {
             symlinks_removed += 1;
-        } else if let Err(e) = std::fs::remove_file(symlink) {
-            eprintln!(
-                "warning: failed to remove symlink {}: {}",
-                symlink.display(),
-                e
-            );
         } else {
-            symlinks_removed += 1;
+            match std::fs::remove_file(symlink) {
+                Ok(_) => symlinks_removed += 1,
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::DistributionSymlink,
+                    symlink.clone(),
+                    e,
+                )),
+            }
         }
     }
 
@@ -208,52 +282,60 @@ pub(crate) fn execute(
         if dry_run {
             library_entries_removed += 1;
         } else if lib_path.is_symlink() {
-            if let Err(e) = std::fs::remove_file(lib_path) {
-                eprintln!(
-                    "warning: failed to remove library symlink {}: {}",
-                    lib_path.display(),
-                    e
-                );
-            } else {
-                library_entries_removed += 1;
+            match std::fs::remove_file(lib_path) {
+                Ok(_) => library_entries_removed += 1,
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::LibrarySymlink,
+                    lib_path.clone(),
+                    e,
+                )),
             }
         } else if lib_path.is_dir() {
-            if let Err(e) = std::fs::remove_dir_all(lib_path) {
-                eprintln!(
-                    "warning: failed to remove library directory {}: {}",
-                    lib_path.display(),
-                    e
-                );
-            } else {
-                library_entries_removed += 1;
+            match std::fs::remove_dir_all(lib_path) {
+                Ok(_) => library_entries_removed += 1,
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::LibraryDir,
+                    lib_path.clone(),
+                    e,
+                )),
             }
         }
     }
 
-    // 3. Remove manifest entries
-    if !dry_run {
-        for skill in &plan.skills {
-            manifest.remove(skill);
-        }
-    }
-
-    // 4. Remove cached git repo
+    // 4. Remove cached git repo (step 3/manifest cleanup is deferred to
+    //    after step 4 so we know the full failure state before deciding
+    //    whether to preserve config+manifest for retry).
     if let Some(cache_path) = &plan.git_cache_path {
         if dry_run {
             git_cache_removed = true;
-        } else if let Err(e) = std::fs::remove_dir_all(cache_path) {
-            eprintln!(
-                "warning: failed to remove git cache {}: {}",
-                cache_path.display(),
-                e
-            );
         } else {
-            git_cache_removed = true;
+            match std::fs::remove_dir_all(cache_path) {
+                Ok(_) => git_cache_removed = true,
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::GitCache,
+                    cache_path.clone(),
+                    e,
+                )),
+            }
         }
     }
 
-    // 5. Remove directory entry from config
-    if !dry_run {
+    // Partial-failure state preservation (I2, I3 from phase-8 PR review).
+    // If ANY cleanup step failed, preserve the config entry AND the
+    // manifest entries so the user can re-run `tome remove <name>` after
+    // addressing the underlying cause (e.g., fixing file permissions).
+    // Otherwise the user would be stuck: plan() bails with "directory
+    // not found in config" and `tome doctor` cannot re-register a
+    // vanished config entry — recovery would be manual `rm -rf`.
+    //
+    // On full success: remove manifest entries (step 3) and config
+    // entry (step 5) as before. dry_run preserves everything.
+    if !dry_run && failures.is_empty() {
+        // 3. Remove manifest entries
+        for skill in &plan.skills {
+            manifest.remove(skill);
+        }
+        // 5. Remove directory entry from config
         config.directories.remove(&plan.directory_name);
     }
 
@@ -261,6 +343,7 @@ pub(crate) fn execute(
         symlinks_removed,
         library_entries_removed,
         git_cache_removed,
+        failures,
     })
 }
 
@@ -386,6 +469,64 @@ mod tests {
     }
 
     #[test]
+    fn partial_failure_aggregates_symlink_error() {
+        let (tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        // Pre-delete the distribution symlink so std::fs::remove_file returns
+        // ENOENT during execute's step 1 loop — forcing a
+        // FailureKind::DistributionSymlink push without affecting the
+        // library-entry step which should still succeed.
+        let dist_symlink = tmp.path().join("target").join("my-skill");
+        assert_eq!(
+            p.symlinks_to_remove.len(),
+            1,
+            "fixture expected one dist symlink"
+        );
+        assert_eq!(p.symlinks_to_remove[0], dist_symlink);
+        std::fs::remove_file(&dist_symlink).ok();
+
+        let result = execute(&p, &mut config, &mut manifest, false).unwrap();
+
+        // Assert: exactly one DistributionSymlink failure, path matches.
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|f| f.kind == FailureKind::DistributionSymlink),
+            "expected a FailureKind::DistributionSymlink failure, got: {:?}",
+            result.failures,
+        );
+        let symlink_failure = result
+            .failures
+            .iter()
+            .find(|f| f.kind == FailureKind::DistributionSymlink)
+            .unwrap();
+        assert_eq!(symlink_failure.path, dist_symlink);
+
+        // Partial-failure semantics: the library entry (separate artifact)
+        // should still have been cleaned up.
+        assert_eq!(result.library_entries_removed, 1);
+        assert_eq!(result.symlinks_removed, 0);
+
+        // I2/I3 retention: on partial failure, the config entry AND the
+        // manifest entries are preserved so the user can re-run
+        // `tome remove <name>` after addressing the failure. Without this,
+        // the user would be stuck: plan() bails with "not found in config"
+        // and there's no programmatic way to re-register it.
+        assert!(
+            config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap()),
+            "config entry must be retained on partial failure so retry works"
+        );
+        assert!(
+            !manifest.is_empty(),
+            "manifest entries must be retained on partial failure so retry sees the skills"
+        );
+    }
+
+    #[test]
     fn execute_dry_run_preserves_state() {
         let (_tmp, mut config, paths, mut manifest) = make_test_setup();
         let p = plan("test-source", &config, &paths, &manifest).unwrap();
@@ -400,5 +541,83 @@ mod tests {
                 .contains_key(&DirectoryName::new("test-source").unwrap())
         );
         assert!(!manifest.is_empty());
+    }
+
+    /// Covers the lib.rs grouped-output formatting indirectly: populates TWO
+    /// FailureKind variants (DistributionSymlink + LibraryDir) in a single
+    /// execute() call, then asserts that:
+    /// - the failures vec contains both variants
+    /// - the counters correctly reflect partial success (both zero because
+    ///   neither step completed any operation)
+    ///
+    /// Pins the partial-success invariant across multiple variants and
+    /// ensures a future refactor that drops a `FailureKind` from the ALL
+    /// constant or label() map would not silently break grouped output
+    /// for the affected variant. Also covers FailureKind::label() for
+    /// every variant and the size of FailureKind::ALL.
+    #[cfg(unix)]
+    #[test]
+    fn partial_failure_aggregates_multiple_kinds() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let (tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        // Pre-delete the distribution symlink → DistributionSymlink
+        // failure on step 1 (remove_file returns ENOENT).
+        let dist_symlink = tmp.path().join("target").join("my-skill");
+        std::fs::remove_file(&dist_symlink).ok();
+
+        // chmod the LIBRARY PARENT to 0o500 (r-x) so step 2's
+        // remove_dir_all on library/my-skill fails with EACCES. The write
+        // bit on the parent is what's needed to unlink children; the
+        // search bit alone still lets is_dir() check the child.
+        // (remove_dir_all on a non-existent path returns Ok(()) in Rust,
+        // so the simpler "pre-delete" trick used elsewhere doesn't work
+        // here — we need a real filesystem-level permission denial.)
+        assert_eq!(p.library_paths.len(), 1, "fixture expected one lib path");
+        let library_parent = p.library_paths[0].parent().unwrap().to_path_buf();
+        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        let result = execute(&p, &mut config, &mut manifest, false);
+
+        // CRITICAL: restore permissions BEFORE assertions so TempDir::drop
+        // can clean up even on panic (Pitfall 2 from 08-RESEARCH.md).
+        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let result = result.expect("execute should not error, only aggregate failures");
+
+        let has = |k: FailureKind| result.failures.iter().any(|f| f.kind == k);
+        assert!(
+            has(FailureKind::DistributionSymlink),
+            "expected DistributionSymlink failure, got: {:?}",
+            result.failures
+        );
+        assert!(
+            has(FailureKind::LibraryDir),
+            "expected LibraryDir failure (from EACCES on parent), got: {:?}",
+            result.failures
+        );
+
+        // Both counters zero — neither step completed.
+        assert_eq!(result.symlinks_removed, 0);
+        assert_eq!(result.library_entries_removed, 0);
+
+        // Cover FailureKind::label() exhaustively — pins user-visible label
+        // strings for every variant (a rename in one variant would fail here).
+        assert_eq!(
+            FailureKind::DistributionSymlink.label(),
+            "Distribution symlinks"
+        );
+        assert_eq!(FailureKind::LibraryDir.label(), "Library entries");
+        assert_eq!(FailureKind::LibrarySymlink.label(), "Library symlinks");
+        assert_eq!(FailureKind::GitCache.label(), "Git cache");
+
+        // Cover FailureKind::ALL — the consumer in lib.rs iterates this.
+        assert_eq!(FailureKind::ALL.len(), 4);
+        assert!(FailureKind::ALL.contains(&FailureKind::DistributionSymlink));
+        assert!(FailureKind::ALL.contains(&FailureKind::LibraryDir));
+        assert!(FailureKind::ALL.contains(&FailureKind::LibrarySymlink));
+        assert!(FailureKind::ALL.contains(&FailureKind::GitCache));
     }
 }
