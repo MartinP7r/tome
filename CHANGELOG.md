@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tome remove` now aggregates partial-cleanup failures and exits non-zero with a distinct `⚠ N operations failed` summary grouped by failure kind (distribution symlinks, library entries, library symlinks, git cache). Previously the command reported success while filesystem artifacts leaked. ([#413](https://github.com/MartinP7r/tome/issues/413))
 - Wizard summary table now aligns correctly in interactive terminals. Previously, the bold ANSI escape codes wrapping header cells (e.g. `\x1b[1mNAME\x1b[0m`) were counted as visible characters by `tabled 0.20`'s default width calculation, inflating header cell widths by 8 columns and misaligning the column dividers with the body rows. Enabled tabled's `ansi` feature so escape sequences are correctly excluded from width measurement.
 
 ## [0.7.0] - 2026-04-23
