@@ -43,24 +43,64 @@ impl RemovePlan {
 }
 
 /// Which cleanup step produced a partial failure.
-#[derive(Debug, PartialEq, Eq)]
+///
+/// Variants are documented by the structural dispatch predicate that emits
+/// them, not by step number — step numbering is implementation detail and
+/// reordering the steps in `execute()` must not require doc edits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureKind {
-    /// Distribution-dir symlink removal (step 1).
-    Symlink,
-    /// Local library directory removal (step 2, non-symlink branch).
+    /// Distribution-dir symlink removal — emitted when `remove_file` fails
+    /// while iterating `plan.symlinks_to_remove`.
+    DistributionSymlink,
+    /// Local library directory removal — emitted by the `remove_dir_all`
+    /// branch of library cleanup (dispatched by `lib_path.is_dir()`).
     LibraryDir,
-    /// Managed-skill library symlink removal (step 2, symlink branch).
+    /// Managed-skill library symlink removal — emitted by the `remove_file`
+    /// branch of library cleanup (dispatched by `lib_path.is_symlink()`).
     LibrarySymlink,
-    /// Git repo cache removal (step 4).
+    /// Git repo cache removal — emitted when `remove_dir_all` fails on the
+    /// plan's `git_cache_path`.
     GitCache,
+}
+
+impl FailureKind {
+    /// All variants, in the order preferred for user-facing grouped output.
+    ///
+    /// Exposed as an associated constant so the `lib.rs` consumer doesn't
+    /// maintain a parallel hand-written array that could silently drop a
+    /// variant when new variants are added.
+    pub(crate) const ALL: [FailureKind; 4] = [
+        FailureKind::DistributionSymlink,
+        FailureKind::LibraryDir,
+        FailureKind::LibrarySymlink,
+        FailureKind::GitCache,
+    ];
+
+    /// Human-readable label used in the grouped failure summary.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            FailureKind::DistributionSymlink => "Distribution symlinks",
+            FailureKind::LibraryDir => "Library entries",
+            FailureKind::LibrarySymlink => "Library symlinks",
+            FailureKind::GitCache => "Git cache",
+        }
+    }
 }
 
 /// A single partial-cleanup failure aggregated from `execute`.
 #[derive(Debug)]
 pub(crate) struct RemoveFailure {
     pub path: PathBuf,
-    pub op: FailureKind,
+    pub kind: FailureKind,
     pub error: std::io::Error,
+}
+
+impl RemoveFailure {
+    /// Construct a RemoveFailure. A single entry point for future invariants
+    /// (e.g., debug-only absolute-path assertions).
+    pub(crate) fn new(kind: FailureKind, path: PathBuf, error: std::io::Error) -> Self {
+        RemoveFailure { kind, path, error }
+    }
 }
 
 /// Result of executing the remove plan.
@@ -228,11 +268,11 @@ pub(crate) fn execute(
         } else {
             match std::fs::remove_file(symlink) {
                 Ok(_) => symlinks_removed += 1,
-                Err(e) => failures.push(RemoveFailure {
-                    path: symlink.clone(),
-                    op: FailureKind::Symlink,
-                    error: e,
-                }),
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::DistributionSymlink,
+                    symlink.clone(),
+                    e,
+                )),
             }
         }
     }
@@ -244,20 +284,20 @@ pub(crate) fn execute(
         } else if lib_path.is_symlink() {
             match std::fs::remove_file(lib_path) {
                 Ok(_) => library_entries_removed += 1,
-                Err(e) => failures.push(RemoveFailure {
-                    path: lib_path.clone(),
-                    op: FailureKind::LibrarySymlink,
-                    error: e,
-                }),
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::LibrarySymlink,
+                    lib_path.clone(),
+                    e,
+                )),
             }
         } else if lib_path.is_dir() {
             match std::fs::remove_dir_all(lib_path) {
                 Ok(_) => library_entries_removed += 1,
-                Err(e) => failures.push(RemoveFailure {
-                    path: lib_path.clone(),
-                    op: FailureKind::LibraryDir,
-                    error: e,
-                }),
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::LibraryDir,
+                    lib_path.clone(),
+                    e,
+                )),
             }
         }
     }
@@ -276,11 +316,11 @@ pub(crate) fn execute(
         } else {
             match std::fs::remove_dir_all(cache_path) {
                 Ok(_) => git_cache_removed = true,
-                Err(e) => failures.push(RemoveFailure {
-                    path: cache_path.clone(),
-                    op: FailureKind::GitCache,
-                    error: e,
-                }),
+                Err(e) => failures.push(RemoveFailure::new(
+                    FailureKind::GitCache,
+                    cache_path.clone(),
+                    e,
+                )),
             }
         }
     }
@@ -425,9 +465,9 @@ mod tests {
         let p = plan("test-source", &config, &paths, &manifest).unwrap();
 
         // Pre-delete the distribution symlink so std::fs::remove_file returns
-        // ENOENT during execute's step 1 loop — forcing a FailureKind::Symlink
-        // push without affecting the library-entry step which should still
-        // succeed.
+        // ENOENT during execute's step 1 loop — forcing a
+        // FailureKind::DistributionSymlink push without affecting the
+        // library-entry step which should still succeed.
         let dist_symlink = tmp.path().join("target").join("my-skill");
         assert_eq!(
             p.symlinks_to_remove.len(),
@@ -439,16 +479,19 @@ mod tests {
 
         let result = execute(&p, &mut config, &mut manifest, false).unwrap();
 
-        // Assert: exactly one Symlink failure, path matches the pre-deleted link.
+        // Assert: exactly one DistributionSymlink failure, path matches.
         assert!(
-            result.failures.iter().any(|f| f.op == FailureKind::Symlink),
-            "expected a FailureKind::Symlink failure, got: {:?}",
+            result
+                .failures
+                .iter()
+                .any(|f| f.kind == FailureKind::DistributionSymlink),
+            "expected a FailureKind::DistributionSymlink failure, got: {:?}",
             result.failures,
         );
         let symlink_failure = result
             .failures
             .iter()
-            .find(|f| f.op == FailureKind::Symlink)
+            .find(|f| f.kind == FailureKind::DistributionSymlink)
             .unwrap();
         assert_eq!(symlink_failure.path, dist_symlink);
 

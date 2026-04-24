@@ -428,26 +428,13 @@ pub fn run(cli: Cli) -> Result<()> {
                     style("`tome doctor`").bold(),
                 );
 
-                use crate::remove::FailureKind;
-                let label = |op: &FailureKind| match op {
-                    FailureKind::Symlink => "Distribution symlinks",
-                    FailureKind::LibraryDir => "Library entries",
-                    FailureKind::LibrarySymlink => "Library symlinks",
-                    FailureKind::GitCache => "Git cache",
-                };
-
-                for kind in [
-                    FailureKind::Symlink,
-                    FailureKind::LibraryDir,
-                    FailureKind::LibrarySymlink,
-                    FailureKind::GitCache,
-                ] {
+                for kind in crate::remove::FailureKind::ALL {
                     let group: Vec<&crate::remove::RemoveFailure> =
-                        result.failures.iter().filter(|f| f.op == kind).collect();
+                        result.failures.iter().filter(|f| f.kind == kind).collect();
                     if group.is_empty() {
                         continue;
                     }
-                    eprintln!("  {} ({}):", label(&kind), group.len());
+                    eprintln!("  {} ({}):", kind.label(), group.len());
                     for f in group {
                         eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
                     }
