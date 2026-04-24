@@ -405,12 +405,59 @@ pub fn run(cli: Cli) -> Result<()> {
             lockfile::save(&lockfile, paths.config_dir())?;
 
             println!(
-                "\n{} Removed directory '{}': {} library entries, {} symlinks",
+                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
                 style("✓").green(),
                 name,
                 result.library_entries_removed,
                 result.symlinks_removed,
+                if result.git_cache_removed {
+                    ", git cache"
+                } else {
+                    ""
+                },
             );
+
+            // Surface partial-cleanup failures (SAFE-01 / #413). On empty
+            // failures the command still returns Ok(()) and behaves as before.
+            if !result.failures.is_empty() {
+                let k = result.failures.len();
+                eprintln!(
+                    "{} {} operations failed — run {}:",
+                    style("⚠").yellow(),
+                    k,
+                    style("`tome doctor`").bold(),
+                );
+
+                use crate::remove::FailureKind;
+                let label = |op: &FailureKind| match op {
+                    FailureKind::Symlink => "Distribution symlinks",
+                    FailureKind::LibraryDir => "Library entries",
+                    FailureKind::LibrarySymlink => "Library symlinks",
+                    FailureKind::GitCache => "Git cache",
+                };
+
+                for kind in [
+                    FailureKind::Symlink,
+                    FailureKind::LibraryDir,
+                    FailureKind::LibrarySymlink,
+                    FailureKind::GitCache,
+                ] {
+                    let group: Vec<&crate::remove::RemoveFailure> = result
+                        .failures
+                        .iter()
+                        .filter(|f| f.op == kind)
+                        .collect();
+                    if group.is_empty() {
+                        continue;
+                    }
+                    eprintln!("  {} ({}):", label(&kind), group.len());
+                    for f in group {
+                        eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+                    }
+                }
+
+                return Err(anyhow::anyhow!("remove completed with {k} failures"));
+            }
         }
         Command::Reassign { skill, to } => {
             let mut manifest = manifest::load(paths.config_dir())?;
