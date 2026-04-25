@@ -47,7 +47,6 @@ Every AI coding tool on a developer's machine shares the same skill library with
 ### Backlog (not in v0.8)
 
 - Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
-- v0.7.1 hotfix (PR #455): tabled ANSI width fix — prerequisite patch release
 - v0.7.2 quick wins (#456 library default derivation, #457 tilde preservation on save) — prereq patch release
 - v0.8.1 hotfix: Phase 8 post-merge findings — partial-failure state window + silent git-skill drop (#461) — H1 is a genuine silent-drop of git-sourced skills from the regenerated lockfile in Remove/Reassign/Fork; H2 is the I2/I3 retention guarantee being voided by post-execute save failures; H3 is wording. Worth a patch release before v0.9.
 - v0.8.x polish: Phase 8 test coverage + wording + dead code (#462) — 5 items from the post-merge review (P1-P5): success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field.
