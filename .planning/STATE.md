@@ -4,7 +4,7 @@ milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: verifying
 stopped_at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
-last_updated: "2026-04-26T12:46:50.602Z"
+last_updated: "2026-04-26T12:51:56.881Z"
 last_activity: 2026-04-26
 progress:
   total_phases: 2
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 08.1 (v0-8-1-hotfix-lockfile-regen-and-save-chain) — EXECUTING
-Plan: 3 of 3
+Phase: 08.1
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-04-26
 
