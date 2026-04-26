@@ -3460,6 +3460,113 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
 
 #[cfg(unix)]
 #[test]
+fn remove_partial_failure_does_not_save_disk_state() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // HOTFIX-02 / #461 H2: with the save chain reordered, a partial-failure
+    // path must NOT mutate config / manifest / lockfile on disk. The user
+    // retains a clean retry surface — no half-saved state. The reorder
+    // guarantees the early-return ⚠ block fires BEFORE config.save /
+    // manifest::save / lockfile::save can run, so on the failure path none
+    // of those files are touched.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    );
+
+    // Prime library + target so there's something to remove.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // Snapshot pre-remove disk state. tome.lock may or may not exist
+    // depending on what `tome sync --no-triage` writes for a non-git
+    // config — tolerate either case (read returns empty Vec on missing,
+    // and the byte-equality check still proves "missing-then-missing").
+    let config_path = tmp.path().join("tome.toml");
+    let manifest_path = tmp.path().join(".tome-manifest.json");
+    let lockfile_path = tmp.path().join("tome.lock");
+
+    let config_before = std::fs::read(&config_path).unwrap_or_default();
+    let manifest_before = std::fs::read(&manifest_path).unwrap_or_default();
+    let lockfile_before = std::fs::read(&lockfile_path).unwrap_or_default();
+
+    // Trigger partial-failure: chmod 0o500 the target dir so step-1 unlink
+    // hits EACCES — execute() lands in the partial-failure path with a
+    // non-empty `failures` Vec.
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let output = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    // Restore permissions BEFORE assertions so TempDir::drop can clean up.
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // 1. CLI exits non-zero.
+    assert!(
+        !output.status.success(),
+        "remove should fail under chmod 0o500, got status: {:?}",
+        output.status,
+    );
+
+    // 2. Stderr has the ⚠ block (proves the moved block fired BEFORE save).
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("⚠"), "missing ⚠ marker in stderr: {stderr}");
+    assert!(
+        stderr.contains("operations failed"),
+        "missing 'operations failed' in stderr: {stderr}"
+    );
+
+    // 3. Disk state is unchanged byte-for-byte (the I2/I3 retention contract
+    //    extended to disk: not just in-memory). If the reorder is reverted,
+    //    config.save / manifest::save / lockfile::save run BEFORE the early
+    //    return and these byte-equality assertions fail.
+    let config_after = std::fs::read(&config_path).unwrap_or_default();
+    let manifest_after = std::fs::read(&manifest_path).unwrap_or_default();
+    let lockfile_after = std::fs::read(&lockfile_path).unwrap_or_default();
+    assert_eq!(
+        config_before, config_after,
+        "tome.toml mutated on partial-failure path (HOTFIX-02 regression)"
+    );
+    assert_eq!(
+        manifest_before, manifest_after,
+        ".tome-manifest.json mutated on partial-failure path (HOTFIX-02 regression)"
+    );
+    assert_eq!(
+        lockfile_before, lockfile_after,
+        "tome.lock mutated on partial-failure path (HOTFIX-02 regression)"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn remove_preserves_git_lockfile_entries() {
     // HOTFIX-01 / #461 H1: the regenerated lockfile after `tome remove` must
     // NOT silently drop git-source-name entries. Before the fix, the handler
