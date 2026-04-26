@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
-status: verifying
+status: executing
 stopped_at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
-last_updated: "2026-04-24T03:44:52.668Z"
-last_activity: 2026-04-24
+last_updated: "2026-04-26T12:20:54.856Z"
+last_activity: 2026-04-26 -- Phase 08.1 execution started
 progress:
   total_phases: 2
   completed_phases: 2
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 08 — safety-refactors-partial-failure-visibility-cross-platform
+**Current focus:** Phase 08.1 — v0-8-1-hotfix-lockfile-regen-and-save-chain
 
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 08
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-24
+Phase: 08.1 (v0-8-1-hotfix-lockfile-regen-and-save-chain) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 08.1
+Last activity: 2026-04-26 -- Phase 08.1 execution started
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
 
@@ -66,6 +66,10 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-03: relocate::plan() now surfaces read_link failures via eprintln warning mirroring PR #448's format verbatim; regression test uses chmod 0o000 + documents Unix platform caveat that is_symlink and read_link share the same parent-search permission (closes #449)
+
+### Roadmap Evolution
+
+- Phase 8.1 inserted after Phase 8 (2026-04-26): v0.8.1 hotfix — lockfile regen + save chain (URGENT). Source: post-merge re-review of PR #460 surfaced 3 correctness/UX findings ([#461](https://github.com/MartinP7r/tome/issues/461)). H1 is a silent-drop regression (git skills omitted from regenerated lockfile in Remove/Reassign/Fork), H2 is the I2/I3 retention guarantee being voided by post-execute save failures, H3 is wording. Worth a patch release before v0.9.
 
 ### Pending Todos
 
