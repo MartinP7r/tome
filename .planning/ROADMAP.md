@@ -89,5 +89,5 @@
 **Source:** [#461](https://github.com/MartinP7r/tome/issues/461)
 **Plans:** 3 plans (Wave 1 → Wave 2 → Wave 3, all touch lib.rs)
   - [x] 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md — `resolved_paths_from_lockfile_cache` helper + replace empty BTreeMap at Remove/Reassign/Fork sites; integration test (HOTFIX-01 / #461 H1)
-  - [ ] 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md — move `if !result.failures.is_empty()` block before save chain in Command::Remove; integration test asserting no disk writes on partial-failure (HOTFIX-02 / #461 H2)
+  - [x] 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md — move `if !result.failures.is_empty()` block before save chain in Command::Remove; integration test asserting no disk writes on partial-failure (HOTFIX-02 / #461 H2)
   - [ ] 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — reword leading line to `Run `tome doctor` after resolving:`; stderr-wording test (HOTFIX-03 / #461 H3)

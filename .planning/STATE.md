@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: executing
-stopped_at: Completed 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md
-last_updated: "2026-04-26T12:33:55.438Z"
+stopped_at: Completed 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md
+last_updated: "2026-04-26T12:41:14.762Z"
 last_activity: 2026-04-26
 progress:
   total_phases: 2
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 08.1 (v0-8-1-hotfix-lockfile-regen-and-save-chain) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-26
 
@@ -69,6 +69,8 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: introduced offline lockfile::resolved_paths_from_lockfile_cache helper (option-(b) lockfile-as-cache) — destructive commands recover git-skill provenance from previous lockfile + on-disk repo cache without network calls
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: integration test asserts on git_commit_sha (not source_name) — bug wipes provenance via lockfile::generate's None-fallback, source_name comes from manifest and survives unrelated removes; uses real local file:// git repo so sync's normal clone/update flow seeds the lockfile offline
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: Note: HOTFIX-01/02/03 are referenced in plan frontmatter and ROADMAP.md but were never added to REQUIREMENTS.md —  is a no-op for these. Track via the phase ROADMAP/SUMMARY artifacts and #461 instead.
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: Command::Remove ⚠ block moved to fire immediately after remove::execute() returns and BEFORE config.save / manifest::save / lockfile regen — ?-propagation in the save chain can no longer mask the I2/I3 retention messaging
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: integration test asserts byte-for-byte equality of tome.toml / .tome-manifest.json / tome.lock pre- vs post-remove under chmod 0o500 partial-failure; tolerates missing tome.lock via unwrap_or_default()
 
 ### Roadmap Evolution
 
@@ -88,6 +90,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-26T12:33:29.701Z
-Stopped at: Completed 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md
+Last session: 2026-04-26T12:41:14.759Z
+Stopped at: Completed 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md
 Resume file: None
