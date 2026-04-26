@@ -3617,7 +3617,10 @@ fn remove_failure_summary_wording() {
 
     std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    assert!(!output.status.success(), "remove should fail under chmod 0o500");
+    assert!(
+        !output.status.success(),
+        "remove should fail under chmod 0o500"
+    );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
 
