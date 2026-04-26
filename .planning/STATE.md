@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
-status: executing
-stopped_at: Completed 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md
-last_updated: "2026-04-26T12:41:14.762Z"
+status: verifying
+stopped_at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
+last_updated: "2026-04-26T12:46:50.602Z"
 last_activity: 2026-04-26
 progress:
   total_phases: 2
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 08.1 (v0-8-1-hotfix-lockfile-regen-and-save-chain) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-04-26
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
@@ -71,6 +71,8 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: Note: HOTFIX-01/02/03 are referenced in plan frontmatter and ROADMAP.md but were never added to REQUIREMENTS.md —  is a no-op for these. Track via the phase ROADMAP/SUMMARY artifacts and #461 instead.
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: Command::Remove ⚠ block moved to fire immediately after remove::execute() returns and BEFORE config.save / manifest::save / lockfile regen — ?-propagation in the save chain can no longer mask the I2/I3 retention messaging
 - [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: integration test asserts byte-for-byte equality of tome.toml / .tome-manifest.json / tome.lock pre- vs post-remove under chmod 0o500 partial-failure; tolerates missing tome.lock via unwrap_or_default()
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: leading eprintln! in Command::Remove ⚠ block reworded — trailing colon now introduces the per-kind listing instead of falsely promising tome doctor output (closes #461 H3); inline reword over terminal-line variant for single-line risk profile
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: integration test asserts on three substrings (positive 'after resolving:', sentinel 'tome doctor', negative 'addressing these. Run `tome doctor`:' absent) under NO_COLOR=1 so styled output renders as plain literal
 
 ### Roadmap Evolution
 
@@ -90,6 +92,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-26T12:41:14.759Z
-Stopped at: Completed 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md
+Last session: 2026-04-26T12:46:50.600Z
+Stopped at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
 Resume file: None
