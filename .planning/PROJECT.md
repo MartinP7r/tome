@@ -151,4 +151,6 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
+*Last updated: 2026-04-26 — Phase 8.1 (v0.8.1 hotfix) complete. Closes #461 H1 (silent-drop regression in lockfile regen — `resolved_paths_from_lockfile_cache` helper restores git-skill provenance to Remove/Reassign/Fork), H2 (save-chain reorder so partial-failure ⚠ block surfaces before save errors), H3 (failure-summary wording). 590 tests passing (464 unit + 126 integration; +9 since v0.8). 2 Linux-runtime verification items still pending in `08-HUMAN-UAT.md`. v0.8.1 ready for `make release VERSION=0.8.1`.*
+
 *Last updated: 2026-04-24 — Phase 8 shipped via PR #460 (squash commit `b884c31` on main). v0.8 milestone complete — 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8. 581 tests passing (458 unit + 123 integration after post-merge PR review added 5 tests). 2 Linux-runtime verification items tracked in `08-HUMAN-UAT.md`. Post-merge review filed follow-up issues #461 (v0.8.1 hotfix candidates), #462 (v0.8.x polish), #463 (v0.9 polish) — see backlog section above.*
