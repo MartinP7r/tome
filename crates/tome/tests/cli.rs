@@ -3458,6 +3458,138 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn remove_preserves_git_lockfile_entries() {
+    // HOTFIX-01 / #461 H1: the regenerated lockfile after `tome remove` must
+    // NOT silently drop git-source-name entries. Before the fix, the handler
+    // passed an empty BTreeMap to discover_all, which `continue`'d for every
+    // git-type directory — wiping their entries from the regenerated lockfile.
+    //
+    // Fixture: a "real" local git repo (file:// URL) holding one skill plus
+    // a separate directory-type "local" source holding another skill. We run
+    // `tome sync` to populate the manifest + lockfile from both sources, then
+    // run `tome remove local` and assert the regenerated lockfile still
+    // contains a `source_name = "myrepo"` entry.
+    let tmp = TempDir::new().unwrap();
+
+    // Set up the directory-type "local" source with one skill.
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "local-skill");
+
+    // Set up a real local git repo to act as the "myrepo" git directory.
+    // Using a file:// URL means `git clone` and `git fetch` work without
+    // network access — sync's resolve_git_directories can clone it normally.
+    let upstream_dir = tmp.path().join("upstream-myrepo.git");
+    std::fs::create_dir_all(&upstream_dir).unwrap();
+    create_skill(&upstream_dir, "git-skill");
+    // Initialize the upstream as a real git repo so `git clone` accepts it.
+    let git_init = |dir: &std::path::Path, args: &[&str]| {
+        StdCommand::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .unwrap();
+    };
+    // `git init -b main` so the initial branch name is stable across host configs.
+    git_init(&upstream_dir, &["init", "-b", "main"]);
+    git_init(&upstream_dir, &["config", "user.email", "test@test.com"]);
+    git_init(&upstream_dir, &["config", "user.name", "Test"]);
+    git_init(&upstream_dir, &["add", "-A"]);
+    git_init(&upstream_dir, &["commit", "-m", "seed"]);
+
+    let dummy_url = format!("file://{}", upstream_dir.display());
+
+    // Config: one Directory + one Git directory.
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\n\
+             path = \"{}\"\n\
+             type = \"directory\"\n\
+             role = \"source\"\n\
+             \n\
+             [directories.myrepo]\n\
+             path = \"{}\"\n\
+             type = \"git\"\n\
+             role = \"source\"\n\
+             branch = \"main\"\n",
+            skills_dir.display(),
+            dummy_url,
+        ),
+    );
+
+    // Sync to populate manifest and lockfile. `--no-triage` avoids the
+    // interactive lockfile diff step on an initial sync.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // Sanity: post-sync lockfile must contain a myrepo entry whose
+    // `git_commit_sha` is populated. The bug doesn't drop the entry by
+    // source_name (that comes from the manifest, which `tome remove` of an
+    // unrelated directory does not touch), but it DOES wipe `git_commit_sha`
+    // because `discover_all` skips git directories when resolved_paths is
+    // empty — so `lockfile::generate` falls back to `(None, None, None)` for
+    // provenance. We assert on `git_commit_sha` to actually exercise the bug.
+    let lockfile_path = tmp.path().join("tome.lock");
+    let lockfile_before: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&lockfile_path).unwrap()).unwrap();
+    let myrepo_sha_before: Option<String> = lockfile_before["skills"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|v| v["source_name"].as_str() == Some("myrepo"))
+        .and_then(|v| v["git_commit_sha"].as_str().map(|s| s.to_string()));
+    assert!(
+        myrepo_sha_before.is_some(),
+        "precondition: post-sync lockfile must contain a myrepo entry with \
+         git_commit_sha set, got: {lockfile_before}"
+    );
+
+    // Now remove the OTHER (directory-type) directory. The regenerated
+    // lockfile MUST keep the myrepo entries' provenance — pre-fix the
+    // git_commit_sha was silently wiped (skill missing from discover →
+    // lockfile::generate falls back to None).
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let lockfile_after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&lockfile_path).unwrap()).unwrap();
+    let myrepo_sha_after: Option<String> = lockfile_after["skills"]
+        .as_object()
+        .unwrap()
+        .values()
+        .find(|v| v["source_name"].as_str() == Some("myrepo"))
+        .and_then(|v| v["git_commit_sha"].as_str().map(|s| s.to_string()));
+    assert_eq!(
+        myrepo_sha_after, myrepo_sha_before,
+        "REGRESSION (#461 H1): lockfile after `tome remove local` lost myrepo \
+         git_commit_sha provenance — git-sourced skills were silently dropped \
+         during regen. Before: {myrepo_sha_before:?}, After: {myrepo_sha_after:?}, \
+         full lockfile: {lockfile_after}"
+    );
+}
+
 // ── tome add integration tests ─────────────────────────────────────
 
 #[test]

@@ -105,7 +105,10 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
 pub(crate) fn resolved_paths_from_lockfile_cache(
     config: &Config,
     paths: &TomePaths,
-) -> (BTreeMap<DirectoryName, (PathBuf, Option<String>)>, Vec<String>) {
+) -> (
+    BTreeMap<DirectoryName, (PathBuf, Option<String>)>,
+    Vec<String>,
+) {
     let mut resolved = BTreeMap::new();
     let mut warnings = Vec::new();
 
@@ -569,7 +572,10 @@ mod tests {
     }
 
     /// Build a `Config` from a list of `(name, DirectoryConfig)` pairs and a library_dir.
-    fn config_with_dirs(library_dir: &std::path::Path, dirs: Vec<(&str, DirectoryConfig)>) -> Config {
+    fn config_with_dirs(
+        library_dir: &std::path::Path,
+        dirs: Vec<(&str, DirectoryConfig)>,
+    ) -> Config {
         let mut config_toml = format!("library_dir = \"{}\"\n", library_dir.display());
         for (name, dc) in &dirs {
             config_toml.push_str(&format!(
@@ -636,13 +642,17 @@ mod tests {
 
         let local_path = tmp.path().join("local-skills");
         std::fs::create_dir_all(&local_path).unwrap();
-        let config = config_with_dirs(paths.library_dir(), vec![
-            ("local", dir_dir_config(&local_path)),
-        ]);
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("local", dir_dir_config(&local_path))],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
         assert!(map.is_empty(), "no git dirs → empty map, got {map:?}");
-        assert!(warnings.is_empty(), "no git dirs → no warnings, got {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "no git dirs → no warnings, got {warnings:?}"
+        );
     }
 
     #[test]
@@ -651,15 +661,19 @@ mod tests {
         let paths = paths_for(tmp.path());
 
         // No tome.lock written. One git directory in config.
-        let config = config_with_dirs(paths.library_dir(), vec![
-            (
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![(
                 "myrepo",
                 git_dir_config("https://example.invalid/foo.git", None),
-            ),
-        ]);
+            )],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
-        assert!(map.is_empty(), "lockfile missing → entry omitted, got {map:?}");
+        assert!(
+            map.is_empty(),
+            "lockfile missing → entry omitted, got {map:?}"
+        );
         assert_eq!(warnings.len(), 1, "expected one warning, got {warnings:?}");
         let w = &warnings[0];
         assert!(
@@ -680,12 +694,13 @@ mod tests {
         // Lockfile present (with a sha for "myrepo") but no cache dir on disk.
         write_lockfile(paths.config_dir(), "myrepo", Some("deadbeef"));
 
-        let config = config_with_dirs(paths.library_dir(), vec![
-            (
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![(
                 "myrepo",
                 git_dir_config("https://example.invalid/foo.git", None),
-            ),
-        ]);
+            )],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
         assert!(
@@ -713,12 +728,16 @@ mod tests {
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
         std::fs::create_dir_all(&cache_dir).unwrap();
 
-        let config = config_with_dirs(paths.library_dir(), vec![
-            ("myrepo", git_dir_config(url, None)),
-        ]);
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("myrepo", git_dir_config(url, None))],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
-        assert!(warnings.is_empty(), "cache present → no warnings, got {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "cache present → no warnings, got {warnings:?}"
+        );
         assert_eq!(map.len(), 1, "expected one entry, got {map:?}");
 
         let key = DirectoryName::new("myrepo").unwrap();
@@ -738,12 +757,16 @@ mod tests {
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
         std::fs::create_dir_all(&cache_dir).unwrap();
 
-        let config = config_with_dirs(paths.library_dir(), vec![
-            ("myrepo", git_dir_config(url, Some("skills"))),
-        ]);
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("myrepo", git_dir_config(url, Some("skills")))],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
-        assert!(warnings.is_empty(), "no warnings expected, got {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected, got {warnings:?}"
+        );
         let key = DirectoryName::new("myrepo").unwrap();
         let (path, _) = map.get(&key).expect("myrepo entry");
         assert_eq!(path, &cache_dir.join("skills"));
@@ -763,16 +786,23 @@ mod tests {
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
         std::fs::create_dir_all(&cache_dir).unwrap();
 
-        let config = config_with_dirs(paths.library_dir(), vec![
-            ("myrepo", git_dir_config(url, None)),
-        ]);
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("myrepo", git_dir_config(url, None))],
+        );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
-        assert!(warnings.is_empty(), "no warnings expected, got {warnings:?}");
+        assert!(
+            warnings.is_empty(),
+            "no warnings expected, got {warnings:?}"
+        );
         let key = DirectoryName::new("myrepo").unwrap();
         let (path, sha) = map.get(&key).expect("myrepo entry");
         assert_eq!(path, &cache_dir);
-        assert!(sha.is_none(), "sha should be None when lockfile has no entry, got {sha:?}");
+        assert!(
+            sha.is_none(),
+            "sha should be None when lockfile has no entry, got {sha:?}"
+        );
     }
 
     #[test]
