@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: executing
-stopped_at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
-last_updated: "2026-04-26T12:20:54.856Z"
-last_activity: 2026-04-26 -- Phase 08.1 execution started
+stopped_at: Completed 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md
+last_updated: "2026-04-26T12:33:55.438Z"
+last_activity: 2026-04-26
 progress:
   total_phases: 2
   completed_phases: 2
@@ -27,9 +27,9 @@ See: .planning/PROJECT.md (updated 2026-04-23)
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
 Phase: 08.1 (v0-8-1-hotfix-lockfile-regen-and-save-chain) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 08.1
-Last activity: 2026-04-26 -- Phase 08.1 execution started
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-26
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
 
@@ -66,6 +66,9 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-03: relocate::plan() now surfaces read_link failures via eprintln warning mirroring PR #448's format verbatim; regression test uses chmod 0o000 + documents Unix platform caveat that is_symlink and read_link share the same parent-search permission (closes #449)
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: introduced offline lockfile::resolved_paths_from_lockfile_cache helper (option-(b) lockfile-as-cache) — destructive commands recover git-skill provenance from previous lockfile + on-disk repo cache without network calls
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: integration test asserts on git_commit_sha (not source_name) — bug wipes provenance via lockfile::generate's None-fallback, source_name comes from manifest and survives unrelated removes; uses real local file:// git repo so sync's normal clone/update flow seeds the lockfile offline
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: Note: HOTFIX-01/02/03 are referenced in plan frontmatter and ROADMAP.md but were never added to REQUIREMENTS.md —  is a no-op for these. Track via the phase ROADMAP/SUMMARY artifacts and #461 instead.
 
 ### Roadmap Evolution
 
@@ -85,6 +88,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-24T02:44:38.468Z
-Stopped at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
+Last session: 2026-04-26T12:33:29.701Z
+Stopped at: Completed 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md
 Resume file: None
