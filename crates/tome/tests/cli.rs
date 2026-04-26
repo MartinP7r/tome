@@ -3567,6 +3567,83 @@ fn remove_partial_failure_does_not_save_disk_state() {
 
 #[cfg(unix)]
 #[test]
+fn remove_failure_summary_wording() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // HOTFIX-03 / #461 H3: the leading line of the partial-failure summary
+    // must end the colon-introduced clause with `after resolving:` (which
+    // introduces the per-kind listing), NOT with `Run `tome doctor`:` (which
+    // falsely promised tome doctor output).
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    );
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let output = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(!output.status.success(), "remove should fail under chmod 0o500");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The new wording is present.
+    assert!(
+        stderr.contains("after resolving:"),
+        "stderr missing reworded fragment 'after resolving:': {stderr}"
+    );
+
+    // The doctor hint is still surfaced (we kept the call-to-action inline).
+    assert!(
+        stderr.contains("tome doctor"),
+        "stderr missing 'tome doctor' hint: {stderr}"
+    );
+
+    // The misleading old wording is gone. With NO_COLOR=1 the styled
+    // `tome doctor` is wrapped in backticks but unstyled, so this literal
+    // pattern matches reliably.
+    assert!(
+        !stderr.contains("addressing these. Run `tome doctor`:"),
+        "stderr still contains old misleading wording 'addressing these. Run `tome doctor`:': {stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn remove_preserves_git_lockfile_entries() {
     // HOTFIX-01 / #461 H1: the regenerated lockfile after `tome remove` must
     // NOT silently drop git-source-name entries. Before the fix, the handler
