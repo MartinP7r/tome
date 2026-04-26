@@ -3,9 +3,9 @@ gsd_state_version: 1.0
 milestone: v0.8
 milestone_name: Wizard UX & Safety Hardening
 status: verifying
-stopped_at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
-last_updated: "2026-04-24T03:44:52.668Z"
-last_activity: 2026-04-24
+stopped_at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
+last_updated: "2026-04-26T12:51:56.881Z"
+last_activity: 2026-04-26
 progress:
   total_phases: 2
   completed_phases: 2
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-23)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 08 — safety-refactors-partial-failure-visibility-cross-platform
+**Current focus:** Phase 08.1 — v0-8-1-hotfix-lockfile-regen-and-save-chain
 
 ## Current Position
 
 Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 08
+Phase: 08.1
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-04-24
+Last activity: 2026-04-26
 
 Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
 
@@ -66,6 +66,17 @@ v0.8-specific decisions (from epic #459):
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
 - [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-03: relocate::plan() now surfaces read_link failures via eprintln warning mirroring PR #448's format verbatim; regression test uses chmod 0o000 + documents Unix platform caveat that is_symlink and read_link share the same parent-search permission (closes #449)
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: introduced offline lockfile::resolved_paths_from_lockfile_cache helper (option-(b) lockfile-as-cache) — destructive commands recover git-skill provenance from previous lockfile + on-disk repo cache without network calls
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: integration test asserts on git_commit_sha (not source_name) — bug wipes provenance via lockfile::generate's None-fallback, source_name comes from manifest and survives unrelated removes; uses real local file:// git repo so sync's normal clone/update flow seeds the lockfile offline
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: Note: HOTFIX-01/02/03 are referenced in plan frontmatter and ROADMAP.md but were never added to REQUIREMENTS.md —  is a no-op for these. Track via the phase ROADMAP/SUMMARY artifacts and #461 instead.
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: Command::Remove ⚠ block moved to fire immediately after remove::execute() returns and BEFORE config.save / manifest::save / lockfile regen — ?-propagation in the save chain can no longer mask the I2/I3 retention messaging
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: integration test asserts byte-for-byte equality of tome.toml / .tome-manifest.json / tome.lock pre- vs post-remove under chmod 0o500 partial-failure; tolerates missing tome.lock via unwrap_or_default()
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: leading eprintln! in Command::Remove ⚠ block reworded — trailing colon now introduces the per-kind listing instead of falsely promising tome doctor output (closes #461 H3); inline reword over terminal-line variant for single-line risk profile
+- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: integration test asserts on three substrings (positive 'after resolving:', sentinel 'tome doctor', negative 'addressing these. Run `tome doctor`:' absent) under NO_COLOR=1 so styled output renders as plain literal
+
+### Roadmap Evolution
+
+- Phase 8.1 inserted after Phase 8 (2026-04-26): v0.8.1 hotfix — lockfile regen + save chain (URGENT). Source: post-merge re-review of PR #460 surfaced 3 correctness/UX findings ([#461](https://github.com/MartinP7r/tome/issues/461)). H1 is a silent-drop regression (git skills omitted from regenerated lockfile in Remove/Reassign/Fork), H2 is the I2/I3 retention guarantee being voided by post-execute save failures, H3 is wording. Worth a patch release before v0.9.
 
 ### Pending Todos
 
@@ -81,6 +92,6 @@ v0.8-specific decisions (from epic #459):
 
 ## Session Continuity
 
-Last session: 2026-04-24T02:44:38.468Z
-Stopped at: Completed 08-03-safe-03-relocate-read-link-warning-PLAN.md
+Last session: 2026-04-26T12:46:50.600Z
+Stopped at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
 Resume file: None

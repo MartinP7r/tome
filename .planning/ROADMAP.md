@@ -80,3 +80,14 @@
 | 6. Display Polish & Docs | v0.7 | 2/2 | Complete | 2026-04-22 |
 | 7. Wizard UX (Greenfield / Brownfield / Legacy) | v0.8 | 4/4 | Complete | 2026-04-23 |
 | 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 0/3 | Planned | — |
+
+### Phase 08.1: v0.8.1 hotfix — lockfile regen + save chain (INSERTED)
+
+**Goal:** Close 3 post-merge findings from #461 — restore git-skill provenance to the regenerated lockfile in Remove/Reassign/Fork (H1, silent-drop regression introduced by Phase 8), reorder the save chain so partial-failure ⚠ block surfaces before save errors propagate (H2), and reword the failure-summary line for clarity (H3).
+**Requirements**: HOTFIX-01 (H1), HOTFIX-02 (H2), HOTFIX-03 (H3)
+**Depends on:** Phase 8
+**Source:** [#461](https://github.com/MartinP7r/tome/issues/461)
+**Plans:** 3/3 plans complete
+  - [x] 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md — `resolved_paths_from_lockfile_cache` helper + replace empty BTreeMap at Remove/Reassign/Fork sites; integration test (HOTFIX-01 / #461 H1)
+  - [x] 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md — move `if !result.failures.is_empty()` block before save chain in Command::Remove; integration test asserting no disk writes on partial-failure (HOTFIX-02 / #461 H2)
+  - [x] 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — reword leading line to `Run `tome doctor` after resolving:`; stderr-wording test (HOTFIX-03 / #461 H3)

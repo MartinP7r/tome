@@ -390,31 +390,21 @@ pub fn run(cli: Cli) -> Result<()> {
             let mut manifest = manifest;
             let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
 
-            // Save updated config
-            config.save(&paths.config_path())?;
-            // Save updated manifest
-            manifest::save(&manifest, paths.config_dir())?;
-            // Regenerate lockfile
-            let mut regen_warnings = Vec::new();
-            let resolved_paths = std::collections::BTreeMap::new();
-            let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-            for w in &regen_warnings {
-                eprintln!("warning: {}", w);
-            }
-            let lockfile = lockfile::generate(&manifest, &skills);
-            lockfile::save(&lockfile, paths.config_dir())?;
-
-            // Surface partial-cleanup failures FIRST so they can't be
-            // hidden by a ✓ success banner above them (scripted callers
-            // keying on stdout miss stderr signals; humans dismiss ⚠
-            // after reading ✓). On full success the success banner below
-            // prints; on partial failure the ⚠ block prints and we
-            // return Err (no success banner).
+            // Surface partial-cleanup failures BEFORE the save chain. If any of
+            // config.save / manifest::save / discover_all / lockfile::save returns
+            // Err, `?` would otherwise propagate and the user would only see a
+            // disk-write error — never the ⚠ block or the I2/I3 retention messaging
+            // ("config entry and manifest retained so you can retry"). Returning
+            // here also means in-memory mutations to `config` and `manifest` are
+            // never persisted on the failure path, which is correct: remove::execute
+            // deliberately leaves them in their pre-mutation state when failures
+            // occur, so the disk state on retry matches the in-memory state.
             if !result.failures.is_empty() {
                 let k = result.failures.len();
                 eprintln!(
                     "{} {} operations failed during remove of '{}' — config entry and \
-                     manifest retained so you can retry after addressing these. Run {}:",
+                     manifest retained so you can retry after addressing these. \
+                     Run {} after resolving:",
                     style("⚠").yellow(),
                     k,
                     name,
@@ -435,6 +425,22 @@ pub fn run(cli: Cli) -> Result<()> {
 
                 return Err(anyhow::anyhow!("remove completed with {k} failures"));
             }
+
+            // Save updated config
+            config.save(&paths.config_path())?;
+            // Save updated manifest
+            manifest::save(&manifest, paths.config_dir())?;
+            // Regenerate lockfile. Recover git-skill provenance offline from
+            // the previous lockfile + on-disk cache so git-type directories
+            // are not silently dropped during regen (#461 H1).
+            let (resolved_paths, mut regen_warnings) =
+                lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
+            let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+            for w in &regen_warnings {
+                eprintln!("warning: {}", w);
+            }
+            let lockfile = lockfile::generate(&manifest, &skills);
+            lockfile::save(&lockfile, paths.config_dir())?;
 
             // Success path — full cleanup completed with no failures.
             println!(
@@ -465,9 +471,12 @@ pub fn run(cli: Cli) -> Result<()> {
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
             if !cli.dry_run {
                 manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync
-                let mut regen_warnings = Vec::new();
-                let resolved_paths = std::collections::BTreeMap::new();
+                // Regenerate lockfile to keep it in sync. Recover git-skill
+                // provenance offline from the previous lockfile + on-disk
+                // cache so git-type directories are not silently dropped
+                // during regen (#461 H1).
+                let (resolved_paths, mut regen_warnings) =
+                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
                 let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
@@ -518,9 +527,12 @@ pub fn run(cli: Cli) -> Result<()> {
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
             if !cli.dry_run {
                 manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync
-                let mut regen_warnings = Vec::new();
-                let resolved_paths = std::collections::BTreeMap::new();
+                // Regenerate lockfile to keep it in sync. Recover git-skill
+                // provenance offline from the previous lockfile + on-disk
+                // cache so git-type directories are not silently dropped
+                // during regen (#461 H1).
+                let (resolved_paths, mut regen_warnings) =
+                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
                 let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
