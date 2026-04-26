@@ -403,7 +403,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 let k = result.failures.len();
                 eprintln!(
                     "{} {} operations failed during remove of '{}' — config entry and \
-                     manifest retained so you can retry after addressing these. Run {}:",
+                     manifest retained so you can retry after addressing these. \
+                     Run {} after resolving:",
                     style("⚠").yellow(),
                     k,
                     name,
