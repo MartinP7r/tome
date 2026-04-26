@@ -101,10 +101,6 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
 ///
 /// Returns `(map, warnings)`. Map values are `(effective_path, Option<git_commit_sha>)`
 /// in the shape `discover::discover_all` requires.
-// `#[allow(dead_code)]` is removed in Task 2 once the three handler call sites
-// in `lib.rs` consume this helper. Kept for the Task-1 atomic commit so clippy
-// doesn't fail on a function that has tests but no production callers yet.
-#[allow(dead_code)]
 #[allow(clippy::type_complexity)] // (BTreeMap, Vec<String>) — matches discover_all's input shape
 pub(crate) fn resolved_paths_from_lockfile_cache(
     config: &Config,

@@ -394,9 +394,11 @@ pub fn run(cli: Cli) -> Result<()> {
             config.save(&paths.config_path())?;
             // Save updated manifest
             manifest::save(&manifest, paths.config_dir())?;
-            // Regenerate lockfile
-            let mut regen_warnings = Vec::new();
-            let resolved_paths = std::collections::BTreeMap::new();
+            // Regenerate lockfile. Recover git-skill provenance offline from
+            // the previous lockfile + on-disk cache so git-type directories
+            // are not silently dropped during regen (#461 H1).
+            let (resolved_paths, mut regen_warnings) =
+                lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
             let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
             for w in &regen_warnings {
                 eprintln!("warning: {}", w);
@@ -465,9 +467,12 @@ pub fn run(cli: Cli) -> Result<()> {
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
             if !cli.dry_run {
                 manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync
-                let mut regen_warnings = Vec::new();
-                let resolved_paths = std::collections::BTreeMap::new();
+                // Regenerate lockfile to keep it in sync. Recover git-skill
+                // provenance offline from the previous lockfile + on-disk
+                // cache so git-type directories are not silently dropped
+                // during regen (#461 H1).
+                let (resolved_paths, mut regen_warnings) =
+                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
                 let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
@@ -518,9 +523,12 @@ pub fn run(cli: Cli) -> Result<()> {
             reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
             if !cli.dry_run {
                 manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync
-                let mut regen_warnings = Vec::new();
-                let resolved_paths = std::collections::BTreeMap::new();
+                // Regenerate lockfile to keep it in sync. Recover git-skill
+                // provenance offline from the previous lockfile + on-disk
+                // cache so git-type directories are not silently dropped
+                // during regen (#461 H1).
+                let (resolved_paths, mut regen_warnings) =
+                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
                 let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
                 for w in &regen_warnings {
                     eprintln!("warning: {}", w);
