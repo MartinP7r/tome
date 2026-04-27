@@ -1,16 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.8
-milestone_name: Wizard UX & Safety Hardening
-status: verifying
-stopped_at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
-last_updated: "2026-04-26T12:51:56.881Z"
-last_activity: 2026-04-26
+milestone: null
+milestone_name: null
+status: between-milestones
+stopped_at: v0.8 milestone shipped (v0.8.1 — 2026-04-27); ready to plan v0.9
+last_updated: "2026-04-27T00:00:00.000Z"
+last_activity: 2026-04-27
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 7
-  completed_plans: 7
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
   percent: 0
 ---
 
@@ -18,28 +18,18 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-23)
+See: .planning/PROJECT.md (updated 2026-04-27)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 08.1 — v0-8-1-hotfix-lockfile-regen-and-save-chain
+**Current focus:** Between milestones — v0.8 shipped, v0.9 not yet planned
 
 ## Current Position
 
-Milestone: v0.8 — Wizard UX & Safety Hardening
-Phase: 08.1
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-26
+Milestone: (none — between milestones)
+Last shipped: v0.8.1 (2026-04-27)
+Next: v0.9 — Cross-Machine Config Portability (epic [#458](https://github.com/MartinP7r/tome/issues/458)) — not yet planned
 
-Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
-
-## Performance Metrics
-
-- Requirements defined: 8 (v1 — 5 WUX + 3 SAFE)
-- Requirements mapped to phases: 8/8 ✓
-- Phases: 2 (Phase 7 WUX, Phase 8 SAFE)
-- Scope anchor: GitHub issue #459 (epic)
-- Prerequisites (not in v0.8): v0.7.1 (PR #455) + v0.7.2 (#456, #457) — both patch releases
+Run `/gsd:new-milestone` to plan v0.9.
 
 ## Accumulated Context
 
@@ -47,51 +37,24 @@ Progress: [░░░░░░░░░░] 0% (roadmap created, plans pending)
 
 Historical decisions are archived in:
 
-- `.planning/PROJECT.md` — rolling Key Decisions table (v0.6 + v0.7)
+- `.planning/PROJECT.md` — rolling Key Decisions table (v0.6 + v0.7 + v0.8)
+- `.planning/milestones/v0.8-ROADMAP.md` — per-phase decisions for v0.8
 - `.planning/milestones/v0.7-ROADMAP.md` — per-phase decisions for v0.7
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 
-v0.8-specific decisions (from epic #459):
+### Pending Todos / Carry-over
 
-- **D-1 (v0.8 scope):** machine.toml path overrides are NOT in v0.8 — deferred to v0.9 because it's a bigger design requiring new schema fields and override-apply timing in the load pipeline.
-- **D-2 (v0.8 scope):** `tome_home` prompt writes XDG config (not `TOME_HOME` env-var injection into shell rc) — XDG file is shell-agnostic and propagates to cron/editor/subshells.
-- **D-3 (v0.8 scope):** Wizard brownfield flow default = "use existing" — safest for the dotfiles-sync workflow the reporter described.
-- **D-4 (v0.8 scope):** Legacy `~/.config/tome/config.toml` detection = warn + offer delete, NOT silent auto-delete — file may contain user-valued data worth manual review.
-- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-04: additive resolve_tome_home_with_source — kept existing resolve_tome_home for non-init call sites; only Command::Init consumes the tagged variant
-- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-03: parse TOML (not substring-match) for legacy-schema detection; graceful no-op on malformed files; interactive default is move-aside (non-destructive backup); --no-input default is leave with stderr note
-- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-01/05: Step 0 gated on matches!(source, TomeHomeSource::Default) && !no_input; custom tome_home persisted to XDG via merge-preserve write; configure_library default derives from <tome_home>/skills; fixed wizard.rs:310 latent bug by using resolve_config_dir(tome_home)
-- [Phase 07-wizard-ux-greenfield-brownfield-legacy]: WUX-02: brownfield decision 4-way dispatch (UseExisting/Edit/Reinit/Cancel); --no-input + invalid config = Cancel (no silent advance); backup_brownfield_config uses copy-not-rename so Cancel-after-backup is safe; prefill union in configure_directories preserves custom dirs through edit (Pitfall 2 fix)
-- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-01: RemoveResult.failures Vec<RemoveFailure> with typed FailureKind enum; Command::Remove surfaces grouped ⚠ K operations failed stderr block and returns Err on partial cleanup failures — exit ≠ 0 (closes #413)
-- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-01: Integration test uses chmod 0o500 (not 0o000 per plan) — 0o000 causes plan() to bail before execute() partial-failure loop runs; 0o500 lets read_dir enumerate but blocks remove_file unlink
-- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: arboard (default-features = false) replaces sh -c | pbcopy; cfg!(target_os = "macos") dispatches open/xdg-open; App.status_message renders ✓/⚠ in status bar until next keypress (closes #414)
-- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-02: glyph-prefix dispatch (starts_with('⚠') → theme.alert; else → theme.accent) reuses existing theme fields; no theme.warning added. Test tolerates both ✓/⚠ prefixes — no trait ClipboardBackend (D-17/D-19 held)
-- [Phase 08-safety-refactors-partial-failure-visibility-cross-platform]: SAFE-03: relocate::plan() now surfaces read_link failures via eprintln warning mirroring PR #448's format verbatim; regression test uses chmod 0o000 + documents Unix platform caveat that is_symlink and read_link share the same parent-search permission (closes #449)
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: introduced offline lockfile::resolved_paths_from_lockfile_cache helper (option-(b) lockfile-as-cache) — destructive commands recover git-skill provenance from previous lockfile + on-disk repo cache without network calls
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-01: integration test asserts on git_commit_sha (not source_name) — bug wipes provenance via lockfile::generate's None-fallback, source_name comes from manifest and survives unrelated removes; uses real local file:// git repo so sync's normal clone/update flow seeds the lockfile offline
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: Note: HOTFIX-01/02/03 are referenced in plan frontmatter and ROADMAP.md but were never added to REQUIREMENTS.md —  is a no-op for these. Track via the phase ROADMAP/SUMMARY artifacts and #461 instead.
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: Command::Remove ⚠ block moved to fire immediately after remove::execute() returns and BEFORE config.save / manifest::save / lockfile regen — ?-propagation in the save chain can no longer mask the I2/I3 retention messaging
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-02: integration test asserts byte-for-byte equality of tome.toml / .tome-manifest.json / tome.lock pre- vs post-remove under chmod 0o500 partial-failure; tolerates missing tome.lock via unwrap_or_default()
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: leading eprintln! in Command::Remove ⚠ block reworded — trailing colon now introduces the per-kind listing instead of falsely promising tome doctor output (closes #461 H3); inline reword over terminal-line variant for single-line risk profile
-- [Phase 08.1-v0-8-1-hotfix-lockfile-regen-and-save-chain]: HOTFIX-03: integration test asserts on three substrings (positive 'after resolving:', sentinel 'tome doctor', negative 'addressing these. Run `tome doctor`:' absent) under NO_COLOR=1 so styled output renders as plain literal
-
-### Roadmap Evolution
-
-- Phase 8.1 inserted after Phase 8 (2026-04-26): v0.8.1 hotfix — lockfile regen + save chain (URGENT). Source: post-merge re-review of PR #460 surfaced 3 correctness/UX findings ([#461](https://github.com/MartinP7r/tome/issues/461)). H1 is a silent-drop regression (git skills omitted from regenerated lockfile in Remove/Reassign/Fork), H2 is the I2/I3 retention guarantee being voided by post-execute save failures, H3 is wording. Worth a patch release before v0.9.
-
-### Pending Todos
-
-- **First:** merge PR #455 + ship v0.7.1 via `make release VERSION=0.7.1`
-- **Then:** ship v0.7.2 patch with #456 + #457 (small scope, could bundle with v0.8 Phase 7 or ship separately)
-- **Then:** `/gsd:plan-phase 7` to decompose the first v0.8 phase (Wizard UX)
-- **Then:** `/gsd:plan-phase 8` for the safety refactors
+- **Linux UAT (v0.8 carry-over):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` — clipboard runtime + xdg-open runtime tests on a Linux desktop. Pending hardware. Run `/gsd:verify-work 08` when on Linux.
+- **v0.8.x polish (#462):** 5 items from Phase 8 post-merge review (success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field). Could ship as a v0.8.x patch.
+- **v0.9 polish (#463):** 6 type design + TUI architecture items from Phase 8 review — natural fit for v0.9 scope.
+- **Pre-existing flake:** `backup::tests::push_and_pull_roundtrip` — passes in isolation, intermittent in full suite. Worth a separate investigation pass.
 
 ### Blockers/Concerns
 
-- `make release VERSION=0.7.1` is user-triggered (not gsd automation) — can happen in parallel with v0.8 phase planning
-- Cross-machine portability (#458) intentionally punted to v0.9 — users needing it before v0.9 can use the manual workaround in epic #459
+- None for v0.9 planning.
 
 ## Session Continuity
 
-Last session: 2026-04-26T12:46:50.600Z
-Stopped at: Completed 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — phase 08.1 complete, v0.8.1 ready for make release
+Last session: 2026-04-27T00:00:00.000Z
+Stopped at: v0.8 milestone archived to milestones/v0.8-ROADMAP.md and milestones/v0.8-REQUIREMENTS.md
 Resume file: None

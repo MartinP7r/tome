@@ -4,7 +4,8 @@
 
 - ✅ **v0.6 Unified Directory Model** — Phases 1-3 (shipped 2026-04-16) — [archive](milestones/v0.6-ROADMAP.md)
 - ✅ **v0.7 Wizard Hardening** — Phases 4-6 (shipped 2026-04-22) — [archive](milestones/v0.7-ROADMAP.md)
-- 🚧 **v0.8 Wizard UX & Safety Hardening** — Phases 7-8 (active since 2026-04-23) — epic [#459](https://github.com/MartinP7r/tome/issues/459)
+- ✅ **v0.8 Wizard UX & Safety Hardening** — Phases 7-8 + 8.1 hotfix (shipped 2026-04-27) — [archive](milestones/v0.8-ROADMAP.md)
+- 📋 **v0.9 Cross-Machine Config Portability** — planned — epic [#458](https://github.com/MartinP7r/tome/issues/458)
 
 ## Phases
 
@@ -30,43 +31,23 @@
 
 </details>
 
-### v0.8 Wizard UX & Safety Hardening
+<details>
+<summary>✅ v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1) — SHIPPED 2026-04-27</summary>
 
-- [x] **Phase 7: Wizard UX (Greenfield / Brownfield / Legacy)** — `tome init` handles new machines, existing configs, and pre-v0.6 cruft without surprises; resolved `tome_home` is surfaced up-front and optionally persisted via XDG config *(completed 2026-04-23)*
-- [ ] **Phase 8: Safety Refactors (Partial-Failure Visibility & Cross-Platform)** — destructive commands surface partial failures; browse UI's external actions work on Linux; silent `fs::read_link(..).ok()` sites are replaced with surfaced warnings
+- [x] Phase 7: Wizard UX — Greenfield / Brownfield / Legacy (4/4 plans) — `tome init` handles new machines, existing configs, and pre-v0.6 cruft without surprises; resolved `tome_home` surfaced up-front and optionally persisted via XDG config (WUX-01/02/03/04/05)
+- [x] Phase 8: Safety Refactors — Partial-Failure Visibility & Cross-Platform (3/3 plans) — `tome remove` aggregates partial-cleanup failures with non-zero exit, `tome browse` works on Linux via `xdg-open` + `arboard`, silent `read_link().ok()` drops replaced with stderr warnings (SAFE-01/02/03)
+- [x] Phase 8.1: v0.8.1 hotfix — lockfile regen + save chain (3/3 plans) — `resolved_paths_from_lockfile_cache` helper restores git-skill provenance after Remove/Reassign/Fork (H1), `Command::Remove` save chain reordered to surface partial-failure ⚠ block before save errors (H2), failure-summary wording reworded (H3)
 
-## Phase Details
+**Released as:** v0.8.0 (2026-04-26) + v0.8.1 hotfix (2026-04-27)
+**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard / xdg-open) — accepted as carry-over pending Linux desktop hardware
 
-### Phase 7: Wizard UX (Greenfield / Brownfield / Legacy)
-**Goal**: `tome init` behaves predictably on any machine state — fresh install, dotfiles-synced home, or pre-v0.6 cruft — and tells the user which `tome_home` it is about to populate
-**Depends on**: Phase 6 (v0.7 Wizard Hardening shipped — `Config::save_checked` and `--no-input` plumbing are prerequisites)
-**Requirements**: WUX-01, WUX-02, WUX-03, WUX-04, WUX-05
-**Success Criteria** (what must be TRUE):
-  1. User running `tome init` on a greenfield machine (no `TOME_HOME`, no XDG config, no existing `.tome/tome.toml`) sees a prompt to choose `tome_home` with `~/.tome/` as the default and a custom-path option that is validated before the wizard proceeds
-  2. User running `tome init` on a brownfield machine (existing `tome.toml` at the resolved `tome_home`) sees a summary of the detected config (directory count, library_dir, last-modified date) and can choose **use existing** (default), **edit existing**, **reinitialize** (with backup), or **cancel** — no path silently overwrites a valid config
-  3. User with a legacy pre-v0.6 `~/.config/tome/config.toml` (contains `[[sources]]` or `[targets.*]`) sees a warning that the file is ignored by current tome and is offered a delete-or-move-aside action — no silent ignore, no auto-delete
-  4. Every `tome init` invocation prints a 1-line "resolved tome_home: <path>" info message before Step 1 prompts, so the user can abort immediately if the wrong path is about to be populated
-  5. When the user selects a custom `tome_home` in the greenfield flow, wizard offers to persist the choice by writing `~/.config/tome/config.toml` with a `tome_home = "..."` field; subsequent `tome sync` / `tome status` invocations find it without `TOME_HOME` env var
-**Plans**: 4 plans
-  - [x] 07-01-wux-04-resolved-tome-home-info-PLAN.md — print resolved tome_home + source label at start of tome init (WUX-04)
-  - [x] 07-02-wux-03-legacy-config-detection-PLAN.md — MachineState + has_legacy_sections + legacy cleanup handler (WUX-03)
-  - [x] 07-03-wux-01-05-tome-home-prompt-PLAN.md — Step 0 greenfield tome_home prompt + XDG persist (WUX-01, WUX-05)
-  - [x] 07-04-wux-02-brownfield-decision-PLAN.md — 4-way brownfield decision + prefill plumbing (WUX-02)
-**UI hint**: yes
+</details>
 
-### Phase 8: Safety Refactors (Partial-Failure Visibility & Cross-Platform)
-**Goal**: Destructive commands cannot report success while partial cleanup failed; browse UI's external actions work on Linux; silent `.ok()` drops on symlink reads are replaced with surfaced warnings
-**Depends on**: Phase 7 (independent changesets, but keeping linear ordering simplifies branch strategy and release cut)
-**Requirements**: SAFE-01, SAFE-02, SAFE-03
-**Success Criteria** (what must be TRUE):
-  1. User running `tome remove <name>` in a state where some symlinks/dirs cannot be cleaned (permissions, missing files) sees a distinct "⚠ N operations failed" summary with per-item detail and the command exits non-zero — the clean success path remains quiet as before
-  2. User on Linux pressing the `open` action in `tome browse` has the skill opened via `xdg-open` (and `copy path` via `wl-copy`/`xclip` or an equivalent cross-platform clipboard crate); any failure appears in the TUI status bar instead of being silently discarded by `let _ = ...`
-  3. User running `tome relocate` (or any command transiting the patched `fs::read_link(..).ok()` sites) sees a stderr warning when a symlink cannot be read, with enough context (path + error) to diagnose — the command no longer silently records "no provenance" on such failures
-  4. `cargo test` covers the new `RemoveResult` aggregation (including a partial-failure case) and the Linux-path branches of the browse action dispatcher (under `#[cfg(target_os = "linux")]` or via platform-agnostic abstractions)
-**Plans**: 3 plans
-  - [x] 08-01-safe-01-remove-partial-failure-aggregation-PLAN.md — RemoveResult aggregates per-loop FailureKind records; lib.rs Command::Remove surfaces grouped '⚠ K operations failed' summary + exits non-zero (SAFE-01 / #413)
-  - [x] 08-02-safe-02-browse-cross-platform-status-bar-PLAN.md — arboard clipboard + cfg!-dispatched open/xdg-open + App.status_message rendered in browse status bar (SAFE-02 / #414)
-  - [x] 08-03-safe-03-relocate-read-link-warning-PLAN.md — relocate.rs:93 explicit match + eprintln warning mirroring PR #448 pattern (SAFE-03 / #449)
+### v0.9 Cross-Machine Config Portability (Planned)
+
+Epic: [#458](https://github.com/MartinP7r/tome/issues/458) — `machine.toml` path overrides for cross-machine portability.
+
+Phases TBD — run `/gsd:new-milestone` to plan v0.9.
 
 ## Progress
 
@@ -79,15 +60,5 @@
 | 5. Wizard Test Coverage | v0.7 | 4/4 | Complete | 2026-04-20 |
 | 6. Display Polish & Docs | v0.7 | 2/2 | Complete | 2026-04-22 |
 | 7. Wizard UX (Greenfield / Brownfield / Legacy) | v0.8 | 4/4 | Complete | 2026-04-23 |
-| 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 0/3 | Planned | — |
-
-### Phase 08.1: v0.8.1 hotfix — lockfile regen + save chain (INSERTED)
-
-**Goal:** Close 3 post-merge findings from #461 — restore git-skill provenance to the regenerated lockfile in Remove/Reassign/Fork (H1, silent-drop regression introduced by Phase 8), reorder the save chain so partial-failure ⚠ block surfaces before save errors propagate (H2), and reword the failure-summary line for clarity (H3).
-**Requirements**: HOTFIX-01 (H1), HOTFIX-02 (H2), HOTFIX-03 (H3)
-**Depends on:** Phase 8
-**Source:** [#461](https://github.com/MartinP7r/tome/issues/461)
-**Plans:** 3/3 plans complete
-  - [x] 08.1-01-hotfix-01-lockfile-regen-resolved-paths-PLAN.md — `resolved_paths_from_lockfile_cache` helper + replace empty BTreeMap at Remove/Reassign/Fork sites; integration test (HOTFIX-01 / #461 H1)
-  - [x] 08.1-02-hotfix-02-remove-save-chain-reorder-PLAN.md — move `if !result.failures.is_empty()` block before save chain in Command::Remove; integration test asserting no disk writes on partial-failure (HOTFIX-02 / #461 H2)
-  - [x] 08.1-03-hotfix-03-failure-summary-reword-PLAN.md — reword leading line to `Run `tome doctor` after resolving:`; stderr-wording test (HOTFIX-03 / #461 H3)
+| 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 3/3 | Complete | 2026-04-24 |
+| 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
