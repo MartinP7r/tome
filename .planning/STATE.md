@@ -44,7 +44,6 @@ Historical decisions are archived in:
 
 ### Pending Todos / Carry-over
 
-- **Open Dependabot PR (#466):** dependency-group bump — clap 4.6.0→4.6.1, clap_complete 4.6.1→4.6.2, assert_cmd 2.2.0→2.2.1. All CI checks pass, MERGEABLE/CLEAN. Routine maintenance — merge at user discretion (squash). Not blocking v0.9 planning.
 - **Linux UAT (v0.8 carry-over):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` — clipboard runtime + xdg-open runtime tests on a Linux desktop. Pending hardware. Run `/gsd:verify-work 08` when on Linux.
 - **v0.8.x polish (#462):** 5 items from Phase 8 post-merge review (success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field). Could ship as a v0.8.x patch.
 - **v0.9 polish (#463):** 6 type design + TUI architecture items from Phase 8 review — natural fit for v0.9 scope.
