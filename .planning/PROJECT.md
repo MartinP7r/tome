@@ -100,17 +100,21 @@ v0.8 milestone complete — Wizard UX & Safety Hardening. 8 requirements shipped
 
 **Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) pending Linux desktop hardware. Accepted as carry-over.
 
-## Next Milestone Goals
+## Current Milestone: v0.9 Cross-Machine Config Portability & Polish
 
-**v0.9 Cross-Machine Config Portability** — epic [#458](https://github.com/MartinP7r/tome/issues/458)
+**Goal:** A single `tome.toml` checked into dotfiles can be applied across machines with different filesystem layouts — without manual edits per machine. Bundled with two polish backlogs (#462, #463) to clear the v0.8 review tail in one cut.
 
-Primary driver: `machine.toml` path overrides so the same `tome.toml` can be checked into dotfiles and applied across machines with different `~/.tome` layouts. Larger design — new schema fields + override-apply timing in the load pipeline. Intentionally deferred from v0.8.
+**Target features:**
+- **Cross-machine portability** ([#458](https://github.com/MartinP7r/tome/issues/458)) — `machine.toml` path overrides allow per-machine remapping of directory paths so the same `tome.toml` is portable across machines. New schema fields + override-apply timing in the config load pipeline.
+- **Type design + TUI architecture polish** ([#463](https://github.com/MartinP7r/tome/issues/463)) — 6 items from the Phase 8 post-merge review: StatusMessage type redesign, `.status()` TUI blocking, clipboard auto-retry, `FailureKind::ALL` compile-enforcement, `RemoveFailure::new` justification, arboard drift hygiene.
+- **Test coverage + wording + dead code polish** ([#462](https://github.com/MartinP7r/tome/issues/462)) — 5 items from the same review: success-banner-absence assertion, retry e2e test, `ViewSource .status()` middle-branch coverage, regen-warning ordering, dead `source_path` field cleanup.
 
-Secondary candidates (from v0.8 post-merge review):
-- v0.9 polish (#463): 6 type design + TUI architecture items from Phase 8 review
-- v0.8.x polish (#462): 5 test coverage + wording + dead code items — could ship as a v0.8.x patch instead
+**Scope anchor:** Epic [#458](https://github.com/MartinP7r/tome/issues/458) (primary) + #462/#463 (carry-over from v0.8 post-merge review).
 
-Run `/gsd:new-milestone` to plan v0.9.
+**Key context:**
+- Bare-slug expansion in `tome add` (PR #471) merged to main 2026-04-27; ships with v0.9 (no v0.8.2 patch release planned).
+- Single-user constraint still holds — no migration tooling; users with existing `tome.toml` get explicit migration docs if schema changes.
+- Cross-machine portability has been intentionally deferred since v0.8 epic #459 because the design needs new schema fields + override-apply timing — a bigger lift than fits a single phase.
 
 <details>
 <summary>Previous milestones (recap)</summary>
@@ -175,4 +179,6 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-27 after v0.8 milestone — v0.8.1 shipped via cargo-dist (commits e13eb31 + 231e52d on main). v0.8 milestone archived: 8 v0.8 requirements (WUX-01..05 + SAFE-01..03) + 3 v0.8.1 hotfix requirements (HOTFIX-01..03) shipped across Phases 7, 8, and 8.1. 590 tests passing (464 unit + 126 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` accepted as carry-over pending hardware. Ready for v0.9 (cross-machine config portability, #458).*
+*Last updated: 2026-04-28 — v0.9 milestone started. Goal: cross-machine config portability (#458) bundled with #463 (type design + TUI architecture polish, 6 items) and #462 (test coverage + dead code polish, 5 items) from the v0.8 post-merge review. Bare-slug `tome add` improvement (PR #471, merged 2026-04-27) ships with v0.9 — no v0.8.2 patch release planned.*
+
+*Last updated: 2026-04-27 after v0.8 milestone — v0.8.1 shipped via cargo-dist (commits e13eb31 + 231e52d on main). v0.8 milestone archived: 8 v0.8 requirements (WUX-01..05 + SAFE-01..03) + 3 v0.8.1 hotfix requirements (HOTFIX-01..03) shipped across Phases 7, 8, and 8.1. 590 tests passing (464 unit + 126 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` accepted as carry-over pending hardware.*
