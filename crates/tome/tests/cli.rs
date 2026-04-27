@@ -3953,9 +3953,10 @@ fn test_add_expands_bare_github_slug() {
 
 #[test]
 fn test_add_dry_run_shows_expanded_slug() {
-    // The dry-run output must show what would be stored — i.e. the
-    // expanded URL, not the bare slug. Otherwise users see "Would add
-    // (git: foo/bar)" and can't tell if expansion happened.
+    // Dry-run with a bare slug must (a) print the expanded URL so the
+    // user can confirm the rewrite, and (b) leave the config on disk
+    // untouched — same contract as `test_add_dry_run` but for the slug
+    // path, since slug expansion is a separate code branch.
     let tmp = TempDir::new().unwrap();
     let config_path = tmp.path().join("tome.toml");
     std::fs::write(&config_path, "").unwrap();
@@ -3975,6 +3976,81 @@ fn test_add_dry_run_shows_expanded_slug() {
         .stdout(predicate::str::contains(
             "https://github.com/planetscale/database-skills",
         ));
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !config_content.contains("[directories"),
+        "dry run should not modify config (slug path): {config_content}"
+    );
+}
+
+#[test]
+fn test_add_bare_slug_with_name_override() {
+    // `--name` skips extract_repo_name, but the slug still has to
+    // expand. This test pins the order: normalize_url runs before the
+    // name-or-extract decision, so the stored path is the expanded URL
+    // regardless of where the directory name comes from.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "planetscale/database-skills",
+            "--name",
+            "ps-db",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config_content.contains("[directories.ps-db]"),
+        "user-supplied --name must win: {config_content}"
+    );
+    assert!(
+        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        "slug must still be expanded when --name is set: {config_content}"
+    );
+}
+
+#[test]
+fn test_add_bare_slug_with_branch_flag() {
+    // The slug flow must coexist with --branch (and by extension --tag,
+    // --rev). Stored config should have both the expanded URL AND the
+    // branch field, written into the same directory section.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "planetscale/database-skills",
+            "--branch",
+            "main",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        "expanded URL not in config: {config_content}"
+    );
+    assert!(
+        config_content.contains("branch = \"main\""),
+        "branch field not in config: {config_content}"
+    );
 }
 
 // ── tome reassign integration tests ────────────────────────────────

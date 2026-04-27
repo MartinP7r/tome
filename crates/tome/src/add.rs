@@ -14,13 +14,23 @@ use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryType};
 ///
 /// Anything that already looks like a URL (contains `://` or starts with
 /// `git@`) is returned unchanged. A string matching `<owner>/<repo>` where
-/// both segments are non-empty and contain only `[A-Za-z0-9._-]` is
-/// rewritten to `https://github.com/<owner>/<repo>` (preserving any
-/// `.git` suffix).
+/// both segments are non-empty, neither is `.` or `..`, and each contains
+/// only `[A-Za-z0-9._-]` is rewritten to `https://github.com/<owner>/<repo>`.
+/// Anything else passes through verbatim and is left for `git clone` to
+/// reject downstream.
 ///
-/// This is a one-shot QoL for the common `org/repo` copy-paste pattern.
-/// It does not touch local paths, gist URLs, or non-GitHub forges — those
-/// must still be passed as full URLs.
+/// This is a syntactic shape check, not a GitHub-validity check. Inputs
+/// like `-foo/bar` (leading hyphen) or `owner/.git` pass the shape check
+/// and will be expanded; the resulting URL fails at clone time, same as
+/// any other malformed reference. The narrow heuristic is intentional:
+/// false-negatives (URL not expanded, user has to paste the full thing)
+/// are easier to recover from than false-positives (path silently
+/// rewritten to a wrong clone target).
+///
+/// **Two-segment relative paths are ambiguous.** A directory like `src/foo`
+/// has the same shape as a slug — the helper cannot tell them apart and
+/// will expand it. Pass `./src/foo` to disambiguate (the leading `./` is
+/// rejected by the `.` segment check).
 fn normalize_url(input: &str) -> String {
     if input.contains("://") || input.starts_with("git@") {
         return input.to_string();
@@ -96,9 +106,7 @@ pub(crate) struct AddOptions<'a> {
 /// This is config-only — no sync is triggered. The user should run `tome sync`
 /// afterwards to clone the repo and discover skills.
 pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
-    // Bare `owner/repo` slugs expand to full GitHub HTTPS URLs so users
-    // can paste the slug from the address bar without ceremony. The
-    // stored URL must be the expanded form — git clone won't resolve
+    // The stored URL must be the expanded form — git clone won't resolve
     // bare slugs on its own.
     let resolved_url = normalize_url(opts.url);
 
@@ -258,9 +266,9 @@ mod tests {
     }
 
     #[test]
-    fn normalize_url_leaves_relative_path_with_dotdot_unchanged() {
-        // `../foo/bar` has 3 segments → length check rejects it. Kept
-        // for completeness; the dangerous case is below.
+    fn normalize_url_leaves_three_segment_relative_path_unchanged() {
+        // 3 segments → length check rejects it. The dangerous case (where
+        // the `.`/`..` sentinel actually does the work) is below.
         let input = "../some/path";
         assert_eq!(normalize_url(input), input);
     }
