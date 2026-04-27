@@ -33,25 +33,28 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ `tome reassign` / `tome fork` — change skill provenance — v0.6
 - ✓ Browse TUI polish (theming, scrollbar, fuzzy highlighting, markdown preview) — v0.6
 
-### Active (v0.8)
+### Validated in v0.8
 
-- [x] **WUX-01** Wizard prompts for `tome_home` on greenfield (#453) — *Validated in Phase 7 (2026-04-23)*
-- [x] **WUX-02** Wizard detects existing `.tome/` config (brownfield: use / edit / reinitialize) (#453) — *Validated in Phase 7 (2026-04-23)*
-- [x] **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup (#453) — *Validated in Phase 7 (2026-04-23)*
-- [x] **WUX-04** Wizard prints resolved `tome_home` up-front as info line (#453) — *Validated in Phase 7 (2026-04-23)*
-- [x] **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write (#453) — *Validated in Phase 7 (2026-04-23)*
-- [x] **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413) — *Validated in Phase 8 (2026-04-24)*
-- [x] **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414) — *Validated in Phase 8 (2026-04-24); Linux runtime behavior flagged in 08-HUMAN-UAT.md for hands-on verification*
-- [x] **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449) — *Validated in Phase 8 (2026-04-24)*
+- ✓ **WUX-01** Wizard prompts for `tome_home` on greenfield — Phase 7 (2026-04-23)
+- ✓ **WUX-02** Wizard detects existing `.tome/` config (brownfield: use / edit / reinitialize) — Phase 7 (2026-04-23)
+- ✓ **WUX-03** Wizard detects legacy `~/.config/tome/config.toml` pre-v0.6 file and offers cleanup — Phase 7 (2026-04-23)
+- ✓ **WUX-04** Wizard prints resolved `tome_home` up-front as info line — Phase 7 (2026-04-23)
+- ✓ **WUX-05** Wizard offers to persist custom `tome_home` via XDG config write — Phase 7 (2026-04-23)
+- ✓ **SAFE-01** `remove::execute` aggregates partial-cleanup failures and surfaces them (#413) — Phase 8 (2026-04-24)
+- ✓ **SAFE-02** Browse UI `open` and `copy path` actions work on Linux (#414) — Phase 8 (2026-04-24); Linux runtime behavior flagged in `08-HUMAN-UAT.md` for hands-on verification (carry-over)
+- ✓ **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449) — Phase 8 (2026-04-24)
+- ✓ **HOTFIX-01/02/03** v0.8.1 hotfix — lockfile regen + save chain reorder + wording (#461) — Phase 8.1 (2026-04-27)
 
-### Backlog (not in v0.8)
+### Active (next milestone)
 
-- Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
-- v0.7.2 quick wins (#456 library default derivation, #457 tilde preservation on save) — prereq patch release
-- v0.8.1 hotfix: Phase 8 post-merge findings — partial-failure state window + silent git-skill drop (#461) — H1 is a genuine silent-drop of git-sourced skills from the regenerated lockfile in Remove/Reassign/Fork; H2 is the I2/I3 retention guarantee being voided by post-execute save failures; H3 is wording. Worth a patch release before v0.9.
+- [ ] Cross-machine config portability via `machine.toml` path overrides (#458) — primary v0.9 driver
+
+### Backlog (deferred)
+
 - v0.8.x polish: Phase 8 test coverage + wording + dead code (#462) — 5 items from the post-merge review (P1-P5): success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field.
 - v0.9 polish: Phase 8 type design + TUI architecture (#463) — 6 items (D1-D6): .status() TUI blocking, StatusMessage type redesign, clipboard auto-retry, FailureKind::ALL compile-enforcement, RemoveFailure::new justification, arboard drift hygiene.
-- v0.9 scope: cross-machine config portability via machine.toml path overrides (#458)
+- Linux runtime UAT carry-over from v0.8: 2 items in `08-HUMAN-UAT.md` (clipboard + xdg-open) — pending Linux desktop hardware
+- Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
 - Pre-existing flaky test: `backup::tests::push_and_pull_roundtrip` — passes in isolation, intermittent in full suite. Worth a separate investigation pass.
 
 ### Validated in v0.7
@@ -82,27 +85,41 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 *v0.7 hardening deliverables:* (a) `Config::validate()` path-overlap checks (Phase 4), (b) `Config::save_checked` with TOML round-trip (Phase 4), (c) `--no-input` plumbing (Phase 5), (d) unit + integration test coverage for pure wizard helpers (Phase 5), (e) 12-combo validation matrix (Phase 5), (f) `tabled` summary migration (Phase 6).
 
-## Current Milestone: v0.8 Wizard UX & Safety Hardening
+## Current State
 
-**Goal:** Close the new-machine / dotfiles-sync UX gap on the wizard and address the P0 safety refactors from the v0.7 whole-codebase review that didn't fit in the v0.7.1 hotfix.
+**Shipped:** v0.8.1 (2026-04-27)
 
-**Target features:**
-- Wizard prompts for `tome_home` on new machines; detects existing `.tome/` configs and offers use / edit / reinitialize flows (brownfield support)
-- Wizard surfaces the resolved `tome_home` up-front and offers to persist via XDG config (`~/.config/tome/config.toml`)
-- Wizard detects and cleans up the legacy pre-v0.6 `~/.config/tome/config.toml` file (silent ignore is a footgun)
-- `remove::execute` aggregates partial-cleanup failures and reports them — no more silent "success" when symlinks fail to delete
-- Browse UI's `open` and `copy path` actions work cross-platform (currently macOS-only with silent no-op on Linux)
-- `relocate.rs` surfaces `fs::read_link` failures instead of silently dropping them
+v0.8 milestone complete — Wizard UX & Safety Hardening. 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8, plus the v0.8.1 hotfix (HOTFIX-01..03 across Phase 8.1) closing 3 post-merge findings from #461. Archive: [`milestones/v0.8-ROADMAP.md`](milestones/v0.8-ROADMAP.md).
 
-**Scope anchor:** Epic issue [#459](https://github.com/MartinP7r/tome/issues/459)
+**Highlights:**
+- Wizard handles greenfield, brownfield, and legacy machine states — no more silent overwrites or default-path footguns
+- `tome remove` aggregates partial-cleanup failures with grouped stderr summary + non-zero exit; save chain reordered so retention messaging surfaces before save errors
+- `tome browse` `open` + `copy path` work on Linux (`xdg-open` + `arboard`), with success/failure surfacing in TUI status bar
+- `relocate.rs` surfaces `read_link` failures instead of silently dropping
+- Lockfile regen for `tome remove`/`reassign`/`fork` no longer silently drops git-sourced skills
 
-**Key context:**
-- v0.7.1 (tabled ANSI width hotfix) and v0.7.2 (library_dir default + tilde preservation, #456/#457) are patch cuts that precede this milestone
-- v0.9 will tackle cross-machine config portability via machine.toml path overrides (#458) — larger design, intentionally deferred
+**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) pending Linux desktop hardware. Accepted as carry-over.
 
-### Shipped in v0.7 (1-line recap)
+## Next Milestone Goals
 
-v0.7 Wizard Hardening — 8 requirements (WHARD-01..08) across Phases 4-6, shipped 2026-04-22. Archive: [`milestones/v0.7-ROADMAP.md`](milestones/v0.7-ROADMAP.md). Wizard now refuses invalid configs at save time; 525 tests passing; summary renders via `tabled` with rounded borders.
+**v0.9 Cross-Machine Config Portability** — epic [#458](https://github.com/MartinP7r/tome/issues/458)
+
+Primary driver: `machine.toml` path overrides so the same `tome.toml` can be checked into dotfiles and applied across machines with different `~/.tome` layouts. Larger design — new schema fields + override-apply timing in the load pipeline. Intentionally deferred from v0.8.
+
+Secondary candidates (from v0.8 post-merge review):
+- v0.9 polish (#463): 6 type design + TUI architecture items from Phase 8 review
+- v0.8.x polish (#462): 5 test coverage + wording + dead code items — could ship as a v0.8.x patch instead
+
+Run `/gsd:new-milestone` to plan v0.9.
+
+<details>
+<summary>Previous milestones (recap)</summary>
+
+- v0.6 Unified Directory Model (Phases 1-3, shipped 2026-04-16) — `[directories.*]` BTreeMap config, git sources, per-directory selection, `tome add`/`remove`/`reassign`/`fork`, browse TUI polish
+- v0.7 Wizard Hardening (Phases 4-6, shipped 2026-04-22) — `Config::validate()` Conflict+Why+Suggestion errors, `Config::save_checked` round-trip, `--no-input` plumbing, 12-combo matrix test, `tabled` summary
+- v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1 hotfix, shipped 2026-04-27) — wizard greenfield/brownfield/legacy flows, partial-failure visibility, cross-platform browse, lockfile regen safety
+
+</details>
 
 ### Out of Scope
 
@@ -114,9 +131,9 @@ v0.7 Wizard Hardening — 8 requirements (WHARD-01..08) across Phases 4-6, shipp
 
 ## Context
 
-tome is at Cargo.toml `0.6.2` pending the v0.7.0 release cut. Codebase: ~21.8k lines of Rust across 20+ source modules in a single crate. v0.6 introduced the unified directory model; v0.7 hardened the wizard surface around it.
+tome is at Cargo.toml `0.8.1` (released 2026-04-27 via cargo-dist). Codebase: ~25.2k lines of Rust across 20+ source modules in a single crate. v0.6 introduced the unified directory model; v0.7 hardened the wizard surface; v0.8 closed the new-machine/dotfiles-sync UX gap and shipped partial-failure visibility + cross-platform browse actions.
 
-The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS. 525 tests total (417 unit + 108 integration).
+The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS. 590 tests total (464 unit + 126 integration as of v0.8.1).
 
 Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git). `Config::save_checked` enforces expand → `validate()` → TOML round-trip → write; no invalid config can reach disk.
 
@@ -145,12 +162,17 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 | TOML round-trip byte-equality over `PartialEq` (v0.7 Phase 4) | Avoids deriving PartialEq cascade across all config types; compares emitted strings | ✓ Good — `Config::save_checked` enforces in ~20 lines |
 | `--no-input` flag over separate non-interactive binary (v0.7 Phase 5) | One wizard, two modes — integration tests drive the same code path users run | ✓ Good — 12-combo matrix test possible because of this |
 | `tabled` `Style::rounded()` for wizard summary, `Style::blank()` stays for `tome status` (v0.7 Phase 6) | Ceremonial one-shot summary deserves visual weight; repeated inspection wants lightweight | ✓ Good — matching pattern not required |
+| Brownfield default = "use existing" (v0.8 Phase 7 / WUX-02) | Safest for the dotfiles-sync workflow that triggered v0.8; never silently overwrites a valid config | ✓ Good — `--no-input` defaults to use-existing too |
+| Legacy config: warn + offer delete, not silent auto-delete (v0.8 Phase 7 / WUX-03) | File may contain user-valued data worth manual review | ✓ Good |
+| `tome_home` prompt writes XDG config, not `TOME_HOME` env-var injection (v0.8 Phase 7 / WUX-05 / D-2) | XDG file is shell-agnostic; propagates to cron/editor/subshells | ✓ Good |
+| `arboard` (default-features = false) for cross-platform clipboard (v0.8 Phase 8 / SAFE-02) | Replaces `sh -c \| pbcopy` command-injection vector; no `image` crate in dep tree | ✓ Good — Linux runtime carry-over flagged in HUMAN-UAT |
+| Glyph-prefix dispatch (✓ → `theme.accent`, ⚠ → `theme.alert`) for status bar (v0.8 Phase 8 / SAFE-02) | Reuses existing theme fields; no new `theme.warning` needed | ✓ Good |
+| Lockfile-as-cache for offline resolved-paths recovery (v0.8.1 Phase 8.1 / HOTFIX-01) | Reads previous lockfile + on-disk repo cache; no `git fetch` from destructive commands; per-directory warnings replace silent skip | ✓ Good — closes #461 H1 silent-drop regression |
+| `if !result.failures.is_empty()` block fires before save chain in `Command::Remove` (v0.8.1 Phase 8.1 / HOTFIX-02) | Save-chain `?` propagation was masking the I2/I3 retention messaging on disk-write errors | ✓ Good — closes #461 H2 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-26 — Phase 8.1 (v0.8.1 hotfix) complete. Closes #461 H1 (silent-drop regression in lockfile regen — `resolved_paths_from_lockfile_cache` helper restores git-skill provenance to Remove/Reassign/Fork), H2 (save-chain reorder so partial-failure ⚠ block surfaces before save errors), H3 (failure-summary wording). 590 tests passing (464 unit + 126 integration; +9 since v0.8). 2 Linux-runtime verification items still pending in `08-HUMAN-UAT.md`. v0.8.1 ready for `make release VERSION=0.8.1`.*
-
-*Last updated: 2026-04-24 — Phase 8 shipped via PR #460 (squash commit `b884c31` on main). v0.8 milestone complete — 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8. 581 tests passing (458 unit + 123 integration after post-merge PR review added 5 tests). 2 Linux-runtime verification items tracked in `08-HUMAN-UAT.md`. Post-merge review filed follow-up issues #461 (v0.8.1 hotfix candidates), #462 (v0.8.x polish), #463 (v0.9 polish) — see backlog section above.*
+*Last updated: 2026-04-27 after v0.8 milestone — v0.8.1 shipped via cargo-dist (commits e13eb31 + 231e52d on main). v0.8 milestone archived: 8 v0.8 requirements (WUX-01..05 + SAFE-01..03) + 3 v0.8.1 hotfix requirements (HOTFIX-01..03) shipped across Phases 7, 8, and 8.1. 590 tests passing (464 unit + 126 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` accepted as carry-over pending hardware. Ready for v0.9 (cross-machine config portability, #458).*

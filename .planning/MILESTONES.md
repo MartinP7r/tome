@@ -1,5 +1,20 @@
 # Milestones
 
+## v0.8 Wizard UX & Safety Hardening (Shipped: 2026-04-27)
+
+**Phases completed:** 2 phases, 7 plans, 26 tasks
+
+**Key accomplishments:**
+
+- `tome init` now prints `resolved tome_home: <path> (from <source>)` before any Step 1 wizard prompts so users can Ctrl-C before destructive writes — foundation for WUX-01 greenfield gating.
+- `tome init` on a greenfield machine now prompts for `tome_home` location (default `~/.tome`, custom with path validation) and offers to persist a custom choice to `~/.config/tome/config.toml` — closing the silent-default footgun and fixing the latent `default_config_path()` save-path bug at wizard.rs:310.
+- `tome init` on a brownfield machine (existing `tome.toml` at the resolved `tome_home`) now shows a summary and offers 4 choices (use existing / edit / reinitialize-with-backup / cancel) — the dotfiles-sync workflow that triggered the v0.8 milestone is safe: `--no-input` defaults to "use existing" and never overwrites a valid config. `Option<&Config>` prefill threads through every wizard helper so "edit" preserves custom directories that aren't in `KNOWN_DIRECTORIES` (Pitfall 2 fix).
+- `tome remove` now aggregates partial-cleanup failures into a typed `Vec<RemoveFailure>`, prints a grouped `⚠ K operations failed` summary to stderr, and exits non-zero — closing #413 where the command silently reported success while filesystem artifacts leaked.
+- `tome browse` `open` (ViewSource) and `copy path` (CopyPath) actions now work on Linux via `xdg-open` + `arboard` (replacing the macOS-only `open` + `sh -c … | pbcopy` invocation which was also a command-injection vector), and both success (`✓`) and failure (`⚠`) outcomes appear in the TUI status bar in place of the keybind line until the next keypress — closing #414.
+- Replaced silent `std::fs::read_link(..).ok()` drop at `relocate.rs:93` with an explicit match that emits a stderr warning on `Err` in the canonical PR #448 format, plus a regression test engineering the failure via `chmod 0o000`.
+
+---
+
 ## v0.7 Wizard Hardening (Shipped: 2026-04-22)
 
 **Phases completed:** 3 phases, 9 plans, 8 tasks
