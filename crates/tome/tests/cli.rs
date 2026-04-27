@@ -3916,6 +3916,67 @@ fn test_add_with_branch() {
     );
 }
 
+#[test]
+fn test_add_expands_bare_github_slug() {
+    // `tome add owner/repo` should expand to https://github.com/owner/repo so
+    // a later `tome sync` can clone it. Without expansion, git would
+    // interpret the bare slug as a local path and fail.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "add",
+            "planetscale/database-skills",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://github.com/planetscale/database-skills",
+        ));
+
+    let config_content = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        "config should store the expanded URL: {config_content}"
+    );
+    assert!(
+        config_content.contains("[directories.database-skills]"),
+        "directory should be named after the repo segment of the slug: {config_content}"
+    );
+}
+
+#[test]
+fn test_add_dry_run_shows_expanded_slug() {
+    // The dry-run output must show what would be stored — i.e. the
+    // expanded URL, not the bare slug. Otherwise users see "Would add
+    // (git: foo/bar)" and can't tell if expansion happened.
+    let tmp = TempDir::new().unwrap();
+    let config_path = tmp.path().join("tome.toml");
+    std::fs::write(&config_path, "").unwrap();
+    std::fs::create_dir_all(tmp.path().join("library")).unwrap();
+
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--dry-run",
+            "add",
+            "planetscale/database-skills",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://github.com/planetscale/database-skills",
+        ));
+}
+
 // ── tome reassign integration tests ────────────────────────────────
 
 fn reassign_test_env(tmp: &TempDir) {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `tome add <owner>/<repo>` now expands a bare GitHub slug to `https://github.com/<owner>/<repo>` so users can paste an `org/repo` token directly from the address bar without ceremony. URLs (anything containing `://` or starting with `git@`) are left untouched, and the heuristic refuses paths with relative segments (`./foo`, `../bar`) or invalid characters (spaces, etc.) so a typo never confidently rewrites to the wrong clone target. Example: `tome add planetscale/database-skills` is now equivalent to `tome add https://github.com/planetscale/database-skills`.
+
 ### Fixed
 
 - `tome remove` now aggregates partial-cleanup failures and exits non-zero with a distinct `⚠ N operations failed` summary grouped by failure kind (distribution symlinks, library entries, library symlinks, git cache). The success banner (`✓ Removed directory ...`) is suppressed entirely when failures occur, so it cannot hide a `⚠` warning that scrolled off-screen. On partial failure the directory's config entry AND its manifest entries are preserved so the user can re-run `tome remove <name>` after addressing the underlying cause (typically permission fixes) — previously the config was unconditionally dropped, leaving orphaned filesystem artifacts with no programmatic recovery path. Previously the command reported success while filesystem artifacts leaked. ([#413](https://github.com/MartinP7r/tome/issues/413))
