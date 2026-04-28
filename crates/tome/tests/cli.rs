@@ -5025,3 +5025,66 @@ fn init_brownfield_with_legacy_runs_both_cleanups() {
     );
     assert_eq!(std::fs::read_to_string(&xdg_file).unwrap(), legacy_seed);
 }
+
+// === [directory_overrides.<name>] end-to-end smoke (PORT-01 + PORT-02) ===
+
+#[cfg(unix)]
+#[test]
+fn machine_override_rewrites_directory_path_for_status() {
+    // PORT-01 + PORT-02 smoke: declare an override in machine.toml and
+    // confirm `tome status --json` reports the OVERRIDDEN path, proving
+    // the load pipeline applied the override before status::gather ran.
+    let tmp = TempDir::new().unwrap();
+    let real_skills = tmp.path().join("real-skills");
+    create_skill(&real_skills, "x");
+
+    // tome.toml points at a path that does NOT exist.
+    let tome_toml = format!(
+        "library_dir = \"{}/library\"\n\
+         \n\
+         [directories.work]\n\
+         path = \"{}/does-not-exist\"\n\
+         type = \"directory\"\n\
+         role = \"source\"\n",
+        tmp.path().display(),
+        tmp.path().display(),
+    );
+    std::fs::write(tmp.path().join("tome.toml"), tome_toml).unwrap();
+
+    // machine.toml overrides directories.work.path to the real path.
+    let machine_toml = format!(
+        "[directory_overrides.work]\npath = \"{}\"\n",
+        real_skills.display(),
+    );
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, machine_toml).unwrap();
+
+    let assert = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "status",
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+    let stdout = String::from_utf8(assert.get_output().stdout.clone()).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout).unwrap();
+    let dirs = report["directories"].as_array().unwrap();
+    let work = dirs
+        .iter()
+        .find(|d| d["name"] == "work")
+        .expect("status JSON missing 'work' directory");
+    let path = work["path"].as_str().unwrap();
+    assert!(
+        path.contains("real-skills"),
+        "expected status to report overridden path, got: {path}"
+    );
+    assert!(
+        !path.contains("does-not-exist"),
+        "expected status to NOT report the original tome.toml path, got: {path}"
+    );
+}

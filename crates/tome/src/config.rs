@@ -582,10 +582,7 @@ impl Config {
     /// Used by `lib.rs::run()` for every non-Init command. `tome init` does NOT use
     /// this path — the wizard runs against the bare `tome.toml` that the user is
     /// about to write.
-    pub fn load_with_overrides(
-        path: &Path,
-        prefs: &crate::machine::MachinePrefs,
-    ) -> Result<Self> {
+    pub fn load_with_overrides(path: &Path, prefs: &crate::machine::MachinePrefs) -> Result<Self> {
         let mut config = if path.exists() {
             let content = std::fs::read_to_string(path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
@@ -2556,11 +2553,7 @@ role = "target"
         };
         // Apply overrides happens via `apply_machine_overrides`; force the
         // flag here directly to test the serialization path.
-        config
-            .directories
-            .get_mut("x")
-            .unwrap()
-            .override_applied = true;
+        config.directories.get_mut("x").unwrap().override_applied = true;
 
         config.save_checked(&cfg_path).unwrap();
 
