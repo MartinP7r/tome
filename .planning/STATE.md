@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.9
 milestone_name: Cross-Machine Config Portability & Polish
 status: executing
-stopped_at: Completed 09-01-machine-overrides-schema-and-apply-PLAN.md (PORT-01 + PORT-02)
-last_updated: "2026-04-28T13:54:44.850Z"
+stopped_at: Completed 09-03-status-doctor-surfacing-PLAN.md (PORT-05) — Phase 9 complete
+last_updated: "2026-04-28T14:10:54.794Z"
 last_activity: 2026-04-28
 progress:
   total_phases: 10
   completed_phases: 9
   total_plans: 33
-  completed_plans: 31
+  completed_plans: 32
   percent: 0
 ---
 
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-04-28)
 
 Milestone: v0.9 — Cross-Machine Config Portability & Polish
 Phase: 9 (cross-machine-path-overrides) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-04-28
 
@@ -50,6 +50,7 @@ v0.9-specific decisions (so far):
 - **D-2 (v0.9 scope):** Bare-slug `tome add` improvement (PR #471, merged 2026-04-27 to main) ships with v0.9 — no separate v0.8.2 patch release.
 - **D-3 (v0.9 phasing):** Two-phase shape — Phase 9 (PORT, 5 reqs) lands the portability epic as a coherent unit; Phase 10 (POLISH + TEST, 11 reqs) lands the entire #462/#463 review tail in one cut. Coarse granularity favours fewer phases; TEST-03 ↔ POLISH-02 coupling (both touch `ViewSource .status()` / `StatusMessage`) makes co-location natural and avoids splitting tightly-related work.
 - [Phase 09-cross-machine-path-overrides]: PORT-01/02: machine.toml [directory_overrides.<name>] schema with apply timing in canonical run() load path (expand_tildes → apply_machine_overrides → validate)
+- [Phase 09]: PORT-05: tome status + tome doctor surface [directory_overrides.<name>] activations via (override) text annotation and override_applied: bool JSON field. DoctorReport.directory_issues schema break: tuples → DirectoryDiagnostic struct
 
 ### Pending Todos / Carry-over
 
@@ -62,6 +63,6 @@ v0.9-specific decisions (so far):
 
 ## Session Continuity
 
-Last session: 2026-04-28T13:54:23.483Z
-Stopped at: Completed 09-01-machine-overrides-schema-and-apply-PLAN.md (PORT-01 + PORT-02)
+Last session: 2026-04-28T14:10:54.792Z
+Stopped at: Completed 09-03-status-doctor-surfacing-PLAN.md (PORT-05) — Phase 9 complete
 Resume file: None

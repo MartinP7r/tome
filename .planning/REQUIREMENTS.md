@@ -16,7 +16,7 @@ Source: [#458](https://github.com/MartinP7r/tome/issues/458). Mechanism: new `[d
 - [x] **PORT-02**: Per-machine overrides apply at config load time (after tilde expansion, before `Config::validate`), so all downstream code (`sync`, `status`, `doctor`, `lockfile::generate`) operates on the merged result.
 - [ ] **PORT-03**: An override that targets a directory name not present in `tome.toml` produces a stderr `warning:` line (typo guard) without aborting load.
 - [ ] **PORT-04**: Validation failures triggered by an override (e.g., overridden path now overlaps `library_dir`) surface as a distinct error class so the user knows to fix `machine.toml`, not `tome.toml`.
-- [ ] **PORT-05**: `tome status` and `tome doctor` indicate which directory entries are subject to a per-machine override, so the user can answer "why is this path different on this machine?" without diffing files.
+- [x] **PORT-05**: `tome status` and `tome doctor` indicate which directory entries are subject to a per-machine override, so the user can answer "why is this path different on this machine?" without diffing files.
 
 ### Type-Design + TUI Architecture Polish (POLISH)
 
@@ -68,7 +68,7 @@ Phase mapping is filled by `/gsd:plan-phase` after roadmap creation.
 | PORT-02 | Phase 9 | Complete |
 | PORT-03 | Phase 9 | Pending |
 | PORT-04 | Phase 9 | Pending |
-| PORT-05 | Phase 9 | Pending |
+| PORT-05 | Phase 9 | Complete |
 | POLISH-01 | Phase 10 | Pending |
 | POLISH-02 | Phase 10 | Pending |
 | POLISH-03 | Phase 10 | Pending |
