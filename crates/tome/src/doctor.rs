@@ -777,6 +777,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -934,6 +935,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -958,6 +960,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()

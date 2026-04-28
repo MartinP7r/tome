@@ -221,6 +221,17 @@ pub struct DirectoryConfig {
     /// When set, discovery scans `<clone_path>/<subdir>/` instead of the repo root.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subdir: Option<String>,
+
+    /// True iff this directory's `path` was rewritten by a `[directory_overrides.<name>]`
+    /// entry in `machine.toml` during config load. Set in `Config::apply_machine_overrides`.
+    /// `#[serde(skip)]` ensures this never appears in `tome.toml` (it's machine-local state,
+    /// not portable config). Default = `false`.
+    ///
+    /// Wired by Plan 09-03 (status/doctor surfacing — PORT-05). For now this
+    /// field is set but not observed by user-facing output.
+    #[serde(skip)]
+    #[allow(dead_code)]
+    pub(crate) override_applied: bool,
 }
 
 impl DirectoryConfig {
@@ -519,6 +530,99 @@ impl Config {
             dir.path = expand_tilde(&dir.path)?;
         }
         Ok(())
+    }
+
+    /// Apply per-machine path overrides from `[directory_overrides.<name>]` entries
+    /// in `machine.toml`. Mutates `self.directories[name].path` and sets
+    /// `override_applied = true` on each matched entry.
+    ///
+    /// **Order constraint (I2 invariant):** Call this AFTER `expand_tildes()` and
+    /// BEFORE `validate()`. The single canonical caller is `Config::load_with_overrides`.
+    ///
+    /// **Override path expansion:** the override's own `path` is tilde-expanded here
+    /// (mirrors what `expand_tildes` did to the original path), so `~/...` works in
+    /// `machine.toml` exactly as it does in `tome.toml`.
+    ///
+    /// **Unknown override targets:** silently ignored at this layer. The Plan 02
+    /// follow-up (PORT-03 warn_unknown_overrides) emits stderr warnings; we keep
+    /// them separate so this method stays infallible apart from tilde-expansion
+    /// errors and side-effect-free apart from mutating `self`.
+    ///
+    /// **Idempotent:** safe to call multiple times — the override path is read
+    /// from `prefs`, not from `self`, and tilde expansion is itself idempotent
+    /// (already-absolute paths pass through unchanged).
+    pub(crate) fn apply_machine_overrides(
+        &mut self,
+        prefs: &crate::machine::MachinePrefs,
+    ) -> Result<()> {
+        for (name, override_) in &prefs.directory_overrides {
+            if let Some(dir) = self.directories.get_mut(name.as_str()) {
+                dir.path = expand_tilde(&override_.path)?;
+                dir.override_applied = true;
+            }
+            // Unknown override targets: no-op here. PORT-03 (Plan 09-02) handles warnings.
+        }
+        Ok(())
+    }
+
+    /// Load config and apply per-machine path overrides in one shot.
+    ///
+    /// **Order (I2 invariant — must not change):**
+    ///   1. Read TOML from `path` (or build defaults if missing — same as `Config::load`)
+    ///   2. `expand_tildes()` on the raw config
+    ///   3. `apply_machine_overrides(prefs)` — rewrites paths per `[directory_overrides.<name>]`
+    ///   4. `validate()` — sees the merged result, so any override that produces an
+    ///      invalid config (e.g., overridden path overlaps `library_dir`) surfaces here
+    ///
+    /// Plan 09-02 (PORT-04) wraps the validate step in a distinct error class so
+    /// the user knows to fix `machine.toml`, not `tome.toml`. This method
+    /// intentionally returns the raw `validate()` error for now — Plan 09-02
+    /// introduces the wrapping.
+    ///
+    /// Used by `lib.rs::run()` for every non-Init command. `tome init` does NOT use
+    /// this path — the wizard runs against the bare `tome.toml` that the user is
+    /// about to write.
+    pub fn load_with_overrides(
+        path: &Path,
+        prefs: &crate::machine::MachinePrefs,
+    ) -> Result<Self> {
+        let mut config = if path.exists() {
+            let content = std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?;
+            toml::from_str(&content).map_err(|e| {
+                let mut msg = format!("failed to parse {}: {e}", path.display());
+                if content.contains("[[sources]]") || content.contains("[targets.") {
+                    msg.push_str("\nhint: tome v0.6 replaced [[sources]] and [targets.*] with [directories.*]. See CHANGELOG.md for migration instructions.");
+                }
+                anyhow::anyhow!("{msg}")
+            })?
+        } else {
+            Self::default()
+        };
+
+        config.expand_tildes()?;
+        config.apply_machine_overrides(prefs)?;
+        config.validate()?;
+        Ok(config)
+    }
+
+    /// CLI-aware variant of `load_with_overrides`. See `load_or_default` for the
+    /// missing-file vs. missing-parent-dir semantics.
+    pub fn load_or_default_with_overrides(
+        cli_path: Option<&Path>,
+        prefs: &crate::machine::MachinePrefs,
+    ) -> Result<Self> {
+        let path = match cli_path {
+            Some(p) => {
+                if !p.exists() {
+                    let parent_exists = p.parent().is_some_and(|d| d.exists());
+                    anyhow::ensure!(parent_exists, "config file not found: {}", p.display());
+                }
+                p.to_path_buf()
+            }
+            None => default_config_path()?,
+        };
+        Self::load_with_overrides(&path, prefs)
     }
 
     /// Save config, but first run the same expand + validate pipeline that
@@ -1119,6 +1223,7 @@ bogus = true
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1146,6 +1251,7 @@ bogus = true
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1173,6 +1279,7 @@ bogus = true
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1200,6 +1307,7 @@ bogus = true
                     tag: None,
                     rev: None,
                     subdir: Some("nested".to_string()),
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1227,6 +1335,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1240,6 +1349,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
             ]),
@@ -1265,6 +1375,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1278,6 +1389,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1291,6 +1403,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1304,6 +1417,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
             ]),
@@ -1329,6 +1443,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1342,6 +1457,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1355,6 +1471,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
                 (
@@ -1368,6 +1485,7 @@ bogus = true
                         rev: None,
 
                         subdir: None,
+                        override_applied: false,
                     },
                 ),
             ]),
@@ -1452,6 +1570,7 @@ bogus = true
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1529,6 +1648,7 @@ role = "target"
             tag: None,
             rev: None,
             subdir: None,
+            override_applied: false,
         }
     }
 
@@ -1702,6 +1822,7 @@ role = "target"
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1734,6 +1855,7 @@ role = "target"
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1764,6 +1886,7 @@ role = "target"
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Default::default()
@@ -1845,6 +1968,7 @@ role = "target"
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
         Config {
@@ -2227,5 +2351,254 @@ role = "target"
                 "temp file should be removed after successful rename"
             );
         });
+    }
+
+    // === apply_machine_overrides + load_with_overrides tests (PORT-02) ===
+
+    /// Build a Config with one Synced directory at the given path. The path
+    /// does not need to exist on disk — `validate()` only checks
+    /// library_dir vs distribution-dirs overlap, not existence.
+    fn config_with_one_dir(name: &str, path: &str) -> Config {
+        Config {
+            library_dir: PathBuf::from("/tmp/tome-test-lib"),
+            directories: BTreeMap::from([(
+                DirectoryName::new(name).unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from(path),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Default::default()
+        }
+    }
+
+    fn prefs_with_override(name: &str, path: &str) -> crate::machine::MachinePrefs {
+        let mut prefs = crate::machine::MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            DirectoryName::new(name).unwrap(),
+            crate::machine::DirectoryOverride {
+                path: PathBuf::from(path),
+            },
+        );
+        prefs
+    }
+
+    #[test]
+    fn apply_machine_overrides_no_overrides_is_noop() {
+        let mut config = config_with_one_dir("x", "/old/path");
+        let prefs = crate::machine::MachinePrefs::default();
+        config.apply_machine_overrides(&prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        assert_eq!(dir.path, PathBuf::from("/old/path"));
+        assert!(!dir.override_applied);
+    }
+
+    #[test]
+    fn apply_machine_overrides_replaces_path() {
+        let mut config = config_with_one_dir("x", "/old/path");
+        let prefs = prefs_with_override("x", "/new/path");
+        config.apply_machine_overrides(&prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        assert_eq!(dir.path, PathBuf::from("/new/path"));
+        assert!(dir.override_applied);
+    }
+
+    #[test]
+    fn apply_machine_overrides_expands_tilde_in_override_path() {
+        let mut config = config_with_one_dir("x", "/old/path");
+        let prefs = prefs_with_override("x", "~/work");
+        config.apply_machine_overrides(&prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        let path_str = dir.path.to_string_lossy();
+        assert!(
+            !path_str.starts_with('~'),
+            "tilde should be expanded, got: {path_str}"
+        );
+        assert!(
+            path_str.ends_with("/work"),
+            "expected path to end with /work, got: {path_str}"
+        );
+        assert!(dir.override_applied);
+    }
+
+    #[test]
+    fn apply_machine_overrides_unknown_target_does_not_panic() {
+        // PORT-03 (Plan 09-02) will add the warning emission. In Plan 09-01,
+        // unknown override targets are a silent no-op — the existing dir
+        // is unchanged and override_applied stays false.
+        let mut config = config_with_one_dir("x", "/old/path");
+        let prefs = prefs_with_override("bogus", "/p");
+        config.apply_machine_overrides(&prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        assert_eq!(dir.path, PathBuf::from("/old/path"));
+        assert!(!dir.override_applied);
+    }
+
+    #[test]
+    fn apply_machine_overrides_idempotent() {
+        let mut config = config_with_one_dir("x", "/old/path");
+        let prefs = prefs_with_override("x", "/new/path");
+
+        config.apply_machine_overrides(&prefs).unwrap();
+        let path_after_first = config.directories.get("x").unwrap().path.clone();
+
+        config.apply_machine_overrides(&prefs).unwrap();
+        let path_after_second = config.directories.get("x").unwrap().path.clone();
+
+        assert_eq!(path_after_first, path_after_second);
+        assert_eq!(path_after_second, PathBuf::from("/new/path"));
+        assert!(config.directories.get("x").unwrap().override_applied);
+    }
+
+    #[test]
+    fn load_with_overrides_runs_in_order_expand_apply_validate() {
+        // Verifies the I2 invariant: override happens AFTER expand_tildes
+        // (so `~` in the override path is expanded) and BEFORE validate.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{}\"\n\
+                 \n\
+                 [directories.x]\n\
+                 path = \"~/old\"\n\
+                 type = \"directory\"\n\
+                 role = \"source\"\n",
+                lib_dir.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = prefs_with_override("x", "~/new");
+        let config = Config::load_with_overrides(&cfg_path, &prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        let path_str = dir.path.to_string_lossy();
+        assert!(
+            !path_str.starts_with('~'),
+            "tilde in override path should be expanded, got: {path_str}"
+        );
+        assert!(
+            path_str.ends_with("/new"),
+            "expected path resolved to <home>/new, got: {path_str}"
+        );
+        assert!(dir.override_applied);
+    }
+
+    #[test]
+    fn load_with_overrides_validate_failure_propagates() {
+        // Build a config with an invalid role/type combo (Managed on a
+        // Directory type — only ClaudePlugins permits Managed).
+        // load_with_overrides must run validate() and surface the error.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{}\"\n\
+                 \n\
+                 [directories.x]\n\
+                 path = \"/some/path\"\n\
+                 type = \"directory\"\n\
+                 role = \"managed\"\n",
+                lib_dir.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = crate::machine::MachinePrefs::default();
+        let result = Config::load_with_overrides(&cfg_path, &prefs);
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("role/type conflict") || err.contains("Conflict:"),
+            "expected role/type conflict error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn save_checked_does_not_serialize_override_applied() {
+        // Build a Config in-memory with override_applied = true, save_checked it,
+        // then read the resulting TOML — `override_applied` MUST NOT appear.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+
+        let mut config = Config {
+            library_dir: lib_dir.clone(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("x").unwrap(),
+                DirectoryConfig {
+                    path: tmp.path().join("skills"),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: true,
+                },
+            )]),
+            ..Default::default()
+        };
+        // Apply overrides happens via `apply_machine_overrides`; force the
+        // flag here directly to test the serialization path.
+        config
+            .directories
+            .get_mut("x")
+            .unwrap()
+            .override_applied = true;
+
+        config.save_checked(&cfg_path).unwrap();
+
+        let on_disk = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(
+            !on_disk.contains("override_applied"),
+            "override_applied must not appear in tome.toml, got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn override_applied_field_starts_false_after_load() {
+        // No overrides declared → override_applied stays false (default-initialized
+        // via #[serde(skip)] + bool::default).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{}\"\n\
+                 \n\
+                 [directories.x]\n\
+                 path = \"/some/path\"\n\
+                 type = \"directory\"\n\
+                 role = \"source\"\n",
+                lib_dir.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = crate::machine::MachinePrefs::default();
+        let config = Config::load_with_overrides(&cfg_path, &prefs).unwrap();
+
+        let dir = config.directories.get("x").unwrap();
+        assert!(
+            !dir.override_applied,
+            "override_applied should default to false when no overrides declared"
+        );
     }
 }

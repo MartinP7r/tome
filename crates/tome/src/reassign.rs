@@ -239,6 +239,7 @@ mod tests {
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
         config
