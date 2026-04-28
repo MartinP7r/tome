@@ -5266,3 +5266,124 @@ fn machine_override_appears_in_status_and_doctor() {
         );
     }
 }
+
+// === [directory_overrides.<name>] surfacing tests (PORT-03 + PORT-04) ===
+
+#[cfg(unix)]
+#[test]
+fn machine_override_unknown_target_warns_and_continues() {
+    // PORT-03: an override targeting a directory name not present in tome.toml
+    // produces a stderr `warning:` line (typo guard) without aborting load.
+    let tmp = TempDir::new().unwrap();
+    let real_skills = tmp.path().join("real-skills");
+    create_skill(&real_skills, "x");
+
+    let tome_toml = format!(
+        "library_dir = \"{}/library\"\n\
+         \n\
+         [directories.work]\n\
+         path = \"{}\"\n\
+         type = \"directory\"\n\
+         role = \"source\"\n",
+        tmp.path().display(),
+        real_skills.display(),
+    );
+    std::fs::write(tmp.path().join("tome.toml"), tome_toml).unwrap();
+
+    // Override target `claud` is a typo — does not match any configured
+    // directory. The typo guard fires for any unknown name, regardless of
+    // whether a similarly-named directory exists.
+    let machine_toml = format!(
+        "[directory_overrides.claud]\npath = \"{}/elsewhere\"\n",
+        tmp.path().display(),
+    );
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, machine_toml).unwrap();
+
+    let assert = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "status",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success(); // does NOT abort, only warns
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+    assert!(
+        stderr.contains("warning:") && stderr.contains("claud") && stderr.contains("machine.toml"),
+        "expected stderr warning naming 'claud' and 'machine.toml', got:\n{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn machine_override_validation_failure_blames_machine_toml() {
+    // PORT-04: validation failures triggered by an override surface as a
+    // distinct error class that names machine.toml (not tome.toml) as the
+    // file to edit.
+    let tmp = TempDir::new().unwrap();
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    // tome.toml is valid: library_dir and directories.work.path are disjoint.
+    let work_dir = tmp.path().join("work-skills");
+    std::fs::create_dir_all(&work_dir).unwrap();
+    let tome_toml = format!(
+        "library_dir = \"{}\"\n\
+         \n\
+         [directories.work]\n\
+         path = \"{}\"\n\
+         type = \"directory\"\n\
+         role = \"synced\"\n",
+        library_dir.display(),
+        work_dir.display(),
+    );
+    std::fs::write(tmp.path().join("tome.toml"), tome_toml).unwrap();
+
+    // machine.toml override forces directories.work.path == library_dir.
+    // After apply_machine_overrides, validate() will fail with the existing
+    // "library_dir overlaps distribution directory 'work'" error.
+    let machine_toml = format!(
+        "[directory_overrides.work]\npath = \"{}\"\n",
+        library_dir.display(),
+    );
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, machine_toml).unwrap();
+
+    let assert = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "status",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .failure();
+    let stderr = String::from_utf8(assert.get_output().stderr.clone()).unwrap();
+
+    // Wrapped error MUST mention machine.toml (so the user knows where to look).
+    assert!(
+        stderr.contains("machine.toml"),
+        "expected stderr to name machine.toml, got:\n{stderr}"
+    );
+    // And include the original validate() error text (preserved inside the wrapper).
+    assert!(
+        stderr.contains("library_dir") && stderr.contains("overlaps"),
+        "expected wrapped error to preserve the original validate() text, got:\n{stderr}"
+    );
+    // And reference the override-induced classification.
+    assert!(
+        stderr.contains("override-induced") || stderr.contains("directory_overrides"),
+        "expected wrapped error to identify itself as override-induced, got:\n{stderr}"
+    );
+    // Negative assertion (the discriminator): MUST NOT direct user to edit tome.toml.
+    assert!(
+        !stderr.contains("edit tome.toml") && !stderr.contains("Edit tome.toml"),
+        "wrapped error must NOT direct the user to edit tome.toml, got:\n{stderr}"
+    );
+}

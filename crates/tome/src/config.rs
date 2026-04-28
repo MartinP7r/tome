@@ -661,8 +661,7 @@ impl Config {
                 }
             }
             let pre_override_valid = pre_override_config.validate().is_ok();
-            let any_override_applied =
-                config.directories.values().any(|d| d.override_applied);
+            let any_override_applied = config.directories.values().any(|d| d.override_applied);
 
             if pre_override_valid && any_override_applied {
                 return Err(format_override_validation_error(
