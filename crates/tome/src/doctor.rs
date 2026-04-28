@@ -1142,6 +1142,152 @@ mod tests {
         );
     }
 
+    // -- PORT-05: override_applied surfacing --
+
+    #[test]
+    fn check_with_no_overrides_sets_flags_false() {
+        let lib = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("plain").unwrap(),
+                DirectoryConfig {
+                    path: target.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+        let report = check(
+            &config,
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directory_issues.len(), 1);
+        assert!(
+            !report.directory_issues[0].override_applied,
+            "override_applied should default to false"
+        );
+        assert_eq!(report.directory_issues[0].name, "plain");
+    }
+
+    #[test]
+    fn check_with_override_applied_sets_flag_true() {
+        let lib = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("work").unwrap(),
+                DirectoryConfig {
+                    path: target.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: true,
+                },
+            )]),
+            ..Config::default()
+        };
+        let report = check(
+            &config,
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directory_issues.len(), 1);
+        assert_eq!(report.directory_issues[0].name, "work");
+        assert!(
+            report.directory_issues[0].override_applied,
+            "override_applied should be true when the config flag is set"
+        );
+    }
+
+    #[test]
+    fn render_issues_for_directory_appends_override_marker_when_set() {
+        let s = format_dir_diagnostic_header("work", true);
+        assert!(s.contains("work"), "name missing: {s}");
+        assert!(s.contains("(override)"), "override marker missing: {s}");
+    }
+
+    #[test]
+    fn render_issues_for_directory_omits_marker_when_unset() {
+        let s = format_dir_diagnostic_header("work", false);
+        assert!(s.contains("work"), "name missing: {s}");
+        assert!(
+            !s.contains("(override)"),
+            "override marker should NOT appear when flag is false: {s}"
+        );
+    }
+
+    #[test]
+    fn doctor_json_includes_override_applied_per_directory() {
+        let dd = DirectoryDiagnostic {
+            name: "work".to_string(),
+            issues: Vec::new(),
+            override_applied: true,
+        };
+        let json = serde_json::to_string(&dd).unwrap();
+        assert!(
+            json.contains("\"override_applied\":true"),
+            "JSON output should include override_applied field, got: {json}"
+        );
+        assert!(
+            json.contains("\"name\":\"work\""),
+            "JSON output should include name field, got: {json}"
+        );
+    }
+
+    #[test]
+    fn total_issues_unchanged_by_directory_diagnostic_shape() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: "lib".to_string(),
+            }],
+            directory_issues: vec![
+                DirectoryDiagnostic {
+                    name: "a".to_string(),
+                    issues: vec![DiagnosticIssue {
+                        severity: IssueSeverity::Error,
+                        message: "x".to_string(),
+                    }],
+                    override_applied: true,
+                },
+                DirectoryDiagnostic {
+                    name: "b".to_string(),
+                    issues: vec![
+                        DiagnosticIssue {
+                            severity: IssueSeverity::Error,
+                            message: "y".to_string(),
+                        },
+                        DiagnosticIssue {
+                            severity: IssueSeverity::Warning,
+                            message: "z".to_string(),
+                        },
+                    ],
+                    override_applied: false,
+                },
+            ],
+            config_issues: vec![DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: "cfg".to_string(),
+            }],
+        };
+        // 1 (lib) + 1 (a) + 2 (b) + 1 (cfg) = 5
+        assert_eq!(report.total_issues(), 5);
+    }
+
     #[test]
     fn repair_library_healthy_is_noop() {
         let lib = TempDir::new().unwrap();
