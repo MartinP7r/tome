@@ -365,6 +365,7 @@ pub(crate) fn run(
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
 
@@ -594,6 +595,7 @@ fn configure_directories(
                     tag: None,
                     rev: None,
                     subdir: None,
+                    override_applied: false,
                 },
             );
         }
@@ -1290,6 +1292,7 @@ mod tests {
             tag: None,
             rev: None,
             subdir: None,
+            override_applied: false,
         }
     }
 
@@ -1725,6 +1728,7 @@ mod tests {
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
 

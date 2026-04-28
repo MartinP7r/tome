@@ -45,14 +45,21 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ **SAFE-03** `relocate.rs` surfaces `fs::read_link` errors instead of silently dropping (#449) — Phase 8 (2026-04-24)
 - ✓ **HOTFIX-01/02/03** v0.8.1 hotfix — lockfile regen + save chain reorder + wording (#461) — Phase 8.1 (2026-04-27)
 
-### Active (next milestone)
+### Validated in v0.9
 
-- [ ] Cross-machine config portability via `machine.toml` path overrides (#458) — primary v0.9 driver
+- ✓ **PORT-01** `[directory_overrides.<name>]` schema in `machine.toml` for per-machine path remapping (#458) — Phase 9 (2026-04-28)
+- ✓ **PORT-02** Override application at config load (after tilde expansion, before validate) — Phase 9 (2026-04-28)
+- ✓ **PORT-03** Typo-target stderr warning for unknown override directory names — Phase 9 (2026-04-28)
+- ✓ **PORT-04** Distinct error wrapper naming `machine.toml` on override-induced validation failures — Phase 9 (2026-04-28)
+- ✓ **PORT-05** `(override)` annotation in `tome status` and `tome doctor` (text + JSON) — Phase 9 (2026-04-28)
+
+### Active (this milestone, in flight)
+
+- [ ] **POLISH-01..06** Phase 8 type design + TUI architecture polish (#463) — Phase 10 (planned)
+- [ ] **TEST-01..05** Phase 8 test coverage + wording + dead code polish (#462) — Phase 10 (planned)
 
 ### Backlog (deferred)
 
-- v0.8.x polish: Phase 8 test coverage + wording + dead code (#462) — 5 items from the post-merge review (P1-P5): success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field.
-- v0.9 polish: Phase 8 type design + TUI architecture (#463) — 6 items (D1-D6): .status() TUI blocking, StatusMessage type redesign, clipboard auto-retry, FailureKind::ALL compile-enforcement, RemoveFailure::new justification, arboard drift hygiene.
 - Linux runtime UAT carry-over from v0.8: 2 items in `08-HUMAN-UAT.md` (clipboard + xdg-open) — pending Linux desktop hardware
 - Expand `KNOWN_DIRECTORIES` registry (Cursor, Windsurf, Aider — if they have skill paths)
 - Pre-existing flaky test: `backup::tests::push_and_pull_roundtrip` — passes in isolation, intermittent in full suite. Worth a separate investigation pass.
@@ -189,6 +196,8 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
+*Last updated: 2026-04-28 — Phase 9 complete (Cross-Machine Path Overrides). All 5 PORT requirements shipped: `[directory_overrides.<name>]` schema in machine.toml, override-apply timing in load pipeline, typo warning, distinct machine.toml error class, and `(override)` annotation in `tome status`/`tome doctor` (text + JSON). 648 tests passing (514 unit + 134 integration; +58 since Phase 9 start). Phase 10 (#462 + #463 polish bundle) is the remaining v0.9 work.*
+
 *Last updated: 2026-04-28 — v0.9 milestone started. Goal: cross-machine config portability (#458) bundled with #463 (type design + TUI architecture polish, 6 items) and #462 (test coverage + dead code polish, 5 items) from the v0.8 post-merge review. Bare-slug `tome add` improvement (PR #471, merged 2026-04-27) ships with v0.9 — no v0.8.2 patch release planned.*
 
 *Last updated: 2026-04-27 after v0.8 milestone — v0.8.1 shipped via cargo-dist (commits e13eb31 + 231e52d on main). v0.8 milestone archived: 8 v0.8 requirements (WUX-01..05 + SAFE-01..03) + 3 v0.8.1 hotfix requirements (HOTFIX-01..03) shipped across Phases 7, 8, and 8.1. 590 tests passing (464 unit + 126 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` accepted as carry-over pending hardware.*

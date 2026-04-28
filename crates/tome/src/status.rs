@@ -46,6 +46,11 @@ pub struct DirectoryStatus {
     pub skill_count: CountOrError,
     /// Warnings emitted during discovery.
     pub warnings: Vec<String>,
+    /// True iff `directories.<name>.path` was rewritten by a `machine.toml`
+    /// `[directory_overrides.<name>]` entry during config load (PORT-05).
+    /// JSON consumers can use this to render the same context that text-mode
+    /// `tome status` shows via the `(override)` annotation.
+    pub override_applied: bool,
 }
 
 /// Complete status report for the tome system.
@@ -92,6 +97,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
                 path: dir_config.path.display().to_string(),
                 skill_count: skill_count.into(),
                 warnings,
+                override_applied: dir_config.override_applied,
             }
         })
         .collect();
@@ -112,6 +118,19 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
 }
 
 // -- Rendering --
+
+/// Format the PATH column for the directories table. When `override_applied`
+/// is true, append a styled ` (override)` annotation so the user can see
+/// which entries were rewritten by a `machine.toml` `[directory_overrides.<name>]`
+/// entry (PORT-05).
+fn format_dir_path_column(path: &str, override_applied: bool) -> String {
+    let collapsed = crate::paths::collapse_home(std::path::Path::new(path));
+    if override_applied {
+        format!("{} {}", collapsed, style("(override)").cyan())
+    } else {
+        collapsed
+    }
+}
 
 /// Display the current status of the tome system.
 pub fn show(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
@@ -178,7 +197,7 @@ fn render_status(report: &StatusReport) {
                 dir.name.clone(),
                 dir.directory_type.clone(),
                 dir.role.clone(),
-                crate::paths::collapse_home(std::path::Path::new(&dir.path)),
+                format_dir_path_column(&dir.path, dir.override_applied),
                 count,
             ]);
         }
@@ -347,6 +366,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -402,6 +422,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -434,6 +455,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -669,5 +691,111 @@ mod tests {
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
 
         assert_eq!(count_health_issues(dir.path(), dir.path()).unwrap(), 0);
+    }
+
+    // -- PORT-05: override_applied surfacing --
+
+    #[test]
+    fn gather_with_no_overrides_sets_flag_false() {
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("plain").unwrap(),
+                DirectoryConfig {
+                    path: lib_dir.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let report = gather(
+            &config,
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directories.len(), 1);
+        assert!(
+            !report.directories[0].override_applied,
+            "override_applied should default to false"
+        );
+    }
+
+    #[test]
+    fn gather_with_override_applied_sets_flag_true() {
+        let lib_dir = tempfile::TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib_dir.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("work").unwrap(),
+                DirectoryConfig {
+                    path: lib_dir.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: true,
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let report = gather(
+            &config,
+            &TomePaths::new(config.library_dir.clone(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directories.len(), 1);
+        assert!(
+            report.directories[0].override_applied,
+            "override_applied should be true when the config flag is set"
+        );
+    }
+
+    #[test]
+    fn render_status_appends_override_marker_to_path() {
+        let s = format_dir_path_column("/foo/bar", true);
+        assert!(s.contains("/foo/bar"), "path content missing: {s}");
+        assert!(s.contains("(override)"), "override marker missing: {s}");
+    }
+
+    #[test]
+    fn render_status_no_override_omits_marker() {
+        let s = format_dir_path_column("/foo/bar", false);
+        assert!(s.contains("/foo/bar"), "path content missing: {s}");
+        assert!(
+            !s.contains("(override)"),
+            "override marker should NOT appear when flag is false: {s}"
+        );
+    }
+
+    #[test]
+    fn status_json_includes_override_applied_field() {
+        let ds = DirectoryStatus {
+            name: "work".to_string(),
+            directory_type: "directory".to_string(),
+            role: "Source".to_string(),
+            path: "/some/path".to_string(),
+            skill_count: CountOrError {
+                count: Some(0),
+                error: None,
+            },
+            warnings: Vec::new(),
+            override_applied: true,
+        };
+        let json = serde_json::to_string(&ds).unwrap();
+        assert!(
+            json.contains("\"override_applied\":true"),
+            "JSON output should include override_applied field, got: {json}"
+        );
     }
 }

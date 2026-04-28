@@ -30,12 +30,26 @@ pub struct DiagnosticIssue {
     pub message: String,
 }
 
+/// Per-directory diagnostic entry. Aggregates issues for one configured
+/// directory and notes whether its `path` was rewritten by a `machine.toml`
+/// `[directory_overrides.<name>]` entry (PORT-05).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirectoryDiagnostic {
+    pub name: String,
+    pub issues: Vec<DiagnosticIssue>,
+    /// True iff `directories.<name>.path` was rewritten by a `machine.toml`
+    /// override during config load. Renders as ` (override)` after the
+    /// directory name in text mode; appears as `override_applied: true` in
+    /// `tome doctor --json`.
+    pub override_applied: bool,
+}
+
 /// Complete diagnostic report for the tome system.
 #[derive(Debug, serde::Serialize)]
 pub struct DoctorReport {
     pub configured: bool,
     pub library_issues: Vec<DiagnosticIssue>,
-    pub directory_issues: Vec<(String, Vec<DiagnosticIssue>)>,
+    pub directory_issues: Vec<DirectoryDiagnostic>,
     pub config_issues: Vec<DiagnosticIssue>,
 }
 
@@ -45,7 +59,7 @@ impl DoctorReport {
             + self
                 .directory_issues
                 .iter()
-                .map(|(_, v)| v.len())
+                .map(|d| d.issues.len())
                 .sum::<usize>()
             + self.config_issues.len()
     }
@@ -71,7 +85,11 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
     let mut directory_issues = Vec::new();
     for (name, dir_config) in config.distribution_dirs() {
         let issues = check_distribution_dir(name.as_str(), &dir_config.path, paths.library_dir())?;
-        directory_issues.push((name.as_str().to_string(), issues));
+        directory_issues.push(DirectoryDiagnostic {
+            name: name.as_str().to_string(),
+            issues,
+            override_applied: dir_config.override_applied,
+        });
     }
 
     let config_issues = check_config(config)?;
@@ -118,8 +136,8 @@ pub fn diagnose(
     render_issues(&report.library_issues, "library");
 
     println!("{}", style("Checking directories...").bold());
-    for (name, issues) in &report.directory_issues {
-        render_issues_for_directory(name, issues);
+    for d in &report.directory_issues {
+        render_issues_for_directory(&d.name, &d.issues, d.override_applied);
     }
 
     println!("{}", style("Checking config...").bold());
@@ -347,14 +365,19 @@ fn render_repair_plan_auto(report: &DoctorReport) {
         };
         println!("  → {} ({})", issue.message, style(action).cyan());
     }
-    for (name, issues) in &report.directory_issues {
-        for issue in issues {
+    for d in &report.directory_issues {
+        for issue in &d.issues {
             let action = if issue.message.contains("stale symlink") {
                 "will delete stale symlink from disk"
             } else {
                 "no auto-repair available"
             };
-            println!("  → {}: {} ({})", name, issue.message, style(action).cyan());
+            println!(
+                "  → {}: {} ({})",
+                d.name,
+                issue.message,
+                style(action).cyan()
+            );
         }
     }
     for issue in &report.config_issues {
@@ -380,16 +403,28 @@ fn render_issues(issues: &[DiagnosticIssue], section: &str) {
     }
 }
 
-fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue]) {
+/// Format the directory header (name plus optional override marker) used by
+/// `render_issues_for_directory`. Extracted as a helper so the override
+/// annotation can be unit-tested without capturing stdout (PORT-05).
+fn format_dir_diagnostic_header(name: &str, override_applied: bool) -> String {
+    if override_applied {
+        format!("{} {}", name, style("(override)").cyan())
+    } else {
+        name.to_string()
+    }
+}
+
+fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue], override_applied: bool) {
+    let display_name = format_dir_diagnostic_header(name, override_applied);
     if issues.is_empty() {
-        println!("  {} {}: OK", style("ok").green(), name);
+        println!("  {} {}: OK", style("ok").green(), display_name);
     } else {
         for issue in issues {
             let marker = match issue.severity {
                 IssueSeverity::Error => style("x").red(),
                 IssueSeverity::Warning => style("!").yellow(),
             };
-            println!("  {} {}: {}", marker, name, issue.message);
+            println!("  {} {}: {}", marker, display_name, issue.message);
         }
     }
 }
@@ -777,6 +812,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -934,6 +970,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -958,6 +995,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             )]),
             ..Config::default()
@@ -1137,6 +1175,152 @@ mod tests {
             !lib.path().join("legacy").exists(),
             "broken legacy symlink should be removed"
         );
+    }
+
+    // -- PORT-05: override_applied surfacing --
+
+    #[test]
+    fn check_with_no_overrides_sets_flags_false() {
+        let lib = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("plain").unwrap(),
+                DirectoryConfig {
+                    path: target.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+        let report = check(
+            &config,
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directory_issues.len(), 1);
+        assert!(
+            !report.directory_issues[0].override_applied,
+            "override_applied should default to false"
+        );
+        assert_eq!(report.directory_issues[0].name, "plain");
+    }
+
+    #[test]
+    fn check_with_override_applied_sets_flag_true() {
+        let lib = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("work").unwrap(),
+                DirectoryConfig {
+                    path: target.path().to_path_buf(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    branch: None,
+                    tag: None,
+                    rev: None,
+                    subdir: None,
+                    override_applied: true,
+                },
+            )]),
+            ..Config::default()
+        };
+        let report = check(
+            &config,
+            &TomePaths::new(lib.path().to_path_buf(), config.library_dir.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report.directory_issues.len(), 1);
+        assert_eq!(report.directory_issues[0].name, "work");
+        assert!(
+            report.directory_issues[0].override_applied,
+            "override_applied should be true when the config flag is set"
+        );
+    }
+
+    #[test]
+    fn render_issues_for_directory_appends_override_marker_when_set() {
+        let s = format_dir_diagnostic_header("work", true);
+        assert!(s.contains("work"), "name missing: {s}");
+        assert!(s.contains("(override)"), "override marker missing: {s}");
+    }
+
+    #[test]
+    fn render_issues_for_directory_omits_marker_when_unset() {
+        let s = format_dir_diagnostic_header("work", false);
+        assert!(s.contains("work"), "name missing: {s}");
+        assert!(
+            !s.contains("(override)"),
+            "override marker should NOT appear when flag is false: {s}"
+        );
+    }
+
+    #[test]
+    fn doctor_json_includes_override_applied_per_directory() {
+        let dd = DirectoryDiagnostic {
+            name: "work".to_string(),
+            issues: Vec::new(),
+            override_applied: true,
+        };
+        let json = serde_json::to_string(&dd).unwrap();
+        assert!(
+            json.contains("\"override_applied\":true"),
+            "JSON output should include override_applied field, got: {json}"
+        );
+        assert!(
+            json.contains("\"name\":\"work\""),
+            "JSON output should include name field, got: {json}"
+        );
+    }
+
+    #[test]
+    fn total_issues_unchanged_by_directory_diagnostic_shape() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: "lib".to_string(),
+            }],
+            directory_issues: vec![
+                DirectoryDiagnostic {
+                    name: "a".to_string(),
+                    issues: vec![DiagnosticIssue {
+                        severity: IssueSeverity::Error,
+                        message: "x".to_string(),
+                    }],
+                    override_applied: true,
+                },
+                DirectoryDiagnostic {
+                    name: "b".to_string(),
+                    issues: vec![
+                        DiagnosticIssue {
+                            severity: IssueSeverity::Error,
+                            message: "y".to_string(),
+                        },
+                        DiagnosticIssue {
+                            severity: IssueSeverity::Warning,
+                            message: "z".to_string(),
+                        },
+                    ],
+                    override_applied: false,
+                },
+            ],
+            config_issues: vec![DiagnosticIssue {
+                severity: IssueSeverity::Warning,
+                message: "cfg".to_string(),
+            }],
+        };
+        // 1 (lib) + 1 (a) + 2 (b) + 1 (cfg) = 5
+        assert_eq!(report.total_issues(), 5);
     }
 
     #[test]

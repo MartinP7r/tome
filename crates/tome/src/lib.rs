@@ -86,10 +86,10 @@ fn spinner(msg: &str) -> ProgressBar {
     sp
 }
 
-/// Resolve the machine preferences path from an optional override,
+/// Resolve the machine preferences path from an optional CLI flag,
 /// falling back to the default `~/.config/tome/machine.toml`.
-fn resolve_machine_path(machine_override: Option<&Path>) -> Result<std::path::PathBuf> {
-    match machine_override {
+fn resolve_machine_path(cli_machine: Option<&Path>) -> Result<std::path::PathBuf> {
+    match cli_machine {
         Some(p) => Ok(p.to_path_buf()),
         None => machine::default_machine_path(),
     }
@@ -262,6 +262,13 @@ pub fn run(cli: Cli) -> Result<()> {
                 .expand_tildes()
                 .context("failed to expand ~ in wizard-produced config")?;
             let paths = TomePaths::new(tome_home, expanded.library_dir.clone())?;
+            // Load machine prefs once at the top of the post-Init sync path
+            // (mirrors the canonical `run()` load order). Init does NOT use
+            // `Config::load_with_overrides` because the wizard runs against
+            // the bare tome.toml that the user is about to write — overrides
+            // would mask schema errors the wizard wants to surface.
+            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+            let machine_prefs = machine::load(&machine_path)?;
             sync(
                 &expanded,
                 &paths,
@@ -272,15 +279,27 @@ pub fn run(cli: Cli) -> Result<()> {
                     no_input: cli.no_input,
                     verbose: cli.verbose,
                     quiet: cli.quiet,
-                    machine_override: cli.machine.as_deref(),
+                    machine_path: &machine_path,
+                    machine_prefs: &machine_prefs,
                 },
             )?;
         }
         return Ok(());
     }
 
-    let config = Config::load_or_default(effective_config.as_deref())?;
-    config.validate()?;
+    // Load per-machine preferences first — they may rewrite directory paths via
+    // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
+    // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
+    let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+    let machine_prefs = machine::load(&machine_path)?;
+
+    let config = Config::load_or_default_with_overrides(
+        effective_config.as_deref(),
+        &machine_path,
+        &machine_prefs,
+    )?;
+    // Note: load_or_default_with_overrides already runs validate() internally —
+    // no separate config.validate()? call here.
     let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
     let paths = TomePaths::new(tome_home, config.library_dir.clone())?;
 
@@ -317,7 +336,8 @@ pub fn run(cli: Cli) -> Result<()> {
                 no_input: cli.no_input,
                 verbose: cli.verbose,
                 quiet: cli.quiet,
-                machine_override: cli.machine.as_deref(),
+                machine_path: &machine_path,
+                machine_prefs: &machine_prefs,
             },
         )?,
         Command::Status { json } => status::show(&config, &paths, json)?,
@@ -607,6 +627,9 @@ pub fn run(cli: Cli) -> Result<()> {
 
             relocate::execute(&plan, false)?;
 
+            // Use plain Config::load (no overrides) — relocate verifies the
+            // newly-written config exactly as it lives on disk. Applying
+            // machine overrides here would mask the relocation result.
             let new_config = Config::load(&config_path)?;
             relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
         }
@@ -695,7 +718,14 @@ struct SyncOptions<'a> {
     no_input: bool,
     verbose: bool,
     quiet: bool,
-    machine_override: Option<&'a Path>,
+    /// Path where `machine.toml` should be saved after triage. Loaded once
+    /// at `run()` entry alongside `machine_prefs` so the override-apply step
+    /// in `Config::load_with_overrides` and the disabled-skill filtering
+    /// inside `sync()` see identical prefs.
+    machine_path: &'a Path,
+    /// Per-machine preferences already loaded by the caller. `sync()` clones
+    /// these locally so triage can mutate without affecting the caller's copy.
+    machine_prefs: &'a machine::MachinePrefs,
 }
 
 /// Pre-discovery step: clone or update git-type directories.
@@ -841,7 +871,8 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         no_input,
         verbose,
         quiet,
-        machine_override,
+        machine_path,
+        machine_prefs: prefs_in,
     } = opts;
     if dry_run && !quiet {
         eprintln!(
@@ -885,9 +916,11 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // Load per-machine preferences (disabled skills and targets)
-    let machine_path = resolve_machine_path(machine_override)?;
-    let mut machine_prefs = machine::load(&machine_path)?;
+    // Per-machine preferences (disabled skills and targets) are loaded once
+    // in `run()` so the override-apply step in `Config::load_with_overrides`
+    // and the disabled-skill filtering below see identical prefs. We clone
+    // here so triage (below) can mutate locally without affecting the caller.
+    let mut machine_prefs = prefs_in.clone();
 
     // Load existing lockfile for diffing and auto-install
     let old_lockfile = lockfile::load(paths.config_dir())?;
@@ -963,7 +996,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 println!("{}", style("Library changes detected:").bold());
                 let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
                 if !newly_disabled.is_empty() && !dry_run {
-                    machine::save(&machine_prefs, &machine_path)?;
+                    machine::save(&machine_prefs, machine_path)?;
                     println!(
                         "  {} skill(s) disabled in {}",
                         newly_disabled.len(),

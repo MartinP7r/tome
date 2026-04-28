@@ -15,6 +15,23 @@ use serde::{Deserialize, Serialize};
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
 
+/// Per-machine path override for a specific directory.
+///
+/// Allows a single `tome.toml` checked into dotfiles to be applied across
+/// machines with different filesystem layouts. The override is applied at
+/// config load time (between `Config::expand_tildes()` and `Config::validate()`)
+/// so every downstream command operates on the merged result.
+///
+/// Schema (v0.9): only `path` is supported. Future versions may add
+/// `role`/`type`/`subdir` overrides — track via #458 follow-ups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryOverride {
+    /// Replaces `directories.<name>.path` on this machine. Tilde-expansion
+    /// happens in `Config::apply_machine_overrides`, not here.
+    pub path: PathBuf,
+}
+
 /// Per-directory skill filtering preferences.
 ///
 /// A directory can have either a `disabled` blocklist OR an `enabled` allowlist,
@@ -46,6 +63,12 @@ pub struct MachinePrefs {
     /// Per-directory skill filtering. Keys are directory names from config.
     #[serde(default)]
     pub(crate) directory: BTreeMap<DirectoryName, DirectoryPrefs>,
+
+    /// Per-machine path overrides for entries in `tome.toml::directories`.
+    /// Keyed by directory name; only the `path` field is currently supported (PORT-01).
+    /// See `Config::apply_machine_overrides` for the apply step.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) directory_overrides: BTreeMap<DirectoryName, DirectoryOverride>,
 }
 
 impl MachinePrefs {
@@ -471,5 +494,98 @@ disabled_directories = ["old-dir"]
         let parsed: MachinePrefs = toml::from_str(&toml_str).unwrap();
         assert!(parsed.is_directory_disabled("claude"));
         assert!(parsed.is_directory_disabled("windsurf"));
+    }
+
+    // === [directory_overrides.<name>] schema tests (PORT-01) ===
+
+    #[test]
+    fn directory_overrides_default_empty() {
+        let prefs = MachinePrefs::default();
+        assert!(prefs.directory_overrides.is_empty());
+    }
+
+    #[test]
+    fn directory_overrides_parses_from_toml() {
+        let toml_str = r#"
+[directory_overrides.claude-skills]
+path = "/work/skills"
+"#;
+        let prefs: MachinePrefs = toml::from_str(toml_str).unwrap();
+        let entry = prefs
+            .directory_overrides
+            .get("claude-skills")
+            .expect("override missing");
+        assert_eq!(entry.path, PathBuf::from("/work/skills"));
+    }
+
+    #[test]
+    fn directory_overrides_with_tilde_path_is_preserved_unexpanded() {
+        // serde::Deserialize for PathBuf treats `~` as a literal char; tilde
+        // expansion is delayed to Config::apply_machine_overrides so override
+        // paths follow the same expansion semantics as paths in tome.toml.
+        let toml_str = r#"
+[directory_overrides.x]
+path = "~/work/skills"
+"#;
+        let prefs: MachinePrefs = toml::from_str(toml_str).unwrap();
+        let entry = prefs.directory_overrides.get("x").unwrap();
+        assert_eq!(entry.path, PathBuf::from("~/work/skills"));
+    }
+
+    #[test]
+    fn directory_overrides_roundtrip() {
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            DirectoryName::new("work").unwrap(),
+            DirectoryOverride {
+                path: PathBuf::from("/work/skills"),
+            },
+        );
+
+        let toml_str = toml::to_string_pretty(&prefs).unwrap();
+        let parsed: MachinePrefs = toml::from_str(&toml_str).unwrap();
+
+        assert_eq!(parsed.directory_overrides.len(), 1);
+        let entry = parsed.directory_overrides.get("work").unwrap();
+        assert_eq!(entry.path, PathBuf::from("/work/skills"));
+    }
+
+    #[test]
+    fn existing_machine_toml_without_overrides_still_parses() {
+        // Backward compat: an existing machine.toml without [directory_overrides.*]
+        // must still parse, with directory_overrides defaulting to empty.
+        let toml_str = "disabled = [\"x\"]\n";
+        let prefs: MachinePrefs = toml::from_str(toml_str).unwrap();
+
+        assert!(prefs.directory_overrides.is_empty());
+        assert!(prefs.is_disabled("x"));
+    }
+
+    #[test]
+    fn directory_overrides_save_skips_when_empty() {
+        // With no overrides set, the on-disk TOML must not emit a
+        // `[directory_overrides]` table heading — the empty map is invisible.
+        let prefs = MachinePrefs::default();
+        let toml_str = toml::to_string_pretty(&prefs).unwrap();
+        assert!(
+            !toml_str.contains("[directory_overrides"),
+            "empty directory_overrides should not be serialized, got:\n{toml_str}"
+        );
+    }
+
+    #[test]
+    fn directory_overrides_unknown_extra_field_rejected() {
+        // `deny_unknown_fields` on DirectoryOverride catches typos in a
+        // future-renamed field before they silently no-op.
+        let toml_str = r#"
+[directory_overrides.x]
+path = "/p"
+bogus = "y"
+"#;
+        let result: Result<MachinePrefs, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "expected parse failure for unknown field, got: {result:?}"
+        );
     }
 }

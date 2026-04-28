@@ -392,6 +392,7 @@ mod tests {
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
         directories.insert(
@@ -404,6 +405,7 @@ mod tests {
                 tag: None,
                 rev: None,
                 subdir: None,
+                override_applied: false,
             },
         );
 

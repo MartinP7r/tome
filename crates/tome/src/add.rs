@@ -136,6 +136,7 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
         tag: opts.tag.map(String::from),
         rev: opts.rev.map(String::from),
         subdir: None,
+        override_applied: false,
     };
 
     if opts.dry_run {

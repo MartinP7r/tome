@@ -568,6 +568,7 @@ mod tests {
                     rev: None,
 
                     subdir: None,
+                    override_applied: false,
                 },
             );
         }
