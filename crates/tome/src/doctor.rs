@@ -30,12 +30,26 @@ pub struct DiagnosticIssue {
     pub message: String,
 }
 
+/// Per-directory diagnostic entry. Aggregates issues for one configured
+/// directory and notes whether its `path` was rewritten by a `machine.toml`
+/// `[directory_overrides.<name>]` entry (PORT-05).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DirectoryDiagnostic {
+    pub name: String,
+    pub issues: Vec<DiagnosticIssue>,
+    /// True iff `directories.<name>.path` was rewritten by a `machine.toml`
+    /// override during config load. Renders as ` (override)` after the
+    /// directory name in text mode; appears as `override_applied: true` in
+    /// `tome doctor --json`.
+    pub override_applied: bool,
+}
+
 /// Complete diagnostic report for the tome system.
 #[derive(Debug, serde::Serialize)]
 pub struct DoctorReport {
     pub configured: bool,
     pub library_issues: Vec<DiagnosticIssue>,
-    pub directory_issues: Vec<(String, Vec<DiagnosticIssue>)>,
+    pub directory_issues: Vec<DirectoryDiagnostic>,
     pub config_issues: Vec<DiagnosticIssue>,
 }
 
@@ -45,7 +59,7 @@ impl DoctorReport {
             + self
                 .directory_issues
                 .iter()
-                .map(|(_, v)| v.len())
+                .map(|d| d.issues.len())
                 .sum::<usize>()
             + self.config_issues.len()
     }
@@ -71,7 +85,11 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
     let mut directory_issues = Vec::new();
     for (name, dir_config) in config.distribution_dirs() {
         let issues = check_distribution_dir(name.as_str(), &dir_config.path, paths.library_dir())?;
-        directory_issues.push((name.as_str().to_string(), issues));
+        directory_issues.push(DirectoryDiagnostic {
+            name: name.as_str().to_string(),
+            issues,
+            override_applied: dir_config.override_applied,
+        });
     }
 
     let config_issues = check_config(config)?;
@@ -118,8 +136,8 @@ pub fn diagnose(
     render_issues(&report.library_issues, "library");
 
     println!("{}", style("Checking directories...").bold());
-    for (name, issues) in &report.directory_issues {
-        render_issues_for_directory(name, issues);
+    for d in &report.directory_issues {
+        render_issues_for_directory(&d.name, &d.issues, d.override_applied);
     }
 
     println!("{}", style("Checking config...").bold());
@@ -347,14 +365,19 @@ fn render_repair_plan_auto(report: &DoctorReport) {
         };
         println!("  → {} ({})", issue.message, style(action).cyan());
     }
-    for (name, issues) in &report.directory_issues {
-        for issue in issues {
+    for d in &report.directory_issues {
+        for issue in &d.issues {
             let action = if issue.message.contains("stale symlink") {
                 "will delete stale symlink from disk"
             } else {
                 "no auto-repair available"
             };
-            println!("  → {}: {} ({})", name, issue.message, style(action).cyan());
+            println!(
+                "  → {}: {} ({})",
+                d.name,
+                issue.message,
+                style(action).cyan()
+            );
         }
     }
     for issue in &report.config_issues {
@@ -380,16 +403,28 @@ fn render_issues(issues: &[DiagnosticIssue], section: &str) {
     }
 }
 
-fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue]) {
+/// Format the directory header (name plus optional override marker) used by
+/// `render_issues_for_directory`. Extracted as a helper so the override
+/// annotation can be unit-tested without capturing stdout (PORT-05).
+fn format_dir_diagnostic_header(name: &str, override_applied: bool) -> String {
+    if override_applied {
+        format!("{} {}", name, style("(override)").cyan())
+    } else {
+        name.to_string()
+    }
+}
+
+fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue], override_applied: bool) {
+    let display_name = format_dir_diagnostic_header(name, override_applied);
     if issues.is_empty() {
-        println!("  {} {}: OK", style("ok").green(), name);
+        println!("  {} {}: OK", style("ok").green(), display_name);
     } else {
         for issue in issues {
             let marker = match issue.severity {
                 IssueSeverity::Error => style("x").red(),
                 IssueSeverity::Warning => style("!").yellow(),
             };
-            println!("  {} {}: {}", marker, name, issue.message);
+            println!("  {} {}: {}", marker, display_name, issue.message);
         }
     }
 }
