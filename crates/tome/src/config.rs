@@ -227,10 +227,10 @@ pub struct DirectoryConfig {
     /// `#[serde(skip)]` ensures this never appears in `tome.toml` (it's machine-local state,
     /// not portable config). Default = `false`.
     ///
-    /// Wired by Plan 09-03 (status/doctor surfacing — PORT-05). For now this
-    /// field is set but not observed by user-facing output.
+    /// Wired by Plan 09-03 (status/doctor surfacing — PORT-05): consumed by
+    /// `status::gather` and `doctor::check` to render an `(override)` annotation
+    /// in text output and an `override_applied: true|false` field in JSON output.
     #[serde(skip)]
-    #[allow(dead_code)]
     pub(crate) override_applied: bool,
 }
 

@@ -46,6 +46,11 @@ pub struct DirectoryStatus {
     pub skill_count: CountOrError,
     /// Warnings emitted during discovery.
     pub warnings: Vec<String>,
+    /// True iff `directories.<name>.path` was rewritten by a `machine.toml`
+    /// `[directory_overrides.<name>]` entry during config load (PORT-05).
+    /// JSON consumers can use this to render the same context that text-mode
+    /// `tome status` shows via the `(override)` annotation.
+    pub override_applied: bool,
 }
 
 /// Complete status report for the tome system.
@@ -92,6 +97,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
                 path: dir_config.path.display().to_string(),
                 skill_count: skill_count.into(),
                 warnings,
+                override_applied: dir_config.override_applied,
             }
         })
         .collect();
@@ -112,6 +118,19 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
 }
 
 // -- Rendering --
+
+/// Format the PATH column for the directories table. When `override_applied`
+/// is true, append a styled ` (override)` annotation so the user can see
+/// which entries were rewritten by a `machine.toml` `[directory_overrides.<name>]`
+/// entry (PORT-05).
+fn format_dir_path_column(path: &str, override_applied: bool) -> String {
+    let collapsed = crate::paths::collapse_home(std::path::Path::new(path));
+    if override_applied {
+        format!("{} {}", collapsed, style("(override)").cyan())
+    } else {
+        collapsed
+    }
+}
 
 /// Display the current status of the tome system.
 pub fn show(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
@@ -178,7 +197,7 @@ fn render_status(report: &StatusReport) {
                 dir.name.clone(),
                 dir.directory_type.clone(),
                 dir.role.clone(),
-                crate::paths::collapse_home(std::path::Path::new(&dir.path)),
+                format_dir_path_column(&dir.path, dir.override_applied),
                 count,
             ]);
         }
