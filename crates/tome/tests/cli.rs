@@ -5117,7 +5117,10 @@ fn machine_override_appears_in_status_and_doctor() {
     // The synced directory must EXIST on disk pre-sync — distribute writes
     // symlinks into it. Create the real path's parent (already done by
     // `create_skill`) and ensure `real_path` itself is a directory.
-    assert!(real_path.is_dir(), "real_path must exist for sync to succeed");
+    assert!(
+        real_path.is_dir(),
+        "real_path must exist for sync to succeed"
+    );
 
     let other_path = tmp.path().join("other-skills");
     create_skill(&other_path, "skill-b");
