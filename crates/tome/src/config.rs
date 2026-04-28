@@ -565,6 +565,33 @@ impl Config {
         Ok(())
     }
 
+    /// Emit a warning for each `[directory_overrides.<name>]` entry whose `<name>`
+    /// does not match any key in `self.directories`. Caller-supplied `warn` closure
+    /// receives the formatted message body (without the `warning:` prefix), so the
+    /// caller decides whether to `eprintln!`, push to a Vec, or do something else.
+    ///
+    /// Used by `Config::load_with_overrides` to surface PORT-03 typo guards.
+    /// Mirrors `lib.rs::warn_unknown_disabled_directories` (which handles the same
+    /// typo case for `disabled_directories`).
+    ///
+    /// **Order:** call this BEFORE `apply_machine_overrides` so the user sees
+    /// warnings about typos even if the apply step never touches them. (Apply is
+    /// silent for unknown targets — see Plan 09-01.)
+    #[allow(dead_code)] // Wired into load_with_overrides in Task 2 of this plan.
+    pub(crate) fn warn_unknown_overrides(
+        &self,
+        prefs: &crate::machine::MachinePrefs,
+        mut warn: impl FnMut(String),
+    ) {
+        for name in prefs.directory_overrides.keys() {
+            if !self.directories.contains_key(name.as_str()) {
+                warn(format!(
+                    "directory_overrides target '{name}' in machine.toml does not match any configured directory"
+                ));
+            }
+        }
+    }
+
     /// Load config and apply per-machine path overrides in one shot.
     ///
     /// **Order (I2 invariant — must not change):**
@@ -2592,6 +2619,131 @@ role = "target"
         assert!(
             !dir.override_applied,
             "override_applied should default to false when no overrides declared"
+        );
+    }
+
+    // === warn_unknown_overrides tests (PORT-03) ===
+
+    #[test]
+    fn warn_unknown_overrides_no_overrides_emits_nothing() {
+        let config = config_with_one_dir("real", "/old/path");
+        let prefs = crate::machine::MachinePrefs::default();
+
+        let mut warnings: Vec<String> = Vec::new();
+        config.warn_unknown_overrides(&prefs, |w| warnings.push(w));
+
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings when directory_overrides is empty, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn warn_unknown_overrides_known_target_emits_nothing() {
+        let config = config_with_one_dir("real", "/old/path");
+        let prefs = prefs_with_override("real", "/new/path");
+
+        let mut warnings: Vec<String> = Vec::new();
+        config.warn_unknown_overrides(&prefs, |w| warnings.push(w));
+
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings when override target matches a configured directory, got: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn warn_unknown_overrides_unknown_target_emits_one_warning() {
+        let config = config_with_one_dir("real", "/old/path");
+        let prefs = prefs_with_override("claud", "/p");
+
+        let mut warnings: Vec<String> = Vec::new();
+        config.warn_unknown_overrides(&prefs, |w| warnings.push(w));
+
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one warning for the unknown target, got: {warnings:?}"
+        );
+        assert!(
+            warnings[0].contains("claud"),
+            "warning should name the typo target 'claud', got: {}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0].contains("machine.toml"),
+            "warning should reference machine.toml as the source file, got: {}",
+            warnings[0]
+        );
+        assert!(
+            warnings[0].contains("directory_overrides") || warnings[0].contains("override"),
+            "warning should mention 'directory_overrides' or 'override', got: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn warn_unknown_overrides_multiple_unknowns_emit_one_each() {
+        let config = config_with_one_dir("real", "/old/path");
+        let mut prefs = crate::machine::MachinePrefs::default();
+        // Insert in reverse alphabetical order to verify BTreeMap iteration is alphabetical.
+        prefs.directory_overrides.insert(
+            DirectoryName::new("b").unwrap(),
+            crate::machine::DirectoryOverride {
+                path: PathBuf::from("/b"),
+            },
+        );
+        prefs.directory_overrides.insert(
+            DirectoryName::new("a").unwrap(),
+            crate::machine::DirectoryOverride {
+                path: PathBuf::from("/a"),
+            },
+        );
+
+        let mut warnings: Vec<String> = Vec::new();
+        config.warn_unknown_overrides(&prefs, |w| warnings.push(w));
+
+        assert_eq!(
+            warnings.len(),
+            2,
+            "expected one warning per unknown target, got: {warnings:?}"
+        );
+        // BTreeMap iteration is alphabetical, so warnings should be in 'a', 'b' order.
+        assert!(
+            warnings[0].contains("'a'"),
+            "first warning should name 'a' (alphabetical order), got: {}",
+            warnings[0]
+        );
+        assert!(
+            warnings[1].contains("'b'"),
+            "second warning should name 'b' (alphabetical order), got: {}",
+            warnings[1]
+        );
+    }
+
+    #[test]
+    fn warn_unknown_overrides_does_not_mutate_config() {
+        // The helper takes &self (not &mut self) — verifying via a snapshot that
+        // calling it leaves the config unchanged. Compile-time signature check is
+        // the primary guard; this test is a defense-in-depth runtime check.
+        let config = config_with_one_dir("real", "/old/path");
+        let snapshot = config.clone();
+        let prefs = prefs_with_override("claud", "/p");
+
+        let mut warnings: Vec<String> = Vec::new();
+        config.warn_unknown_overrides(&prefs, |w| warnings.push(w));
+
+        // Compare path of the only directory to confirm no mutation.
+        let original_path = snapshot.directories.get("real").unwrap().path.clone();
+        let after_path = config.directories.get("real").unwrap().path.clone();
+        assert_eq!(
+            original_path, after_path,
+            "warn_unknown_overrides must not mutate config paths"
+        );
+        assert_eq!(
+            snapshot.directories.len(),
+            config.directories.len(),
+            "warn_unknown_overrides must not mutate directory count"
         );
     }
 }
