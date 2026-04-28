@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: null
-milestone_name: null
-status: between-milestones
-stopped_at: v0.8 milestone shipped (v0.8.1 — 2026-04-27); ready to plan v0.9
-last_updated: "2026-04-27T00:00:00.000Z"
-last_activity: 2026-04-27
+milestone: v0.9
+milestone_name: Cross-Machine Config Portability & Polish
+status: roadmap-ready
+stopped_at: v0.9 roadmap drafted — Phase 9 ready for /gsd:plan-phase
+last_updated: "2026-04-28T00:00:00.000Z"
+last_activity: 2026-04-28
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -18,18 +18,20 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-27)
+See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Between milestones — v0.8 shipped, v0.9 not yet planned
+**Current focus:** v0.9 — Cross-Machine Config Portability & Polish (Phase 9: Cross-Machine Path Overrides)
 
 ## Current Position
 
-Milestone: (none — between milestones)
-Last shipped: v0.8.1 (2026-04-27)
-Next: v0.9 — Cross-Machine Config Portability (epic [#458](https://github.com/MartinP7r/tome/issues/458)) — not yet planned
+Milestone: v0.9 — Cross-Machine Config Portability & Polish
+Phase: Phase 9 — Cross-Machine Path Overrides (not started)
+Plan: — (run `/gsd:plan-phase 9` to decompose)
+Status: Roadmap drafted; awaiting plan-phase decomposition
+Last activity: 2026-04-28 — v0.9 roadmap drafted (Phases 9 + 10)
 
-Run `/gsd:new-milestone` to plan v0.9.
+Progress: [░░░░░░░░░░] 0% (0/2 phases complete)
 
 ## Accumulated Context
 
@@ -42,19 +44,23 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.7-ROADMAP.md` — per-phase decisions for v0.7
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 
+v0.9-specific decisions (so far):
+
+- **D-1 (v0.9 scope):** Bundle #462 (test/wording/dead-code polish) and #463 (type design + TUI architecture polish) into v0.9 alongside the cross-machine portability driver. Trade-off: bigger milestone, longer cycle, but clears the v0.8 review tail in one cut and avoids a v0.8.2 patch release.
+- **D-2 (v0.9 scope):** Bare-slug `tome add` improvement (PR #471, merged 2026-04-27 to main) ships with v0.9 — no separate v0.8.2 patch release.
+- **D-3 (v0.9 phasing):** Two-phase shape — Phase 9 (PORT, 5 reqs) lands the portability epic as a coherent unit; Phase 10 (POLISH + TEST, 11 reqs) lands the entire #462/#463 review tail in one cut. Coarse granularity favours fewer phases; TEST-03 ↔ POLISH-02 coupling (both touch `ViewSource .status()` / `StatusMessage`) makes co-location natural and avoids splitting tightly-related work.
+
 ### Pending Todos / Carry-over
 
 - **Linux UAT (v0.8 carry-over):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` — clipboard runtime + xdg-open runtime tests on a Linux desktop. Pending hardware. Run `/gsd:verify-work 08` when on Linux.
-- **v0.8.x polish (#462):** 5 items from Phase 8 post-merge review (success-banner-absence assertion, retry end-to-end test, ViewSource .status() middle-branch coverage, regen-warning ordering, dead `source_path` field). Could ship as a v0.8.x patch.
-- **v0.9 polish (#463):** 6 type design + TUI architecture items from Phase 8 review — natural fit for v0.9 scope.
 - **Pre-existing flake:** `backup::tests::push_and_pull_roundtrip` — passes in isolation, intermittent in full suite. Worth a separate investigation pass.
 
 ### Blockers/Concerns
 
-- None for v0.9 planning.
+- None for v0.9 Phase 9 entry.
 
 ## Session Continuity
 
-Last session: 2026-04-27T00:00:00.000Z
-Stopped at: v0.8 milestone archived to milestones/v0.8-ROADMAP.md and milestones/v0.8-REQUIREMENTS.md
+Last session: 2026-04-28T00:00:00.000Z
+Stopped at: v0.9 roadmap drafted (Phases 9 + 10) — ready for `/gsd:plan-phase 9`
 Resume file: None
