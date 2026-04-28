@@ -64,19 +64,19 @@ Phase mapping is filled by `/gsd:plan-phase` after roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PORT-01 | TBD | Pending |
-| PORT-02 | TBD | Pending |
-| PORT-03 | TBD | Pending |
-| PORT-04 | TBD | Pending |
-| PORT-05 | TBD | Pending |
-| POLISH-01 | TBD | Pending |
-| POLISH-02 | TBD | Pending |
-| POLISH-03 | TBD | Pending |
-| POLISH-04 | TBD | Pending |
-| POLISH-05 | TBD | Pending |
-| POLISH-06 | TBD | Pending |
-| TEST-01 | TBD | Pending |
-| TEST-02 | TBD | Pending |
-| TEST-03 | TBD | Pending |
-| TEST-04 | TBD | Pending |
-| TEST-05 | TBD | Pending |
+| PORT-01 | Phase 9 | Pending |
+| PORT-02 | Phase 9 | Pending |
+| PORT-03 | Phase 9 | Pending |
+| PORT-04 | Phase 9 | Pending |
+| PORT-05 | Phase 9 | Pending |
+| POLISH-01 | Phase 10 | Pending |
+| POLISH-02 | Phase 10 | Pending |
+| POLISH-03 | Phase 10 | Pending |
+| POLISH-04 | Phase 10 | Pending |
+| POLISH-05 | Phase 10 | Pending |
+| POLISH-06 | Phase 10 | Pending |
+| TEST-01 | Phase 10 | Pending |
+| TEST-02 | Phase 10 | Pending |
+| TEST-03 | Phase 10 | Pending |
+| TEST-04 | Phase 10 | Pending |
+| TEST-05 | Phase 10 | Pending |

@@ -116,6 +116,16 @@ v0.8 milestone complete — Wizard UX & Safety Hardening. 8 requirements shipped
 - Single-user constraint still holds — no migration tooling; users with existing `tome.toml` get explicit migration docs if schema changes.
 - Cross-machine portability has been intentionally deferred since v0.8 epic #459 because the design needs new schema fields + override-apply timing — a bigger lift than fits a single phase.
 
+## Looking Beyond v0.9
+
+**v1.0 tome Desktop (Tauri GUI)** — drafted 2026-04-28
+
+Forward-planning artifacts: [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md) + [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md). 32 requirements across 7 categories (CORE / VIEW / SYNC / CFG / OPS / BAK / DIST) + 5 cross-cutting NF gates. 7 phases (10–16). Rough size: 15–22 weeks of focused work; alpha after Phase 11, beta after Phase 13, ship after Phase 16.
+
+Tauri 2 chosen over Electron + napi-rs (D-GUI-01): the Rust crate becomes the native backend directly, ~8 MB bundle, built-in code-signed auto-update, reuses Developer ID flow. CLI ships unchanged from `crates/tome`; the GUI lives in a new `crates/tome-desktop` workspace member.
+
+Sequenced after v0.9 by default (D-GUI-09). Ratify via `/gsd:new-milestone` when v0.9 ships and v1.0 becomes the active milestone.
+
 <details>
 <summary>Previous milestones (recap)</summary>
 
