@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.9
 milestone_name: Cross-Machine Config Portability & Polish
-status: roadmap-ready
-stopped_at: v0.9 roadmap drafted — Phase 9 ready for /gsd:plan-phase
-last_updated: "2026-04-28T00:00:00.000Z"
+status: executing
+stopped_at: Completed 09-01-machine-overrides-schema-and-apply-PLAN.md (PORT-01 + PORT-02)
+last_updated: "2026-04-28T13:54:44.850Z"
 last_activity: 2026-04-28
 progress:
-  total_phases: 2
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 10
+  completed_phases: 9
+  total_plans: 33
+  completed_plans: 31
   percent: 0
 ---
 
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** v0.9 — Cross-Machine Config Portability & Polish (Phase 9: Cross-Machine Path Overrides)
+**Current focus:** Phase 9 — cross-machine-path-overrides
 
 ## Current Position
 
 Milestone: v0.9 — Cross-Machine Config Portability & Polish
-Phase: Phase 9 — Cross-Machine Path Overrides (not started)
-Plan: — (run `/gsd:plan-phase 9` to decompose)
-Status: Roadmap drafted; awaiting plan-phase decomposition
-Last activity: 2026-04-28 — v0.9 roadmap drafted (Phases 9 + 10)
+Phase: 9 (cross-machine-path-overrides) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-28
 
 Progress: [░░░░░░░░░░] 0% (0/2 phases complete)
 
@@ -49,6 +49,7 @@ v0.9-specific decisions (so far):
 - **D-1 (v0.9 scope):** Bundle #462 (test/wording/dead-code polish) and #463 (type design + TUI architecture polish) into v0.9 alongside the cross-machine portability driver. Trade-off: bigger milestone, longer cycle, but clears the v0.8 review tail in one cut and avoids a v0.8.2 patch release.
 - **D-2 (v0.9 scope):** Bare-slug `tome add` improvement (PR #471, merged 2026-04-27 to main) ships with v0.9 — no separate v0.8.2 patch release.
 - **D-3 (v0.9 phasing):** Two-phase shape — Phase 9 (PORT, 5 reqs) lands the portability epic as a coherent unit; Phase 10 (POLISH + TEST, 11 reqs) lands the entire #462/#463 review tail in one cut. Coarse granularity favours fewer phases; TEST-03 ↔ POLISH-02 coupling (both touch `ViewSource .status()` / `StatusMessage`) makes co-location natural and avoids splitting tightly-related work.
+- [Phase 09-cross-machine-path-overrides]: PORT-01/02: machine.toml [directory_overrides.<name>] schema with apply timing in canonical run() load path (expand_tildes → apply_machine_overrides → validate)
 
 ### Pending Todos / Carry-over
 
@@ -61,6 +62,6 @@ v0.9-specific decisions (so far):
 
 ## Session Continuity
 
-Last session: 2026-04-28T00:00:00.000Z
-Stopped at: v0.9 roadmap drafted (Phases 9 + 10) — ready for `/gsd:plan-phase 9`
+Last session: 2026-04-28T13:54:23.483Z
+Stopped at: Completed 09-01-machine-overrides-schema-and-apply-PLAN.md (PORT-01 + PORT-02)
 Resume file: None

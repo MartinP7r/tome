@@ -12,8 +12,8 @@ A single `tome.toml` checked into dotfiles can be applied across machines with d
 
 Source: [#458](https://github.com/MartinP7r/tome/issues/458). Mechanism: new `[directory_overrides.<name>]` table in `machine.toml`.
 
-- [ ] **PORT-01**: User can declare `[directory_overrides.<name>]` blocks in `~/.config/tome/machine.toml` (or per-tome-home equivalent) to remap a directory's `path` field on this machine, without editing the synced `tome.toml`.
-- [ ] **PORT-02**: Per-machine overrides apply at config load time (after tilde expansion, before `Config::validate`), so all downstream code (`sync`, `status`, `doctor`, `lockfile::generate`) operates on the merged result.
+- [x] **PORT-01**: User can declare `[directory_overrides.<name>]` blocks in `~/.config/tome/machine.toml` (or per-tome-home equivalent) to remap a directory's `path` field on this machine, without editing the synced `tome.toml`.
+- [x] **PORT-02**: Per-machine overrides apply at config load time (after tilde expansion, before `Config::validate`), so all downstream code (`sync`, `status`, `doctor`, `lockfile::generate`) operates on the merged result.
 - [ ] **PORT-03**: An override that targets a directory name not present in `tome.toml` produces a stderr `warning:` line (typo guard) without aborting load.
 - [ ] **PORT-04**: Validation failures triggered by an override (e.g., overridden path now overlaps `library_dir`) surface as a distinct error class so the user knows to fix `machine.toml`, not `tome.toml`.
 - [ ] **PORT-05**: `tome status` and `tome doctor` indicate which directory entries are subject to a per-machine override, so the user can answer "why is this path different on this machine?" without diffing files.
@@ -64,8 +64,8 @@ Phase mapping is filled by `/gsd:plan-phase` after roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PORT-01 | Phase 9 | Pending |
-| PORT-02 | Phase 9 | Pending |
+| PORT-01 | Phase 9 | Complete |
+| PORT-02 | Phase 9 | Complete |
 | PORT-03 | Phase 9 | Pending |
 | PORT-04 | Phase 9 | Pending |
 | PORT-05 | Phase 9 | Pending |
