@@ -577,7 +577,6 @@ impl Config {
     /// **Order:** call this BEFORE `apply_machine_overrides` so the user sees
     /// warnings about typos even if the apply step never touches them. (Apply is
     /// silent for unknown targets — see Plan 09-01.)
-    #[allow(dead_code)] // Wired into load_with_overrides in Task 2 of this plan.
     pub(crate) fn warn_unknown_overrides(
         &self,
         prefs: &crate::machine::MachinePrefs,
@@ -597,19 +596,27 @@ impl Config {
     /// **Order (I2 invariant — must not change):**
     ///   1. Read TOML from `path` (or build defaults if missing — same as `Config::load`)
     ///   2. `expand_tildes()` on the raw config
-    ///   3. `apply_machine_overrides(prefs)` — rewrites paths per `[directory_overrides.<name>]`
-    ///   4. `validate()` — sees the merged result, so any override that produces an
-    ///      invalid config (e.g., overridden path overlaps `library_dir`) surfaces here
+    ///   3. `warn_unknown_overrides(prefs)` — stderr typo guard (PORT-03)
+    ///   4. snapshot pre-override paths (for the PORT-04 wrapper)
+    ///   5. `apply_machine_overrides(prefs)` — rewrites paths per `[directory_overrides.<name>]`
+    ///   6. `validate()` — sees the merged result; if it fails AND the pre-override
+    ///      config DID validate AND ≥ 1 override was applied, the error is wrapped
+    ///      via `format_override_validation_error` so the user knows to edit
+    ///      `machine.toml`, not `tome.toml` (PORT-04). Otherwise the raw
+    ///      `validate()` error passes through.
     ///
-    /// Plan 09-02 (PORT-04) wraps the validate step in a distinct error class so
-    /// the user knows to fix `machine.toml`, not `tome.toml`. This method
-    /// intentionally returns the raw `validate()` error for now — Plan 09-02
-    /// introduces the wrapping.
+    /// `machine_path` is the path to `machine.toml`; only used to build the
+    /// PORT-04 wrapper message ("To fix: edit `<machine_path>`"). The prefs
+    /// themselves come from `prefs`, not by re-reading the file.
     ///
     /// Used by `lib.rs::run()` for every non-Init command. `tome init` does NOT use
     /// this path — the wizard runs against the bare `tome.toml` that the user is
     /// about to write.
-    pub fn load_with_overrides(path: &Path, prefs: &crate::machine::MachinePrefs) -> Result<Self> {
+    pub fn load_with_overrides(
+        path: &Path,
+        machine_path: &Path,
+        prefs: &crate::machine::MachinePrefs,
+    ) -> Result<Self> {
         let mut config = if path.exists() {
             let content = std::fs::read_to_string(path)
                 .with_context(|| format!("failed to read {}", path.display()))?;
@@ -625,8 +632,48 @@ impl Config {
         };
 
         config.expand_tildes()?;
+
+        // PORT-03: warn about typos before applying. Apply is a silent no-op
+        // for unknown targets (see `apply_machine_overrides` doc), so the user
+        // would otherwise lose their override silently.
+        config.warn_unknown_overrides(prefs, |w| eprintln!("warning: {w}"));
+
+        // PORT-04 setup: snapshot pre-override paths so we can both (a)
+        // discriminate "override-induced" failure from a pre-existing tome.toml
+        // problem and (b) show the user what changed in the wrapper message.
+        let pre_override_paths: BTreeMap<String, PathBuf> = config
+            .directories
+            .iter()
+            .map(|(name, dir)| (name.as_str().to_string(), dir.path.clone()))
+            .collect();
+
         config.apply_machine_overrides(prefs)?;
-        config.validate()?;
+
+        if let Err(post_err) = config.validate() {
+            // Only wrap if the pre-override config WOULD have validated AND at
+            // least one override was applied. Otherwise blaming machine.toml
+            // would be wrong — the underlying tome.toml is what's broken.
+            let mut pre_override_config = config.clone();
+            for (name, dir) in pre_override_config.directories.iter_mut() {
+                if let Some(orig) = pre_override_paths.get(name.as_str()) {
+                    dir.path = orig.clone();
+                    dir.override_applied = false;
+                }
+            }
+            let pre_override_valid = pre_override_config.validate().is_ok();
+            let any_override_applied =
+                config.directories.values().any(|d| d.override_applied);
+
+            if pre_override_valid && any_override_applied {
+                return Err(format_override_validation_error(
+                    &post_err,
+                    &pre_override_paths,
+                    &config,
+                    machine_path,
+                ));
+            }
+            return Err(post_err);
+        }
         Ok(config)
     }
 
@@ -634,6 +681,7 @@ impl Config {
     /// missing-file vs. missing-parent-dir semantics.
     pub fn load_or_default_with_overrides(
         cli_path: Option<&Path>,
+        machine_path: &Path,
         prefs: &crate::machine::MachinePrefs,
     ) -> Result<Self> {
         let path = match cli_path {
@@ -646,7 +694,7 @@ impl Config {
             }
             None => default_config_path()?,
         };
-        Self::load_with_overrides(&path, prefs)
+        Self::load_with_overrides(&path, machine_path, prefs)
     }
 
     /// Save config, but first run the same expand + validate pipeline that
@@ -691,6 +739,71 @@ impl Config {
         std::fs::write(path, &emitted)
             .with_context(|| format!("failed to write {}", path.display()))
     }
+}
+
+/// Wrap a `Config::validate()` error that was caused by `[directory_overrides.*]`
+/// rewriting paths into something invalid. Names `machine.toml` as the file to
+/// edit (NOT `tome.toml`) and shows the pre-override vs post-override paths so
+/// the user can see what changed.
+///
+/// Only called from `Config::load_with_overrides` when:
+///   - pre-override config validates,
+///   - at least one override was applied,
+///   - post-override config fails validation.
+///
+/// PORT-04: the "distinct error class" is achieved by message-content
+/// conventions (`override-induced config error from machine.toml`,
+/// `directory_overrides`) rather than a typed error variant — matches the
+/// existing tome anyhow conventions. If a future caller needs to detect this
+/// error programmatically, consider migrating to a typed `OverrideValidationError`
+/// enum (tracked as a v1.0 follow-up).
+fn format_override_validation_error(
+    post_err: &anyhow::Error,
+    pre_override_paths: &BTreeMap<String, PathBuf>,
+    config: &Config,
+    machine_path: &Path,
+) -> anyhow::Error {
+    let mut diff_lines = Vec::new();
+    for (name, dir) in &config.directories {
+        if dir.override_applied {
+            let was = pre_override_paths
+                .get(name.as_str())
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "<unknown>".to_string());
+            diff_lines.push(format!(
+                "  - {}: {} (was: {}, in tome.toml)",
+                name,
+                dir.path.display(),
+                was,
+            ));
+        }
+    }
+
+    // Indent the original validate() error by 2 spaces so it visually nests
+    // under our wrapper text. Use {:#} so anyhow's chained context shows up
+    // even for multi-line errors.
+    let indented = format!("{post_err:#}")
+        .lines()
+        .map(|l| format!("  {l}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    anyhow::anyhow!(
+        "override-induced config error from machine.toml\n\
+         \n\
+         The following directory paths come from `[directory_overrides.<name>]` overrides:\n\
+         {}\n\
+         \n\
+         These overrides made an otherwise-valid `tome.toml` fail validation:\n\
+         \n\
+         {}\n\
+         \n\
+         To fix: edit `{}` (NOT tome.toml). Either remove the override(s) above \
+         or change them to paths that don't conflict.",
+        diff_lines.join("\n"),
+        indented,
+        machine_path.display(),
+    )
 }
 
 impl Default for Config {
@@ -2506,7 +2619,8 @@ role = "target"
         .unwrap();
 
         let prefs = prefs_with_override("x", "~/new");
-        let config = Config::load_with_overrides(&cfg_path, &prefs).unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        let config = Config::load_with_overrides(&cfg_path, &machine_path, &prefs).unwrap();
 
         let dir = config.directories.get("x").unwrap();
         let path_str = dir.path.to_string_lossy();
@@ -2544,7 +2658,8 @@ role = "target"
         .unwrap();
 
         let prefs = crate::machine::MachinePrefs::default();
-        let result = Config::load_with_overrides(&cfg_path, &prefs);
+        let machine_path = tmp.path().join("machine.toml");
+        let result = Config::load_with_overrides(&cfg_path, &machine_path, &prefs);
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("role/type conflict") || err.contains("Conflict:"),
@@ -2613,7 +2728,8 @@ role = "target"
         .unwrap();
 
         let prefs = crate::machine::MachinePrefs::default();
-        let config = Config::load_with_overrides(&cfg_path, &prefs).unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        let config = Config::load_with_overrides(&cfg_path, &machine_path, &prefs).unwrap();
 
         let dir = config.directories.get("x").unwrap();
         assert!(
@@ -2744,6 +2860,184 @@ role = "target"
             snapshot.directories.len(),
             config.directories.len(),
             "warn_unknown_overrides must not mutate directory count"
+        );
+    }
+
+    // === load_with_overrides PORT-04 wrapping tests ===
+
+    #[test]
+    fn load_with_overrides_pre_override_invalid_returns_raw_error() {
+        // tome.toml ALREADY invalid (library_dir == directories.work.path);
+        // no overrides applied. The raw `validate()` error must surface as-is —
+        // no machine.toml wrapper, since removing the (empty) override set
+        // would not have fixed anything.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let shared = tmp.path().join("shared");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{shared}\"\n\
+                 \n\
+                 [directories.work]\n\
+                 path = \"{shared}\"\n\
+                 type = \"directory\"\n\
+                 role = \"synced\"\n",
+                shared = shared.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = crate::machine::MachinePrefs::default();
+        let machine_path = tmp.path().join("machine.toml");
+        let err = Config::load_with_overrides(&cfg_path, &machine_path, &prefs)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("library_dir") && err.contains("overlaps"),
+            "expected raw library_dir overlap error, got: {err}"
+        );
+        assert!(
+            !err.contains("override-induced"),
+            "raw error must not be wrapped — pre-override config was already invalid: {err}"
+        );
+        assert!(
+            !err.contains("machine.toml"),
+            "pre-existing tome.toml errors should not name machine.toml: {err}"
+        );
+    }
+
+    #[test]
+    fn load_with_overrides_override_induces_invalid_returns_wrapped_error() {
+        // tome.toml is VALID (library_dir != directories.work.path); the
+        // override rewrites work.path to equal library_dir, breaking
+        // validate(). The error must be wrapped with the machine.toml class.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        let work_dir = tmp.path().join("work");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{}\"\n\
+                 \n\
+                 [directories.work]\n\
+                 path = \"{}\"\n\
+                 type = \"directory\"\n\
+                 role = \"synced\"\n",
+                lib_dir.display(),
+                work_dir.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = prefs_with_override("work", lib_dir.to_str().unwrap());
+        let machine_path = tmp.path().join("machine.toml");
+        let err = Config::load_with_overrides(&cfg_path, &machine_path, &prefs)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("machine.toml"),
+            "wrapped error must name machine.toml, got: {err}"
+        );
+        assert!(
+            err.contains("override-induced") || err.contains("directory_overrides"),
+            "wrapped error must identify override origin, got: {err}"
+        );
+        assert!(
+            err.contains("library_dir") && err.contains("overlaps"),
+            "wrapped error must preserve the original validate() text, got: {err}"
+        );
+        // Negative assertion: the wrapper must NOT direct the user to edit tome.toml.
+        assert!(
+            !err.contains("edit tome.toml") && !err.contains("Edit tome.toml"),
+            "wrapped error must NOT direct user to edit tome.toml, got: {err}"
+        );
+    }
+
+    #[test]
+    fn load_with_overrides_override_unrelated_to_failure_returns_raw_error() {
+        // tome.toml is invalid (library_dir == work.path) AND machine.toml has
+        // an override targeting an UNRELATED directory name (typo).
+        // Discriminator: removing the override would not fix tome.toml, so
+        // the raw error passes through (unwrapped).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let shared = tmp.path().join("shared");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{shared}\"\n\
+                 \n\
+                 [directories.work]\n\
+                 path = \"{shared}\"\n\
+                 type = \"directory\"\n\
+                 role = \"synced\"\n",
+                shared = shared.display(),
+            ),
+        )
+        .unwrap();
+
+        // Override 'unrelated' is a typo — does not match any configured directory.
+        // It will produce a typo warning AND not affect any path, so post-override
+        // failure has the same root cause as pre-override.
+        let prefs = prefs_with_override("unrelated", "/elsewhere");
+        let machine_path = tmp.path().join("machine.toml");
+        let err = Config::load_with_overrides(&cfg_path, &machine_path, &prefs)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("library_dir") && err.contains("overlaps"),
+            "expected raw library_dir overlap error, got: {err}"
+        );
+        assert!(
+            !err.contains("override-induced"),
+            "raw error must not be wrapped when override is unrelated to failure: {err}"
+        );
+    }
+
+    #[test]
+    fn load_with_overrides_path_appears_in_wrapper_message() {
+        // Wrapped message must include the override target name, the new path,
+        // AND the old (pre-override) path so the user can see the diff.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        let work_dir = tmp.path().join("work-original");
+        std::fs::write(
+            &cfg_path,
+            format!(
+                "library_dir = \"{}\"\n\
+                 \n\
+                 [directories.work]\n\
+                 path = \"{}\"\n\
+                 type = \"directory\"\n\
+                 role = \"synced\"\n",
+                lib_dir.display(),
+                work_dir.display(),
+            ),
+        )
+        .unwrap();
+
+        let prefs = prefs_with_override("work", lib_dir.to_str().unwrap());
+        let machine_path = tmp.path().join("machine.toml");
+        let err = Config::load_with_overrides(&cfg_path, &machine_path, &prefs)
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("work"),
+            "wrapper must name the override target 'work', got: {err}"
+        );
+        assert!(
+            err.contains(lib_dir.to_str().unwrap()),
+            "wrapper must include the new (override) path, got: {err}"
+        );
+        assert!(
+            err.contains("work-original"),
+            "wrapper must include the old (pre-override) path, got: {err}"
         );
     }
 }

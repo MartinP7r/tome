@@ -293,8 +293,11 @@ pub fn run(cli: Cli) -> Result<()> {
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
     let machine_prefs = machine::load(&machine_path)?;
 
-    let config =
-        Config::load_or_default_with_overrides(effective_config.as_deref(), &machine_prefs)?;
+    let config = Config::load_or_default_with_overrides(
+        effective_config.as_deref(),
+        &machine_path,
+        &machine_prefs,
+    )?;
     // Note: load_or_default_with_overrides already runs validate() internally —
     // no separate config.validate()? call here.
     let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
