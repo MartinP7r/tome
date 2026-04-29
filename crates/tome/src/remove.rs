@@ -682,10 +682,7 @@ mod tests {
         // Pairwise-unique: no duplicates in ALL.
         for (i, a) in all.iter().enumerate() {
             for b in all.iter().skip(i + 1) {
-                assert_ne!(
-                    a, b,
-                    "FailureKind::ALL contains duplicate variant {a:?}"
-                );
+                assert_ne!(a, b, "FailureKind::ALL contains duplicate variant {a:?}");
             }
         }
         // Membership: every variant appears.
