@@ -12,8 +12,9 @@ use ratatui::widgets::{
 use super::app::{App, Mode, SortMode};
 use super::theme::Theme;
 
-pub fn render(frame: &mut Frame, app: &mut App) {
-    // Clone theme out to avoid borrow conflict with &mut app
+pub fn render(frame: &mut Frame, app: &App) {
+    // Clone theme out so render_* fns don't borrow app's theme field while
+    // they also borrow other app fields immutably for layout/data.
     let theme = app.theme.clone();
 
     match app.mode {
@@ -27,7 +28,26 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     }
 }
 
-fn render_normal(frame: &mut Frame, app: &mut App, theme: &Theme) {
+/// Compute the body height that `render_normal` would assign to
+/// `app.visible_height`. Called from `browse::run_loop` after each
+/// `terminal.draw(...)` so scroll-distance calculations in subsequent
+/// `handle_key` ticks use the correct viewport size. Kept as a free
+/// function (not a method on App) because the geometry is purely a
+/// function of the terminal area, not of any `App` state.
+pub(super) fn body_height_for_area(area: Rect) -> usize {
+    let chunks = Layout::vertical([
+        Constraint::Length(1), // header
+        Constraint::Length(1), // separator
+        Constraint::Min(1),    // body split
+        Constraint::Length(1), // status bar
+    ])
+    .split(area);
+    let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
+        .split(chunks[2]);
+    body_chunks[0].height as usize
+}
+
+fn render_normal(frame: &mut Frame, app: &App, theme: &Theme) {
     let area = frame.area();
 
     let chunks = Layout::vertical([
@@ -40,9 +60,6 @@ fn render_normal(frame: &mut Frame, app: &mut App, theme: &Theme) {
 
     let body_chunks = Layout::horizontal([Constraint::Percentage(45), Constraint::Percentage(55)])
         .split(chunks[2]);
-
-    // Update visible_height so App can compute scroll distances
-    app.visible_height = body_chunks[0].height as usize;
 
     // -- Header --
     let header = Row::new(vec![
@@ -191,7 +208,7 @@ fn highlight_name<'a>(name: &'a str, indices: &[u32], theme: &Theme) -> Line<'a>
     Line::from(spans)
 }
 
-fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
+fn render_detail(frame: &mut Frame, app: &App, theme: &Theme) {
     let area = frame.area();
 
     let chunks = Layout::vertical([

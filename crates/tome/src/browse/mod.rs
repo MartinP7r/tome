@@ -44,12 +44,28 @@ pub fn browse(skills: Vec<DiscoveredSkill>, manifest: &crate::manifest::Manifest
 
 fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
-        terminal.draw(|frame| ui::render(frame, app))?;
+        let area = terminal.draw(|frame| ui::render(frame, app))?.area;
+        // ui::render takes `&App` (so it can be invoked from the
+        // POLISH-01 redraw closure inside handle_key, which only has
+        // a shared borrow on App). The viewport-cache mutation that
+        // used to live in render_normal is hoisted here so scroll
+        // distances stay correct on the next handle_key tick.
+        app.visible_height = ui::body_height_for_area(area);
 
         if event::poll(Duration::from_millis(100))?
             && let Event::Key(key) = event::read()?
         {
-            app.handle_key(key);
+            // POLISH-01: redraw closure threaded into handle_key so the
+            // ViewSource arm can surface a `Pending("Opening: ...")` message
+            // BEFORE `.status()` blocks. The closure receives `&App` (the
+            // current state from inside `handle_key`) and re-renders via
+            // the captured `terminal`. Draw errors are dropped — a draw
+            // failure must not abort the open action; the top-of-loop
+            // `terminal.draw(...)` will recover on the next tick.
+            let mut redraw = |a: &App| {
+                let _ = terminal.draw(|frame| ui::render(frame, a));
+            };
+            app.handle_key(key, &mut redraw);
         }
 
         if app.should_quit {
