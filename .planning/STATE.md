@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.9
 milestone_name: Cross-Machine Config Portability & Polish
-status: verifying
-stopped_at: Completed 09-02-validation-surfacing-PLAN.md (PORT-03 + PORT-04)
-last_updated: "2026-04-28T14:16:48.602Z"
-last_activity: 2026-04-28
+status: executing
+stopped_at: Completed 10-01-tui-status-message-redesign-PLAN.md (POLISH-01 + POLISH-02 + POLISH-03 + TEST-03)
+last_updated: "2026-04-29T03:09:56.317Z"
+last_activity: 2026-04-29
 progress:
-  total_phases: 10
-  completed_phases: 10
-  total_plans: 33
-  completed_plans: 33
+  total_phases: 11
+  completed_phases: 11
+  total_plans: 36
+  completed_plans: 36
   percent: 0
 ---
 
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 9 — cross-machine-path-overrides
+**Current focus:** Phase 10 — phase-8-review-tail
 
 ## Current Position
 
 Milestone: v0.9 — Cross-Machine Config Portability & Polish
-Phase: 9
+Phase: 10
 Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-28
+Status: Ready to execute
+Last activity: 2026-04-29
 
 Progress: [░░░░░░░░░░] 0% (0/2 phases complete)
 
@@ -53,6 +53,14 @@ v0.9-specific decisions (so far):
 - [Phase 09]: PORT-05: tome status + tome doctor surface [directory_overrides.<name>] activations via (override) text annotation and override_applied: bool JSON field. DoctorReport.directory_issues schema break: tuples → DirectoryDiagnostic struct
 - [Phase 09]: PORT-03: warn_unknown_overrides emits stderr typo guard for [directory_overrides.<name>] entries that don't match any configured directory; load continues unchanged
 - [Phase 09]: PORT-04: override-induced validate() failures wrap with distinct error class naming machine.toml; discriminator gates wrapping (pre-override valid AND >=1 override applied)
+- [Phase 10]: POLISH-06: arboard pinned to >=3.6, <3.7 (option a, patch-pin) with bump-review comment in Cargo.toml. Cargo.lock unchanged.
+- [Phase 10]: TEST-05: SkillMoveEntry.source_path REMOVED (option a) instead of wired-into-execute. provenance_from_link_result retained for SAFE-03 stderr-warning side effect (let _ = ...). Three test-side assertions deleted.
+- [Phase 10]: POLISH-04: chose option (c) exhaustive-match sentinel — _ensure_failure_kind_all_exhaustive const fn + const _: () = { assert!(FailureKind::ALL.len() == 4); }; smaller blast-radius than strum::EnumIter (option a)
+- [Phase 10]: POLISH-05: chose option (a) keep new() + add debug_assert!(path.is_absolute(), ...); single-site edit vs option (b) replacing 4 call sites
+- [Phase 10]: TEST-04: chose option (a) defer regen_warnings until after success banner — banner is user's anchor; option (b) [lockfile regen] prefix would add visual noise on every line
+- [Phase 10-phase-8-review-tail]: POLISH-01 redraw threading: closure-callback (\&mut dyn FnMut(\&App)) over pending_redraw flag (too late) and \&mut DefaultTerminal injection (couples App to ratatui type)
+- [Phase 10-phase-8-review-tail]: ui::render widened to &App; viewport-cache mutation hoisted to run_loop via new ui::body_height_for_area(area) pure helper, so the redraw closure can call terminal.draw(|f| ui::render(f, a)) without &mut conflict
+- [Phase 10-phase-8-review-tail]: POLISH-03 retry test bound: 600ms (not the originally-pinned 250ms) — macOS arboard under parallel cargo test has 5–500ms NSPasteboard contention; 600ms still catches the regression we care about (a SECOND retry hop)
 
 ### Pending Todos / Carry-over
 
@@ -65,6 +73,6 @@ v0.9-specific decisions (so far):
 
 ## Session Continuity
 
-Last session: 2026-04-28T14:11:33.982Z
-Stopped at: Completed 09-02-validation-surfacing-PLAN.md (PORT-03 + PORT-04)
+Last session: 2026-04-29T03:03:40.157Z
+Stopped at: Completed 10-01-tui-status-message-redesign-PLAN.md (POLISH-01 + POLISH-02 + POLISH-03 + TEST-03)
 Resume file: None

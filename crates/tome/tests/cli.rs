@@ -3456,6 +3456,22 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
         stderr.contains("retained") || stderr.contains("retry"),
         "stderr missing retry guidance (I2/I3): {stderr}"
     );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // TEST-01 / P1: success banner MUST NOT appear on partial failure.
+    // The banner string is "✓ Removed directory" but the leading glyph may
+    // be styled with ANSI codes; we assert on "Removed directory" (no glyph)
+    // for robustness against console color rendering. NO_COLOR=1 is already
+    // set above so the styled `✓` is a literal char, but defending against
+    // both forms is defense-in-depth.
+    assert!(
+        !stdout.contains("Removed directory"),
+        "stdout must NOT contain success banner on partial failure; got: {stdout}",
+    );
+    assert!(
+        !stderr.contains("Removed directory"),
+        "stderr must NOT contain success banner on partial failure (defense-in-depth); got: {stderr}",
+    );
 }
 
 #[cfg(unix)]
@@ -3562,6 +3578,181 @@ fn remove_partial_failure_does_not_save_disk_state() {
     assert_eq!(
         lockfile_before, lockfile_after,
         "tome.lock mutated on partial-failure path (HOTFIX-02 regression)"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn remove_retry_succeeds_after_failure_resolved() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // TEST-02 / P2: end-to-end I2/I3 retention contract.
+    //   1. Partial failure → config entry + manifest preserved (existing v0.8 contract)
+    //   2. User fixes the underlying condition (chmod 0o755)
+    //   3. Second `tome remove` succeeds, leaves NO leftover state
+    //
+    // Without this test, the retry path is only exercised by manual UAT.
+    // A future refactor that mutates config/manifest on the failure path
+    // (regressing #461 H2) would silently break retry — the second
+    // `tome remove` would fail with "directory not found in config".
+
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    );
+
+    // Prime: sync to wire library + target symlink.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+    assert!(
+        target_dir.join("my-skill").exists(),
+        "fixture: target symlink must exist after sync"
+    );
+
+    // Step 1 — partial failure: chmod 0o500 on target dir.
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+
+    let first = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        !first.status.success(),
+        "first remove must fail on chmod 0o500"
+    );
+    let first_stderr = String::from_utf8_lossy(&first.stderr);
+    assert!(
+        first_stderr.contains("⚠"),
+        "first remove stderr missing ⚠ marker: {first_stderr}"
+    );
+
+    // Step 1.5 — assert config entry preserved (I2 retention).
+    let config_after_fail = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        config_after_fail.contains("[directories.local]"),
+        "config entry for 'local' must be preserved on partial failure; got: {config_after_fail}"
+    );
+
+    // Step 2 — user fixes the underlying cause.
+    std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    // Step 3 — retry: second `tome remove` should succeed cleanly.
+    let second = tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "local",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        second.status.success(),
+        "retry remove must succeed after chmod restore; stderr: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let second_stdout = String::from_utf8_lossy(&second.stdout);
+    assert!(
+        second_stdout.contains("Removed directory"),
+        "retry stdout must contain success banner; got: {second_stdout}"
+    );
+
+    // Step 4 — assert clean state: no config entry, no manifest entry, no library dir.
+    let config_after_success = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        !config_after_success.contains("[directories.local]"),
+        "config entry for 'local' must be removed after retry success; got: {config_after_success}"
+    );
+
+    let manifest_path = tmp.path().join(".tome-manifest.json");
+    if manifest_path.exists() {
+        let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+        assert!(
+            !manifest.contains("\"my-skill\""),
+            "manifest must not contain my-skill after retry success; got: {manifest}"
+        );
+    }
+
+    let library_skill = tmp.path().join("library").join("my-skill");
+    assert!(
+        !library_skill.exists(),
+        "library dir for my-skill must be gone after retry success; still exists at {}",
+        library_skill.display()
+    );
+}
+
+#[test]
+fn lib_rs_remove_handler_prints_success_banner_before_regen_warnings() {
+    // TEST-04 / P4 regression: pin the source-order in lib.rs Command::Remove
+    // happy-path. The success banner `println!("Removed directory ...")` MUST
+    // appear earlier in the file than the `for w in &regen_warnings ... eprintln!`
+    // loop. If a future refactor reorders these, this test fails.
+    //
+    // ANCHORING: lib.rs contains three `for w in &regen_warnings` loops —
+    // one each in Remove, Reassign, Fork handlers. Without anchoring to
+    // `Command::Remove` first, a future reorder of Reassign or Fork (or
+    // a new handler inserted above Remove with its own regen-warnings
+    // loop) could create a false-positive failure unrelated to Remove.
+    // We anchor all subsequent searches to `region_start` to keep the
+    // test focused on the Remove handler contract.
+    //
+    // We assert at the source level (file byte-position) rather than at the
+    // process-output level because stdout vs stderr ordering is determined
+    // by terminal interleaving, not by Rust flush order — assert_cmd captures
+    // them as separate streams and gives us no temporal ordering signal.
+
+    let lib_rs_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/lib.rs");
+    let lib_rs = std::fs::read_to_string(&lib_rs_path)
+        .unwrap_or_else(|e| panic!("lib.rs must exist at {}: {e}", lib_rs_path.display()));
+
+    let region_start = lib_rs
+        .find("Command::Remove")
+        .expect("lib.rs must contain `Command::Remove` handler");
+
+    let banner_offset = lib_rs[region_start..]
+        .find("Removed directory")
+        .expect("✓ Removed directory banner must appear inside Command::Remove region");
+    let banner_idx = region_start + banner_offset;
+
+    let warnings_offset = lib_rs[region_start..]
+        .find("for w in &regen_warnings")
+        .expect("regen_warnings loop must appear inside Command::Remove region");
+    let warnings_idx = region_start + warnings_offset;
+
+    assert!(
+        banner_idx < warnings_idx,
+        "TEST-04 option a: `Removed directory` banner (byte {}) MUST precede `for w in &regen_warnings` loop (byte {}) inside the Command::Remove handler region (starts at byte {})",
+        banner_idx,
+        warnings_idx,
+        region_start,
     );
 }
 

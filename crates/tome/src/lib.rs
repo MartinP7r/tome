@@ -452,17 +452,22 @@ pub fn run(cli: Cli) -> Result<()> {
             manifest::save(&manifest, paths.config_dir())?;
             // Regenerate lockfile. Recover git-skill provenance offline from
             // the previous lockfile + on-disk cache so git-type directories
-            // are not silently dropped during regen (#461 H1).
+            // are not silently dropped during regen (#461 H1). Warnings
+            // collected here are deferred until AFTER the success banner —
+            // see comment below (TEST-04 option a).
             let (resolved_paths, mut regen_warnings) =
                 lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
             let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-            for w in &regen_warnings {
-                eprintln!("warning: {}", w);
-            }
             let lockfile = lockfile::generate(&manifest, &skills);
             lockfile::save(&lockfile, paths.config_dir())?;
 
-            // Success path — full cleanup completed with no failures.
+            // Success banner FIRST (TEST-04 option a — deferred regen-warnings).
+            // The banner is the user's anchor for "what just happened"; warnings
+            // come after as a footnote. Without this ordering, multi-warning
+            // regen output buries the green ✓ confirmation and the user has to
+            // scroll up to find it. The deferred ordering is regression-tested
+            // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
+            // in tests/cli.rs.
             println!(
                 "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
                 style("✓").green(),
@@ -475,6 +480,9 @@ pub fn run(cli: Cli) -> Result<()> {
                     ""
                 },
             );
+            for w in &regen_warnings {
+                eprintln!("warning: {}", w);
+            }
         }
         Command::Reassign { skill, to } => {
             let mut manifest = manifest::load(paths.config_dir())?;

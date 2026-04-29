@@ -52,11 +52,21 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ **PORT-03** Typo-target stderr warning for unknown override directory names — Phase 9 (2026-04-28)
 - ✓ **PORT-04** Distinct error wrapper naming `machine.toml` on override-induced validation failures — Phase 9 (2026-04-28)
 - ✓ **PORT-05** `(override)` annotation in `tome status` and `tome doctor` (text + JSON) — Phase 9 (2026-04-28)
+- ✓ **POLISH-01** "Opening: <path>..." pre-block status + tty drain in `tome browse` (D1, #463) — Phase 10 (2026-04-29)
+- ✓ **POLISH-02** `StatusMessage` redesigned as `Success | Warning | Pending` enum with body/glyph/severity accessors (D2, #463) — Phase 10 (2026-04-29)
+- ✓ **POLISH-03** `ClipboardOccupied` auto-retry with 100ms backoff (D3, #463) — Phase 10 (2026-04-29)
+- ✓ **POLISH-04** `FailureKind::ALL` compile-enforced via exhaustive-match sentinel (D4, #463) — Phase 10 (2026-04-29)
+- ✓ **POLISH-05** `RemoveFailure::new` `debug_assert!(path.is_absolute())` invariant (D5, #463) — Phase 10 (2026-04-29)
+- ✓ **POLISH-06** `arboard` patch-pin (`>=3.6, <3.7`) with bump-review policy (D6, #463) — Phase 10 (2026-04-29)
+- ✓ **TEST-01** Success-banner-absence assertion on partial-failure (P1, #462) — Phase 10 (2026-04-29)
+- ✓ **TEST-02** Retry-after-fix end-to-end pinning I2/I3 retention (P2, #462) — Phase 10 (2026-04-29)
+- ✓ **TEST-03** `status_message_from_open_result` helper + 3-arm unit tests (P3, #462) — Phase 10 (2026-04-29)
+- ✓ **TEST-04** `regen_warnings` deferred until after success banner (P4, #462) — Phase 10 (2026-04-29)
+- ✓ **TEST-05** Dead `SkillMoveEntry.source_path` field removed (P5, #462) — Phase 10 (2026-04-29)
 
-### Active (this milestone, in flight)
+### Active (next milestone)
 
-- [ ] **POLISH-01..06** Phase 8 type design + TUI architecture polish (#463) — Phase 10 (planned)
-- [ ] **TEST-01..05** Phase 8 test coverage + wording + dead code polish (#462) — Phase 10 (planned)
+v0.9 milestone complete — see `Current State` for next milestone planning.
 
 ### Backlog (deferred)
 
@@ -196,6 +206,8 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
+*Last updated: 2026-04-29 — Phase 10 complete (Phase 8 Review Tail). All 11 v0.8 review-tail items shipped: POLISH-01..06 (#463 D1-D6 — TUI block UX, StatusMessage enum redesign, ClipboardOccupied retry, FailureKind::ALL compile-enforce, RemoveFailure::new invariant, arboard patch-pin) + TEST-01..05 (#462 P1-P5 — banner-absent assertion, retry-after-fix e2e, ViewSource helper extraction, regen-warnings reorder, dead source_path field removed). 662 tests passing (526 unit + 136 integration; +14 since Phase 10 start). v0.9 milestone is now functionally complete — both Phase 9 + Phase 10 shipped. Ready for `/gsd:complete-milestone v0.9` after PR merges to main and `make release VERSION=0.9.0`.*
+
 *Last updated: 2026-04-28 — Phase 9 complete (Cross-Machine Path Overrides). All 5 PORT requirements shipped: `[directory_overrides.<name>]` schema in machine.toml, override-apply timing in load pipeline, typo warning, distinct machine.toml error class, and `(override)` annotation in `tome status`/`tome doctor` (text + JSON). 648 tests passing (514 unit + 134 integration; +58 since Phase 9 start). Phase 10 (#462 + #463 polish bundle) is the remaining v0.9 work.*
 
 *Last updated: 2026-04-28 — v0.9 milestone started. Goal: cross-machine config portability (#458) bundled with #463 (type design + TUI architecture polish, 6 items) and #462 (test coverage + dead code polish, 5 items) from the v0.8 post-merge review. Bare-slug `tome add` improvement (PR #471, merged 2026-04-27) ships with v0.9 — no v0.8.2 patch release planned.*
