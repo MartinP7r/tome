@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.9
 milestone_name: Cross-Machine Config Portability & Polish
-status: verifying
-stopped_at: Completed 09-02-validation-surfacing-PLAN.md (PORT-03 + PORT-04)
-last_updated: "2026-04-28T14:16:48.602Z"
-last_activity: 2026-04-28
+status: executing
+stopped_at: Completed 10-03-arboard-pin-and-relocate-deadcode-PLAN.md (POLISH-06 + TEST-05)
+last_updated: "2026-04-29T02:53:35.919Z"
+last_activity: 2026-04-29
 progress:
-  total_phases: 10
+  total_phases: 11
   completed_phases: 10
-  total_plans: 33
-  completed_plans: 33
+  total_plans: 36
+  completed_plans: 34
   percent: 0
 ---
 
@@ -21,15 +21,15 @@ progress:
 See: .planning/PROJECT.md (updated 2026-04-28)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 9 — cross-machine-path-overrides
+**Current focus:** Phase 10 — phase-8-review-tail
 
 ## Current Position
 
 Milestone: v0.9 — Cross-Machine Config Portability & Polish
-Phase: 9
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-04-28
+Phase: 10 (phase-8-review-tail) — EXECUTING
+Plan: 2 of 3
+Status: Ready to execute
+Last activity: 2026-04-29
 
 Progress: [░░░░░░░░░░] 0% (0/2 phases complete)
 
@@ -53,6 +53,8 @@ v0.9-specific decisions (so far):
 - [Phase 09]: PORT-05: tome status + tome doctor surface [directory_overrides.<name>] activations via (override) text annotation and override_applied: bool JSON field. DoctorReport.directory_issues schema break: tuples → DirectoryDiagnostic struct
 - [Phase 09]: PORT-03: warn_unknown_overrides emits stderr typo guard for [directory_overrides.<name>] entries that don't match any configured directory; load continues unchanged
 - [Phase 09]: PORT-04: override-induced validate() failures wrap with distinct error class naming machine.toml; discriminator gates wrapping (pre-override valid AND >=1 override applied)
+- [Phase 10]: POLISH-06: arboard pinned to >=3.6, <3.7 (option a, patch-pin) with bump-review comment in Cargo.toml. Cargo.lock unchanged.
+- [Phase 10]: TEST-05: SkillMoveEntry.source_path REMOVED (option a) instead of wired-into-execute. provenance_from_link_result retained for SAFE-03 stderr-warning side effect (let _ = ...). Three test-side assertions deleted.
 
 ### Pending Todos / Carry-over
 
@@ -65,6 +67,6 @@ v0.9-specific decisions (so far):
 
 ## Session Continuity
 
-Last session: 2026-04-28T14:11:33.982Z
-Stopped at: Completed 09-02-validation-surfacing-PLAN.md (PORT-03 + PORT-04)
+Last session: 2026-04-29T02:53:35.916Z
+Stopped at: Completed 10-03-arboard-pin-and-relocate-deadcode-PLAN.md (POLISH-06 + TEST-05)
 Resume file: None

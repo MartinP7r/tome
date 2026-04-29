@@ -104,4 +104,4 @@ Phases will be planned via `/gsd:new-milestone` when v1.0 becomes active. Phase 
 | 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 3/3 | Complete | 2026-04-24 |
 | 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
 | 9. Cross-Machine Path Overrides | v0.9 | 2/3 | Complete    | 2026-04-28 |
-| 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 0/N | Not started | — |
+| 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 1/3 | In Progress|  |

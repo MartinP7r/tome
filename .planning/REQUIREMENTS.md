@@ -27,7 +27,7 @@ Source: [#463](https://github.com/MartinP7r/tome/issues/463). Each item closes a
 - [ ] **POLISH-03** (D3): `ClipboardOccupied` errors auto-retry once with a 100ms backoff before the warning reaches the status bar.
 - [ ] **POLISH-04** (D4): `FailureKind::ALL` cannot drift from the enum — either compile-enforced (e.g., `strum::EnumIter` or exhaustive-match sentinel) or replaced by an iteration mechanism that doesn't require manual sync.
 - [ ] **POLISH-05** (D5): `RemoveFailure::new` either gains a real invariant (`debug_assert!(path.is_absolute(), ...)`) or is removed in favor of struct-literal construction at the four call sites in `execute`.
-- [ ] **POLISH-06** (D6): `arboard` is pinned to a patch-version range with a documented "review changelog on bump" policy in `Cargo.toml` (or a `#[cfg(test)]` enum-growth canary).
+- [x] **POLISH-06** (D6): `arboard` is pinned to a patch-version range with a documented "review changelog on bump" policy in `Cargo.toml` (or a `#[cfg(test)]` enum-growth canary).
 
 ### Test Coverage + Wording + Dead Code (TEST)
 
@@ -37,7 +37,7 @@ Source: [#462](https://github.com/MartinP7r/tome/issues/462). Each item closes a
 - [ ] **TEST-02** (P2): End-to-end test pins the I2/I3 retention contract: partial failure → user fixes the underlying condition → second `tome remove <name>` succeeds with empty `failures`, config entry gone, manifest empty, library dir gone.
 - [ ] **TEST-03** (P3): `ViewSource .status()` match is factored into a `status_message_from_open_result(...)` helper, with unit tests covering all three arms (Ok+success, Ok+non-zero exit, Err) using synthetic `ExitStatus` values via `ExitStatusExt::from_raw`.
 - [ ] **TEST-04** (P4): `regen_warnings` no longer print **before** the success banner on the happy path. Either deferred until after the banner (option a) or scoped with a `[lockfile regen]` prefix (option b) — pin the choice in code and regression-test the ordering.
-- [ ] **TEST-05** (P5): The dead `SkillMoveEntry.source_path` field is either removed (option a) or wired into `copy_library` / `recreate_target_symlinks` (option b) — `#[allow(dead_code)]` is gone from `relocate.rs`.
+- [x] **TEST-05** (P5): The dead `SkillMoveEntry.source_path` field is either removed (option a) or wired into `copy_library` / `recreate_target_symlinks` (option b) — `#[allow(dead_code)]` is gone from `relocate.rs`.
 
 ## Future Requirements
 
@@ -74,9 +74,9 @@ Phase mapping is filled by `/gsd:plan-phase` after roadmap creation.
 | POLISH-03 | Phase 10 | Pending |
 | POLISH-04 | Phase 10 | Pending |
 | POLISH-05 | Phase 10 | Pending |
-| POLISH-06 | Phase 10 | Pending |
+| POLISH-06 | Phase 10 | Complete |
 | TEST-01 | Phase 10 | Pending |
 | TEST-02 | Phase 10 | Pending |
 | TEST-03 | Phase 10 | Pending |
 | TEST-04 | Phase 10 | Pending |
-| TEST-05 | Phase 10 | Pending |
+| TEST-05 | Phase 10 | Complete |
