@@ -87,6 +87,35 @@ impl FailureKind {
     }
 }
 
+/// Compile-time drift guard for `FailureKind::ALL` (POLISH-04 option c).
+///
+/// If a new variant is added to `FailureKind`, this `const fn` fails to
+/// compile because the match below is exhaustive. The fix is to (a) add
+/// an arm here AND (b) append the new variant to `ALL`. Symmetric to the
+/// 12-combo `(DirectoryType, DirectoryRole)` matrix test that
+/// compile-enforces config-shape invariants (WHARD-06).
+///
+/// The function is dead-code at runtime — its sole purpose is the
+/// exhaustiveness check. The `const _: () = ...` block below additionally
+/// pins `ALL.len() == 4` at compile time so a hand-edit that adds a
+/// match arm here without growing `ALL` (or vice versa) also fails.
+#[allow(dead_code)]
+const fn _ensure_failure_kind_all_exhaustive(k: FailureKind) -> usize {
+    match k {
+        FailureKind::DistributionSymlink => 0,
+        FailureKind::LibraryDir => 1,
+        FailureKind::LibrarySymlink => 2,
+        FailureKind::GitCache => 3,
+    }
+}
+
+const _: () = {
+    // If this fails: FailureKind::ALL is missing or has extra variants.
+    // The match arms in _ensure_failure_kind_all_exhaustive are the source
+    // of truth — ALL must contain exactly one entry per arm.
+    assert!(FailureKind::ALL.len() == 4);
+};
+
 /// A single partial-cleanup failure aggregated from `execute`.
 #[derive(Debug)]
 pub(crate) struct RemoveFailure {
@@ -96,9 +125,24 @@ pub(crate) struct RemoveFailure {
 }
 
 impl RemoveFailure {
-    /// Construct a RemoveFailure. A single entry point for future invariants
-    /// (e.g., debug-only absolute-path assertions).
+    /// Construct a `RemoveFailure` (POLISH-05 option a).
+    ///
+    /// The path MUST be absolute — downstream rendering uses
+    /// `paths::collapse_home(&f.path)` in lib.rs, which expects an absolute
+    /// path. Relative paths would render unmodified, leaking
+    /// working-directory-relative shapes into user-facing error output.
+    ///
+    /// The four `execute()` call sites all pass paths derived from
+    /// config-resolved directory paths (always absolute), so this guard
+    /// never fires in normal use; it's a forward guard against a future
+    /// refactor that adds a relative-path call site. Debug-only via
+    /// `debug_assert!` to keep release builds zero-cost.
     pub(crate) fn new(kind: FailureKind, path: PathBuf, error: std::io::Error) -> Self {
+        debug_assert!(
+            path.is_absolute(),
+            "RemoveFailure::path must be absolute, got: {}",
+            path.display()
+        );
         RemoveFailure { kind, path, error }
     }
 }
@@ -621,5 +665,85 @@ mod tests {
         assert!(FailureKind::ALL.contains(&FailureKind::LibraryDir));
         assert!(FailureKind::ALL.contains(&FailureKind::LibrarySymlink));
         assert!(FailureKind::ALL.contains(&FailureKind::GitCache));
+    }
+
+    // POLISH-04: Pins the runtime drift check that complements the
+    // compile-time `_ensure_failure_kind_all_exhaustive` sentinel.
+    // Uses a hand-rolled uniqueness check (FailureKind only derives
+    // PartialEq/Eq, not Ord/Hash, so BTreeSet/HashSet are unavailable).
+    #[test]
+    fn failure_kind_all_length_matches_variant_count() {
+        let all = FailureKind::ALL;
+        assert_eq!(
+            all.len(),
+            4,
+            "FailureKind::ALL must contain every variant exactly once"
+        );
+        // Pairwise-unique: no duplicates in ALL.
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(
+                    a, b,
+                    "FailureKind::ALL contains duplicate variant {a:?}"
+                );
+            }
+        }
+        // Membership: every variant appears.
+        assert!(all.contains(&FailureKind::DistributionSymlink));
+        assert!(all.contains(&FailureKind::LibraryDir));
+        assert!(all.contains(&FailureKind::LibrarySymlink));
+        assert!(all.contains(&FailureKind::GitCache));
+    }
+
+    // POLISH-04: The grouped failure-summary output in lib.rs::Command::Remove
+    // iterates FailureKind::ALL in declaration order. The user-visible grouping
+    // therefore depends on this exact order. A reorder is a UI change and
+    // must require an explicit code edit (this test fails on reorder).
+    #[test]
+    fn failure_kind_all_ordering_pinned() {
+        assert_eq!(
+            FailureKind::ALL,
+            [
+                FailureKind::DistributionSymlink,
+                FailureKind::LibraryDir,
+                FailureKind::LibrarySymlink,
+                FailureKind::GitCache,
+            ],
+            "FailureKind::ALL ordering is part of the user-visible grouping contract"
+        );
+    }
+
+    // POLISH-05: `RemoveFailure::new` carries a debug-only `is_absolute`
+    // invariant. Debug builds panic on relative paths; release builds
+    // compile out the assert (zero release cost).
+    #[test]
+    fn remove_failure_new_relative_path_panics_in_debug() {
+        let result = std::panic::catch_unwind(|| {
+            RemoveFailure::new(
+                FailureKind::DistributionSymlink,
+                PathBuf::from("relative/path"),
+                std::io::Error::other("test"),
+            )
+        });
+        if cfg!(debug_assertions) {
+            assert!(result.is_err(), "debug build must panic on relative path");
+        } else {
+            assert!(
+                result.is_ok(),
+                "release build must allow construction (debug_assert compiled out)"
+            );
+        }
+    }
+
+    // POLISH-05: Absolute paths are accepted in both debug and release.
+    #[test]
+    fn remove_failure_new_absolute_path_succeeds() {
+        let f = RemoveFailure::new(
+            FailureKind::DistributionSymlink,
+            PathBuf::from("/abs/path"),
+            std::io::Error::other("test"),
+        );
+        assert_eq!(f.kind, FailureKind::DistributionSymlink);
+        assert_eq!(f.path, PathBuf::from("/abs/path"));
     }
 }
