@@ -28,14 +28,14 @@ pub(crate) struct RelocatePlan {
     pub config_path: PathBuf,
 }
 
-/// A single skill that will be moved.
+/// A single skill that will be moved during a `tome relocate`.
 #[derive(Debug)]
 pub(crate) struct SkillMoveEntry {
     pub name: SkillName,
+    /// True for managed skills (library symlink → external source dir).
+    /// Used by `copy_library` to preserve the symlink shape during the
+    /// move (lines ~419–424).
     pub is_managed: bool,
-    /// For managed skills, the original symlink target (external source path).
-    #[allow(dead_code)]
-    pub source_path: Option<PathBuf>,
 }
 
 /// Build a relocation plan by scanning the current library state.
@@ -86,33 +86,22 @@ pub(crate) fn plan(
     let manifest = manifest::load(paths.config_dir())?;
     let mut skills = Vec::new();
     for (name, entry) in manifest.iter() {
-        let source_path = if entry.managed {
-            // For managed skills, read the symlink target to record the
-            // external source (used to re-create the managed symlink at the
-            // new library_dir after move). An observable-but-recoverable IO
-            // error here deserves a stderr warning — not a silent "no
-            // provenance" data-loss as the original `.ok()` produced. Same
-            // rationale as the git-HEAD-sha warning shipped in the same
-            // milestone: surface the gap so the user can diagnose.
-            //
-            // Factored into `provenance_from_link_result` so the Err arm is
-            // directly unit-testable with a synthetic io::Error (Unix makes
-            // engineering a real post-is_symlink read_link failure racy —
-            // both syscalls share the parent-search permission gate).
+        // SAFE-03 / #449: managed-skill symlinks are checked here so an
+        // unreadable symlink produces a stderr warning during plan() instead
+        // of silently disappearing during execute(). The provenance return
+        // value is no longer stored on SkillMoveEntry (TEST-05 / POLISH-05
+        // option a — removed as dead code). We call provenance_from_link_result
+        // for its stderr side effect only and discard the return value.
+        if entry.managed {
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                provenance_from_link_result(std::fs::read_link(&link_path), &link_path)
-            } else {
-                None
+                let _ = provenance_from_link_result(std::fs::read_link(&link_path), &link_path);
             }
-        } else {
-            None
-        };
+        }
 
         skills.push(SkillMoveEntry {
             name: name.clone(),
             is_managed: entry.managed,
-            source_path,
         });
     }
 
@@ -306,6 +295,14 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
 
 /// Translate a `read_link` result into a provenance `Option<PathBuf>`, warning
 /// on Err instead of silently dropping (SAFE-03 / #449).
+///
+/// **Note (TEST-05 / POLISH-05 option a):** the return value is no longer
+/// consumed by `relocate::plan()` — the dead provenance field was removed
+/// from `SkillMoveEntry`. The function is retained because its primary
+/// purpose is the stderr WARNING on the Err arm; the `Option<PathBuf>` return
+/// shape is kept for testability (the SAFE-03 unit test asserts `None` on the
+/// Err path). Future consumers (e.g. a debug tool that needs provenance) can
+/// use the return value; current callers `let _ = ...` it.
 ///
 /// This is factored out so the Err arm is directly unit-testable with a
 /// synthetic `io::Error` — on Unix, engineering a real `read_link` failure
@@ -579,7 +576,6 @@ mod tests {
         assert_eq!(p.skills.len(), 1);
         assert_eq!(p.skills[0].name.as_str(), "my-skill");
         assert!(!p.skills[0].is_managed);
-        assert!(p.skills[0].source_path.is_none());
     }
 
     #[test]
@@ -801,7 +797,6 @@ mod tests {
             .find(|s| s.name.as_str() == "managed-skill")
             .unwrap();
         assert!(managed.is_managed);
-        assert!(managed.source_path.is_some());
 
         execute(&p, false).unwrap();
 
@@ -840,9 +835,10 @@ mod tests {
     /// Regression test for SAFE-03 (#449) covering the `is_symlink()`-false
     /// branch: when the library-dir parent has no search permission,
     /// `is_symlink()` returns false (Rust treats metadata errors as "not a
-    /// symlink") and `plan()` records `source_path: None` via the outer
-    /// `else { None }` arm — upholding the contract that plan() does not
-    /// propagate the error or silently claim "no provenance".
+    /// symlink") and `plan()` skips the `provenance_from_link_result` call
+    /// entirely via the outer `if link_path.is_symlink()` guard — upholding
+    /// the contract that `plan()` does not propagate the error or silently
+    /// claim "no provenance".
     ///
     /// The new `read_link` Err arm added by SAFE-03 is covered separately by
     /// `provenance_from_link_result_warns_and_returns_none_on_err` below. That
@@ -915,13 +911,11 @@ mod tests {
             corrupt.is_managed,
             "corrupt-skill manifest entry is managed"
         );
-        assert!(
-            corrupt.source_path.is_none(),
-            "source_path must be None when the symlink cannot be read (either via the new \
-             read_link Err arm or the outer is_symlink-false branch — both uphold SAFE-03's \
-             contract); got {:?}",
-            corrupt.source_path
-        );
+        // Note: the SAFE-03 stderr-warning contract on read_link failure is
+        // verified by the standalone `provenance_from_link_result_warns_and_returns_none_on_err`
+        // unit test below. A previous integration-style assertion on the
+        // dead provenance field was removed alongside the field itself
+        // (TEST-05 / POLISH-05 option a — dead code removal).
     }
 
     /// Unit test covering the SAFE-03 (#449) `Err` arm of `read_link` directly.
@@ -945,7 +939,7 @@ mod tests {
 
         assert!(
             result.is_none(),
-            "Err arm must return None so plan() records source_path: None"
+            "Err arm must return None — pre-existing SAFE-03 regression guard"
         );
     }
 
