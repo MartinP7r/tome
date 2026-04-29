@@ -313,16 +313,19 @@ fn render_detail(frame: &mut Frame, app: &mut App, theme: &Theme) {
     // call sites feel identical to the user across modes. Cleared by
     // handle_key on next keypress.
     let status = if let Some(msg) = &app.status_message {
-        let msg_style = match msg.severity {
+        let msg_style = match msg.severity() {
             super::app::StatusSeverity::Warning => {
                 Style::default().fg(theme.alert).bg(theme.status_bar_bg)
             }
             super::app::StatusSeverity::Success => {
                 Style::default().fg(theme.accent).bg(theme.status_bar_bg)
             }
+            super::app::StatusSeverity::Pending => {
+                Style::default().fg(theme.muted).bg(theme.status_bar_bg)
+            }
         };
         Line::from(vec![
-            Span::styled(format!(" {} ", msg.text), msg_style),
+            Span::styled(format!(" {} {} ", msg.glyph(), msg.body()), msg_style),
             Span::styled(
                 " ".repeat(area.width as usize),
                 Style::default().bg(theme.status_bar_bg),
@@ -368,17 +371,20 @@ fn render_status_bar(
     // in one place rather than being duplicated if/when Normal-mode sources
     // appear.
     if let Some(msg) = &app.status_message {
-        let style = match msg.severity {
+        let style = match msg.severity() {
             super::app::StatusSeverity::Warning => {
                 Style::default().fg(theme.alert).bg(theme.status_bar_bg)
             }
             super::app::StatusSeverity::Success => {
                 Style::default().fg(theme.accent).bg(theme.status_bar_bg)
             }
+            super::app::StatusSeverity::Pending => {
+                Style::default().fg(theme.muted).bg(theme.status_bar_bg)
+            }
         };
         let bg_style = Style::default().bg(theme.status_bar_bg);
         let spans = vec![
-            Span::styled(format!(" {} ", msg.text), style),
+            Span::styled(format!(" {} {} ", msg.glyph(), msg.body()), style),
             Span::styled(" ".repeat(width as usize), bg_style),
         ];
         frame.render_widget(Paragraph::new(Line::from(spans)), area);

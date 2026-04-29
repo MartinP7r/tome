@@ -14,41 +14,66 @@ pub enum Mode {
 }
 
 /// Severity for ephemeral status-bar messages surfaced by DetailAction
-/// handlers. Replaces the prior stringly-typed severity inferred from the
-/// leading `⚠`/`✓` glyph of a `String`.
+/// handlers. The variant set is closed — adding a new variant requires
+/// updates to `glyph()`, `severity()`, the ui.rs color dispatch, and any
+/// tests that exhaustively match on it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StatusSeverity {
+pub(super) enum StatusSeverity {
     Success,
     Warning,
+    /// Informational "operation in progress" message. Used for the
+    /// `Opening: <path>...` status surfaced before blocking on
+    /// `xdg-open` / `open` (POLISH-01). Rendered with `theme.muted`.
+    Pending,
 }
 
 /// A one-shot toast rendered in the status bar until the next keypress.
 ///
-/// Stored as `Option<StatusMessage>` on `App`. Constructors apply the glyph
-/// prefix (`✓` / `⚠`) centrally so callers don't re-encode severity as a
-/// leading character, and the `ui.rs` consumer switches on `severity`
-/// directly instead of `starts_with('⚠')`.
+/// Stored as `Option<StatusMessage>` on `App`. The variant carries the raw
+/// body string only — the glyph (`✓` / `⚠` / `⏳`) is composed at render
+/// time in `ui.rs` via `msg.glyph()`. This eliminates the stringly-typed
+/// pre-formatted-text design that made the type fragile to refactor and
+/// duplicated the severity signal between `severity` and the leading
+/// glyph in `text`.
+// Derives note: Clone + PartialEq + Eq are kept for the existing assert_eq!-based
+// test surface (handle_key / execute_action lifecycle). Debug is for {:?} in test
+// failure messages. NO Hash / Ord / Default — this type has no key/sort/empty
+// semantics. Audited 2026 (POLISH-02).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatusMessage {
-    pub severity: StatusSeverity,
-    /// The glyph-prefixed text rendered in the status bar (e.g.
-    /// `"✓ Copied: /path"` or `"⚠ Could not open: ..."`). Pre-formatted so
-    /// the consumer just renders without rebuilding the prefix.
-    pub text: String,
+pub(super) enum StatusMessage {
+    Success(String),
+    Warning(String),
+    // Constructed in `handle_view_source` (POLISH-01, Task 2 of this plan)
+    // to surface "Opening: <path>..." before `xdg-open`/`open` blocks.
+    #[allow(dead_code)]
+    Pending(String),
 }
 
 impl StatusMessage {
-    pub fn success(body: impl Into<String>) -> Self {
-        StatusMessage {
-            severity: StatusSeverity::Success,
-            text: format!("✓ {}", body.into()),
+    /// Raw body without any glyph prefix.
+    pub(super) fn body(&self) -> &str {
+        match self {
+            StatusMessage::Success(s) | StatusMessage::Warning(s) | StatusMessage::Pending(s) => {
+                s.as_str()
+            }
         }
     }
 
-    pub fn warning(body: impl Into<String>) -> Self {
-        StatusMessage {
-            severity: StatusSeverity::Warning,
-            text: format!("⚠ {}", body.into()),
+    /// Severity glyph rendered before the body. UI composes
+    /// `format!("{} {}", msg.glyph(), msg.body())` at render time.
+    pub(super) fn glyph(&self) -> char {
+        match self {
+            StatusMessage::Success(_) => '✓',
+            StatusMessage::Warning(_) => '⚠',
+            StatusMessage::Pending(_) => '⏳',
+        }
+    }
+
+    pub(super) fn severity(&self) -> StatusSeverity {
+        match self {
+            StatusMessage::Success(_) => StatusSeverity::Success,
+            StatusMessage::Warning(_) => StatusSeverity::Warning,
+            StatusMessage::Pending(_) => StatusSeverity::Pending,
         }
     }
 }
@@ -126,7 +151,7 @@ pub struct App {
     pub detail_actions: Vec<DetailAction>,
     pub detail_selected: usize,
     pub theme: super::theme::Theme,
-    pub status_message: Option<StatusMessage>,
+    pub(super) status_message: Option<StatusMessage>,
 }
 
 impl App {
@@ -269,7 +294,7 @@ impl App {
                     };
                     match std::process::Command::new(binary).arg(&path).status() {
                         Ok(status) if status.success() => {
-                            self.status_message = Some(StatusMessage::success(format!(
+                            self.status_message = Some(StatusMessage::Success(format!(
                                 "Opened: {}",
                                 crate::paths::collapse_home(Path::new(&path))
                             )));
@@ -279,12 +304,12 @@ impl App {
                                 .code()
                                 .map(|c| c.to_string())
                                 .unwrap_or_else(|| "signal".into());
-                            self.status_message = Some(StatusMessage::warning(format!(
+                            self.status_message = Some(StatusMessage::Warning(format!(
                                 "{binary} exited {exit} for: {path}"
                             )));
                         }
                         Err(e) => {
-                            self.status_message = Some(StatusMessage::warning(format!(
+                            self.status_message = Some(StatusMessage::Warning(format!(
                                 "Could not launch {binary}: {e}"
                             )));
                         }
@@ -308,7 +333,7 @@ impl App {
                         arboard::Clipboard::new().and_then(|mut cb| cb.set_text(path.clone()));
                     match result {
                         Ok(()) => {
-                            self.status_message = Some(StatusMessage::success(format!(
+                            self.status_message = Some(StatusMessage::Success(format!(
                                 "Copied: {}",
                                 crate::paths::collapse_home(Path::new(&path))
                             )));
@@ -331,7 +356,7 @@ impl App {
                                 }
                                 other => format!("Could not copy: {other}"),
                             };
-                            self.status_message = Some(StatusMessage::warning(msg));
+                            self.status_message = Some(StatusMessage::Warning(msg));
                         }
                     }
                 }
@@ -853,11 +878,11 @@ mod tests {
     fn status_message_set_by_copy_path_and_cleared_by_any_key() {
         // Lifecycle contract for the SAFE-02 status_message surface:
         //   1. Executing a DetailAction (CopyPath here) must set
-        //      app.status_message to Some(StatusMessage { severity, text })
-        //      where severity is Success or Warning — we accept either
-        //      because headless CI runners (Linux over SSH, etc.) may not
-        //      have a clipboard service available, and per D-17/D-19 we do
-        //      NOT introduce a `trait ClipboardBackend` to force one branch.
+        //      app.status_message to Some(StatusMessage::Success(_) | Warning(_))
+        //      — we accept either because headless CI runners (Linux over
+        //      SSH, etc.) may not have a clipboard service available, and
+        //      per D-17/D-19 we do NOT introduce a `trait ClipboardBackend`
+        //      to force one branch.
         //   2. Feeding any KeyEvent through handle_key must clear
         //      status_message to None — the any-key-dismisses semantic
         //      handle_key enforces as its first statement.
@@ -874,16 +899,24 @@ mod tests {
             .expect("status_message must be Some after CopyPath action");
         assert!(
             matches!(
-                msg.severity,
+                msg.severity(),
                 StatusSeverity::Success | StatusSeverity::Warning
             ),
             "expected Success or Warning severity, got: {:?}",
-            msg.severity
+            msg.severity()
+        );
+        // The glyph belongs in ui.rs at render time, not in the body string.
+        assert!(
+            msg.glyph() == '✓' || msg.glyph() == '⚠',
+            "expected ✓ or ⚠ glyph; got: {}",
+            msg.glyph()
         );
         assert!(
-            msg.text.starts_with('✓') || msg.text.starts_with('⚠'),
-            "constructor must prefix text with the severity glyph; got: {}",
-            msg.text
+            !msg.body().starts_with('✓')
+                && !msg.body().starts_with('⚠')
+                && !msg.body().starts_with('⏳'),
+            "body must not embed a glyph prefix; got: {}",
+            msg.body()
         );
 
         // Step 2: any key clears the message.
@@ -896,35 +929,65 @@ mod tests {
     }
 
     #[test]
-    fn status_message_success_and_warning_constructors_apply_glyph_prefix() {
-        // StatusMessage::success should prefix with ✓; StatusMessage::warning
-        // should prefix with ⚠. These glyphs are part of the contract between
-        // the constructor and ui.rs's rendering (which now switches on
-        // severity, not glyph — but the glyph is still what the user sees).
-        let ok = StatusMessage::success("Copied: /tmp/foo");
-        assert_eq!(ok.severity, StatusSeverity::Success);
-        assert_eq!(ok.text, "✓ Copied: /tmp/foo");
+    fn status_message_glyph_dispatch_for_each_variant() {
+        // Each variant's `body()` must return the raw inner string with no
+        // leading glyph or space, while `glyph()` and `severity()` reflect
+        // the variant. UI composition (`{glyph} {body}`) lives in ui.rs.
+        let ok = StatusMessage::Success("Copied: /tmp/foo".into());
+        assert_eq!(ok.severity(), StatusSeverity::Success);
+        assert_eq!(ok.glyph(), '✓');
+        assert_eq!(ok.body(), "Copied: /tmp/foo");
 
-        let warn = StatusMessage::warning("Could not copy: permission denied");
-        assert_eq!(warn.severity, StatusSeverity::Warning);
-        assert_eq!(warn.text, "⚠ Could not copy: permission denied");
+        let warn = StatusMessage::Warning("Could not copy: permission denied".into());
+        assert_eq!(warn.severity(), StatusSeverity::Warning);
+        assert_eq!(warn.glyph(), '⚠');
+        assert_eq!(warn.body(), "Could not copy: permission denied");
+
+        let pending = StatusMessage::Pending("Opening: ~/foo...".into());
+        assert_eq!(pending.severity(), StatusSeverity::Pending);
+        assert_eq!(pending.glyph(), '⏳');
+        assert_eq!(pending.body(), "Opening: ~/foo...");
+    }
+
+    #[test]
+    fn status_message_body_does_not_contain_glyph() {
+        // Belt-and-braces invariant: regardless of variant, body() is the raw
+        // inner string and never starts with a glyph or leading space. UI
+        // rendering composes the glyph at display time, so any leading-glyph
+        // bytes here would render double-glyphed (`✓ ✓ Copied...`).
+        for msg in [
+            StatusMessage::Success("Copied: /tmp/x".into()),
+            StatusMessage::Warning("Could not copy: permission denied".into()),
+            StatusMessage::Pending("Opening: ~/foo...".into()),
+        ] {
+            assert!(
+                !msg.body().starts_with('✓')
+                    && !msg.body().starts_with('⚠')
+                    && !msg.body().starts_with('⏳'),
+                "body() must not start with a glyph; got: {}",
+                msg.body()
+            );
+            assert!(
+                !msg.body().starts_with(' '),
+                "body() must not start with a space; got: {:?}",
+                msg.body()
+            );
+        }
     }
 
     #[test]
     fn status_message_set_by_view_source_and_cleared_by_any_key() {
         // Lifecycle contract for DetailAction::ViewSource — symmetric to the
         // CopyPath test above but exercises the `open`/`xdg-open` dispatch
-        // path. We accept either severity because the opener may or may not
-        // succeed depending on the host environment (open/xdg-open presence,
-        // path validity, display server). What we assert is:
-        //   1. ViewSource ALWAYS sets status_message (no silent no-op).
-        //   2. The message is a StatusMessage with a Success or Warning
-        //      severity and the matching glyph prefix.
-        //   3. The next keypress clears status_message to None.
-        //
-        // Prevents regressions where a future refactor swaps Success/Warning
-        // arms or skips status_message plumbing in the ViewSource path
-        // (symmetric to CopyPath but with its own set of format strings).
+        // path. We accept any of the three severities because:
+        //   - Success/Warning depends on whether the opener succeeds or
+        //     fails on this host (open/xdg-open presence, path validity,
+        //     display server).
+        //   - Pending is the transient state set BEFORE `.status()` blocks
+        //     (POLISH-01) — in `execute_action` (no redraw closure), the
+        //     `handle_view_source` dispatch overwrites it before returning,
+        //     but the exhaustive arm guards against future refactors that
+        //     might leave the message as Pending.
         let (mut app, _tmp) = make_app(3);
 
         app.execute_action(DetailAction::ViewSource);
@@ -934,16 +997,24 @@ mod tests {
             .as_ref()
             .cloned()
             .expect("status_message must be Some after ViewSource action");
-        match msg.severity {
-            StatusSeverity::Success => assert!(
-                msg.text.starts_with('✓'),
-                "Success severity must produce ✓ prefix; got: {}",
-                msg.text
+        match msg.severity() {
+            StatusSeverity::Success => assert_eq!(
+                msg.glyph(),
+                '✓',
+                "Success severity must produce ✓ glyph; got: {}",
+                msg.glyph()
             ),
-            StatusSeverity::Warning => assert!(
-                msg.text.starts_with('⚠'),
-                "Warning severity must produce ⚠ prefix; got: {}",
-                msg.text
+            StatusSeverity::Warning => assert_eq!(
+                msg.glyph(),
+                '⚠',
+                "Warning severity must produce ⚠ glyph; got: {}",
+                msg.glyph()
+            ),
+            StatusSeverity::Pending => assert_eq!(
+                msg.glyph(),
+                '⏳',
+                "Pending severity must produce ⏳ glyph; got: {}",
+                msg.glyph()
             ),
         }
 
