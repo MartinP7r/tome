@@ -3456,6 +3456,22 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
         stderr.contains("retained") || stderr.contains("retry"),
         "stderr missing retry guidance (I2/I3): {stderr}"
     );
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    // TEST-01 / P1: success banner MUST NOT appear on partial failure.
+    // The banner string is "✓ Removed directory" but the leading glyph may
+    // be styled with ANSI codes; we assert on "Removed directory" (no glyph)
+    // for robustness against console color rendering. NO_COLOR=1 is already
+    // set above so the styled `✓` is a literal char, but defending against
+    // both forms is defense-in-depth.
+    assert!(
+        !stdout.contains("Removed directory"),
+        "stdout must NOT contain success banner on partial failure; got: {stdout}",
+    );
+    assert!(
+        !stderr.contains("Removed directory"),
+        "stderr must NOT contain success banner on partial failure (defense-in-depth); got: {stderr}",
+    );
 }
 
 #[cfg(unix)]
