@@ -12,7 +12,14 @@ repository = "https://github.com/martinP7r/tome"
 
 [workspace.dependencies]
 anyhow = "1"
-arboard = { version = "3", default-features = false, features = ["wayland-data-control"] }
+# Pin arboard to a patch-version range. Bump-review policy: when bumping
+# the upper bound, review CHANGELOG.md for new `arboard::Error` variants.
+# The match-arms in `crates/tome/src/browse/app.rs::execute_action`
+# (CopyPath arm) and `try_clipboard_set_text_with_retry` must remain
+# exhaustive — a new variant unobserved is a silent UX regression because
+# the fall-through `Could not copy: {other}` branch hides the semantic
+# of the new error from the user. Closes #463 / POLISH-06 (D6).
+arboard = { version = ">=3.6, <3.7", default-features = false, features = ["wayland-data-control"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 console = "0.16"
