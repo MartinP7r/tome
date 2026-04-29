@@ -104,44 +104,29 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 ## Current State
 
-**Shipped:** v0.8.1 (2026-04-27)
+**Shipped:** v0.9.0 (2026-04-29)
 
-v0.8 milestone complete — Wizard UX & Safety Hardening. 8 requirements shipped (WUX-01..05 + SAFE-01..03) across Phases 7+8, plus the v0.8.1 hotfix (HOTFIX-01..03 across Phase 8.1) closing 3 post-merge findings from #461. Archive: [`milestones/v0.8-ROADMAP.md`](milestones/v0.8-ROADMAP.md).
+v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requirements shipped (5 PORT + 6 POLISH + 5 TEST) across Phases 9-10. Archive: [`milestones/v0.9-ROADMAP.md`](milestones/v0.9-ROADMAP.md).
 
 **Highlights:**
-- Wizard handles greenfield, brownfield, and legacy machine states — no more silent overwrites or default-path footguns
-- `tome remove` aggregates partial-cleanup failures with grouped stderr summary + non-zero exit; save chain reordered so retention messaging surfaces before save errors
-- `tome browse` `open` + `copy path` work on Linux (`xdg-open` + `arboard`), with success/failure surfacing in TUI status bar
-- `relocate.rs` surfaces `read_link` failures instead of silently dropping
-- Lockfile regen for `tome remove`/`reassign`/`fork` no longer silently drops git-sourced skills
+- A single `tome.toml` checked into dotfiles now works across machines via per-machine `[directory_overrides.<name>]` blocks in `machine.toml` — overrides apply once at config load, every downstream command (`sync`, `status`, `doctor`, `lockfile::generate`) sees the merged result
+- `tome status` and `tome doctor` mark overridden directories with `(override)` in text output and `override_applied: bool` in JSON
+- `tome browse open` paints "Opening: <path>..." before blocking on `xdg-open`; `StatusMessage` redesigned as `Success | Warning | Pending` enum; `ClipboardOccupied` auto-retries with 100ms backoff
+- `FailureKind::ALL` compile-enforced via exhaustive-match sentinel; `RemoveFailure::new` gains `path.is_absolute()` debug invariant; `arboard` patch-pinned with bump-review policy
+- `regen_warnings` deferred until after the success banner; partial-failure success-banner-absence + retry-after-fix end-to-end tests pin the I2/I3 retention contract
+- Bare-slug `tome add` (PR #471) bundled in — `tome add planetscale/database-skills` expands to `https://github.com/planetscale/database-skills`
 
-**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) pending Linux desktop hardware. Accepted as carry-over.
+**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) still pending Linux desktop hardware. Accepted as carry-over for the third consecutive milestone.
 
-## Current Milestone: v0.9 Cross-Machine Config Portability & Polish
+## Next Milestone Goals
 
-**Goal:** A single `tome.toml` checked into dotfiles can be applied across machines with different filesystem layouts — without manual edits per machine. Bundled with two polish backlogs (#462, #463) to clear the v0.8 review tail in one cut.
+**v1.0 tome Desktop (Tauri GUI)** — drafted, ready to ratify
 
-**Target features:**
-- **Cross-machine portability** ([#458](https://github.com/MartinP7r/tome/issues/458)) — `machine.toml` path overrides allow per-machine remapping of directory paths so the same `tome.toml` is portable across machines. New schema fields + override-apply timing in the config load pipeline.
-- **Type design + TUI architecture polish** ([#463](https://github.com/MartinP7r/tome/issues/463)) — 6 items from the Phase 8 post-merge review: StatusMessage type redesign, `.status()` TUI blocking, clipboard auto-retry, `FailureKind::ALL` compile-enforcement, `RemoveFailure::new` justification, arboard drift hygiene.
-- **Test coverage + wording + dead code polish** ([#462](https://github.com/MartinP7r/tome/issues/462)) — 5 items from the same review: success-banner-absence assertion, retry e2e test, `ViewSource .status()` middle-branch coverage, regen-warning ordering, dead `source_path` field cleanup.
-
-**Scope anchor:** Epic [#458](https://github.com/MartinP7r/tome/issues/458) (primary) + #462/#463 (carry-over from v0.8 post-merge review).
-
-**Key context:**
-- Bare-slug expansion in `tome add` (PR #471) merged to main 2026-04-27; ships with v0.9 (no v0.8.2 patch release planned).
-- Single-user constraint still holds — no migration tooling; users with existing `tome.toml` get explicit migration docs if schema changes.
-- Cross-machine portability has been intentionally deferred since v0.8 epic #459 because the design needs new schema fields + override-apply timing — a bigger lift than fits a single phase.
-
-## Looking Beyond v0.9
-
-**v1.0 tome Desktop (Tauri GUI)** — drafted 2026-04-28
-
-Forward-planning artifacts: [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md) + [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md). 32 requirements across 7 categories (CORE / VIEW / SYNC / CFG / OPS / BAK / DIST) + 5 cross-cutting NF gates. 7 phases (10–16). Rough size: 15–22 weeks of focused work; alpha after Phase 11, beta after Phase 13, ship after Phase 16.
+Forward-planning artifacts complete: [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md) + [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md). 32 requirements across 7 categories (CORE / VIEW / SYNC / CFG / OPS / BAK / DIST) + 5 cross-cutting NF gates. 7 phases (proposed numbering 11–17). Rough size: 15–22 weeks of focused work; alpha after Phase 12, beta after Phase 14, ship after Phase 17.
 
 Tauri 2 chosen over Electron + napi-rs (D-GUI-01): the Rust crate becomes the native backend directly, ~8 MB bundle, built-in code-signed auto-update, reuses Developer ID flow. CLI ships unchanged from `crates/tome`; the GUI lives in a new `crates/tome-desktop` workspace member.
 
-Sequenced after v0.9 by default (D-GUI-09). Ratify via `/gsd:new-milestone` when v0.9 ships and v1.0 becomes the active milestone.
+Run `/gsd:new-milestone` to ratify v1.0 and start phase planning.
 
 <details>
 <summary>Previous milestones (recap)</summary>
@@ -162,9 +147,9 @@ Sequenced after v0.9 by default (D-GUI-09). Ratify via `/gsd:new-milestone` when
 
 ## Context
 
-tome is at Cargo.toml `0.8.1` (released 2026-04-27 via cargo-dist). Codebase: ~25.2k lines of Rust across 20+ source modules in a single crate. v0.6 introduced the unified directory model; v0.7 hardened the wizard surface; v0.8 closed the new-machine/dotfiles-sync UX gap and shipped partial-failure visibility + cross-platform browse actions.
+tome is at Cargo.toml `0.9.0` (released 2026-04-29 via cargo-dist). Codebase: ~26k lines of Rust across 20+ source modules in a single crate. v0.6 introduced the unified directory model; v0.7 hardened the wizard surface; v0.8 closed the new-machine/dotfiles-sync UX gap and shipped partial-failure visibility + cross-platform browse actions; v0.9 shipped per-machine `[directory_overrides.<name>]` for cross-machine portability and cleared the v0.8 review tail.
 
-The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS. 590 tests total (464 unit + 126 integration as of v0.8.1).
+The Rust codebase uses `anyhow` for errors, `serde`/`toml` for config, `clap` for CLI, `ratatui` for the TUI browser, and `nucleo-matcher` for fuzzy search. Tests use `assert_cmd` + `tempfile` + `insta` snapshots. CI runs on Ubuntu and macOS. 662 tests total (526 unit + 136 integration as of v0.9.0).
 
 Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each entry has a `role` (managed/synced/source/target) and `type` (claude-plugins/directory/git). `Config::save_checked` enforces expand → `validate()` → TOML round-trip → write; no invalid config can reach disk.
 
@@ -200,13 +185,24 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 | Glyph-prefix dispatch (✓ → `theme.accent`, ⚠ → `theme.alert`) for status bar (v0.8 Phase 8 / SAFE-02) | Reuses existing theme fields; no new `theme.warning` needed | ✓ Good |
 | Lockfile-as-cache for offline resolved-paths recovery (v0.8.1 Phase 8.1 / HOTFIX-01) | Reads previous lockfile + on-disk repo cache; no `git fetch` from destructive commands; per-directory warnings replace silent skip | ✓ Good — closes #461 H1 silent-drop regression |
 | `if !result.failures.is_empty()` block fires before save chain in `Command::Remove` (v0.8.1 Phase 8.1 / HOTFIX-02) | Save-chain `?` propagation was masking the I2/I3 retention messaging on disk-write errors | ✓ Good — closes #461 H2 |
+| `[directory_overrides.<name>]` lives in `machine.toml` (v0.9 Phase 9 / PORT-01) | Sync boundary already correct — `machine.toml` is per-machine and never synced; reusing it for path overrides preserves the "tome.toml is portable" invariant | ✓ Good — closes #458 cross-machine portability epic |
+| `Config::apply_machine_overrides` between `expand_tildes()` and `validate()` (v0.9 Phase 9 / PORT-02) | Single insertion point in the load pipeline guarantees all downstream code sees the merged result; no second code path can observe pre-override paths | ✓ Good — single source of truth |
+| `override_applied: bool` on `DirectoryConfig` with `#[serde(skip)]` (v0.9 Phase 9 / PORT-05) | Single source of truth for status/doctor surfacing; round-trip byte-equality of `tome.toml` preserved | ✓ Good — chosen over snapshot-diff |
+| Override-induced validation errors via message-content wrapper, not typed enum (v0.9 Phase 9 / PORT-04) | Matches existing tome convention (`anyhow::Result` + grep-able message templates); typed-enum migration noted as v1.0 follow-up if a programmatic consumer needs it | ✓ Good — defensible per plan-checker |
+| `StatusMessage = Success \| Warning \| Pending` enum with `body()`/`glyph()`/`severity()` accessors (v0.9 Phase 10 / POLISH-02) | Removes dual-source-of-truth between severity and pre-formatted glyph in body; UI formats `"{glyph} {body}"` at render time | ✓ Good |
+| Closure-callback redraw threading for pre-block TUI updates (v0.9 Phase 10 / POLISH-01) | Keeps `App` independent of `ratatui::DefaultTerminal`; redraw fires BEFORE `.status()` blocks (a flag-based approach would only redraw on the next event loop iteration, too late) | ✓ Good — chosen over `pending_redraw` flag and `&mut Terminal` threading |
+| `FailureKind::ALL` compile-enforced via exhaustive-match sentinel + const-len assert (v0.9 Phase 10 / POLISH-04) | Catches "added a variant without updating ALL" at compile time; no `strum` dep needed | ✓ Good — chosen over runtime canary |
+| `arboard` patch-pin (`>=3.6, <3.7`) with bump-review comment (v0.9 Phase 10 / POLISH-06) | Prevents silent variant addition (`arboard::Error` is `#[non_exhaustive]`); review-on-bump policy documented in `Cargo.toml` | ✓ Good |
+| Defer `regen_warnings` until after success banner (v0.9 Phase 10 / TEST-04) | Success banner is the user's anchor; warnings as a footnote feel more natural than scoped-prefix on every line. Source-byte regression test anchored to `Command::Remove` region for false-positive resistance | ✓ Good — chosen over `[lockfile regen]` prefix |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
-*Last updated: 2026-04-29 — Phase 10 complete (Phase 8 Review Tail). All 11 v0.8 review-tail items shipped: POLISH-01..06 (#463 D1-D6 — TUI block UX, StatusMessage enum redesign, ClipboardOccupied retry, FailureKind::ALL compile-enforce, RemoveFailure::new invariant, arboard patch-pin) + TEST-01..05 (#462 P1-P5 — banner-absent assertion, retry-after-fix e2e, ViewSource helper extraction, regen-warnings reorder, dead source_path field removed). 662 tests passing (526 unit + 136 integration; +14 since Phase 10 start). v0.9 milestone is now functionally complete — both Phase 9 + Phase 10 shipped. Ready for `/gsd:complete-milestone v0.9` after PR merges to main and `make release VERSION=0.9.0`.*
+*Last updated: 2026-04-29 after v0.9 milestone — v0.9.0 shipped via cargo-dist (commits c183e3f Phase 10 + 0ae6288 version bump on main). v0.9 milestone archived: 16 v0.9 requirements (5 PORT + 6 POLISH + 5 TEST) shipped across Phases 9 and 10 (10 in 1 wave, 9 in 2 waves). 662 tests passing (526 unit + 136 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` carried over for the third consecutive milestone (still pending hardware). Ready for v1.0 — Tauri GUI milestone artifacts already drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`; ratify via `/gsd:new-milestone` to start phase planning.*
+
+*Last updated: 2026-04-29 — Phase 10 complete (Phase 8 Review Tail). All 11 v0.8 review-tail items shipped: POLISH-01..06 (#463 D1-D6) + TEST-01..05 (#462 P1-P5). 662 tests passing. v0.9 milestone functionally complete — ready for milestone closure.*
 
 *Last updated: 2026-04-28 — Phase 9 complete (Cross-Machine Path Overrides). All 5 PORT requirements shipped: `[directory_overrides.<name>]` schema in machine.toml, override-apply timing in load pipeline, typo warning, distinct machine.toml error class, and `(override)` annotation in `tome status`/`tome doctor` (text + JSON). 648 tests passing (514 unit + 134 integration; +58 since Phase 9 start). Phase 10 (#462 + #463 polish bundle) is the remaining v0.9 work.*
 
