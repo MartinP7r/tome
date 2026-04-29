@@ -49,7 +49,7 @@
 Epic: [#458](https://github.com/MartinP7r/tome/issues/458) — `machine.toml` path overrides for cross-machine portability. Bundled with #462 (test/wording/dead-code polish) and #463 (type-design + TUI architecture polish) to clear the v0.8 post-merge review tail in one cut.
 
 - [x] **Phase 9: Cross-Machine Path Overrides** — `[directory_overrides.<name>]` in `machine.toml` lets a single `tome.toml` work across machines with different filesystem layouts (PORT-01..05) (completed 2026-04-28)
-- [ ] **Phase 10: Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage** — close the 11 post-merge review items from #462 + #463 (POLISH-01..06, TEST-01..05)
+- [x] **Phase 10: Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage** — close the 11 post-merge review items from #462 + #463 (POLISH-01..06, TEST-01..05) (completed 2026-04-29)
 
 ### v1.0 tome Desktop — Tauri GUI (Drafted)
 
@@ -104,4 +104,4 @@ Phases will be planned via `/gsd:new-milestone` when v1.0 becomes active. Phase 
 | 8. Safety Refactors (Partial-Failure Visibility & Cross-Platform) | v0.8 | 3/3 | Complete | 2026-04-24 |
 | 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
 | 9. Cross-Machine Path Overrides | v0.9 | 2/3 | Complete    | 2026-04-28 |
-| 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 2/3 | In Progress|  |
+| 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete   | 2026-04-29 |

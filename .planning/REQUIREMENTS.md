@@ -22,9 +22,9 @@ Source: [#458](https://github.com/MartinP7r/tome/issues/458). Mechanism: new `[d
 
 Source: [#463](https://github.com/MartinP7r/tome/issues/463). Each item closes a specific D# from the post-merge review.
 
-- [ ] **POLISH-01** (D1): `tome browse` `open` action surfaces an "Opening: <path>..." status message immediately before blocking on `xdg-open`/`open`, and any keystrokes that arrived during the block are drained from the tty buffer afterward instead of replayed as actions.
-- [ ] **POLISH-02** (D2): `StatusMessage` is a single enum (`Success(String) | Warning(String)`) with accessor methods (`body()`, `glyph()`, `severity()`) — pre-formatted glyph in `text` is gone. UI formats `"{glyph} {body}"` at render time. Visibility narrowed to `pub(super)`. Test-only `Clone`/`PartialEq`/`Eq` derives audited.
-- [ ] **POLISH-03** (D3): `ClipboardOccupied` errors auto-retry once with a 100ms backoff before the warning reaches the status bar.
+- [x] **POLISH-01** (D1): `tome browse` `open` action surfaces an "Opening: <path>..." status message immediately before blocking on `xdg-open`/`open`, and any keystrokes that arrived during the block are drained from the tty buffer afterward instead of replayed as actions.
+- [x] **POLISH-02** (D2): `StatusMessage` is a single enum (`Success(String) | Warning(String)`) with accessor methods (`body()`, `glyph()`, `severity()`) — pre-formatted glyph in `text` is gone. UI formats `"{glyph} {body}"` at render time. Visibility narrowed to `pub(super)`. Test-only `Clone`/`PartialEq`/`Eq` derives audited.
+- [x] **POLISH-03** (D3): `ClipboardOccupied` errors auto-retry once with a 100ms backoff before the warning reaches the status bar.
 - [x] **POLISH-04** (D4): `FailureKind::ALL` cannot drift from the enum — either compile-enforced (e.g., `strum::EnumIter` or exhaustive-match sentinel) or replaced by an iteration mechanism that doesn't require manual sync.
 - [x] **POLISH-05** (D5): `RemoveFailure::new` either gains a real invariant (`debug_assert!(path.is_absolute(), ...)`) or is removed in favor of struct-literal construction at the four call sites in `execute`.
 - [x] **POLISH-06** (D6): `arboard` is pinned to a patch-version range with a documented "review changelog on bump" policy in `Cargo.toml` (or a `#[cfg(test)]` enum-growth canary).
@@ -35,7 +35,7 @@ Source: [#462](https://github.com/MartinP7r/tome/issues/462). Each item closes a
 
 - [x] **TEST-01** (P1): `remove_partial_failure_exits_nonzero_with_warning_marker` asserts the `✓ Removed directory` success banner is **absent** from stdout on partial failure (not just that the `⚠` block is present).
 - [x] **TEST-02** (P2): End-to-end test pins the I2/I3 retention contract: partial failure → user fixes the underlying condition → second `tome remove <name>` succeeds with empty `failures`, config entry gone, manifest empty, library dir gone.
-- [ ] **TEST-03** (P3): `ViewSource .status()` match is factored into a `status_message_from_open_result(...)` helper, with unit tests covering all three arms (Ok+success, Ok+non-zero exit, Err) using synthetic `ExitStatus` values via `ExitStatusExt::from_raw`.
+- [x] **TEST-03** (P3): `ViewSource .status()` match is factored into a `status_message_from_open_result(...)` helper, with unit tests covering all three arms (Ok+success, Ok+non-zero exit, Err) using synthetic `ExitStatus` values via `ExitStatusExt::from_raw`.
 - [x] **TEST-04** (P4): `regen_warnings` no longer print **before** the success banner on the happy path. Either deferred until after the banner (option a) or scoped with a `[lockfile regen]` prefix (option b) — pin the choice in code and regression-test the ordering.
 - [x] **TEST-05** (P5): The dead `SkillMoveEntry.source_path` field is either removed (option a) or wired into `copy_library` / `recreate_target_symlinks` (option b) — `#[allow(dead_code)]` is gone from `relocate.rs`.
 
@@ -69,14 +69,14 @@ Phase mapping is filled by `/gsd:plan-phase` after roadmap creation.
 | PORT-03 | Phase 9 | Complete |
 | PORT-04 | Phase 9 | Complete |
 | PORT-05 | Phase 9 | Complete |
-| POLISH-01 | Phase 10 | Pending |
-| POLISH-02 | Phase 10 | Pending |
-| POLISH-03 | Phase 10 | Pending |
+| POLISH-01 | Phase 10 | Complete |
+| POLISH-02 | Phase 10 | Complete |
+| POLISH-03 | Phase 10 | Complete |
 | POLISH-04 | Phase 10 | Complete |
 | POLISH-05 | Phase 10 | Complete |
 | POLISH-06 | Phase 10 | Complete |
 | TEST-01 | Phase 10 | Complete |
 | TEST-02 | Phase 10 | Complete |
-| TEST-03 | Phase 10 | Pending |
+| TEST-03 | Phase 10 | Complete |
 | TEST-04 | Phase 10 | Complete |
 | TEST-05 | Phase 10 | Complete |
