@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.9
 milestone_name: Cross-Machine Config Portability & Polish
 status: executing
-stopped_at: Completed 10-03-arboard-pin-and-relocate-deadcode-PLAN.md (POLISH-06 + TEST-05)
-last_updated: "2026-04-29T02:53:35.919Z"
+stopped_at: Completed 10-02-remove-correctness-and-test-coverage-PLAN.md (POLISH-04, POLISH-05, TEST-01, TEST-02, TEST-04)
+last_updated: "2026-04-29T03:01:39.339Z"
 last_activity: 2026-04-29
 progress:
   total_phases: 11
   completed_phases: 10
   total_plans: 36
-  completed_plans: 34
+  completed_plans: 35
   percent: 0
 ---
 
@@ -55,6 +55,9 @@ v0.9-specific decisions (so far):
 - [Phase 09]: PORT-04: override-induced validate() failures wrap with distinct error class naming machine.toml; discriminator gates wrapping (pre-override valid AND >=1 override applied)
 - [Phase 10]: POLISH-06: arboard pinned to >=3.6, <3.7 (option a, patch-pin) with bump-review comment in Cargo.toml. Cargo.lock unchanged.
 - [Phase 10]: TEST-05: SkillMoveEntry.source_path REMOVED (option a) instead of wired-into-execute. provenance_from_link_result retained for SAFE-03 stderr-warning side effect (let _ = ...). Three test-side assertions deleted.
+- [Phase 10]: POLISH-04: chose option (c) exhaustive-match sentinel — _ensure_failure_kind_all_exhaustive const fn + const _: () = { assert!(FailureKind::ALL.len() == 4); }; smaller blast-radius than strum::EnumIter (option a)
+- [Phase 10]: POLISH-05: chose option (a) keep new() + add debug_assert!(path.is_absolute(), ...); single-site edit vs option (b) replacing 4 call sites
+- [Phase 10]: TEST-04: chose option (a) defer regen_warnings until after success banner — banner is user's anchor; option (b) [lockfile regen] prefix would add visual noise on every line
 
 ### Pending Todos / Carry-over
 
@@ -67,6 +70,6 @@ v0.9-specific decisions (so far):
 
 ## Session Continuity
 
-Last session: 2026-04-29T02:53:35.916Z
-Stopped at: Completed 10-03-arboard-pin-and-relocate-deadcode-PLAN.md (POLISH-06 + TEST-05)
+Last session: 2026-04-29T03:01:39.336Z
+Stopped at: Completed 10-02-remove-correctness-and-test-coverage-PLAN.md (POLISH-04, POLISH-05, TEST-01, TEST-02, TEST-04)
 Resume file: None
