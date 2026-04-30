@@ -1336,7 +1336,7 @@ fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
             .to_string();
         rows.push([
             s.name.to_string(),
-            s.source_name.clone(),
+            s.source_name.as_str().to_string(),
             version,
             s.path.display().to_string(),
         ]);

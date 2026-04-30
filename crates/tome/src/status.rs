@@ -596,7 +596,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -635,7 +635,7 @@ mod tests {
             crate::discover::SkillName::new("missing").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -668,7 +668,7 @@ mod tests {
             crate::discover::SkillName::new("managed-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
-                source_name: "plugins".to_string(),
+                source_name: DirectoryName::new("plugins").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

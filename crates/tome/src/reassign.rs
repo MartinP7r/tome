@@ -30,7 +30,7 @@ pub(crate) struct ReassignPlan {
     /// Name of the skill being reassigned.
     pub skill_name: SkillName,
     /// Current source_name from manifest.
-    pub from_directory: String,
+    pub from_directory: DirectoryName,
     /// Target directory to reassign to.
     pub to_directory: DirectoryName,
     /// What filesystem action is needed.
@@ -155,7 +155,7 @@ pub(crate) fn execute(
     }
 
     // Update manifest source_name
-    if !manifest.update_source_name(plan.skill_name.as_str(), plan.to_directory.as_ref()) {
+    if !manifest.update_source_name(plan.skill_name.as_str(), &plan.to_directory) {
         anyhow::bail!(
             "skill '{}' disappeared from manifest during reassignment",
             plan.skill_name.as_str()
@@ -258,7 +258,7 @@ mod tests {
             SkillName::new("test-skill").unwrap(),
             SkillEntry::new(
                 PathBuf::from("/some/path"),
-                "old-dir".to_string(),
+                DirectoryName::new("old-dir").unwrap(),
                 ContentHash::new("a".repeat(64)).unwrap(),
                 false,
             ),
@@ -298,7 +298,7 @@ mod tests {
             SkillName::new("test-skill").unwrap(),
             SkillEntry::new(
                 PathBuf::from("/some/path"),
-                "old-dir".to_string(),
+                DirectoryName::new("old-dir").unwrap(),
                 ContentHash::new("a".repeat(64)).unwrap(),
                 false,
             ),
@@ -323,7 +323,7 @@ mod tests {
             SkillName::new("test-skill").unwrap(),
             SkillEntry::new(
                 PathBuf::from("/some/path"),
-                "old-dir".to_string(),
+                DirectoryName::new("old-dir").unwrap(),
                 ContentHash::new("a".repeat(64)).unwrap(),
                 false,
             ),

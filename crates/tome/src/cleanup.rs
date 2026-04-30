@@ -45,13 +45,15 @@ pub fn cleanup_library(
         .cloned()
         .collect();
 
-    // Group stale skills by their previous source for better messaging
+    // Group stale skills by their previous source for better messaging.
+    // Key is `String` so an "unknown" sentinel can coexist with real
+    // DirectoryName values; real keys go through `.as_str().to_string()`.
     let mut stale_by_source: std::collections::BTreeMap<String, Vec<SkillName>> =
         std::collections::BTreeMap::new();
     for name in &stale {
         let source = manifest
             .get(name.as_str())
-            .map(|e| e.source_name.clone())
+            .map(|e| e.source_name.as_str().to_string())
             .unwrap_or_else(|| "unknown".to_string());
         stale_by_source
             .entry(source)
@@ -208,6 +210,7 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DirectoryName;
     use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
 
@@ -225,7 +228,7 @@ mod tests {
             crate::discover::SkillName::new("old-skill").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/old-skill"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -261,7 +264,7 @@ mod tests {
             crate::discover::SkillName::new("keep-me").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/keep-me"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -295,7 +298,7 @@ mod tests {
             crate::discover::SkillName::new("stale").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/stale"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -439,7 +442,7 @@ mod tests {
             crate::discover::SkillName::new("plugin-skill").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: skill_source,
-                source_name: "plugins".to_string(),
+                source_name: DirectoryName::new("plugins").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

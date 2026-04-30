@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
+use crate::config::DirectoryName;
 use crate::discover::SkillName;
 use crate::validation::ContentHash;
 
@@ -70,9 +71,9 @@ impl Manifest {
     ///
     /// Returns `true` if the skill was found and updated, `false` if missing.
     /// Preserves `content_hash`, `synced_at`, and other fields.
-    pub fn update_source_name(&mut self, skill_name: &str, new_source: &str) -> bool {
+    pub fn update_source_name(&mut self, skill_name: &str, new_source: &DirectoryName) -> bool {
         if let Some(entry) = self.skills.get_mut(skill_name) {
-            entry.source_name = new_source.to_string();
+            entry.source_name = new_source.clone();
             true
         } else {
             false
@@ -87,7 +88,10 @@ pub struct SkillEntry {
     pub source_path: PathBuf,
     /// Which directory config entry contributed this skill.
     /// In v0.6+, this is the directory name from `[directories.*]` in `tome.toml`.
-    pub source_name: String,
+    /// On-disk JSON representation is unchanged (`DirectoryName` is `#[serde(transparent)]`
+    /// over `String`); the type lift to `DirectoryName` (closes #489) tightens validation
+    /// at deserialize time so a corrupted manifest with an invalid identifier fails fast.
+    pub source_name: DirectoryName,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
@@ -102,7 +106,7 @@ impl SkillEntry {
     /// Create a new `SkillEntry`, recording the current timestamp automatically.
     pub fn new(
         source_path: PathBuf,
-        source_name: String,
+        source_name: DirectoryName,
         content_hash: ContentHash,
         managed: bool,
     ) -> Self {
@@ -296,7 +300,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: "test".to_string(),
+                source_name: DirectoryName::new("test").unwrap(),
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -396,21 +400,23 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry::new(
                 PathBuf::from("/tmp/source/my-skill"),
-                "old-source".to_string(),
+                DirectoryName::new("old-source").unwrap(),
                 test_hash("my-skill"),
                 false,
             ),
         );
 
-        let updated = manifest.update_source_name("my-skill", "new-source");
+        let new_source = DirectoryName::new("new-source").unwrap();
+        let updated = manifest.update_source_name("my-skill", &new_source);
         assert!(updated, "should return true for existing skill");
-        assert_eq!(manifest.get("my-skill").unwrap().source_name, "new-source");
+        assert_eq!(manifest.get("my-skill").unwrap().source_name, new_source);
     }
 
     #[test]
     fn update_source_name_missing_skill() {
         let mut manifest = Manifest::default();
-        let updated = manifest.update_source_name("nonexistent", "new-source");
+        let new_source = DirectoryName::new("new-source").unwrap();
+        let updated = manifest.update_source_name("nonexistent", &new_source);
         assert!(!updated, "should return false for missing skill");
     }
 }

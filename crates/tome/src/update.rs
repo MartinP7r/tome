@@ -88,7 +88,7 @@ pub fn present_changes(
             SkillChange::Removed(e) => &e.source_name,
         };
         by_source
-            .entry(source.clone())
+            .entry(source.as_str().to_string())
             .or_default()
             .push((name, change));
     }
@@ -169,12 +169,13 @@ pub fn present_changes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DirectoryName;
     use crate::lockfile::LockEntry;
     use crate::validation::test_hash;
 
     fn entry(source: &str, hash_seed: &str) -> LockEntry {
         LockEntry {
-            source_name: source.to_string(),
+            source_name: DirectoryName::new(source).unwrap(),
             content_hash: test_hash(hash_seed),
             registry_id: None,
             version: None,
@@ -184,7 +185,7 @@ mod tests {
 
     fn managed_entry(source: &str, hash_seed: &str, registry_id: &str) -> LockEntry {
         LockEntry {
-            source_name: source.to_string(),
+            source_name: DirectoryName::new(source).unwrap(),
             content_hash: test_hash(hash_seed),
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),

@@ -466,7 +466,7 @@ mod tests {
             SkillName::new("my-skill").unwrap(),
             SkillEntry::new(
                 tmp.path().join("source/my-skill"),
-                "test-source".to_string(),
+                DirectoryName::new("test-source").unwrap(),
                 test_hash(),
                 false,
             ),

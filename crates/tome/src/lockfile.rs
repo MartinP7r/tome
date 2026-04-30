@@ -31,7 +31,9 @@ pub struct Lockfile {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockEntry {
     /// Directory name (maps to a `[directories.*]` entry in `tome.toml`).
-    pub source_name: String,
+    /// On-disk JSON shape is unchanged (`DirectoryName` is `#[serde(transparent)]`); the
+    /// type lift to `DirectoryName` (closes #489) tightens validation at deserialize time.
+    pub source_name: DirectoryName,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: ContentHash,
     /// Registry identifier (e.g. "my-plugin@npm"). Present for managed plugins.
@@ -235,7 +237,7 @@ mod tests {
                 SkillName::new(name).unwrap(),
                 SkillEntry::new(
                     PathBuf::from(format!("/tmp/{name}")),
-                    source.to_string(),
+                    DirectoryName::new(source).unwrap(),
                     test_hash(hash_seed),
                     managed,
                 ),
@@ -267,7 +269,7 @@ mod tests {
         DiscoveredSkill {
             name: SkillName::new(name).unwrap(),
             path: PathBuf::from(format!("/tmp/{name}")),
-            source_name: source.to_string(),
+            source_name: DirectoryName::new(source).unwrap(),
             origin,
             frontmatter: None,
         }
@@ -392,7 +394,7 @@ mod tests {
             skills: BTreeMap::from([(
                 SkillName::new("my-skill").unwrap(),
                 LockEntry {
-                    source_name: "test".to_string(),
+                    source_name: DirectoryName::new("test").unwrap(),
                     content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
@@ -621,7 +623,7 @@ mod tests {
         skills.insert(
             SkillName::new("seed-skill").unwrap(),
             LockEntry {
-                source_name: source.to_string(),
+                source_name: DirectoryName::new(source).unwrap(),
                 content_hash: test_hash("seed"),
                 registry_id: None,
                 version: None,
