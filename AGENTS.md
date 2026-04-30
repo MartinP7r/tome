@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI agents 
 
 ## Current State
 
-**v0.9.0 (shipped 2026-04-29)** — between milestones; v1.0 (Tauri GUI) drafted in `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`, awaiting `/gsd:new-milestone` to ratify.
+**v0.9.0 (shipped 2026-04-29)** — between milestones; next milestone (Tauri GUI) drafted in `.planning/milestones/`, awaiting `/gsd:new-milestone` to ratify. Per semver the next release is `0.10.0`; the project disclaims API stability (`Backward compat: None`) so it has not yet committed to a `1.0.0` cut.
 
 Cumulative through v0.9:
 - **v0.6 — Unified Directory Model**: `[directories.*]` BTreeMap replacing `[[sources]]` + `[targets.*]`; git-backed skill repos with shallow clone + ref pinning + SHA in lockfile; per-directory skill filtering (`enabled`/`disabled` in `machine.toml`); CLI commands `tome add`, `tome remove`, `tome reassign`, `tome fork`; browse TUI polish (theming, fuzzy highlighting, scrollbar, markdown preview, help overlay).
@@ -222,9 +222,9 @@ This project uses **GitHub Issues** for backlog and roadmap intent, and **GSD** 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**tome v0.9 — Cross-Machine Path Overrides (shipped); v1.0 — Desktop GUI (drafted)**
+**tome v0.9 — Cross-Machine Path Overrides (shipped); next milestone — Desktop GUI (drafted)**
 
-tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. The unified directory model (v0.6) is the foundation; subsequent milestones hardened the wizard (v0.7), polished cross-platform UX (v0.8), and added per-machine path overrides for portability (v0.9). v1.0 will add a Tauri desktop GUI on top of the existing CLI library.
+tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. The unified directory model (v0.6) is the foundation; subsequent milestones hardened the wizard (v0.7), polished cross-platform UX (v0.8), and added per-machine path overrides for portability (v0.9). The next milestone will add a Tauri desktop GUI on top of the existing CLI library.
 
 **Core Value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. One config, one library, every tool.
 
