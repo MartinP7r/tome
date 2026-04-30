@@ -563,9 +563,7 @@ mod tests {
                     path,
                     directory_type: dir_type,
                     role,
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
 
                     subdir: None,
                     override_applied: false,

@@ -843,9 +843,9 @@ fn resolve_git_directories(
             }
             git::update_repo(
                 &cache_dir,
-                dir_config.branch.as_deref(),
-                dir_config.tag.as_deref(),
-                dir_config.rev.as_deref(),
+                dir_config.git_ref.as_ref().and_then(|r| r.branch()),
+                dir_config.git_ref.as_ref().and_then(|r| r.tag()),
+                dir_config.git_ref.as_ref().and_then(|r| r.rev()),
             )
         } else {
             // Fresh clone (GIT-02)
@@ -855,9 +855,9 @@ fn resolve_git_directories(
             git::clone_repo(
                 &url,
                 &cache_dir,
-                dir_config.branch.as_deref(),
-                dir_config.tag.as_deref(),
-                dir_config.rev.as_deref(),
+                dir_config.git_ref.as_ref().and_then(|r| r.branch()),
+                dir_config.git_ref.as_ref().and_then(|r| r.tag()),
+                dir_config.git_ref.as_ref().and_then(|r| r.rev()),
             )
         };
 

@@ -164,9 +164,7 @@ mod tests {
             path,
             directory_type: DirectoryType::Directory,
             role: None,
-            branch: None,
-            tag: None,
-            rev: None,
+            git_ref: None,
 
             subdir: None,
             override_applied: false,

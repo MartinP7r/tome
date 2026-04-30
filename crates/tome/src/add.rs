@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Result, bail};
 use console::style;
 
-use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryType};
+use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryType, GitRef};
 
 /// Expand a bare `owner/repo` slug to a full GitHub HTTPS URL.
 ///
@@ -128,13 +128,27 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
         bail!("directory '{}' already exists in config", dir_name_str);
     }
 
+    // CLI clap config enforces mutual exclusion of branch/tag/rev via
+    // `conflicts_with_all`, so at most one of these is `Some`.
+    let git_ref = match (
+        opts.branch.map(String::from),
+        opts.tag.map(String::from),
+        opts.rev.map(String::from),
+    ) {
+        (Some(b), None, None) => Some(GitRef::Branch(b)),
+        (None, Some(t), None) => Some(GitRef::Tag(t)),
+        (None, None, Some(r)) => Some(GitRef::Rev(r)),
+        (None, None, None) => None,
+        // Unreachable in practice because clap enforces mutual exclusion;
+        // bail with a recoverable error rather than panicking if a future
+        // refactor removes that constraint.
+        _ => bail!("internal: --branch, --tag, --rev are mutually exclusive"),
+    };
     let dir_config = DirectoryConfig {
         path: PathBuf::from(&resolved_url),
         directory_type: DirectoryType::Git,
         role: None,
-        branch: opts.branch.map(String::from),
-        tag: opts.tag.map(String::from),
-        rev: opts.rev.map(String::from),
+        git_ref,
         subdir: None,
         override_applied: false,
     };

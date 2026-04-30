@@ -737,9 +737,7 @@ mod tests {
                 path: target_dir.clone(),
                 directory_type: DirectoryType::Directory,
                 role: Some(DirectoryRole::Target),
-                branch: None,
-                tag: None,
-                rev: None,
+                git_ref: None,
 
                 subdir: None,
                 override_applied: false,
