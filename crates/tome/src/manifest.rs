@@ -140,13 +140,22 @@ pub fn save(manifest: &Manifest, tome_home: &Path) -> Result<()> {
     let content = serde_json::to_string_pretty(manifest).context("failed to serialize manifest")?;
     std::fs::write(&tmp_path, &content)
         .with_context(|| format!("failed to write temporary manifest {}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, &path).with_context(|| {
-        format!(
-            "failed to rename manifest {} -> {}",
-            tmp_path.display(),
-            path.display()
-        )
-    })
+    if let Err(e) = std::fs::rename(&tmp_path, &path) {
+        // Best-effort cleanup so a stale `.tome-manifest.tmp` doesn't
+        // accumulate after a failed save (e.g. read-only target). We
+        // ignore the cleanup result on purpose: the rename error is the
+        // real failure to surface; masking it with a cleanup error
+        // would hide the actual cause.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| {
+            format!(
+                "failed to rename manifest {} -> {}",
+                tmp_path.display(),
+                path.display()
+            )
+        });
+    }
+    Ok(())
 }
 
 /// Compute a deterministic SHA-256 hash of a directory's contents.
