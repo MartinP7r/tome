@@ -167,8 +167,15 @@ pub fn save(prefs: &MachinePrefs, path: &Path) -> Result<()> {
     let tmp_path = path.with_extension("toml.tmp");
     std::fs::write(&tmp_path, &content)
         .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("failed to rename to {}", path.display()))
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        // Best-effort cleanup so a stale `machine.toml.tmp` doesn't
+        // accumulate after a failed save. Ignore the cleanup result on
+        // purpose: the rename error is the real failure; masking it with
+        // a cleanup error would hide the actual cause.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| format!("failed to rename to {}", path.display()));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

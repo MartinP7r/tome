@@ -1,6 +1,6 @@
 # Coding Conventions
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-04-30 (v0.9.0)
 
 ## Naming Patterns
 
@@ -17,12 +17,12 @@
 **Variables:**
 - Lowercase snake_case: `tmp_dir`, `source_path`, `skill_name`
 - Single-letter loop variables acceptable in short contexts: `for (k, v) in...`
-- Collection variables use plural forms: `sources`, `targets`, `skills`, `directories`
+- Collection variables use plural forms: `skills`, `directories`, `failures`
 
 **Types:**
-- PascalCase for struct/enum names: `SkillName`, `TargetName`, `DiscoveredSkill`, `SkillOrigin`, `SyncReport`
+- PascalCase for struct/enum names: `SkillName`, `DirectoryName`, `DiscoveredSkill`, `SkillOrigin`, `SyncReport`
 - Newtype wrappers use transparent repr: `pub struct SkillName(String);`
-- Enums descriptive and specific: `SourceType::ClaudePlugins`, `SkillOrigin::Managed { provenance }`
+- Enums descriptive and specific: `DirectoryType::ClaudePlugins`, `DirectoryRole::Synced`, `SkillOrigin::Managed { provenance }`
 
 ## Code Style
 
@@ -207,7 +207,7 @@ pub struct SyncReport { ... }
 ## Type Safety
 
 **Newtype Pattern:**
-- Used for domain types to prevent mixing (e.g., `SkillName`, `TargetName`, `ContentHash`)
+- Used for domain types to prevent mixing (e.g., `SkillName`, `DirectoryName`, `ContentHash`)
 - Provides validation at construction time
 - Implements `AsRef<str>`, `Display`, `Borrow<str>` for ergonomics
 - Custom `Deserialize` impl validates on deserialization

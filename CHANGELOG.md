@@ -7,16 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-04-29
+
+The **v0.9 Cross-Machine Path Overrides** milestone. Adds a per-machine path-remapping layer in `machine.toml` so the same `tome.toml` can ship in dotfiles across machines with divergent on-disk layouts. Bundles a Phase-8 review-tail pass that hardens the v0.8 `tome browse` partial-failure UX and lifts a `StatusMessage` enum.
+
 ### Added
 
-- `tome add <owner>/<repo>` now expands a bare GitHub slug to `https://github.com/<owner>/<repo>` so users can paste an `org/repo` token directly from the address bar without ceremony. URLs (anything containing `://` or starting with `git@`) are left untouched, and the heuristic refuses paths with relative segments (`./foo`, `../bar`) or invalid characters (spaces, etc.) so a typo never confidently rewrites to the wrong clone target. Example: `tome add planetscale/database-skills` is now equivalent to `tome add https://github.com/planetscale/database-skills`.
+- `[directory_overrides.<name>]` section in `machine.toml` for per-machine path remapping. Each override entry can supply a `path` that replaces the value in `tome.toml`, allowing the same shared config to work across machines whose home layouts differ. Override application happens at config load (after tilde expansion, before `Config::validate`), so all downstream code sees the canonical post-override paths. Unknown override directory names emit a typo-target stderr warning instead of silently being ignored. Override-induced validation failures are wrapped with a distinct error attributing them to `machine.toml` rather than `tome.toml`. (PORT-01..04, [#458](https://github.com/MartinP7r/tome/issues/458))
+- `(override)` annotation in `tome status` and `tome doctor` text and JSON output for any directory whose path was rewritten by a `machine.toml` override, so the user can tell at a glance which paths come from the portable config and which come from the machine-local layer. (PORT-05)
+- TUI status-bar `Pending` state for in-progress actions: `Opening: <path>...` appears in `tome browse` before the `xdg-open`/`open` syscall returns, replacing the prior "no feedback" gap. Pre-block status messages drain pending TTY events to avoid stale keypresses interleaving with the `Success`/`Warning` outcome banner. (POLISH-01)
+- `ClipboardOccupied` errors in `tome browse copy path` now auto-retry once with a 100 ms backoff before surfacing the warning, so most transient X11/Wayland data-control collisions become invisible to the user. (POLISH-03)
+- Test additions: success-banner-absence assertion on `tome remove` partial-failure (TEST-01); end-to-end retry-after-fix coverage (TEST-02); `status_message_from_open_result` 3-arm unit tests (TEST-03); `regen_warnings` deferred-emit ordering (TEST-04).
+
+### Changed
+
+- `StatusMessage` redesigned as a `Success | Warning | Pending` enum with `body`, `glyph`, and `severity` accessors. Old code that built status text by string concatenation is gone; all callers funnel through the enum so glyph + colorization stay consistent. (POLISH-02, [#463](https://github.com/MartinP7r/tome/issues/463))
+- `FailureKind::ALL` is now compile-time-enforced via an exhaustive-match sentinel: adding a new `FailureKind` variant without updating `ALL` is a compile error. Eliminates the silent-drop class of bugs where a new failure kind would be omitted from the partial-failure summary. (POLISH-04)
+- `RemoveFailure::new` adds a `debug_assert!(path.is_absolute())` invariant. Catches the "relative path leaked into a removal failure record" class of bug in debug builds before it reaches the user-facing summary. (POLISH-05)
+- `arboard` is now patch-pinned to `>=3.6, <3.7` with an in-line bump-review policy (Cargo.toml). The match arms in `browse/app.rs::execute_action` and `try_clipboard_set_text_with_retry` must remain exhaustive — a new `arboard::Error` variant unobserved is a silent UX regression because the fall-through branch hides the semantic. The pin forces a manual review on minor bumps. (POLISH-06)
 
 ### Fixed
 
-- `tome remove` now aggregates partial-cleanup failures and exits non-zero with a distinct `⚠ N operations failed` summary grouped by failure kind (distribution symlinks, library entries, library symlinks, git cache). The success banner (`✓ Removed directory ...`) is suppressed entirely when failures occur, so it cannot hide a `⚠` warning that scrolled off-screen. On partial failure the directory's config entry AND its manifest entries are preserved so the user can re-run `tome remove <name>` after addressing the underlying cause (typically permission fixes) — previously the config was unconditionally dropped, leaving orphaned filesystem artifacts with no programmatic recovery path. Previously the command reported success while filesystem artifacts leaked. ([#413](https://github.com/MartinP7r/tome/issues/413))
-- `tome browse` actions `open` (ViewSource) and `copy path` (CopyPath) now work on Linux — `open` dispatches to `xdg-open` and `copy path` uses the `arboard` crate with both X11 and Wayland (`wayland-data-control`) backends enabled. `open` now uses `.status()` instead of `.spawn()` so a non-zero exit from `xdg-open` (no MIME handler, no DISPLAY) surfaces as `⚠ xdg-open exited N for: <path>` instead of the previous silent `✓ Opened` lie. Clipboard failures surface targeted hints: `⚠ Clipboard unavailable (headless or unsupported session)` for `ClipboardNotSupported`, `⚠ Clipboard busy (another app is holding it); try again` for `ClipboardOccupied`. Both success (`✓`) and failure (`⚠`) outcomes appear in the TUI status bar in place of the keybind line until the next keypress, replacing the prior macOS-only silent-drop behavior. The `sh -c "echo -n ${path} | pbcopy"` invocation is removed (eliminates a command-injection vector). ([#414](https://github.com/MartinP7r/tome/issues/414))
-- Wizard summary table now aligns correctly in interactive terminals. Previously, the bold ANSI escape codes wrapping header cells (e.g. `\x1b[1mNAME\x1b[0m`) were counted as visible characters by `tabled 0.20`'s default width calculation, inflating header cell widths by 8 columns and misaligning the column dividers with the body rows. Enabled tabled's `ansi` feature so escape sequences are correctly excluded from width measurement.
 - `tome relocate` now emits a stderr warning (`warning: could not read symlink at <path>: <error>`) when a managed-skill symlink cannot be read, instead of silently recording the entry as having no provenance. Mirrors the eprintln-warning pattern shipped in PR #448. ([#449](https://github.com/MartinP7r/tome/issues/449))
+
+### Internal
+
+- Dead `SkillMoveEntry.source_path` field removed; `tome relocate` no longer carries the unused field through its move plan. (TEST-05)
+
+## [0.8.2] - 2026-04-27
+
+### Added
+
+- `tome add <owner>/<repo>` now expands a bare GitHub slug to `https://github.com/<owner>/<repo>` so users can paste an `org/repo` token directly from the address bar without ceremony. URLs (anything containing `://` or starting with `git@`) are left untouched, and the heuristic refuses paths with relative segments (`./foo`, `../bar`) or invalid characters (spaces, etc.) so a typo never confidently rewrites to the wrong clone target. Example: `tome add planetscale/database-skills` is now equivalent to `tome add https://github.com/planetscale/database-skills`. ([#471](https://github.com/MartinP7r/tome/pull/471))
+
+## [0.8.1] - 2026-04-26
+
+The **v0.8.1 hotfix** for the v0.8.0 release. Fixes a lockfile regen + save chain ordering issue surfaced immediately after the v0.8.0 cut. ([#468](https://github.com/MartinP7r/tome/pull/468))
+
+### Fixed
+
+- `tome sync` save-chain ordering: lockfile regeneration runs after manifest persist so a partial-failure mid-chain cannot leave the lockfile pointing at a manifest entry that was never written. Distinct error wording on lockfile-vs-manifest failures so the user can tell which step blew up. (HOTFIX-01/02/03)
+
+## [0.8.0] - 2026-04-26
+
+The **v0.8 Safety Refactors** milestone — partial-failure visibility, cross-platform `tome browse`, and surfaced warnings. Closes the longstanding gap where `tome remove` and `tome browse` actions could fail silently. ([#460](https://github.com/MartinP7r/tome/pull/460))
+
+### Fixed
+
+- `tome remove` now aggregates partial-cleanup failures and exits non-zero with a distinct `⚠ N operations failed` summary grouped by failure kind (distribution symlinks, library entries, library symlinks, git cache). The success banner (`✓ Removed directory ...`) is suppressed entirely when failures occur, so it cannot hide a `⚠` warning that scrolled off-screen. On partial failure the directory's config entry AND its manifest entries are preserved so the user can re-run `tome remove <name>` after addressing the underlying cause (typically permission fixes) — previously the config was unconditionally dropped, leaving orphaned filesystem artifacts with no programmatic recovery path. Previously the command reported success while filesystem artifacts leaked. (SAFE-01, [#413](https://github.com/MartinP7r/tome/issues/413))
+- `tome browse` actions `open` (ViewSource) and `copy path` (CopyPath) now work on Linux — `open` dispatches to `xdg-open` and `copy path` uses the `arboard` crate with both X11 and Wayland (`wayland-data-control`) backends enabled. `open` now uses `.status()` instead of `.spawn()` so a non-zero exit from `xdg-open` (no MIME handler, no DISPLAY) surfaces as `⚠ xdg-open exited N for: <path>` instead of the previous silent `✓ Opened` lie. Clipboard failures surface targeted hints: `⚠ Clipboard unavailable (headless or unsupported session)` for `ClipboardNotSupported`, `⚠ Clipboard busy (another app is holding it); try again` for `ClipboardOccupied`. Both success (`✓`) and failure (`⚠`) outcomes appear in the TUI status bar in place of the keybind line until the next keypress, replacing the prior macOS-only silent-drop behavior. The `sh -c "echo -n ${path} | pbcopy"` invocation is removed (eliminates a command-injection vector). (SAFE-02, [#414](https://github.com/MartinP7r/tome/issues/414))
+- Wizard summary table now aligns correctly in interactive terminals. Previously, the bold ANSI escape codes wrapping header cells (e.g. `\x1b[1mNAME\x1b[0m`) were counted as visible characters by `tabled 0.20`'s default width calculation, inflating header cell widths by 8 columns and misaligning the column dividers with the body rows. Enabled tabled's `ansi` feature so escape sequences are correctly excluded from width measurement.
 
 ## [0.7.0] - 2026-04-23
 

@@ -235,9 +235,16 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                     wizard::BrownfieldAction::Edit => match existing_config {
                         Ok(c) => Some(c.clone()),
-                        Err(_) => unreachable!(
-                            "brownfield_decision does not offer Edit for unparsable configs"
-                        ),
+                        Err(e) => {
+                            // The Edit action is only offered when the existing
+                            // config parses cleanly (see wizard::brownfield_decision).
+                            // Reaching this arm with Err means a refactor broke that
+                            // invariant; bail with a recoverable error so the user
+                            // gets an actionable message instead of a panic.
+                            anyhow::bail!(
+                                "internal: brownfield Edit reached with unparsable config: {e:#}"
+                            );
+                        }
                     },
                 }
             }
@@ -304,7 +311,14 @@ pub fn run(cli: Cli) -> Result<()> {
     let paths = TomePaths::new(tome_home, config.library_dir.clone())?;
 
     match cli.command {
-        Command::Init => unreachable!(),
+        Command::Init => {
+            // Init is dispatched ~150 lines above (see `if matches!(cli.command, Command::Init)`).
+            // Reaching this arm means a refactor broke that early-return contract;
+            // bail so the user sees an actionable error instead of a panic.
+            anyhow::bail!(
+                "internal: Command::Init reached the main dispatch but should have been handled by the early-return path"
+            );
+        }
         Command::Add {
             url,
             name,
@@ -641,7 +655,14 @@ pub fn run(cli: Cli) -> Result<()> {
             let new_config = Config::load(&config_path)?;
             relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
         }
-        Command::Version => unreachable!(),
+        Command::Version => {
+            // Version is dispatched ~500 lines above (see `if matches!(cli.command, Command::Version)`).
+            // Reaching this arm means a refactor broke that early-return contract;
+            // bail so the user sees an actionable error instead of a panic.
+            anyhow::bail!(
+                "internal: Command::Version reached the main dispatch but should have been handled by the early-return path"
+            );
+        }
         Command::Completions { shell, print } => {
             if print {
                 print_completions(shell);

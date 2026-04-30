@@ -22,7 +22,7 @@ pub(crate) struct RelocatePlan {
     pub old_library_dir: PathBuf,
     pub new_library_dir: PathBuf,
     pub skills: Vec<SkillMoveEntry>,
-    /// (target_name, symlink_count) for each target with symlinks pointing into the library.
+    /// (directory_name, symlink_count) for each distribution directory with symlinks pointing into the library.
     pub targets: Vec<(DirectoryName, usize)>,
     pub cross_filesystem: bool,
     pub config_path: PathBuf,
@@ -105,9 +105,27 @@ pub(crate) fn plan(
         });
     }
 
-    // Count target symlinks that point into the old library
-    let canonical_old_for_targets =
-        std::fs::canonicalize(&old_library_dir).unwrap_or(old_library_dir.clone());
+    // Count target symlinks that point into the old library.
+    //
+    // We canonicalize the old library path because on macOS distribution
+    // symlinks may resolve through `/var → /private/var`. If canonicalize
+    // fails we fall back to the non-canonical path AND warn — silent
+    // fallback would undercount target symlinks, leaving the relocate plan
+    // claiming "0 symlinks to recreate" while `execute()` leaves dangling
+    // links in target tools. See review note C2.
+    let canonical_old_for_targets = match std::fs::canonicalize(&old_library_dir) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!(
+                "warning: could not canonicalize old library path {} ({}); \
+                 distribution symlink count may be inaccurate on filesystems \
+                 with symlinked roots (e.g. macOS /var → /private/var)",
+                old_library_dir.display(),
+                e
+            );
+            old_library_dir.clone()
+        }
+    };
     let mut targets = Vec::new();
     for (dir_name, dir_config) in config.distribution_dirs() {
         let skills_dir = &dir_config.path;
@@ -355,11 +373,19 @@ fn move_cross_filesystem(plan: &RelocatePlan) -> Result<()> {
     // Copy
     copy_library(&plan.old_library_dir, &plan.new_library_dir)?;
 
-    // Verify content hashes for local skills
-    let manifest = manifest::load(
-        // tome_home is the parent of the config path
-        plan.config_path.parent().unwrap_or(Path::new("/")),
-    )?;
+    // Verify content hashes for local skills.
+    //
+    // The previous fallback `.unwrap_or(Path::new("/"))` would silently
+    // load the manifest from `/.tome-manifest.json` (a real path on the
+    // host) if the config path had no parent — a config-misuse bug
+    // would then read an unrelated file rather than failing fast.
+    let tome_home = plan.config_path.parent().with_context(|| {
+        format!(
+            "config path {} has no parent directory; cannot locate tome home for cross-filesystem manifest verification",
+            plan.config_path.display()
+        )
+    })?;
+    let manifest = manifest::load(tome_home)?;
 
     for entry in &plan.skills {
         if entry.is_managed {

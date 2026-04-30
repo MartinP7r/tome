@@ -115,7 +115,15 @@ pub fn symlink_points_to(link_path: &Path, expected_target: &Path) -> bool {
     };
 
     let resolved = std::fs::canonicalize(link_path).unwrap_or_else(|e| {
-        if link_path.exists() {
+        // We know the symlink itself exists (we just read_link()'d it
+        // successfully above). The previous gate `link_path.exists()`
+        // followed the symlink, which is false for broken symlinks —
+        // exactly the case we want to surface, so we'd silently swallow
+        // the error there. Use `symlink_metadata` (does NOT follow) so
+        // we warn for broken symlinks AND for permission errors, but not
+        // for the truly "link disappeared between read_link and canonicalize"
+        // race (which would also fail symlink_metadata).
+        if link_path.symlink_metadata().is_ok() {
             eprintln!(
                 "warning: could not canonicalize {}: {}",
                 link_path.display(),

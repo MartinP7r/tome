@@ -1,11 +1,11 @@
 # Codebase Structure
 
-**Analysis Date:** 2025-04-05
+**Analysis Date:** 2026-04-30 (v0.9.0)
 
 ## Directory Layout
 
 ```
-/Users/martin/code/opensource/tome/
+/Users/martin/dev/opensource/tome/
 ├── crates/                              # Workspace members
 │   └── tome/                            # Main crate (binary + library)
 │       ├── src/                         # Source code
@@ -124,7 +124,7 @@
 - `crates/tome/src/browse/fuzzy.rs`: nucleo-matcher fuzzy search
 
 **Utilities & Helpers:**
-- `crates/tome/src/config.rs`: TOML loading, TargetName, SkillName, tilde expansion
+- `crates/tome/src/config.rs`: TOML loading, `DirectoryName`, `DirectoryType`, `DirectoryRole`, `DirectoryConfig`, `Config::apply_machine_overrides`, tilde expansion
 - `crates/tome/src/paths.rs`: TomePaths bundling, symlink resolution
 - `crates/tome/src/machine.rs`: Per-machine preferences (machine.toml)
 - `crates/tome/src/validation.rs`: Shared validation (identifiers, content hashing)
@@ -163,8 +163,8 @@
 - Submodules: Namespace under parent (e.g., `browse/mod.rs`, `browse/app.rs`)
 
 **Types:**
-- Newtype wrappers: `SkillName(String)`, `TargetName(String)`, `ContentHash(String)`
-- Enums: `Command` (subcommands), `SourceType` (discovery strategy), `TargetMethod` (distribution method)
+- Newtype wrappers: `SkillName(String)`, `DirectoryName(String)`, `ContentHash(String)`, `TomePaths`
+- Enums: `Command` (subcommands), `DirectoryType` (`ClaudePlugins`/`Directory`/`Git`), `DirectoryRole` (`Managed`/`Synced`/`Source`/`Target`), `SkillOrigin` (`Managed { provenance }` / `Local`)
 - Structs: Descriptive names, e.g., `DiscoveredSkill`, `SkillEntry`, `ConsolidateResult`
 
 **Functions:**

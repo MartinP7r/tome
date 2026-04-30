@@ -422,9 +422,12 @@ pub(crate) fn run(
         println!("{} Config saved!", style("done").green());
 
         // Offer to git-init the tome home directory for backup tracking
-        let tome_home = config_path
-            .parent()
-            .expect("config path should have a parent");
+        let tome_home = config_path.parent().with_context(|| {
+            format!(
+                "config path {} has no parent directory; cannot locate tome home for backup git-init",
+                config_path.display()
+            )
+        })?;
         if !tome_home.join(".git").exists() {
             if no_input {
                 // Surface the skipped step so CI/script users aren't surprised
