@@ -1,5 +1,21 @@
 # Milestones
 
+## v0.9 Cross-Machine Config Portability & Polish (Shipped: 2026-04-29)
+
+**Phases completed:** 2 phases (9 + 10), 6 plans, ~26 tasks
+
+**Key accomplishments:**
+
+- **Cross-machine config portability** (#458) — `[directory_overrides.<name>]` schema in `machine.toml` lets a single `tome.toml` checked into dotfiles work across machines with different filesystem layouts. Override application happens at config load time (after tilde expansion, before `Config::validate`) so every downstream command (`sync`, `status`, `doctor`, `lockfile::generate`) operates on the merged result.
+- **Override surfacing** (#458) — Typo'd override target names produce a stderr `warning:` line without aborting load; override-induced validation failures surface a distinct error class naming `machine.toml` (not `tome.toml`); `tome status` and `tome doctor` mark overridden directories with `(override)` in text output and `override_applied: bool` in JSON.
+- **Bare-slug `tome add` expansion** (PR #471, included in v0.9.0) — `tome add planetscale/database-skills` now expands to `https://github.com/planetscale/database-skills` so users can paste org/repo tokens directly without ceremony.
+- **TUI polish** (#463 D1-D3) — `tome browse open` paints "Opening: <path>..." before blocking on `xdg-open`/`open` via closure-callback redraw threading; `StatusMessage` redesigned as `Success | Warning | Pending` enum with `body()`/`glyph()`/`severity()` accessors and `pub(super)` visibility; `ClipboardOccupied` auto-retries once with 100ms backoff before surfacing a warning.
+- **Type-design polish** (#463 D4-D6) — `FailureKind::ALL` compile-enforced via exhaustive-match sentinel + `const _: () = { assert!(...len() == 4); };`; `RemoveFailure::new` gains `debug_assert!(path.is_absolute(), ...)` invariant; `arboard` pinned to `>=3.6, <3.7` with bump-review-on-bump comment in `Cargo.toml`; dead `SkillMoveEntry.source_path` field removed from `relocate.rs`.
+- **Test coverage closing the v0.8 review tail** (#462 P1-P5) — `status_message_from_open_result` helper extracted from ViewSource match with all three arms (Ok+success, Ok+non-zero exit, Err) unit-tested via synthetic `ExitStatus`; `regen_warnings` deferred until after the success banner with source-byte regression test anchored to `Command::Remove` region; partial-failure success-banner-absence assertion + retry-after-fix end-to-end test pinning the I2/I3 retention contract.
+- **Test footprint:** 526 unit + 136 integration = 662 total tests at v0.9.0 (was 514 + 130 = 644 at v0.8.1; +18 new tests from v0.9 phases plus +4 `tome add` slug tests bundled in).
+
+---
+
 ## v0.8 Wizard UX & Safety Hardening (Shipped: 2026-04-27)
 
 **Phases completed:** 2 phases, 7 plans, 26 tasks

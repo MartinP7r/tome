@@ -78,16 +78,66 @@
 - Phase 8.1 wall time: ~16 min for 3 sequential waves + verification (vs ~30 min projected for 3 plans)
 - Integration test revert-and-rerun sanity checks added ~3 min per plan but caught 0 false-positives this milestone — still worth it as a discipline
 
+## Milestone: v0.9 — Cross-Machine Config Portability & Polish
+
+**Shipped:** 2026-04-29 (v0.9.0)
+**Phases:** 2 (9 + 10) | **Plans:** 6 | **Tasks:** ~26
+
+### What Was Built
+
+- **Cross-machine portability** (#458) — `[directory_overrides.<name>]` schema in `machine.toml`, `Config::apply_machine_overrides` between `expand_tildes()` and `validate()`, threaded through Sync/Status/Doctor/Init via `Config::load_with_overrides`. Typo guard (stderr `warning:`), distinct `machine.toml` error class for override-induced validation failures, `(override)` annotation in `tome status`/`tome doctor` text + `override_applied: true` in JSON.
+- **TUI polish** (#463 D1-D3) — `StatusMessage` collapsed to `Success | Warning | Pending` enum with `body()`/`glyph()`/`severity()` accessors and `pub(super)` visibility; UI formats `"{glyph} {body}"` at render time. "Opening: <path>..." renders before `xdg-open`/`open` blocks via closure-callback redraw threading from `run_loop` → `handle_key` → `handle_view_source`. `ClipboardOccupied` auto-retries once with 100ms backoff.
+- **Type-design polish** (#463 D4-D6) — `FailureKind::ALL` compile-enforced via exhaustive-match sentinel + const-len assert; `RemoveFailure::new` `debug_assert!(path.is_absolute())`; `arboard` patch-pinned with bump-review comment; dead `SkillMoveEntry.source_path` field removed.
+- **Test coverage** (#462 P1-P5) — `status_message_from_open_result` 3-arm tests via synthetic `ExitStatus`; banner-absence assertion; retry-after-fix end-to-end pinning the I2/I3 retention contract; `regen_warnings` deferred until after success banner with source-byte regression test anchored to `Command::Remove` region.
+- **Bonus:** Bare-slug `tome add planetscale/database-skills` expansion (PR #471, bundled in v0.9.0).
+
+### What Worked
+
+- **Forward-planning v1.0 in parallel.** While v0.9 phases were executing, the v1.0 Tauri GUI artifacts (`milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`) were drafted independently. Reference made it from forward-plan to "ready-to-ratify" status by the time v0.9 closed. Saves a future planning session's fresh-start cost.
+- **Wave 1 parallel execution in Phase 10.** Three plans, three modules, zero file overlap, ~32 min wall time vs ~80 min sequential. The planner's deliberate file-disjointness during plan boundary decisions (browse vs remove + lib + tests/cli.rs vs Cargo.toml + relocate) is what made true-parallel safe.
+- **Plan-checker iteration 2 catches.** Twice this milestone the plan-checker caught issues the planner missed — Phase 9's `DirectoryConfig` struct-literal cascade (~38 sites compile-fail without explicit guidance) and Phase 10's `SkillMoveEntry.source_path` test assertions (3 tests compile-fail when the field is removed). Both would have surfaced as executor surprises mid-task; iter-2 review was the right place to catch them.
+- **Memory-driven discipline pays off.** Three direct-to-main / stacked-PR / empty-squash incidents during Phase 9 setup — all caught either by the permission system or by the now-canonical pre-commit `git status -sb` check. Zero such incidents in Phase 10 setup or execution. The discipline is paying its way.
+
+### What Was Inefficient
+
+- **Phase 9 setup chain (3 PRs deep before plans landed on main).** `b8d7ac8` direct-to-main → #474 revert → #475 stacked-PR misroute → #476 empty squash → #477 clean cherry-pick. Five PRs to land what should have been one. Each recovery was correct *for the bug it knew about*, but each had a fresh GitHub-sequencing footgun the previous one didn't anticipate. The cumulative memory entry now has 3 layers of process-bug coverage; future sessions should skip the chain entirely.
+- **`gsd-tools milestone complete` produced bogus stats.** Counted "11 phases / 36 plans / 78 tasks" (cumulative across the project's entire history, not v0.9-specific) and listed accomplishments from every prior phase including `RED:` as a literal line extracted from a TDD-style summary header. Required manual MILESTONES.md rewrite. Worth filing upstream.
+- **v0.9-ROADMAP.md archive captured pre-collapse snapshot** (same v0.7/v0.8 issue) — needed manual patch to flip 🚧 → ✅ and update active-section header. Pattern is consistent across milestones; could be fixed by ordering: collapse current ROADMAP first, *then* let `milestone complete` archive it.
+
+### Patterns Established
+
+- **Forward-plan adjacent milestones during current execution.** `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` was drafted while v0.9 was still in flight. When v0.9 closed, the next milestone wasn't a blank slate. Worth carrying as a discipline: "if a future milestone has obvious shape, draft it speculatively while waiting on the current one's verification cycles."
+- **Plan-check "removal" work is high-leverage.** Removing a struct field reverberates beyond the constructor sites — any code that READS the field also breaks. Plan-checker-iter-2 caught this twice (Phase 9 struct-literal cascade, Phase 10 source_path assertions). Could be turned into a planner heuristic: "when removing a struct field, grep for ALL references (constructions AND reads/asserts) and enumerate them in the plan."
+- **Parallel-wave plan partitioning.** When a phase has ≥3 plans, optimize the file-disjointness of the partition, not just the logical grouping. Phase 10 Wave 1 nailed this — three plans across three modules with zero overlap, true-parallel safe.
+
+### Key Lessons
+
+1. **Verify the actual file landed, not just the merge.** PR #476 squash-merged successfully but produced an empty commit (`d22b3d8`) — the UI showed the right diff, the merge succeeded, but the destination tree was unchanged. After ANY recovery PR, `git ls-tree HEAD <expected_path>` is the only honest check. Added to memory.
+2. **Branch-discipline doesn't just save direct-to-main commits — it saves planning-doc inconsistency too.** All v0.9 setup-chain incidents started with the same root cause: a subagent's `git checkout main` invisible to the orchestrator. The pre-commit `git status -sb` check is now the single most-load-bearing discipline this project has.
+3. **Three milestone-closure runs deep, the workflow's `gsd-tools milestone complete` still produces wrong stats.** Don't trust the auto-generated MILESTONES.md entry — always rewrite it manually with milestone-scoped accomplishments + correct phase/plan/task counts.
+
+### Cost Observations
+
+- Model mix: orchestrator + planner on Opus, executors on Opus, verifier + plan-checker on Sonnet — typical balanced profile
+- v0.9 wall time: ~3 days (Phase 9 over 1 day + Phase 10 in <1 day + setup-chain overhead)
+- Phase 10 was the smoothest execution this entire milestone — proves the discipline accumulated through Phases 7/8/8.1/9 pays off when nothing breaks the chain
+
 ## Cross-Milestone Trends
 
-| Metric | v0.6 | v0.8 |
-|--------|------|------|
-| Phases | 3 | 3 (7, 8, 8.1) |
-| Plans | 11 | 10 |
-| Tasks | ~19 | ~26 |
-| Timeline | 2 days | ~5 days incl. hotfix |
-| Known gaps | 5 (WIZ-01–05) | 2 (Linux UAT carry-over) |
-| Critical bugs found in review | 3 | 3 (#461 H1/H2/H3) |
-| Hotfix release | — | v0.8.1 (3 fixes) |
+| Metric | v0.6 | v0.8 | v0.9 |
+|--------|------|------|------|
+| Phases | 3 | 3 (7, 8, 8.1) | 2 (9, 10) |
+| Plans | 11 | 10 | 6 |
+| Tasks | ~19 | ~26 | ~26 |
+| Timeline | 2 days | ~5 days incl. hotfix | ~3 days |
+| Known gaps | 5 (WIZ-01–05) | 2 (Linux UAT carry-over) | 2 (Linux UAT carry-over still) |
+| Critical bugs found in review | 3 | 3 (#461 H1/H2/H3) | 0 |
+| Hotfix release | — | v0.8.1 (3 fixes) | — |
+| Plan-checker iter-2 catches | n/a | n/a | 2 (struct-literal cascade, source_path assertions) |
+| Process incidents (direct-to-main / stacked-PR / empty-squash) | 0 | 0 | 3 (Phase 9 setup chain) |
 
-**Recurring pattern:** Post-merge review consistently catches issues that phase verification misses — both as a quality gate. v0.6 had a 3-issue PR review; v0.8 had a 3-issue post-merge re-review. Worth formalizing as a phase exit criterion.
+**Recurring pattern:** Post-merge review consistently catches issues that phase verification misses — both as a quality gate. v0.6 had a 3-issue PR review; v0.8 had a 3-issue post-merge re-review. v0.9 had ZERO post-merge findings — possibly because the v0.8 review tail (#462 + #463) was cleared in-milestone via Phase 10, depriving the next post-merge review of low-hanging items.
+
+**New pattern:** Plan-checker iteration 2 ("removal-work miss" — fields removed without enumerating consumers) is now a recurring catch. Worth turning into a planner-skill heuristic.
+
+**Discipline trend:** Process incidents went 0 → 0 → 3 → 0 (across v0.6, v0.7 unrecorded, v0.8, v0.9). The v0.9 spike was concentrated in Phase 9 setup; Phase 10 had zero. The branch-discipline memory entry is now load-bearing — every future session inherits it.
