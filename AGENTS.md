@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI agents 
 
 ## Current State
 
-**v0.6.0 (unreleased)** — Unified Directory Model milestone complete. Config uses `[directories.*]` BTreeMap replacing separate `[[sources]]` + `[targets.*]`. Git-backed skill repos with shallow clone, ref pinning, SHA in lockfile. Per-directory skill filtering (`enabled`/`disabled` in `machine.toml`). CLI commands: `tome add`, `tome remove`, `tome reassign`, `tome fork`. Browse TUI: adaptive theming, fuzzy match highlighting, scrollbar, markdown preview, help overlay. Known gap: wizard rewrite (WIZ-01–05) deferred.
+**v0.9.0 (shipped 2026-04-29)** — between milestones; v1.0 (Tauri GUI) drafted in `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`, awaiting `/gsd:new-milestone` to ratify.
+
+Cumulative through v0.9:
+- **v0.6 — Unified Directory Model**: `[directories.*]` BTreeMap replacing `[[sources]]` + `[targets.*]`; git-backed skill repos with shallow clone + ref pinning + SHA in lockfile; per-directory skill filtering (`enabled`/`disabled` in `machine.toml`); CLI commands `tome add`, `tome remove`, `tome reassign`, `tome fork`; browse TUI polish (theming, fuzzy highlighting, scrollbar, markdown preview, help overlay).
+- **v0.7 — Wizard Hardening**: WIZ-01–05 formally validated and unit-tested (registry invariants, `find_known_directories_in` coverage, circular-path detection); legacy pre-v0.6 config detection (WUX-03).
+- **v0.8 — Cross-Platform Polish**: partial-failure visibility in `tome browse`; cross-platform clipboard via arboard; xdg-open integration; HOTFIX-01/02/03 (lockfile regen + save chain ordering).
+- **v0.9 — Cross-Machine Path Overrides**: `[directory_overrides.<name>]` schema in `machine.toml` (PORT-01..05); override-induced validation errors named `machine.toml`; `(override)` annotation in `tome status`/`tome doctor`; Phase-8 review tail (`StatusMessage` enum redesign, `RemoveFailure` invariants, `arboard` patch-pin policy, dead-code removal).
+
+Open carry-overs: 2 Linux-runtime UAT items (clipboard + xdg-open) pending Linux hardware; intermittent `backup::tests::push_and_pull_roundtrip` flake.
 
 ## Quick Reference
 
@@ -140,7 +148,7 @@ The main binary. All domain logic lives here as a library (`lib.rs` re-exports a
 4. **Cleanup** (`cleanup.rs`) — Remove stale entries from library (skills no longer in any source), broken symlinks from targets, and disabled skill symlinks from target directories. Interactive in TTY mode; auto-removes with warning otherwise.
 
 **Other modules:**
-- `wizard.rs` — Interactive `tome init` setup using `dialoguer`. Auto-discovers known directory locations. (Note: still uses legacy source/target model — wizard rewrite deferred.)
+- `wizard.rs` — Interactive `tome init` setup using `dialoguer`. Uses the merged `KNOWN_DIRECTORIES` registry (WIZ-01, hardened in v0.7). Auto-discovers known directory locations and detects legacy pre-v0.6 configs.
 - `config.rs` — TOML config at `~/.tome/tome.toml`. `Config::load_or_default` handles missing files gracefully. All path fields support `~` expansion. `DirectoryName`, `DirectoryType`, `DirectoryRole`, `DirectoryConfig` types.
 - `manifest.rs` — Library manifest (`.tome-manifest.json`): tracks provenance, content hashes, and sync timestamps for each skill. Provides `hash_directory()` for deterministic SHA-256 of directory contents.
 - `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks) and missing directory paths; interactive per-item repair for orphans.
@@ -214,9 +222,9 @@ This project uses **GitHub Issues** for backlog and roadmap intent, and **GSD** 
 <!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
-**tome v0.6 — Unified Directory Model**
+**tome v0.9 — Cross-Machine Path Overrides (shipped); v1.0 — Desktop GUI (drafted)**
 
-tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. v0.6 shipped the unified directory model where each configured directory declares its type and role.
+tome is a CLI tool that manages AI coding agent skills across multiple tools (Claude Code, Codex, Antigravity, Cursor, etc.). It discovers skills from configured directories, consolidates them into a central library, and distributes them to target tools via symlinks. The unified directory model (v0.6) is the foundation; subsequent milestones hardened the wizard (v0.7), polished cross-platform UX (v0.8), and added per-machine path overrides for portability (v0.9). v1.0 will add a Tauri desktop GUI on top of the existing CLI library.
 
 **Core Value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. One config, one library, every tool.
 

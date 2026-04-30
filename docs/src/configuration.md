@@ -1,70 +1,117 @@
 # Configuration
 
-## Main Config
+tome reads two TOML files:
 
-TOML at `~/.tome/tome.toml`:
+- `~/.tome/tome.toml` — the **portable** config (intended to be shared via dotfiles across machines).
+- `~/.config/tome/machine.toml` — **machine-local** preferences and path overrides (do *not* share this).
+
+The split is intentional: the portable config describes the abstract topology (which directories tome cares about, what role each plays), while `machine.toml` describes how that topology maps onto *this* machine's filesystem.
+
+## `tome.toml` — Portable Config
 
 ```toml
 library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
-[[sources]]
-name = "claude-plugins"
+[directories.claude-plugins]
 path = "~/.claude/plugins/cache"
 type = "claude-plugins"
 
-[[sources]]
-name = "standalone"
+[directories.local-skills]
 path = "~/.claude/skills"
 type = "directory"
+role = "synced"
 
-[targets.antigravity]
-enabled = true
-method = "symlink"
-skills_dir = "~/.gemini/antigravity/skills"
+[directories.team-skills]
+path = "https://github.com/myorg/team-skills"
+type = "git"
+branch = "main"
+
+[directories.antigravity]
+path = "~/.gemini/antigravity/skills"
+type = "directory"
+role = "target"
 ```
 
-### Fields
+> **Migrating from v0.5 or earlier?** The `[[sources]]` and `[targets.*]` sections were replaced with a single `[directories.<name>]` map in v0.6. tome will refuse to load old-format configs and print a migration hint. There is no automated migration tool — copy each `[[sources]]` entry to a `[directories.<name>]` entry with `role = "source"` (or `"managed"` for `claude-plugins`), and each `[targets.<name>]` entry to a `[directories.<name>]` entry with `role = "target"`.
+
+### Top-level fields
 
 | Field | Description |
 |-------|-------------|
 | `library_dir` | Path to the consolidated skill library. Supports `~` expansion. |
 | `exclude` | List of skill names to skip during discovery. |
 
-### Source Types
+### `[directories.<name>]` — entries
+
+A `<name>` is a kebab-case identifier. Each entry combines a `type` (how skills are discovered) with a `role` (whether it's a source, a target, or both).
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `path` | Yes | Filesystem path (or git URL when `type = "git"`). Tilde-expanded. |
+| `type` | No (defaults to `"directory"`) | One of `claude-plugins`, `directory`, `git`. |
+| `role` | No (each `type` has a default) | One of `managed`, `synced`, `source`, `target`. |
+| `branch` / `tag` / `rev` | No (`git` only, mutually exclusive) | Pin a git directory to a branch, tag, or commit SHA. |
+| `subdir` | No (`git` only) | If the repo nests skills under a subdirectory. |
+
+### Directory `type`
 
 | Type | Description |
 |------|-------------|
-| `claude-plugins` | Reads `installed_plugins.json` from the Claude Code plugin cache. Supports v1 (flat array) and v2 (namespaced object) formats. |
-| `directory` | Flat scan for `*/SKILL.md` directories. |
+| `claude-plugins` | Reads `installed_plugins.json` from the Claude Code plugin cache. Supports v1 (flat array) and v2 (namespaced object) formats. Always `role = "managed"`. |
+| `directory` | Flat scan for `*/SKILL.md` directories. Default. |
+| `git` | Shallow-clones a remote repo into `~/.tome/repos/<sha256>/` and treats the clone as a `directory` source. Always `role = "source"`. |
 
-### Target Methods
+### Directory `role`
 
-| Method | Fields | Description |
-|--------|--------|-------------|
-| `symlink` | `skills_dir` | Creates symlinks in the target's skills directory pointing into the library. |
+| Role | Discovery | Distribution | Typical use |
+|------|-----------|--------------|-------------|
+| `managed` | ✓ (read-only) | — | Plugin cache (e.g. Claude Code) |
+| `synced` | ✓ | ✓ | A directory that is both a skill source AND a tool that consumes them (e.g. `~/.claude/skills`) |
+| `source` | ✓ | — | A skill repo or local skill directory |
+| `target` | — | ✓ | A tool that only receives skills (e.g. Codex, Antigravity) |
 
-Targets are data-driven — any tool can be added without code changes. The `tome init` wizard auto-discovers common tool locations via a built-in `KnownTarget` registry.
+`tome init` picks a sensible default role from the type, but you can override it per directory.
 
-## Machine Preferences
+The directory model is fully data-driven: any new tool can be supported by adding a `[directories.<name>]` entry — no code changes required. The `tome init` wizard auto-discovers common tool locations via the built-in `KNOWN_DIRECTORIES` registry.
 
-Per-machine opt-in/opt-out at `~/.config/tome/machine.toml` (intentionally kept separate from `~/.tome/` — machine-specific preferences should not be in the portable tome home directory):
+## `machine.toml` — Machine-Local Preferences
 
 ```toml
+# Skip these skills entirely on this machine
 disabled = ["noisy-skill", "work-only-skill"]
-disabled_targets = ["openclaw"]
+
+# Don't distribute to these directories on this machine
+disabled_directories = ["openclaw"]
+
+# Per-directory skill filtering (mutually exclusive: pick disabled OR enabled per directory)
+[directory.antigravity]
+disabled = ["claude-only-skill"]
+
+[directory.work-laptop]
+enabled = ["work-skill-a", "work-skill-b"]  # allowlist — ONLY these are distributed
+
+# Per-machine path overrides for `tome.toml::directories.<name>.path` (PORT-01..05, v0.9)
+[directory_overrides.local-skills]
+path = "/Users/alice-corp/.claude/skills"
+
+[directory_overrides.team-skills]
+path = "/opt/shared/team-skills"
 ```
 
 | Field | Description |
 |-------|-------------|
-| `disabled` | List of skill names to skip during distribution (no symlinks created in targets). |
-| `disabled_targets` | List of target names to skip entirely on this machine. |
+| `disabled` | List of skill names to skip during distribution (no symlinks created in any target). |
+| `disabled_directories` | List of directory names to skip entirely on this machine. |
+| `[directory.<name>].disabled` | Skills to exclude from a single directory (blocklist). |
+| `[directory.<name>].enabled` | Allowlist — ONLY these skills are distributed to this directory. Mutually exclusive with `disabled` per directory (MACH-04). |
+| `[directory_overrides.<name>].path` | Replaces `directories.<name>.path` on this machine. Useful when the same `tome.toml` is shared across machines with different home layouts. Unknown override names emit a typo-target stderr warning. |
 
-Disabled skills remain in the library but are skipped during distribution.
+Override application happens at config load (after tilde expansion, before `Config::validate`), so all downstream code sees the canonical post-override paths. Any validation failure caused by an override is wrapped with an error attributing the problem to `machine.toml` rather than the portable `tome.toml`.
 
-This allows sharing a single library (e.g., via git) across machines while customizing which skills are active on each one.
+`tome status` and `tome doctor` annotate `(override)` next to any path that came from `machine.toml`, so you can tell at a glance which paths are portable and which are machine-local.
 
-`tome sync` automatically diffs the lockfile and offers interactive triage when new or changed skills are detected. The `--machine <path>` global flag overrides the default machine preferences path.
+The `--machine <path>` global flag overrides the default machine preferences path.
 
 ## Lockfile
 

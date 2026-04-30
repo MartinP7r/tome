@@ -2,16 +2,20 @@
 
 | Command | Description |
 |---------|-------------|
-| `tome init` | Interactive wizard to configure sources and targets |
+| `tome init` | Interactive wizard to configure directories |
 | `tome sync` | Discover, consolidate, triage changes, and distribute skills |
-| `tome status` | Show library, sources, targets, and health summary |
-| `tome list` (alias: `ls`) | List all discovered skills with sources (supports `--json`) |
+| `tome add <url\|slug>` | Register a git skill repository in `tome.toml` |
+| `tome remove <name>` | Remove a directory entry and clean up its artifacts |
+| `tome reassign <skill> <directory>` | Reassign a skill to a different directory |
+| `tome fork <skill> <local-directory>` | Fork a managed skill to a local directory for customization |
+| `tome status` | Show library, directories, and health summary |
+| `tome list` (alias: `ls`) | List all discovered skills with their directories (supports `--json`) |
 | `tome browse` | Interactively browse discovered skills with fuzzy search |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues |
 | `tome lint` | Validate skill frontmatter and report issues |
 | `tome config` | Show current configuration |
 | `tome backup` | Git-backed backup and restore for the skill library |
-| `tome eject` | Remove tome's symlinks from all targets (reversible via `tome sync`) |
+| `tome eject` | Remove tome's symlinks from all distribution directories (reversible via `tome sync`) |
 | `tome relocate <path>` | Move the skill library to a new location |
 | `tome completions <shell>` | Install shell completions (bash, zsh, fish, powershell) |
 | `tome version` | Print version information |
@@ -32,12 +36,47 @@
 
 ### `tome sync`
 
-Runs the full pipeline: discover skills from sources, consolidate into the library, diff the lockfile to surface changes, distribute to targets, and clean up stale entries. When new or changed skills are detected, an interactive triage prompt lets you disable unwanted skills. Generates a `tome.lock` lockfile for reproducible snapshots.
+Runs the full pipeline: discover skills from configured directories, consolidate into the library, diff the lockfile to surface changes, distribute to targets, and clean up stale entries. When new or changed skills are detected, an interactive triage prompt lets you disable unwanted skills. Generates a `tome.lock` lockfile for reproducible snapshots.
 
 | Flag | Short | Description |
 |------|-------|-------------|
 | `--force` | `-f` | Recreate all symlinks even if they appear up-to-date |
 | `--no-triage` | | Skip interactive triage of new/changed skills (for CI/scripts) |
+
+### `tome add`
+
+Register a git skill repository in `tome.toml`. Accepts either a full git URL (`https://github.com/owner/repo`, `git@github.com:owner/repo.git`) or a bare GitHub slug (`owner/repo`), which is expanded to `https://github.com/owner/repo` (v0.8.2+). The clone is shallow and lives in `~/.tome/repos/<sha256>/`.
+
+| Flag | Description |
+|------|-------------|
+| `URL` | Git repository URL or `owner/repo` slug |
+| `--name <name>` | Custom directory name (default: extracted from URL) |
+| `--branch <branch>` | Track a specific branch |
+| `--tag <tag>` | Pin to a specific tag |
+| `--rev <sha>` | Pin to a specific commit SHA |
+
+`--branch`, `--tag`, `--rev` are mutually exclusive.
+
+### `tome remove`
+
+Remove a directory entry and clean up all its artifacts: distribution symlinks, library entries, library symlinks, and (for git directories) the cached clone. Aggregates partial-cleanup failures and exits non-zero with a `⚠ N operations failed` summary if any cleanup step fails (the directory's config entry and manifest entries are preserved on partial failure so the command can be re-run after fixing the underlying cause).
+
+| Flag | Description |
+|------|-------------|
+| `NAME` | Directory name to remove (as shown in `tome status`) |
+| `--yes` | Skip confirmation prompt |
+
+### `tome reassign`
+
+Reassign a skill to a different directory — useful when the same skill appears under multiple sources and you want to pin which directory owns it.
+
+### `tome fork`
+
+Fork a managed (read-only) skill into a local directory so it can be edited. The local copy supersedes the managed one in the library.
+
+| Flag | Description |
+|------|-------------|
+| `--yes` | Skip confirmation prompt |
 
 ### `tome list`
 
@@ -78,11 +117,11 @@ Git-backed backup and restore. Subcommands:
 
 ### `tome eject`
 
-Removes all of tome's symlinks from target tool directories. Reversible — run `tome sync` to recreate them.
+Removes all of tome's symlinks from distribution directories. Reversible — run `tome sync` to recreate them.
 
 ### `tome relocate`
 
-Moves the skill library to a new path, updating symlinks in all targets.
+Moves the skill library to a new path, updating symlinks in all distribution directories. Detects cross-filesystem moves and warns when target symlinks need to be re-anchored.
 
 ### `tome completions`
 

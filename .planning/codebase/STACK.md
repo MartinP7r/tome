@@ -1,6 +1,6 @@
 # Technology Stack
 
-**Analysis Date:** 2026-04-05
+**Analysis Date:** 2026-04-30 (v0.9.0)
 
 ## Languages
 
@@ -27,6 +27,7 @@
 - `ratatui` 0.30 - Terminal UI framework (TUI) for `tome browse` command
 - `crossterm` 0.29 - Terminal event handling and cursor control
 - `nucleo-matcher` 0.3 - Fuzzy matching for interactive search in browse view
+- `arboard` `>=3.6, <3.7` patch-pinned - Cross-platform clipboard for `tome browse` copy-path action (X11 + Wayland data-control); pinned with bump-review policy in workspace `Cargo.toml` (POLISH-06)
 
 **Data & Configuration:**
 - `serde` 1 with derive - Serialization/deserialization framework

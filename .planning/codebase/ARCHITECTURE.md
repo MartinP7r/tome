@@ -1,18 +1,20 @@
 # Architecture
 
-**Analysis Date:** 2025-04-05
+**Analysis Date:** 2026-04-30 (v0.9.0)
 
 ## Pattern Overview
 
-**Overall:** Two-tier source → library → target pipeline
+**Overall:** Two-tier discovery → library → distribution pipeline. Each configured directory declares a `type` and a `role` (`managed`/`synced`/`source`/`target`); the pipeline asks each directory's role what to do with it.
 
 **Key Characteristics:**
 - Unix-only symlink-based distribution (uses `std::os::unix::fs::symlink`)
 - Idempotent consolidation with SHA-256 content hashing
 - Managed vs. local dual consolidation strategies
-- Data-driven target configuration (BTreeMap-based)
+- Data-driven directory configuration (BTreeMap-based, role-driven)
+- Per-machine path overrides via `[directory_overrides.<name>]` in `machine.toml` (PORT-01..05, v0.9)
 - Dry-run threading throughout all operations
 - Atomic file writes with temp+rename pattern
+- Plan / render / execute pattern for `add`, `remove`, `reassign`, `relocate`, `eject`
 
 ## Layers
 
@@ -26,7 +28,7 @@
 **Configuration Layer:**
 - Purpose: Load, validate, and manage TOML config files
 - Location: `crates/tome/src/config.rs`, `crates/tome/src/paths.rs`, `crates/tome/src/machine.rs`
-- Contains: `Config` (sources/targets), `TargetName`, `SkillName`, `TomePaths` (path bundling), `MachinePrefs` (per-machine disable lists)
+- Contains: `Config` (`directories: BTreeMap<DirectoryName, DirectoryConfig>`), `DirectoryName`, `DirectoryType`, `DirectoryRole`, `SkillName`, `TomePaths` (path bundling), `MachinePrefs` (per-machine disable lists + `[directory_overrides.<name>]` path remapping)
 - Depends on: `serde`, file I/O, tilde expansion
 - Used by: All domain operations
 
@@ -75,7 +77,7 @@
 **Linting & Validation:**
 - Purpose: Validate SKILL.md frontmatter and directory structure
 - Location: `crates/tome/src/lint.rs`, `crates/tome/src/skill.rs`, `crates/tome/src/validation.rs`
-- Contains: Frontmatter parsing (YAML), content hashing, skill name/target name validation
+- Contains: Frontmatter parsing (YAML), content hashing, skill name / directory name validation (shared `validate_identifier`)
 - Depends on: `serde_yaml`, `sha2`, regex patterns
 - Used by: Lint command, consolidate (validation)
 
@@ -130,15 +132,25 @@
 - Examples: `crates/tome/src/discover.rs` (SkillName type)
 - Pattern: Newtype wrapper with `new()` constructor, lenient validation (rejects empty + path separators), strict convention checking (lowercase + digits + hyphens)
 
-**TargetName:**
-- Purpose: Validated, type-safe target identifier
-- Examples: `crates/tome/src/config.rs` (TargetName type)
-- Pattern: Same as SkillName; prevents accidental string parameter mixing
+**DirectoryName:**
+- Purpose: Validated, type-safe directory identifier
+- Examples: `crates/tome/src/config.rs` (DirectoryName type)
+- Pattern: Same as SkillName; prevents accidental string parameter mixing. Used as the key in `Config::directories`.
 
-**SourceType:**
-- Purpose: Enum-based source discovery strategy
-- Examples: `crates/tome/src/config.rs` (SourceType enum)
-- Pattern: Variants = ClaudePlugins (plugin-based), Directory (flat walkdir). Determines consolidation strategy.
+**DirectoryType:**
+- Purpose: Enum-based discovery strategy
+- Examples: `crates/tome/src/config.rs` (DirectoryType enum)
+- Pattern: Variants = `ClaudePlugins` (reads `installed_plugins.json`), `Directory` (flat walkdir), `Git` (shallow clone into `~/.tome/repos/<sha256>/` then walk). Determines consolidation strategy.
+
+**DirectoryRole:**
+- Purpose: Enum-based pipeline role
+- Examples: `crates/tome/src/config.rs` (DirectoryRole enum)
+- Pattern: Variants = `Managed` (read-only source), `Synced` (source AND target — same dir is both read AND written), `Source` (discovery only), `Target` (distribution only). `is_discovery()` / `is_distribution()` accessors.
+
+**DirectoryOverride:**
+- Purpose: Per-machine path remapping for a single `[directories.<name>]` entry
+- Examples: `crates/tome/src/machine.rs` (DirectoryOverride struct)
+- Pattern: Lives in `MachinePrefs::directory_overrides` (`BTreeMap<DirectoryName, DirectoryOverride>`). Currently only `path` is supported (PORT-01); applied at config load before validation.
 
 **TomePaths:**
 - Purpose: Bundle tome_home + library_dir + config_dir to prevent swaps
