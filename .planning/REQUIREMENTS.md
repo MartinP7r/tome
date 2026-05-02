@@ -119,24 +119,74 @@ Deferred to post-v0.10. Surface as candidates for v0.11 / v1.0 / v2.
 
 ## Traceability
 
-(Filled by `gsd-roadmapper` in Step 10 of new-milestone workflow.)
+Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–17), 100% coverage.
 
 | Requirement | Phase | GitHub Issue | Status |
 |-------------|-------|--------------|--------|
-| LIB-01..05 | TBD | #459 | Pending |
-| ADP-01..04 | TBD | — | Pending |
-| RECON-01..05 | TBD | — | Pending |
-| UNOWN-01..03 | TBD | — | Pending |
-| UX-01..02 | TBD | — | Pending |
-| HARD-01..22 | TBD | #485-503, #416, #430, #433, #447, #457 | Pending |
-| DOC-01..03 | TBD | — | Pending |
-| REL-01..05 | TBD | — | Pending |
+| LIB-01 | Phase 11 | #459 | Pending |
+| LIB-02 | Phase 11 | #459 | Pending |
+| LIB-03 | Phase 11 | #459 | Pending |
+| LIB-04 | Phase 11 | #459 | Pending |
+| LIB-05 | Phase 11 | #459 | Pending |
+| ADP-01 | Phase 12 | — | Pending |
+| ADP-02 | Phase 12 | — | Pending |
+| ADP-03 | Phase 12 | — | Pending |
+| ADP-04 | Phase 12 | — | Pending |
+| RECON-01 | Phase 13 | — | Pending |
+| RECON-02 | Phase 13 | — | Pending |
+| RECON-03 | Phase 13 | — | Pending |
+| RECON-04 | Phase 13 | — | Pending |
+| RECON-05 | Phase 13 | — | Pending |
+| UNOWN-01 | Phase 14 | — | Pending |
+| UNOWN-02 | Phase 14 | — | Pending |
+| UNOWN-03 | Phase 14 | — | Pending |
+| HARD-01 | Phase 15 | #485 | Pending |
+| HARD-02 | Phase 15 | #486 | Pending |
+| HARD-03 | Phase 15 | #487 | Pending |
+| HARD-04 | Phase 15 | #488 | Pending |
+| HARD-05 | Phase 15 | #491 | Pending |
+| HARD-06 | Phase 15 | #492 | Pending |
+| HARD-07 | Phase 15 | #493 | Pending |
+| HARD-08 | Phase 15 | #494 | Pending |
+| HARD-09 | Phase 15 | #495 | Pending |
+| HARD-10 | Phase 15 | #496 | Pending |
+| HARD-11 | Phase 15 | #497 | Pending |
+| HARD-12 | Phase 15 | #498 | Pending |
+| HARD-13 | Phase 15 | #499 | Pending |
+| HARD-14 | Phase 15 | #500 | Pending |
+| HARD-15 | Phase 15 | #501 | Pending |
+| HARD-16 | Phase 15 | #502 | Pending |
+| HARD-17 | Phase 15 | #503 | Pending |
+| HARD-18 | Phase 15 | #416 | Pending |
+| HARD-19 | Phase 15 | #430 | Pending |
+| HARD-20 | Phase 15 | #433 | Pending |
+| HARD-21 | Phase 15 | #447 | Pending |
+| HARD-22 | Phase 15 | #457 | Pending |
+| UX-01 | Phase 16 | — | Pending |
+| UX-02 | Phase 16 | — | Pending |
+| DOC-01 | Phase 16 | — | Pending |
+| DOC-02 | Phase 16 | — | Pending |
+| DOC-03 | Phase 16 | — | Pending |
+| REL-01 | Phase 17 | — | Pending |
+| REL-02 | Phase 17 | — | Pending |
+| REL-03 | Phase 17 | — | Pending |
+| REL-04 | Phase 17 | — | Pending |
+| REL-05 | Phase 17 | — | Pending |
 
 **Coverage:**
 - v0.10 requirements: 49 total (5 LIB + 4 ADP + 5 RECON + 3 UNOWN + 2 UX + 22 HARD + 3 DOC + 5 REL)
-- Mapped to phases: 0 / 49 (pending roadmapper)
-- GitHub issues closed: 22 review-followups + ~5 older bugs = ~27 issues
+- Mapped to phases: 49 / 49 (100% — no orphans, no duplicates)
+- GitHub issues closed: 22 review-followups (#485–#503) + 5 older bugs (#416, #430, #433, #447, #457) = 27 issues, plus epic #459
+
+**Phase distribution:**
+- Phase 11: 5 reqs (LIB)
+- Phase 12: 4 reqs (ADP)
+- Phase 13: 5 reqs (RECON) — alpha cut
+- Phase 14: 3 reqs (UNOWN)
+- Phase 15: 22 reqs (HARD) — beta cut
+- Phase 16: 5 reqs (UX + DOC) — rc cut
+- Phase 17: 5 reqs (REL) — v0.10 final
 
 ---
 
-*Requirements defined: 2026-05-02 from `.planning/research/v0.10-library-canonical-design.md`. Ready for `gsd-roadmapper` to derive phases.*
+*Requirements defined: 2026-05-02 from `.planning/research/v0.10-library-canonical-design.md`. Traceability filled 2026-05-02 by `gsd-roadmapper`. 49 requirements, 7 phases, 100% coverage. Ready for `/gsd:plan-phase 11`.*
