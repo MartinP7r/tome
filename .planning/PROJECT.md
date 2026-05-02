@@ -64,9 +64,9 @@ Every AI coding tool on a developer's machine shares the same skill library with
 - ✓ **TEST-04** `regen_warnings` deferred until after success banner (P4, #462) — Phase 10 (2026-04-29)
 - ✓ **TEST-05** Dead `SkillMoveEntry.source_path` field removed (P5, #462) — Phase 10 (2026-04-29)
 
-### Active (next milestone)
+### Active (v0.10 — Library-canonical Model)
 
-v0.9 milestone complete — see `Current State` for next milestone planning.
+v0.10 milestone in flight. Requirements defined in `.planning/REQUIREMENTS.md`. Design doc: `.planning/research/v0.10-library-canonical-design.md`. Closes epic [#459](https://github.com/MartinP7r/tome/issues/459).
 
 ### Backlog (deferred)
 
@@ -118,15 +118,39 @@ v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requir
 
 **Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) still pending Linux desktop hardware. Accepted as carry-over for the third consecutive milestone.
 
-## Next Milestone Goals
+## Current Milestone: v0.10 — Library-canonical Model + Cross-Machine Plugin Reconciliation
 
-**v1.0 tome Desktop (Tauri GUI)** — drafted, ready to ratify
+**Goal:** Make tome's library a single source of truth (real directory copies for both managed and local skills), with a lockfile-authoritative `tome sync` flow that reconciles installed plugins to the lockfile state on every machine via marketplace adapters. Closes the library-as-dotfiles workflow gap surfaced in the post-v0.9 codebase review.
 
-Forward-planning artifacts complete: [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md) + [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md). 32 requirements across 7 categories (CORE / VIEW / SYNC / CFG / OPS / BAK / DIST) + 5 cross-cutting NF gates. 7 phases (proposed numbering 11–17). Rough size: 15–22 weeks of focused work; alpha after Phase 12, beta after Phase 14, ship after Phase 17.
+**Target features:**
 
-Tauri 2 chosen over Electron + napi-rs (D-GUI-01): the Rust crate becomes the native backend directly, ~8 MB bundle, built-in code-signed auto-update, reuses Developer ID flow. CLI ships unchanged from `crates/tome`; the GUI lives in a new `crates/tome-desktop` workspace member.
+- **Library-canonical model** — managed skills become real directory copies in the library, not symlinks into machine-specific cache paths. Survives plugin uninstall, version churn, cross-machine sync.
+- **Lockfile-authoritative cross-machine sync** — `tome.lock` becomes the truth (Cargo.lock-shaped). `tome sync` reconciles installed plugins to lockfile state via marketplace adapters.
+- **MarketplaceAdapter trait** — `ClaudeMarketplaceAdapter` (shells out to `claude plugin install/update/list --json`) + `GitAdapter` (wraps existing `git.rs`).
+- **Unowned-library lifecycle** — `tome adopt <skill> <dir>` and `tome forget <skill>`. Source removal preserves library content; lifecycle is explicit, not implicit.
+- **Migration UX** — first-sync auto-migrate symlink library → real-copy library, with guarded prompt and persisted consent in `machine.toml`.
+- **CLI hardening bundle** — 19 review-followups (#485–#503) + ~10 older bug backlog issues (#416, #430, #433, #447, #454, #456, #457, etc.).
+- **Cleanup-message UX rewrite** — partition "stale" skills into removed-from-config / missing-from-disk / now-excluded with clear per-bucket messaging (the original trigger for this milestone discussion).
 
-Run `/gsd:new-milestone` to ratify v1.0 and start phase planning.
+**Key context:**
+
+- Closes epic [#459](https://github.com/MartinP7r/tome/issues/459) (cross-machine library-as-dotfiles).
+- v1.0 (Tauri Desktop GUI) drafted in [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md) + [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md) but **deferred to after v0.10 ships**. Library-canonical work changes the public type surface (`SkillEntry`, `LockEntry`, `RemovePlan`) that the GUI's Tauri IPC will expose; settling the model first means GUI types don't churn mid-build.
+- Hard upstream constraint: `claude plugin install/update` don't accept `--version` flags. Adapter installs/updates to "latest" only; lockfile records actual installed version + surfaces drift. True version pinning is an upstream Claude Code feature request.
+- Backward compat: None (per project policy). Migration hard-cuts on first v0.10 sync; no compat shim for old library shape.
+- Behavior change worth flagging in release notes: plugin updates no longer auto-propagate via symlink — they require `tome sync` to reach Claude Code skills. Users opt into upstream changes instead of being subject to them.
+- Sized at ~7 phases, ~10–14 weeks of focused work. Phase numbering continues from 10 → starts at Phase 11.
+- Design doc: [`.planning/research/v0.10-library-canonical-design.md`](research/v0.10-library-canonical-design.md) (468 lines, 9 open questions resolved with rationale + alternatives).
+
+<details>
+<summary>Previous milestones (recap)</summary>
+
+- v0.6 Unified Directory Model (Phases 1-3, shipped 2026-04-16) — `[directories.*]` BTreeMap config, git sources, per-directory selection, `tome add`/`remove`/`reassign`/`fork`, browse TUI polish
+- v0.7 Wizard Hardening (Phases 4-6, shipped 2026-04-22) — `Config::validate()` Conflict+Why+Suggestion errors, `Config::save_checked` round-trip, `--no-input` plumbing, 12-combo matrix test, `tabled` summary
+- v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1 hotfix, shipped 2026-04-27) — wizard greenfield/brownfield/legacy flows, partial-failure visibility, cross-platform browse, lockfile regen safety
+- v0.9 Cross-Machine Config Portability & Polish (Phases 9-10, shipped 2026-04-29) — `[directory_overrides.<name>]` schema, override surfacing, Phase 8 review tail (StatusMessage redesign, FailureKind compile-enforcement, RemoveFailure invariant, arboard patch-pin)
+
+</details>
 
 <details>
 <summary>Previous milestones (recap)</summary>
@@ -194,12 +218,21 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 | `FailureKind::ALL` compile-enforced via exhaustive-match sentinel + const-len assert (v0.9 Phase 10 / POLISH-04) | Catches "added a variant without updating ALL" at compile time; no `strum` dep needed | ✓ Good — chosen over runtime canary |
 | `arboard` patch-pin (`>=3.6, <3.7`) with bump-review comment (v0.9 Phase 10 / POLISH-06) | Prevents silent variant addition (`arboard::Error` is `#[non_exhaustive]`); review-on-bump policy documented in `Cargo.toml` | ✓ Good |
 | Defer `regen_warnings` until after success banner (v0.9 Phase 10 / TEST-04) | Success banner is the user's anchor; warnings as a footnote feel more natural than scoped-prefix on every line. Source-byte regression test anchored to `Command::Remove` region for false-positive resistance | ✓ Good — chosen over `[lockfile regen]` prefix |
+| Insert v0.10 (library-canonical) before v1.0 GUI (2026-05-02) | v0.10 reshapes the public Rust types (`SkillEntry`, `LockEntry`, `RemovePlan`) that the GUI's Tauri IPC will expose. Settling the model first means GUI types don't churn mid-build. Library-as-dotfiles workflow gap is also blocking for the project's primary user — fixing it before adding a GUI surface is the right order. | TBD — outcome at v0.10 ship |
+| Keep GUI = v1.0 naming despite v0.10 inserted between v0.9 and v1.0 (2026-05-02) | Library-canonical work earns the v1.0 framing (stable Rust types, durable library, reproducible cross-machine install). Calling the GUI release v1.0 *because it ships on solid ground* is honest, not just naming-ceremony. v0.10 lays the foundation; v1.0 ships the visible product on top of it. | TBD — outcome at v1.0 ship |
+| Library = single source of truth (managed-as-copy), not consolidated cache (v0.10 / D-LIB-01) | Today's symlink-managed library breaks library-as-dotfiles (machine-specific paths in git), loses content on plugin uninstall/version-churn, and provides no resilience against vanished plugins. Library-canonical model fixes all three at the cost of disk space (~5–50 MB) and update-timing change (sync required for upstream changes to propagate). | Pending — implementation in Phase 11 |
+| Lockfile-authoritative cross-machine reproducibility (Cargo.lock-shaped) (v0.10 / D-LIB-02) | `tome.lock` becomes the authoritative state for what's installed on every machine. `tome sync` reconciles drift via marketplace adapters. Mirrors `cargo build` semantics; user mental model already familiar. | Pending — implementation in Phase 13 |
+| MarketplaceAdapter trait, not direct shell-out (v0.10 / D-LIB-03) | Trait isolates marketplace-specific install logic (Claude CLI, git, future: npm) behind a stable interface. Production adapter shells out; tests use `MockMarketplaceAdapter`. v0.10 ships `ClaudeMarketplaceAdapter` + `GitAdapter` (wrap existing `git.rs`). | Pending — implementation in Phase 12 |
+| `tome adopt`/`forget` for unowned library entries (v0.10 / D-LIB-04) | Source removal no longer auto-deletes library content. Library entries enter `Unowned` state; explicit commands manage the lifecycle. Avoids silent data loss when user removes a directory entry from `tome.toml`. | Pending — implementation in Phase 14 |
+| Per-machine first-time auto-install consent persisted in `machine.toml` (v0.10 / D-LIB-05) | Balances zero-touch new-machine onboarding (auto-install missing plugins) against surprise-action-prevention on shared/CI machines. Prompts once per machine; remembers consent. Honors global `--no-install` opt-out. | Pending — implementation in Phase 13 |
 
 ## Evolution
 
 This document evolves at phase transitions and milestone boundaries.
 
 ---
+*Last updated: 2026-05-02 — v0.10 milestone started. Goal: library-canonical model (managed-as-copy, source removal preserves content) + lockfile-authoritative cross-machine sync via marketplace adapters + CLI hardening bundle (19 review-followups + ~10 older bug backlog issues). Closes epic #459 (cross-machine library-as-dotfiles). v1.0 (Tauri GUI) deferred — drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`, ratifies after v0.10 ships so it can build on the stable type surface and durable library. Design doc: `.planning/research/v0.10-library-canonical-design.md` (468 lines, 9 OQs resolved). Phase 11 is the next planning unit. Discussion lineage: PR #484 codebase review → "no longer configured" UX question → library-as-dotfiles realization → managed-as-copy resilience requirement → cross-machine reconciliation requirement.*
+
 *Last updated: 2026-04-29 after v0.9 milestone — v0.9.0 shipped via cargo-dist (commits c183e3f Phase 10 + 0ae6288 version bump on main). v0.9 milestone archived: 16 v0.9 requirements (5 PORT + 6 POLISH + 5 TEST) shipped across Phases 9 and 10 (10 in 1 wave, 9 in 2 waves). 662 tests passing (526 unit + 136 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` carried over for the third consecutive milestone (still pending hardware). Ready for v1.0 — Tauri GUI milestone artifacts already drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`; ratify via `/gsd:new-milestone` to start phase planning.*
 
 *Last updated: 2026-04-29 — Phase 10 complete (Phase 8 Review Tail). All 11 v0.8 review-tail items shipped: POLISH-01..06 (#463 D1-D6) + TEST-01..05 (#462 P1-P5). 662 tests passing. v0.9 milestone functionally complete — ready for milestone closure.*
