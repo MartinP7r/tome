@@ -3263,9 +3263,13 @@ fn test_remove_local_directory() {
         .success();
 
     // Verify cleanup
+    // v0.10 (LIB-04): library content for owned skills is preserved on
+    // `tome remove`; the manifest entry transitions to Unowned. Distribution
+    // symlinks ARE still removed (the user removed the source from config,
+    // not the skill from the library).
     assert!(
-        !library_dir.join("my-skill").exists(),
-        "library skill should be removed"
+        library_dir.join("my-skill").exists(),
+        "library skill must be preserved as Unowned per LIB-04"
     );
     assert!(
         !target_dir.join("my-skill").exists(),
@@ -3685,7 +3689,10 @@ fn remove_retry_succeeds_after_failure_resolved() {
         "retry stdout must contain success banner; got: {second_stdout}"
     );
 
-    // Step 4 — assert clean state: no config entry, no manifest entry, no library dir.
+    // Step 4 — assert clean state per v0.10 LIB-04 / D-10 trigger 1:
+    // - config entry is removed
+    // - manifest entry is RETAINED (transitioned to Unowned with source_name omitted)
+    // - library dir is RETAINED (preserved as Unowned content)
     let config_after_success = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
     assert!(
         !config_after_success.contains("[directories.local]"),
@@ -3693,18 +3700,24 @@ fn remove_retry_succeeds_after_failure_resolved() {
     );
 
     let manifest_path = tmp.path().join(".tome-manifest.json");
-    if manifest_path.exists() {
-        let manifest = std::fs::read_to_string(&manifest_path).unwrap();
-        assert!(
-            !manifest.contains("\"my-skill\""),
-            "manifest must not contain my-skill after retry success; got: {manifest}"
-        );
-    }
+    assert!(
+        manifest_path.exists(),
+        "manifest must still exist after retry success"
+    );
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+    assert!(
+        manifest.contains("\"my-skill\""),
+        "manifest must retain my-skill (Unowned) per LIB-04; got: {manifest}"
+    );
+    assert!(
+        !manifest.contains("\"source_name\":\"local\""),
+        "my-skill source_name must be transitioned away from 'local' (skip_serializing_if omits None); got: {manifest}"
+    );
 
     let library_skill = tmp.path().join("library").join("my-skill");
     assert!(
-        !library_skill.exists(),
-        "library dir for my-skill must be gone after retry success; still exists at {}",
+        library_skill.exists(),
+        "library dir for my-skill must be preserved as Unowned per LIB-04; missing at {}",
         library_skill.display()
     );
 }

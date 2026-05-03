@@ -1,12 +1,17 @@
-//! Remove a directory entry from config and clean up all artifacts.
+//! Remove a directory entry from config and clean up most artifacts.
 //!
-//! Cleanup order:
+//! Cleanup order (v0.10, per LIB-04 / D-10 trigger 1):
 //! 1. Remove symlinks from distribution directories
-//! 2. Remove library entries for skills from this directory
-//! 3. Remove manifest entries
-//! 4. Remove cached git repo (if git-type directory)
-//! 5. Remove directory entry from config
-//! 6. Regenerate lockfile
+//! 2. Transition manifest entries owned by this directory to Unowned
+//!    (`source_name = None`) — library content is preserved on disk
+//! 3. Remove cached git repo (if git-type directory)
+//! 4. Remove directory entry from config
+//! 5. Regenerate lockfile
+//!
+//! Note: library directories for skills owned by the removed directory are
+//! NOT deleted (LIB-04). The user can later re-anchor them with
+//! `tome adopt <skill> <new-dir>` or delete them with `tome forget <skill>`
+//! (Phase 14 commands).
 
 use anyhow::{Context, Result};
 use console::style;
@@ -25,7 +30,8 @@ pub(crate) struct RemovePlan {
     pub skills: Vec<String>,
     /// Symlinks in distribution directories pointing to these skills.
     pub symlinks_to_remove: Vec<PathBuf>,
-    /// Library directories for these skills.
+    /// Library directories for these skills (preserved per LIB-04 v0.10 — these
+    /// are reported by render_plan as "kept as Unowned" but NOT deleted by execute).
     pub library_paths: Vec<PathBuf>,
     /// Cached git repo path (if git-type directory).
     pub git_cache_path: Option<PathBuf>,
@@ -47,17 +53,17 @@ impl RemovePlan {
 /// Variants are documented by the structural dispatch predicate that emits
 /// them, not by step number — step numbering is implementation detail and
 /// reordering the steps in `execute()` must not require doc edits.
+///
+/// In v0.10 (LIB-04 / D-10 trigger 1), `tome remove` no longer touches
+/// library files — owned manifest entries transition to Unowned and library
+/// content is preserved on disk. The `LibraryDir` and `LibrarySymlink`
+/// variants from v0.9 are removed; only distribution-dir symlinks and the
+/// git repo cache remain as failable filesystem operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailureKind {
     /// Distribution-dir symlink removal — emitted when `remove_file` fails
     /// while iterating `plan.symlinks_to_remove`.
     DistributionSymlink,
-    /// Local library directory removal — emitted by the `remove_dir_all`
-    /// branch of library cleanup (dispatched by `lib_path.is_dir()`).
-    LibraryDir,
-    /// Managed-skill library symlink removal — emitted by the `remove_file`
-    /// branch of library cleanup (dispatched by `lib_path.is_symlink()`).
-    LibrarySymlink,
     /// Git repo cache removal — emitted when `remove_dir_all` fails on the
     /// plan's `git_cache_path`.
     GitCache,
@@ -69,10 +75,8 @@ impl FailureKind {
     /// Exposed as an associated constant so the `lib.rs` consumer doesn't
     /// maintain a parallel hand-written array that could silently drop a
     /// variant when new variants are added.
-    pub(crate) const ALL: [FailureKind; 4] = [
+    pub(crate) const ALL: [FailureKind; 2] = [
         FailureKind::DistributionSymlink,
-        FailureKind::LibraryDir,
-        FailureKind::LibrarySymlink,
         FailureKind::GitCache,
     ];
 
@@ -80,8 +84,6 @@ impl FailureKind {
     pub(crate) fn label(self) -> &'static str {
         match self {
             FailureKind::DistributionSymlink => "Distribution symlinks",
-            FailureKind::LibraryDir => "Library entries",
-            FailureKind::LibrarySymlink => "Library symlinks",
             FailureKind::GitCache => "Git cache",
         }
     }
@@ -97,15 +99,13 @@ impl FailureKind {
 ///
 /// The function is dead-code at runtime — its sole purpose is the
 /// exhaustiveness check. The `const _: () = ...` block below additionally
-/// pins `ALL.len() == 4` at compile time so a hand-edit that adds a
+/// pins `ALL.len() == 2` at compile time so a hand-edit that adds a
 /// match arm here without growing `ALL` (or vice versa) also fails.
 #[allow(dead_code)]
 const fn _ensure_failure_kind_all_exhaustive(k: FailureKind) -> usize {
     match k {
         FailureKind::DistributionSymlink => 0,
-        FailureKind::LibraryDir => 1,
-        FailureKind::LibrarySymlink => 2,
-        FailureKind::GitCache => 3,
+        FailureKind::GitCache => 1,
     }
 }
 
@@ -113,7 +113,7 @@ const _: () = {
     // If this fails: FailureKind::ALL is missing or has extra variants.
     // The match arms in _ensure_failure_kind_all_exhaustive are the source
     // of truth — ALL must contain exactly one entry per arm.
-    assert!(FailureKind::ALL.len() == 4);
+    assert!(FailureKind::ALL.len() == 2);
 };
 
 /// A single partial-cleanup failure aggregated from `execute`.
@@ -150,7 +150,10 @@ impl RemoveFailure {
 /// Result of executing the remove plan.
 pub(crate) struct RemoveResult {
     pub symlinks_removed: usize,
-    pub library_entries_removed: usize,
+    /// Manifest entries transitioned to Unowned (`source_name = None`) per
+    /// LIB-04 / D-10 trigger 1. Library content for these skills is preserved
+    /// on disk; only the manifest's source_name field is mutated.
+    pub library_entries_transitioned_to_unowned: usize,
     pub git_cache_removed: bool,
     /// Partial-cleanup failures that occurred during `execute`.
     ///
@@ -286,7 +289,8 @@ pub(crate) fn render_plan(plan: &RemovePlan) {
 
     if !plan.library_paths.is_empty() {
         println!(
-            "  Library directories to remove: {}",
+            "  Library content preserved as {} (run `tome forget <skill>` later to delete): {}",
+            style("Unowned").yellow(),
             style(plan.library_paths.len()).bold()
         );
     }
@@ -306,11 +310,11 @@ pub(crate) fn execute(
     dry_run: bool,
 ) -> Result<RemoveResult> {
     let mut symlinks_removed = 0;
-    let mut library_entries_removed = 0;
+    let mut library_entries_transitioned_to_unowned = 0;
     let mut git_cache_removed = false;
     let mut failures: Vec<RemoveFailure> = Vec::new();
 
-    // 1. Remove symlinks from distribution directories
+    // 1. Remove symlinks from distribution directories.
     for symlink in &plan.symlinks_to_remove {
         if dry_run {
             symlinks_removed += 1;
@@ -326,34 +330,9 @@ pub(crate) fn execute(
         }
     }
 
-    // 2. Remove library directories
-    for lib_path in &plan.library_paths {
-        if dry_run {
-            library_entries_removed += 1;
-        } else if lib_path.is_symlink() {
-            match std::fs::remove_file(lib_path) {
-                Ok(_) => library_entries_removed += 1,
-                Err(e) => failures.push(RemoveFailure::new(
-                    FailureKind::LibrarySymlink,
-                    lib_path.clone(),
-                    e,
-                )),
-            }
-        } else if lib_path.is_dir() {
-            match std::fs::remove_dir_all(lib_path) {
-                Ok(_) => library_entries_removed += 1,
-                Err(e) => failures.push(RemoveFailure::new(
-                    FailureKind::LibraryDir,
-                    lib_path.clone(),
-                    e,
-                )),
-            }
-        }
-    }
-
-    // 4. Remove cached git repo (step 3/manifest cleanup is deferred to
-    //    after step 4 so we know the full failure state before deciding
-    //    whether to preserve config+manifest for retry).
+    // 2. Remove cached git repo (if applicable). Library deletion is
+    //    intentionally absent here — library content is preserved per LIB-04;
+    //    the manifest transition below is the user-visible "removal".
     if let Some(cache_path) = &plan.git_cache_path {
         if dry_run {
             git_cache_removed = true;
@@ -369,28 +348,31 @@ pub(crate) fn execute(
         }
     }
 
-    // Partial-failure state preservation (I2, I3 from phase-8 PR review).
-    // If ANY cleanup step failed, preserve the config entry AND the
-    // manifest entries so the user can re-run `tome remove <name>` after
-    // addressing the underlying cause (e.g., fixing file permissions).
-    // Otherwise the user would be stuck: plan() bails with "directory
-    // not found in config" and `tome doctor` cannot re-register a
-    // vanished config entry — recovery would be manual `rm -rf`.
+    // 3. On full success: transition manifest entries owned by this directory
+    //    to Unowned (source_name = None) AND remove the directory entry from
+    //    config (LIB-04 / D-10 trigger 1). Library content is preserved on disk.
     //
-    // On full success: remove manifest entries (step 3) and config
-    // entry (step 5) as before. dry_run preserves everything.
+    //    On partial failure: preserve config + manifest entries unchanged so
+    //    `tome remove <name>` can be re-run after addressing the underlying
+    //    cause (matches Phase 8 SAFE-01 retention semantics).
+    //
+    //    skills_get_mut is provided by Plan 11-01 in manifest.rs.
     if !dry_run && failures.is_empty() {
-        // 3. Remove manifest entries
-        for skill in &plan.skills {
-            manifest.remove(skill);
+        for skill_name in &plan.skills {
+            if let Some(entry) = manifest.skills_get_mut(skill_name) {
+                entry.source_name = None;
+                library_entries_transitioned_to_unowned += 1;
+            }
         }
-        // 5. Remove directory entry from config
         config.directories.remove(&plan.directory_name);
+    } else if dry_run {
+        // In dry-run, count what WOULD transition but don't mutate.
+        library_entries_transitioned_to_unowned = plan.skills.len();
     }
 
     Ok(RemoveResult {
         symlinks_removed,
-        library_entries_removed,
+        library_entries_transitioned_to_unowned,
         git_cache_removed,
         failures,
     })
@@ -500,19 +482,29 @@ mod tests {
     }
 
     #[test]
-    fn execute_removes_artifacts() {
+    fn execute_transitions_to_unowned_and_preserves_library() {
         let (_tmp, mut config, paths, mut manifest) = make_test_setup();
         let p = plan("test-source", &config, &paths, &manifest).unwrap();
 
         let result = execute(&p, &mut config, &mut manifest, false).unwrap();
         assert_eq!(result.symlinks_removed, 1);
-        assert_eq!(result.library_entries_removed, 1);
+        assert_eq!(result.library_entries_transitioned_to_unowned, 1);
         assert!(
             !config
                 .directories
-                .contains_key(&DirectoryName::new("test-source").unwrap())
+                .contains_key(&DirectoryName::new("test-source").unwrap()),
+            "config entry must be removed on full success"
         );
-        assert!(manifest.is_empty());
+        assert!(!manifest.is_empty(), "manifest entry retained as Unowned");
+        assert_eq!(
+            manifest.get("my-skill").unwrap().source_name,
+            None,
+            "transitioned to Unowned"
+        );
+        assert!(
+            _tmp.path().join("library").join("my-skill").exists(),
+            "library content preserved per LIB-04"
+        );
     }
 
     #[test]
@@ -551,9 +543,10 @@ mod tests {
             .unwrap();
         assert_eq!(symlink_failure.path, dist_symlink);
 
-        // Partial-failure semantics: the library entry (separate artifact)
-        // should still have been cleaned up.
-        assert_eq!(result.library_entries_removed, 1);
+        // Partial-failure semantics: no Unowned transition happens because
+        // failures.is_empty() is false. The library entry (and manifest
+        // entry) are preserved unchanged.
+        assert_eq!(result.library_entries_transitioned_to_unowned, 0);
         assert_eq!(result.symlinks_removed, 0);
 
         // I2/I3 retention: on partial failure, the config entry AND the
@@ -571,6 +564,11 @@ mod tests {
             !manifest.is_empty(),
             "manifest entries must be retained on partial failure so retry sees the skills"
         );
+        assert_eq!(
+            manifest.get("my-skill").unwrap().source_name,
+            Some(DirectoryName::new("test-source").unwrap()),
+            "transition NOT applied on partial failure"
+        );
     }
 
     #[test]
@@ -580,91 +578,81 @@ mod tests {
 
         let result = execute(&p, &mut config, &mut manifest, true).unwrap();
         assert_eq!(result.symlinks_removed, 1);
-        assert_eq!(result.library_entries_removed, 1);
+        assert_eq!(
+            result.library_entries_transitioned_to_unowned, 1,
+            "dry-run should count the would-be transition"
+        );
         // Config and manifest should not be modified
         assert!(
             config
                 .directories
-                .contains_key(&DirectoryName::new("test-source").unwrap())
+                .contains_key(&DirectoryName::new("test-source").unwrap()),
+            "dry-run preserves config"
         );
         assert!(!manifest.is_empty());
+        assert_eq!(
+            manifest.get("my-skill").unwrap().source_name,
+            Some(DirectoryName::new("test-source").unwrap()),
+            "dry-run does not mutate manifest"
+        );
     }
 
-    /// Covers the lib.rs grouped-output formatting indirectly: populates TWO
-    /// FailureKind variants (DistributionSymlink + LibraryDir) in a single
-    /// execute() call, then asserts that:
-    /// - the failures vec contains both variants
-    /// - the counters correctly reflect partial success (both zero because
-    ///   neither step completed any operation)
-    ///
-    /// Pins the partial-success invariant across multiple variants and
-    /// ensures a future refactor that drops a `FailureKind` from the ALL
-    /// constant or label() map would not silently break grouped output
-    /// for the affected variant. Also covers FailureKind::label() for
-    /// every variant and the size of FailureKind::ALL.
-    #[cfg(unix)]
     #[test]
-    fn partial_failure_aggregates_multiple_kinds() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let (tmp, mut config, paths, mut manifest) = make_test_setup();
+    fn execute_transitions_multiple_owned_skills_to_unowned() {
+        let (_tmp, mut config, paths, mut manifest) = make_test_setup();
+        // Add two more skills owned by test-source.
+        for n in ["skill-2", "skill-3"] {
+            manifest.insert(
+                SkillName::new(n).unwrap(),
+                SkillEntry::new(
+                    _tmp.path().join("source").join(n),
+                    DirectoryName::new("test-source").unwrap(),
+                    test_hash(),
+                    false,
+                ),
+            );
+        }
         let p = plan("test-source", &config, &paths, &manifest).unwrap();
+        let result = execute(&p, &mut config, &mut manifest, false).unwrap();
 
-        // Pre-delete the distribution symlink → DistributionSymlink
-        // failure on step 1 (remove_file returns ENOENT).
-        let dist_symlink = tmp.path().join("target").join("my-skill");
-        std::fs::remove_file(&dist_symlink).ok();
-
-        // chmod the LIBRARY PARENT to 0o500 (r-x) so step 2's
-        // remove_dir_all on library/my-skill fails with EACCES. The write
-        // bit on the parent is what's needed to unlink children; the
-        // search bit alone still lets is_dir() check the child.
-        // (remove_dir_all on a non-existent path returns Ok(()) in Rust,
-        // so the simpler "pre-delete" trick used elsewhere doesn't work
-        // here — we need a real filesystem-level permission denial.)
-        assert_eq!(p.library_paths.len(), 1, "fixture expected one lib path");
-        let library_parent = p.library_paths[0].parent().unwrap().to_path_buf();
-        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o500)).unwrap();
-
-        let result = execute(&p, &mut config, &mut manifest, false);
-
-        // CRITICAL: restore permissions BEFORE assertions so TempDir::drop
-        // can clean up even on panic (Pitfall 2 from 08-RESEARCH.md).
-        std::fs::set_permissions(&library_parent, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let result = result.expect("execute should not error, only aggregate failures");
-
-        let has = |k: FailureKind| result.failures.iter().any(|f| f.kind == k);
+        assert_eq!(result.library_entries_transitioned_to_unowned, 3);
+        for n in ["my-skill", "skill-2", "skill-3"] {
+            assert_eq!(
+                manifest.get(n).unwrap().source_name,
+                None,
+                "skill {n} should transition to Unowned"
+            );
+        }
+        assert!(result.failures.is_empty());
         assert!(
-            has(FailureKind::DistributionSymlink),
-            "expected DistributionSymlink failure, got: {:?}",
-            result.failures
+            !config
+                .directories
+                .contains_key(&DirectoryName::new("test-source").unwrap()),
+            "config entry removed on full success"
         );
-        assert!(
-            has(FailureKind::LibraryDir),
-            "expected LibraryDir failure (from EACCES on parent), got: {:?}",
-            result.failures
-        );
+    }
 
-        // Both counters zero — neither step completed.
-        assert_eq!(result.symlinks_removed, 0);
-        assert_eq!(result.library_entries_removed, 0);
-
-        // Cover FailureKind::label() exhaustively — pins user-visible label
-        // strings for every variant (a rename in one variant would fail here).
+    /// Cover FailureKind::label() exhaustively — pins user-visible label
+    /// strings for every variant (a rename in one variant would fail here).
+    /// In v0.10 (LIB-04 / Plan 11-03) the LibraryDir/LibrarySymlink variants
+    /// were removed; only DistributionSymlink and GitCache remain.
+    #[test]
+    fn failure_kind_label_coverage() {
         assert_eq!(
             FailureKind::DistributionSymlink.label(),
             "Distribution symlinks"
         );
-        assert_eq!(FailureKind::LibraryDir.label(), "Library entries");
-        assert_eq!(FailureKind::LibrarySymlink.label(), "Library symlinks");
         assert_eq!(FailureKind::GitCache.label(), "Git cache");
+    }
 
-        // Cover FailureKind::ALL — the consumer in lib.rs iterates this.
-        assert_eq!(FailureKind::ALL.len(), 4);
+    /// `FailureKind::ALL` is consumed by lib.rs's grouped failure summary;
+    /// pinning length to 2 also pairs with the const-fn drift guard
+    /// `_ensure_failure_kind_all_exhaustive` so a hand-edit that grows
+    /// the enum without growing ALL fails to compile.
+    #[test]
+    fn failure_kind_all_pinned_size_two() {
+        assert_eq!(FailureKind::ALL.len(), 2);
         assert!(FailureKind::ALL.contains(&FailureKind::DistributionSymlink));
-        assert!(FailureKind::ALL.contains(&FailureKind::LibraryDir));
-        assert!(FailureKind::ALL.contains(&FailureKind::LibrarySymlink));
         assert!(FailureKind::ALL.contains(&FailureKind::GitCache));
     }
 
@@ -677,7 +665,7 @@ mod tests {
         let all = FailureKind::ALL;
         assert_eq!(
             all.len(),
-            4,
+            2,
             "FailureKind::ALL must contain every variant exactly once"
         );
         // Pairwise-unique: no duplicates in ALL.
@@ -688,8 +676,6 @@ mod tests {
         }
         // Membership: every variant appears.
         assert!(all.contains(&FailureKind::DistributionSymlink));
-        assert!(all.contains(&FailureKind::LibraryDir));
-        assert!(all.contains(&FailureKind::LibrarySymlink));
         assert!(all.contains(&FailureKind::GitCache));
     }
 
@@ -701,12 +687,7 @@ mod tests {
     fn failure_kind_all_ordering_pinned() {
         assert_eq!(
             FailureKind::ALL,
-            [
-                FailureKind::DistributionSymlink,
-                FailureKind::LibraryDir,
-                FailureKind::LibrarySymlink,
-                FailureKind::GitCache,
-            ],
+            [FailureKind::DistributionSymlink, FailureKind::GitCache,],
             "FailureKind::ALL ordering is part of the user-visible grouping contract"
         );
     }

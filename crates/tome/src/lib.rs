@@ -483,10 +483,10 @@ pub fn run(cli: Cli) -> Result<()> {
             // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
             // in tests/cli.rs.
             println!(
-                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
+                "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
                 style("✓").green(),
                 name,
-                result.library_entries_removed,
+                result.library_entries_transitioned_to_unowned,
                 result.symlinks_removed,
                 if result.git_cache_removed {
                     ", git cache"
