@@ -850,4 +850,50 @@ mod tests {
             "should omit null version in JSON"
         );
     }
+
+    #[test]
+    fn deserialize_old_shape_lockfile_source_name_string() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#
+        );
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+    }
+
+    #[test]
+    fn deserialize_new_shape_lockfile_null_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_name":null,"content_hash":"{valid_hash}"}}"#
+        );
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn deserialize_new_shape_lockfile_missing_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn unowned_skill_omits_source_name_in_lockfile_json() {
+        use crate::manifest::SkillEntry;
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false),
+        );
+        let lockfile = generate(&manifest, &[]);
+        let json = serde_json::to_string_pretty(&lockfile).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let orphan = &parsed["skills"]["orphan"];
+        assert!(
+            orphan.get("source_name").is_none(),
+            "Unowned skill must omit source_name in lockfile JSON, got: {json}"
+        );
+    }
 }
