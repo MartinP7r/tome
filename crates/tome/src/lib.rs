@@ -1061,6 +1061,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         paths.library_dir(),
         &discovered_names,
         &mut manifest,
+        config,
         dry_run,
         quiet,
         no_input,

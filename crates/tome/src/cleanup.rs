@@ -16,16 +16,35 @@ use crate::paths::resolve_symlink_target;
 #[derive(Debug, Default)]
 pub struct CleanupResult {
     pub removed_from_library: usize,
+    /// Skills transitioned from owned -> Unowned (Case 1 of LIB-04 / D-09).
+    /// Library content for these skills is preserved on disk; the manifest
+    /// entry's `source_name` is set to `None`.
+    pub transitioned_to_unowned: usize,
 }
 
 /// Remove library entries whose skills are no longer present in any discovered source.
 ///
-/// When stdin is a TTY and `quiet` is false, prompts the user before removing each
-/// stale entry. Otherwise, warns to stderr and removes automatically.
+/// Stale candidates (manifest entries not in `discovered_names`) are partitioned
+/// per LIB-04 / D-09 / D-10:
+///
+/// - **Case 1** — `source_name` no longer keys a `[directories.*]` entry in
+///   `config.directories`. The user removed the source from `tome.toml`
+///   (manually or via `tome remove`). Action: transition to **Unowned**
+///   (`source_name = None`) and **preserve library content on disk**.
+/// - **Case 2** — `source_name` IS still in `config.directories` but the file
+///   vanished from the source on disk. Today's behavior — delete the library
+///   copy. The configured source removing a file is treated as intentional.
+/// - **Already-Unowned** — `source_name` is `None`. Filtered out of the stale
+///   set entirely; preserved by definition.
+///
+/// When stdin is a TTY and `quiet` is false, prompts the user before deleting
+/// Case 2 entries. Case 1 transitions are silent (info-level eprintln) — no
+/// confirmation needed because library content is preserved.
 pub fn cleanup_library(
     library_dir: &Path,
     discovered_names: &HashSet<String>,
     manifest: &mut Manifest,
+    config: &crate::config::Config,
     dry_run: bool,
     quiet: bool,
     no_input: bool,
@@ -38,41 +57,97 @@ pub fn cleanup_library(
 
     let interactive = !no_input && std::io::stdin().is_terminal() && !quiet;
 
-    // Find manifest entries not in discovered_names
+    // Stale candidates = manifest entries whose skill names weren't discovered.
+    // We split into D-09 cases:
+    //   Case 1: source removed from config -> transition to Unowned (preserve library)
+    //   Case 2: source still configured, file vanished from disk -> delete (today's behavior)
+    //
+    // Already-Unowned entries (source_name == None) are filtered out of the
+    // stale set entirely; they have no source to compare against and are
+    // preserved by definition (LIB-04). They were skipped from discover too.
     let stale: Vec<SkillName> = manifest
         .keys()
         .filter(|name| !discovered_names.contains(name.as_str()))
+        .filter(|name| {
+            // Skip already-Unowned entries — they're preserved by definition.
+            manifest
+                .get(name.as_str())
+                .map(|e| e.source_name.is_some())
+                .unwrap_or(false)
+        })
         .cloned()
         .collect();
 
-    // Group stale skills by their previous source for better messaging.
-    // Key is `String` so an "unknown" sentinel can coexist with real
-    // DirectoryName values; real keys go through `.as_str().to_string()`.
-    let mut stale_by_source: std::collections::BTreeMap<String, Vec<SkillName>> =
-        std::collections::BTreeMap::new();
+    // Partition stale entries into Case 1 (transition) and Case 2 (delete).
+    let mut case1_unowned_transition: Vec<SkillName> = Vec::new();
+    let mut case2_delete: Vec<SkillName> = Vec::new();
     for name in &stale {
+        let entry = manifest
+            .get(name.as_str())
+            .expect("stale name from manifest");
+        // SAFETY: we already filtered out None-source_name entries above.
+        let source = entry
+            .source_name
+            .as_ref()
+            .expect("filter-guard ensures Some");
+        if config.directories().contains_key(source) {
+            // Source dir is still configured -> file vanished from disk -> Case 2.
+            case2_delete.push(name.clone());
+        } else {
+            // Source dir is gone from config -> preserve library, transition -> Case 1.
+            case1_unowned_transition.push(name.clone());
+        }
+    }
+
+    // --- Case 1: transition to Unowned (preserve library content) ---
+    for name in &case1_unowned_transition {
+        if !quiet {
+            let prev_source = manifest
+                .get(name.as_str())
+                .and_then(|e| e.source_name.as_ref())
+                .map(|d| d.as_str().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            eprintln!(
+                "info: skill '{name}' (from '{prev_source}') no longer in any source — preserving as Unowned"
+            );
+        }
+        if !dry_run {
+            // skills_get_mut is provided by Plan 11-01 in manifest.rs.
+            if let Some(entry) = manifest.skills_get_mut(name.as_str()) {
+                entry.source_name = None;
+            }
+        }
+        result.transitioned_to_unowned += 1;
+    }
+
+    // --- Case 2: delete (today's behavior) ---
+    // Group by source for messaging (matches today's UX) and apply the
+    // existing interactive/non-interactive decision logic.
+    let mut case2_by_source: std::collections::BTreeMap<String, Vec<SkillName>> =
+        std::collections::BTreeMap::new();
+    for name in &case2_delete {
         let source = manifest
             .get(name.as_str())
-            .and_then(|e| e.source_name.as_ref().map(|d| d.as_str().to_string()))
+            .and_then(|e| e.source_name.as_ref())
+            .map(|d| d.as_str().to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        stale_by_source
+        case2_by_source
             .entry(source)
             .or_default()
             .push(name.clone());
     }
 
-    // In interactive mode, show grouped summary and batch-confirm
-    let skills_to_remove: Vec<SkillName> = if interactive && !stale.is_empty() {
+    let skills_to_remove: Vec<SkillName> = if interactive && !case2_delete.is_empty() {
         println!(
             "{}",
             console::style(format!(
-                "{} skill(s) from sources no longer configured:",
-                stale.len()
+                "{} skill(s) missing from configured sources:",
+                case2_delete.len()
             ))
             .yellow()
             .bold()
         );
-        for (source, names) in &stale_by_source {
+        for (source, names) in &case2_by_source {
             println!(
                 "  {} (from '{}'):",
                 console::style(format!("{} skill(s)", names.len())).dim(),
@@ -88,21 +163,19 @@ pub fn cleanup_library(
             .default(false)
             .interact_opt()?;
         if confirmed == Some(true) {
-            stale.clone()
+            case2_delete.clone()
         } else {
             Vec::new()
         }
-    } else if !stale.is_empty() {
-        // Non-interactive: warn and auto-remove
-        for (source, names) in &stale_by_source {
+    } else if !case2_delete.is_empty() {
+        for (source, names) in &case2_by_source {
             for name in names {
                 eprintln!(
-                    "warning: skill '{}' (from '{}') no longer in any source, removing from library",
-                    name, source
+                    "warning: skill '{name}' (from '{source}') missing from source on disk, removing from library"
                 );
             }
         }
-        stale.clone()
+        case2_delete.clone()
     } else {
         Vec::new()
     };
@@ -214,8 +287,35 @@ mod tests {
     use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
 
+    fn empty_config() -> crate::config::Config {
+        crate::config::Config::default()
+    }
+
+    fn config_with_dir(name: &str) -> crate::config::Config {
+        use crate::config::{
+            Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType,
+        };
+        use std::collections::BTreeMap;
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new(name).unwrap(),
+            DirectoryConfig {
+                path: std::path::PathBuf::from("/tmp/source"),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+        Config {
+            directories,
+            ..Default::default()
+        }
+    }
+
     #[test]
-    fn cleanup_removes_stale_manifest_entries() {
+    fn cleanup_transitions_orphaned_to_unowned_when_source_removed_from_config() {
         let library = TempDir::new().unwrap();
 
         // Create a skill dir and manifest entry
@@ -235,21 +335,36 @@ mod tests {
             },
         );
 
-        // "old-skill" is NOT in discovered names — should be removed (non-interactive)
+        // "old-skill" is NOT in discovered names AND its source 'test' is NOT
+        // in config.directories -> Case 1 (transition to Unowned).
+        let config = empty_config();
         let discovered: HashSet<String> = HashSet::new();
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
             false,
             false,
             true,
         )
         .unwrap();
 
-        assert_eq!(result.removed_from_library, 1);
-        assert!(!library.path().join("old-skill").exists());
-        assert!(!manifest.contains_key("old-skill"));
+        assert_eq!(result.removed_from_library, 0, "Case 1 must NOT delete");
+        assert_eq!(result.transitioned_to_unowned, 1, "Case 1 must transition");
+        assert!(
+            library.path().join("old-skill").exists(),
+            "Case 1 must preserve library content"
+        );
+        assert!(
+            manifest.contains_key("old-skill"),
+            "Case 1 must keep manifest entry"
+        );
+        assert_eq!(
+            manifest.get("old-skill").unwrap().source_name,
+            None,
+            "Case 1 must transition source_name to None"
+        );
     }
 
     #[test]
@@ -271,11 +386,13 @@ mod tests {
             },
         );
 
+        let config = config_with_dir("test");
         let discovered: HashSet<String> = ["keep-me".to_string()].into();
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
             false,
             false,
             true,
@@ -283,11 +400,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.removed_from_library, 0);
+        assert_eq!(result.transitioned_to_unowned, 0);
         assert!(library.path().join("keep-me").exists());
     }
 
     #[test]
-    fn cleanup_dry_run_preserves_stale() {
+    fn cleanup_dry_run_does_not_mutate_manifest_for_unowned_transition() {
         let library = TempDir::new().unwrap();
 
         let skill_dir = library.path().join("stale");
@@ -305,22 +423,35 @@ mod tests {
             },
         );
 
+        // Source 'test' is NOT in config.directories -> Case 1 (transition).
+        // Dry-run: count the would-be transition but don't mutate.
+        let config = empty_config();
         let discovered: HashSet<String> = HashSet::new();
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
             true,
             false,
             true,
         )
         .unwrap();
 
-        assert_eq!(result.removed_from_library, 1);
-        // Should still exist in dry run
+        assert_eq!(result.removed_from_library, 0);
+        assert_eq!(
+            result.transitioned_to_unowned, 1,
+            "dry-run should count the would-be transition"
+        );
+        // Library content preserved (Case 1 preserves regardless of dry-run).
         assert!(library.path().join("stale").exists());
-        // Manifest should still have the entry in dry run
+        // Manifest entry preserved AND source_name unchanged (dry-run skipped mutation).
         assert!(manifest.contains_key("stale"));
+        assert_eq!(
+            manifest.get("stale").unwrap().source_name,
+            Some(DirectoryName::new("test").unwrap()),
+            "dry-run must NOT mutate source_name"
+        );
     }
 
     #[test]
@@ -331,11 +462,13 @@ mod tests {
         unix_fs::symlink("/nonexistent/path", library.path().join("broken")).unwrap();
 
         let mut manifest = Manifest::default();
+        let config = empty_config();
         let discovered: HashSet<String> = HashSet::new();
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
             false,
             false,
             true,
@@ -397,18 +530,21 @@ mod tests {
     fn cleanup_dry_run_preserves_managed_symlink() {
         let library = TempDir::new().unwrap();
 
-        // Create a broken symlink simulating a managed skill whose source was removed
+        // Create a broken symlink simulating a managed skill whose source was removed.
+        // Manifest has NO entry for stale-skill — so it's not classified by D-09 cases;
+        // it falls into the broken-symlink branch instead.
         unix_fs::symlink("/nonexistent", library.path().join("stale-skill")).unwrap();
         assert!(library.path().join("stale-skill").is_symlink());
 
-        // Manifest has NO entry for stale-skill — it is stale
         let mut manifest = Manifest::default();
+        let config = empty_config();
         let discovered: HashSet<String> = HashSet::new();
 
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
             true,
             false,
             true,
@@ -427,11 +563,13 @@ mod tests {
     }
 
     #[test]
-    fn cleanup_removes_managed_symlink() {
+    fn cleanup_transitions_managed_symlink_to_unowned_when_source_removed() {
         let library = TempDir::new().unwrap();
         let source = tempfile::TempDir::new().unwrap();
 
-        // Create a managed skill symlink in the library
+        // Create a managed skill symlink in the library (v0.9-shape artifact;
+        // in v0.10 these would be real dirs per Plan 11-02, but the legacy
+        // shape is still a valid scenario here).
         let skill_source = source.path().join("plugin-skill");
         std::fs::create_dir_all(&skill_source).unwrap();
         std::fs::write(skill_source.join("SKILL.md"), "# test").unwrap();
@@ -449,12 +587,156 @@ mod tests {
             },
         );
 
-        // Skill not in discovered names — should be removed
+        // Source 'plugins' is NOT in config.directories -> Case 1 (transition).
+        let config = empty_config();
         let discovered: HashSet<String> = HashSet::new();
         let result = cleanup_library(
             library.path(),
             &discovered,
             &mut manifest,
+            &config,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.removed_from_library, 0, "Case 1 must NOT delete");
+        assert_eq!(result.transitioned_to_unowned, 1, "Case 1 must transition");
+        assert!(
+            library.path().join("plugin-skill").is_symlink(),
+            "library content (managed symlink) preserved on transition"
+        );
+        assert!(
+            manifest.contains_key("plugin-skill"),
+            "manifest entry preserved on transition"
+        );
+        assert_eq!(
+            manifest.get("plugin-skill").unwrap().source_name,
+            None,
+            "source_name transitioned to None"
+        );
+    }
+
+    #[test]
+    fn cleanup_case2_deletes_when_source_still_configured() {
+        let library = TempDir::new().unwrap();
+        let skill_dir = library.path().join("vanished");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("vanished").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/source/vanished"),
+                crate::config::DirectoryName::new("active-source").unwrap(),
+                crate::validation::test_hash("h"),
+                false,
+            ),
+        );
+
+        // Config STILL has "active-source" — file vanished from source disk -> Case 2.
+        let config = config_with_dir("active-source");
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            &config,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.removed_from_library, 1, "Case 2 must delete");
+        assert_eq!(
+            result.transitioned_to_unowned, 0,
+            "Case 2 must NOT transition"
+        );
+        assert!(
+            !library.path().join("vanished").exists(),
+            "Case 2 must remove library dir"
+        );
+        assert!(!manifest.contains_key("vanished"));
+    }
+
+    #[test]
+    fn cleanup_already_unowned_entry_is_preserved_and_not_counted() {
+        let library = TempDir::new().unwrap();
+        let skill_dir = library.path().join("orphan");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan").unwrap(),
+            crate::manifest::SkillEntry::new_unowned(
+                std::path::PathBuf::from("/tmp/orphan"),
+                crate::validation::test_hash("h"),
+                false,
+            ),
+        );
+
+        let config = empty_config();
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            &config,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.removed_from_library, 0);
+        assert_eq!(
+            result.transitioned_to_unowned, 0,
+            "already-Unowned must not be counted"
+        );
+        assert!(
+            library.path().join("orphan").is_dir(),
+            "Unowned library content preserved"
+        );
+        assert!(manifest.contains_key("orphan"));
+        assert!(manifest.get("orphan").unwrap().source_name.is_none());
+    }
+
+    #[test]
+    fn cleanup_case1_and_case2_in_same_run() {
+        let library = TempDir::new().unwrap();
+        std::fs::create_dir_all(library.path().join("orphan-c1")).unwrap();
+        std::fs::create_dir_all(library.path().join("vanished-c2")).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan-c1").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/removed-source/orphan-c1"),
+                crate::config::DirectoryName::new("removed-source").unwrap(),
+                crate::validation::test_hash("h1"),
+                false,
+            ),
+        );
+        manifest.insert(
+            crate::discover::SkillName::new("vanished-c2").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/active-source/vanished-c2"),
+                crate::config::DirectoryName::new("active-source").unwrap(),
+                crate::validation::test_hash("h2"),
+                false,
+            ),
+        );
+
+        // Config has "active-source" but NOT "removed-source".
+        let config = config_with_dir("active-source");
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            &config,
             false,
             false,
             true,
@@ -462,10 +744,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.removed_from_library, 1);
-        assert!(
-            !library.path().join("plugin-skill").exists(),
-            "managed symlink should be removed"
-        );
-        assert!(!manifest.contains_key("plugin-skill"));
+        assert_eq!(result.transitioned_to_unowned, 1);
+        assert!(library.path().join("orphan-c1").exists(), "C1 preserved");
+        assert!(!library.path().join("vanished-c2").exists(), "C2 deleted");
+        assert_eq!(manifest.get("orphan-c1").unwrap().source_name, None);
+        assert!(!manifest.contains_key("vanished-c2"));
     }
 }
