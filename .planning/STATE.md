@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: planning
-stopped_at: Phase 11 context gathered
-last_updated: "2026-05-03T11:25:25.962Z"
-last_activity: 2026-05-02 — ROADMAP.md created (7 phases, 49 reqs, 100% coverage)
+status: executing
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-05-03T13:21:56.960Z"
+last_activity: 2026-05-03
 progress:
   total_phases: 7
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 5
+  completed_plans: 1
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** v0.10 — Library-canonical Model + Cross-Machine Plugin Reconciliation. Reshape the library to be a single source of truth (managed-as-copy), make the lockfile authoritative for cross-machine reproducibility, ship marketplace adapters for plugin install/update on sync, and bundle the v0.9-review CLI hardening backlog.
+**Current focus:** Phase 11 — library-canonical-core
 
 ## Current Position
 
-Phase: 11 — Library-canonical core
-Plan: — (none yet; awaiting `/gsd:plan-phase 11`)
-Status: Ready to plan Phase 11
-Last activity: 2026-05-02 — ROADMAP.md created (7 phases, 49 reqs, 100% coverage)
+Phase: 11 (library-canonical-core) — EXECUTING
+Plan: 2 of 5
+Status: Ready to execute
+Last activity: 2026-05-03
 
 **v0.10 phase shape (Phases 11–17):**
 
@@ -54,6 +54,7 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.7-ROADMAP.md` — per-phase decisions for v0.7
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — Tauri GUI milestone (drafted, deferred to after v0.10 ships)
+- [Phase 11]: LIB-03: SkillEntry/LockEntry source_name lifted to Option<DirectoryName>; SkillEntry::new signature unchanged via twin-constructor pattern (new + new_unowned); Manifest::skills_get_mut accessor lifted into Plan 11-01 to keep manifest.rs touches contained
 
 ### v0.10 design context (consume during planning)
 
@@ -92,6 +93,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-03T11:25:25.955Z
-Stopped at: Phase 11 context gathered
-Resume file: .planning/phases/11-library-canonical-core/11-CONTEXT.md
+Last session: 2026-05-03T13:21:42.642Z
+Stopped at: Completed 11-01-PLAN.md
+Resume file: None

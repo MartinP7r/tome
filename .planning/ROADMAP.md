@@ -84,7 +84,7 @@
   4. On a machine with an existing v0.9-shape library (mix of symlinks + real dirs), `tome sync` refuses with a Conflict / Why / Suggestion error pointing at `tome migrate-library`. Running `tome migrate-library` (or `tome migrate-library --dry-run`) detects v0.9-shape entries via `is_symlink() && manifest.contains_key(name) && manifest[name].managed == true` (D-03), converts symlinks to real-dir copies, and exits non-zero on any failure with a SAFE-01 grouped summary. Re-runs are idempotent — successful conversions are skipped, broken-source entries are preserved in place (D-04), and post-migration `tome sync` proceeds normally. **No `machine.toml::migration_v010_acknowledged` flag is persisted** — running the command IS the consent. Decision rationale: CONTEXT.md D-01.
   5. The cleanup phase no longer auto-deletes orphan library entries; orphans surface in `tome status` and `tome doctor` output as the new unowned set (Phase 14 wires the surfacing; this phase ensures cleanup leaves them in place).
 **Plans**: 5 plans
-- [ ] 11-01-PLAN.md — Manifest + lockfile schema lift (`source_name: Option<DirectoryName>`, `new_unowned` constructor; LIB-03)
+- [x] 11-01-PLAN.md — Manifest + lockfile schema lift (`source_name: Option<DirectoryName>`, `new_unowned` constructor; LIB-03)
 - [ ] 11-02-PLAN.md — `consolidate_managed` rewrite (symlink → real-dir copy; LIB-01, LIB-02)
 - [ ] 11-03-PLAN.md — Source-removal → Unowned transition (cleanup Case 1/2 split + `tome remove` explicit trigger; LIB-04)
 - [ ] 11-04-PLAN.md — `tome migrate-library` CLI command + sync v0.9-shape refuse-with-hint (LIB-05)
@@ -176,7 +176,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
 | 9. Cross-Machine Path Overrides | v0.9 | 3/3 | Complete | 2026-04-28 |
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
-| 11. Library-canonical core | v0.10 | 0/TBD | Not started | - |
+| 11. Library-canonical core | v0.10 | 1/5 | In Progress|  |
 | 12. Marketplace adapter | v0.10 | 0/TBD | Not started | - |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/TBD | Not started | - |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
