@@ -412,6 +412,14 @@ MigrateLibrary {
            }
 
            // 1. Capture source content_hash before conversion (used to verify post-copy).
+           //    NOTE: Add an inline comment AT THIS SITE in the produced code reading
+           //    exactly:
+           //        // hash_directory works on a symlink path: WalkDir follows the symlink root
+           //        // even when follow_links is false, so this hashes the source content correctly.
+           //    This documents the implicit assumption the executor relies on (the
+           //    `library_path` is still a symlink at this point and walkdir's
+           //    follow-symlink-root default is what makes hashing the *source*
+           //    content possible without a manual `read_link` resolve.)
            let pre_hash = match manifest::hash_directory(&entry.library_path) {
                Ok(h) => h,
                Err(e) => {
@@ -876,6 +884,13 @@ MigrateLibrary {
    pub(crate) mod migration_v010;
    ```
    Place it alphabetically between `manifest` and `paths` (the existing module list is alphabetical).
+
+3. **Add the `pre_hash` site inline comment in `execute()`.** When you write the `execute()` body, ensure that immediately above the `let pre_hash = match manifest::hash_directory(&entry.library_path) { ... }` line you place the following comment exactly:
+   ```rust
+   // hash_directory works on a symlink path: WalkDir follows the symlink root
+   // even when follow_links is false, so this hashes the source content correctly.
+   ```
+   Rationale: at this point `library_path` is still a v0.9-shape symlink. `hash_directory` calls `WalkDir::new(library_path).follow_links(false)`, but walkdir follows the **symlink root** by default even when `follow_links(false)` (only nested symlinks are skipped). So hashing succeeds against the source content the symlink resolves to. The comment makes this implicit assumption explicit so a future reader doesn't get confused or "fix" it into a `read_link + hash_directory(target)` two-step.
   </action>
   <verify>
     <automated>cargo test --package tome --lib migration_v010::tests</automated>
@@ -890,10 +905,12 @@ MigrateLibrary {
     - `rg -n "fn copy_dir_recursive_resolving" crates/tome/src/migration_v010.rs` returns 1 match
     - `rg -n "follow_links\\(true\\)" crates/tome/src/migration_v010.rs` returns 1 match (resolves symlinks during copy, opposite of relocate.rs)
     - `rg -n "pub\\(crate\\) mod migration_v010;" crates/tome/src/lib.rs` returns 1 match
+    - `rg -n "WalkDir follows the symlink root" crates/tome/src/migration_v010.rs` returns 1 match (the inline comment above the `pre_hash` site documenting the implicit assumption)
+    - execute() body in migration_v010.rs contains the comment "WalkDir follows the symlink root"
     - `cargo test --package tome --lib migration_v010::tests` exits 0 (all 11 unit tests pass)
     - `cargo build --package tome` exits 0
   </acceptance_criteria>
-  <done>migration_v010.rs created with detection (D-03), plan/render/execute (D-04 broken-symlink preserve, D-05 SAFE-01 failure aggregation, D-06 idempotency); module wired into lib.rs; comprehensive unit tests covering plan, detection variations, conversion, broken-symlink preservation, dry-run, idempotent re-run, and the compile-time MigrationFailureKind::ALL guard.</done>
+  <done>migration_v010.rs created with detection (D-03), plan/render/execute (D-04 broken-symlink preserve, D-05 SAFE-01 failure aggregation, D-06 idempotency); module wired into lib.rs; the `pre_hash` site has an inline comment documenting why `hash_directory` works on a symlink path (walkdir follows the symlink root); comprehensive unit tests covering plan, detection variations, conversion, broken-symlink preservation, dry-run, idempotent re-run, and the compile-time MigrationFailureKind::ALL guard.</done>
 </task>
 
 <task type="auto">
@@ -1027,3 +1044,5 @@ broken-symlink preservation rationale (D-04), SAFE-01 failure aggregation (D-05 
 K skipped · M failed banner), the lib.rs::sync refuse-with-hint integration point, and a
 v0.11 follow-up reminder ("delete migration_v010.rs and the sync v0.9-shape check").
 </output>
+</content>
+</invoke>

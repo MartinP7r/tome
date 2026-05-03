@@ -19,9 +19,10 @@ must_haves:
     - "Round-tripping a manifest entry with `source_name = Some(...)` writes the same string shape as today (`\"source_name\": \"foo\"`)."
     - "All existing call-sites continue to work via the existing `SkillEntry::new(...)` constructor (still takes owned `DirectoryName`)."
     - "A new `SkillEntry::new_unowned(source_path, content_hash, managed)` constructor produces an entry with `source_name = None`."
+    - "A `Manifest::skills_get_mut(name) -> Option<&mut SkillEntry>` accessor exists for downstream plans to perform in-place transitions (Plan 11-03 uses it for the Unowned transition; this avoids cross-plan touches of manifest.rs)."
   artifacts:
     - path: "crates/tome/src/manifest.rs"
-      provides: "SkillEntry with `source_name: Option<DirectoryName>`, `new_unowned` constructor"
+      provides: "SkillEntry with `source_name: Option<DirectoryName>`, `new_unowned` constructor, `Manifest::skills_get_mut` accessor"
       contains: "Option<DirectoryName>"
     - path: "crates/tome/src/lockfile.rs"
       provides: "LockEntry with `source_name: Option<DirectoryName>`"
@@ -50,7 +51,9 @@ SkillEntry/LockEntry).
 
 Output: `manifest.rs` and `lockfile.rs` updated; tests cover old-shape compatibility
 and new Unowned round-trip. All existing call-sites unchanged (still pass owned
-`DirectoryName` via `SkillEntry::new`).
+`DirectoryName` via `SkillEntry::new`). Adds the `Manifest::skills_get_mut` accessor
+that Plan 11-03 needs for the Case 1 Unowned transition (lifted into this plan to
+keep manifest.rs touches contained to Plan 11-01).
 </objective>
 
 <execution_context>
@@ -114,7 +117,7 @@ pub struct LockEntry {
 <tasks>
 
 <task type="auto" tdd="true">
-  <name>Task 1: Lift `SkillEntry.source_name` to `Option<DirectoryName>` and add `new_unowned` constructor</name>
+  <name>Task 1: Lift `SkillEntry.source_name` to `Option<DirectoryName>`, add `new_unowned` constructor and `Manifest::skills_get_mut` accessor</name>
   <files>crates/tome/src/manifest.rs</files>
   <read_first>
     - crates/tome/src/manifest.rs (current SkillEntry struct, `new` constructor, `update_source_name`, all `mod tests`)
@@ -128,6 +131,8 @@ pub struct LockEntry {
     - Test 5 (round-trip owned preserves shape): `SkillEntry::new(path, DirectoryName::new("foo")?, hash, false)` serializes to JSON containing `"source_name": "foo"` (no `Some(...)` wrapping in JSON).
     - Test 6 (`new_unowned` constructor): `SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false)` returns an entry with `source_name == None`, `source_path == "/tmp/x"`, `content_hash == test_hash("h")`, `managed == false`, and a non-empty `synced_at`.
     - Test 7 (`update_source_name` still works for owned entries): existing `update_source_name("name", &new_dir)` test must still pass (entry must already have `source_name = Some(...)` to be updated; behavior change documented below).
+    - Test 8 (`skills_get_mut` returns Some for existing entry): inserting an entry then calling `manifest.skills_get_mut("name")` returns `Some(&mut SkillEntry)`; mutating `.source_name = None` through the returned reference is observable on a subsequent `manifest.get("name")`.
+    - Test 9 (`skills_get_mut` returns None for missing entry): `manifest.skills_get_mut("nonexistent")` returns `None`.
   </behavior>
   <action>
 1. **Change `SkillEntry.source_name` field declaration.**
@@ -214,17 +219,40 @@ pub struct LockEntry {
        }
    ```
 
-5. **Update existing test fixtures in this file** so they keep compiling with the new shape:
+5. **Add `Manifest::skills_get_mut` accessor** for downstream plans (specifically Plan 11-03's Case 1 Unowned transition in `cleanup.rs`). Add this method to the `impl Manifest` block, placed near `update_source_name` for cohesion:
+   ```rust
+       /// Mutable access to a skill entry by name. Used by downstream code that
+       /// needs to mutate an entry's fields in place (e.g. transitioning
+       /// `source_name` to `None` for the Unowned state per LIB-04 / D-10
+       /// trigger 2 in `cleanup::cleanup_library`).
+       ///
+       /// Returns `None` if no entry exists with that name. Keep the surface
+       /// minimal (`pub(crate)`) — external callers should use higher-level
+       /// helpers like `update_source_name`.
+       pub(crate) fn skills_get_mut(&mut self, name: &str) -> Option<&mut SkillEntry> {
+           self.skills.get_mut(name)
+       }
+   ```
+
+   Lifting this accessor here (rather than in Plan 11-03) keeps all `manifest.rs`
+   touches contained to Plan 11-01. Plan 11-03's `cleanup.rs` and `remove.rs`
+   work then call `manifest.skills_get_mut(name)` directly without needing to
+   add another method to `manifest.rs`.
+
+6. **Update existing test fixtures in this file** so they keep compiling with the new shape:
    - In `manifest_roundtrip` (line ~294): the literal struct `SkillEntry { source_name: DirectoryName::new("test").unwrap(), ... }` becomes `source_name: Some(DirectoryName::new("test").unwrap())`.
    - In `update_source_name_existing_skill` and `update_source_name_missing_skill`: still use `SkillEntry::new(...)` (no change needed — the constructor wraps in `Some` internally).
+   - In `update_source_name_existing_skill`: the assertion `assert_eq!(manifest.get("my-skill").unwrap().source_name, new_source);` becomes `assert_eq!(manifest.get("my-skill").unwrap().source_name, Some(new_source));` to account for the Option wrapping.
 
-6. **Add tests for the new behavior** (place at end of `mod tests`, before the closing `}`):
+7. **Add tests for the new behavior** (place at end of `mod tests`, before the closing `}`):
    - `deserialize_old_shape_with_source_name_string` — covers Test 1
    - `deserialize_new_shape_with_null_source_name` — covers Test 2
    - `deserialize_new_shape_missing_source_name` — covers Test 3
    - `serialize_unowned_entry_omits_source_name_key` — covers Test 4 (assert `!json.contains("source_name")`)
    - `serialize_owned_entry_preserves_string_shape` — covers Test 5 (assert `json.contains("\"source_name\": \"foo\"")`)
    - `new_unowned_constructor_sets_source_name_none` — covers Test 6
+   - `skills_get_mut_returns_some_for_existing_entry` — covers Test 8
+   - `skills_get_mut_returns_none_for_missing_entry` — covers Test 9
 
    Use `crate::validation::test_hash("...")` for content_hash values. Use the existing `tempfile::TempDir` import where needed; the new tests are pure JSON-parsing and don't need filesystem.
 
@@ -256,7 +284,35 @@ pub struct LockEntry {
    }
    ```
 
-7. **Honor LIB-02 documentation update** in this file too. Update the `managed` field's doc comment from:
+   For Test 8 example:
+   ```rust
+   #[test]
+   fn skills_get_mut_returns_some_for_existing_entry() {
+       let mut manifest = Manifest::default();
+       manifest.insert(
+           crate::discover::SkillName::new("my-skill").unwrap(),
+           SkillEntry::new(
+               PathBuf::from("/tmp/source/my-skill"),
+               DirectoryName::new("src").unwrap(),
+               test_hash("h"),
+               false,
+           ),
+       );
+       {
+           let entry = manifest.skills_get_mut("my-skill").expect("should be present");
+           entry.source_name = None;
+       }
+       assert_eq!(manifest.get("my-skill").unwrap().source_name, None);
+   }
+
+   #[test]
+   fn skills_get_mut_returns_none_for_missing_entry() {
+       let mut manifest = Manifest::default();
+       assert!(manifest.skills_get_mut("nonexistent").is_none());
+   }
+   ```
+
+8. **Honor LIB-02 documentation update** in this file too. Update the `managed` field's doc comment from:
    ```rust
        /// Whether this skill is managed by a package manager (symlinked, not copied).
        /// Defaults to `false` for backwards compatibility with pre-v0.2.1 manifests.
@@ -281,13 +337,14 @@ pub struct LockEntry {
     - `rg -n "pub source_name: Option<DirectoryName>" crates/tome/src/manifest.rs` returns 1 match
     - `rg -n "skip_serializing_if = \"Option::is_none\"" crates/tome/src/manifest.rs` returns at least 1 match (on the `source_name` field)
     - `rg -n "pub fn new_unowned" crates/tome/src/manifest.rs` returns 1 match
+    - `rg -n "pub\\(crate\\) fn skills_get_mut" crates/tome/src/manifest.rs` returns 1 match (the new accessor)
     - `rg -n "source_name: Some\\(source_name\\)" crates/tome/src/manifest.rs` returns 1 match (in `SkillEntry::new`)
     - `rg -n "source_name: None" crates/tome/src/manifest.rs` returns at least 1 match (in `new_unowned` body and tests)
-    - `rg -n "deserialize_old_shape_with_source_name_string|deserialize_new_shape_with_null_source_name|deserialize_new_shape_missing_source_name|serialize_unowned_entry_omits_source_name_key|serialize_owned_entry_preserves_string_shape|new_unowned_constructor_sets_source_name_none" crates/tome/src/manifest.rs` returns 6 matches
+    - `rg -n "deserialize_old_shape_with_source_name_string|deserialize_new_shape_with_null_source_name|deserialize_new_shape_missing_source_name|serialize_unowned_entry_omits_source_name_key|serialize_owned_entry_preserves_string_shape|new_unowned_constructor_sets_source_name_none|skills_get_mut_returns_some_for_existing_entry|skills_get_mut_returns_none_for_missing_entry" crates/tome/src/manifest.rs` returns 8 matches
     - `cargo test --package tome --lib manifest::tests` exits 0
     - `cargo build --package tome` exits 0 (compilation across all call-sites still works because `SkillEntry::new` signature unchanged)
   </acceptance_criteria>
-  <done>Manifest schema lifted; old-shape and new-shape JSON both round-trip correctly; new `new_unowned` constructor available; managed field doc reflects LIB-02 "update channel" semantics; all existing tests pass; new tests assert the exact behaviors above.</done>
+  <done>Manifest schema lifted; old-shape and new-shape JSON both round-trip correctly; new `new_unowned` constructor available; new `Manifest::skills_get_mut` accessor available for downstream plans (lifted into Plan 11-01 to keep manifest.rs touches contained); managed field doc reflects LIB-02 "update channel" semantics; all existing tests pass; new tests assert the exact behaviors above.</done>
 </task>
 
 <task type="auto" tdd="true">
@@ -417,12 +474,17 @@ pub struct LockEntry {
 
 <success_criteria>
 - LIB-03 fully addressed: manifest and lockfile both accept old (`source_name: "foo"`) and new (Unowned) shapes via serde defaults; new `new_unowned` constructor available.
+- New `Manifest::skills_get_mut` accessor in place; downstream Plan 11-03 uses it without re-touching `manifest.rs`.
 - Schema is now ready for Phase 13 drift detection (D-08): `content_hash: ContentHash` remains the authoritative drift signal; `version: Option<String>` stays as display-only.
 - No call-site changes required outside this plan (the `SkillEntry::new` constructor preserves its signature).
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/11-library-canonical-core/11-01-SUMMARY.md`
-documenting: schema changes (field type, serde attrs, new constructor), test additions,
-backward-compat verification, and any follow-on items for downstream Phase 11 plans.
+documenting: schema changes (field type, serde attrs, new constructor), the new
+`Manifest::skills_get_mut` accessor and why it lives here (Plan 11-01) rather than
+in Plan 11-03, test additions, backward-compat verification, and any follow-on
+items for downstream Phase 11 plans.
 </output>
+</content>
+</invoke>

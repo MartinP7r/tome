@@ -9,6 +9,7 @@ depends_on:
   - 11-03
   - 11-04
 files_modified:
+  - crates/tome/src/lib.rs
   - crates/tome/tests/cli.rs
 autonomous: true
 requirements:
@@ -22,7 +23,11 @@ must_haves:
     - "An end-to-end CLI test exercises source removal preservation (LIB-04 / D-09 Case 1): set up tome.toml with directory D containing skill X → `tome sync` → remove D from tome.toml → `tome sync` again → assert library still contains X with same `content_hash` AND manifest entry has `source_name == None`."
     - "An end-to-end CLI test exercises `tome migrate-library --dry-run`: command exits 0 (or non-zero only when broken-symlinks present), no filesystem mutation, plan rendered to stdout."
     - "An end-to-end CLI test exercises post-migration idempotent `tome sync`: after `tome migrate-library` succeeds, running `tome sync` does NOT refuse anymore — sync succeeds (consolidate sees real dirs, treats them as no-op or hash-matched updates)."
+    - "Integration tests reuse `tome::manifest::hash_directory` directly via a crate-root re-export — no duplicated SHA-256 helper, so the test fixture's hashes are byte-for-byte identical to the production hashing algorithm."
   artifacts:
+    - path: "crates/tome/src/lib.rs"
+      provides: "Crate-root re-export of manifest::hash_directory so integration tests can call it without recomputing the algorithm"
+      contains: "pub use manifest::hash_directory"
     - path: "crates/tome/tests/cli.rs"
       provides: "Integration tests for v0.10 library-canonical core"
       contains: "tome migrate-library"
@@ -31,6 +36,10 @@ must_haves:
       to: "tome binary via assert_cmd"
       via: "Command::cargo_bin(\"tome\")"
       pattern: "Command::cargo_bin"
+    - from: "tests/cli.rs::build_v09_fixture"
+      to: "tome::hash_directory (re-exported from manifest)"
+      via: "crate-root re-export of the production hashing function"
+      pattern: "tome::hash_directory"
 ---
 
 <objective>
@@ -48,7 +57,10 @@ phase's success criteria 1, 2, 4 from ROADMAP.md Phase 11.
 
 Output: New tests appended to `crates/tome/tests/cli.rs` (or a new section if
 preferred; HARD-13 will eventually split this file in Phase 15, but for Phase 11 we
-follow the existing single-file convention).
+follow the existing single-file convention). Plus a one-line crate-root re-export
+in `lib.rs` so integration tests can call the production `hash_directory` function
+directly (avoids a duplicated SHA-256 helper that could drift from the production
+algorithm).
 </objective>
 
 <execution_context>
@@ -64,6 +76,8 @@ follow the existing single-file convention).
 @CLAUDE.md
 @crates/tome/tests/cli.rs
 @crates/tome/src/cli.rs
+@crates/tome/src/lib.rs
+@crates/tome/src/manifest.rs
 @crates/tome/src/migration_v010.rs
 
 <interfaces>
@@ -74,6 +88,16 @@ follow the existing single-file convention).
      - Set `--config <path>` and `--tome-home <path>` to point at the temp tree.
      - For machine.toml, use `--machine <path>` to isolate.
      - For non-interactive tests, pass `--no-input`. -->
+
+<!-- Existing manifest.rs hashing function (already `pub fn` inside the
+     `pub(crate) mod manifest;` module — currently inaccessible from
+     integration tests because the module is `pub(crate)`). After Task 0
+     of this plan, it's reachable as `tome::hash_directory` via a crate-root
+     `pub use` re-export. -->
+```rust
+// crates/tome/src/manifest.rs (existing — UNCHANGED in this plan):
+pub fn hash_directory(dir: &Path) -> Result<ContentHash>
+```
 
 <!-- The synthetic v0.9 library fixture should mimic the user's real layout per
      CONTEXT.md <specifics>:
@@ -87,12 +111,64 @@ follow the existing single-file convention).
 <tasks>
 
 <task type="auto">
+  <name>Task 0: Re-export `manifest::hash_directory` at the crate root for integration test reuse</name>
+  <files>crates/tome/src/lib.rs</files>
+  <read_first>
+    - crates/tome/src/lib.rs (current `pub(crate) mod manifest;` declaration and existing `pub use ...` re-exports — observe placement convention)
+    - crates/tome/src/manifest.rs (confirm `pub fn hash_directory(dir: &Path) -> Result<ContentHash>` exists with that signature)
+  </read_first>
+  <action>
+1. **Add a crate-root re-export** of `manifest::hash_directory` so integration tests
+   in `crates/tome/tests/cli.rs` can call it without their own SHA-256 helper.
+   The function is already `pub` inside the `pub(crate) mod manifest;` module —
+   the only obstacle is the module's `pub(crate)` visibility, which prevents
+   integration tests (which are external crate consumers) from reaching it.
+
+   The minimum-surface-area fix: add a single re-export line near the existing
+   `pub use ...` declarations in `crates/tome/src/lib.rs`. Place it next to other
+   re-exports (e.g. after `pub use config::*` or wherever sibling re-exports
+   live; alphabetical or grouped — match the existing convention). The line:
+   ```rust
+   /// Re-exported for integration tests so the synthetic-fixture builder in
+   /// `tests/cli.rs` can hash directories with the exact same algorithm the
+   /// production manifest uses (avoids a duplicated SHA-256 helper that could
+   /// drift). Production code should still call `manifest::hash_directory`
+   /// directly via the crate path.
+   pub use manifest::hash_directory;
+   ```
+
+   Rationale: `hash_directory` is a pure deterministic function with no side
+   effects and no dependencies on internal types beyond `ContentHash` (which
+   is already crate-public). Exposing it has zero risk and saves us from
+   maintaining a parallel implementation in tests.
+
+2. **Verify the re-export compiles cleanly:**
+   ```bash
+   cargo build --package tome
+   cargo test --package tome --lib --no-run  # confirms unit tests still build
+   ```
+
+3. **No other code changes** in this task. The actual integration tests that USE
+   the re-export are in Task 1 below.
+  </action>
+  <verify>
+    <automated>cargo build --package tome</automated>
+  </verify>
+  <acceptance_criteria>
+    - `rg -n "pub use manifest::hash_directory" crates/tome/src/lib.rs` returns 1 match
+    - `cargo build --package tome` exits 0
+    - `cargo test --package tome --lib --no-run` exits 0 (unit tests still compile after the re-export)
+  </acceptance_criteria>
+  <done>The crate root exposes `tome::hash_directory` for integration-test consumption; production code paths are unchanged; the re-export carries a doc comment explaining its purpose.</done>
+</task>
+
+<task type="auto">
   <name>Task 1: Add fixture helper and core migrate-library happy-path test</name>
   <files>crates/tome/tests/cli.rs</files>
   <read_first>
     - crates/tome/tests/cli.rs (the WHOLE file — observe existing test conventions, fixture builders, common helpers)
     - crates/tome/src/migration_v010.rs (output banner format from Plan 11-04 — `⚠ N converted · K skipped · M failed`)
-    - crates/tome/src/lib.rs (refuse-with-hint message text from Plan 11-04 Task 2)
+    - crates/tome/src/lib.rs (refuse-with-hint message text from Plan 11-04 Task 2; AND the `pub use manifest::hash_directory;` re-export from this plan's Task 0)
     - .planning/phases/11-library-canonical-core/11-CONTEXT.md (`<specifics>` for synthetic library shape)
   </read_first>
   <action>
@@ -183,24 +259,26 @@ follow the existing single-file convention).
        std::fs::write(user_target.join("SKILL.md"), "# user").unwrap();
        unix_fs::symlink(&user_target, library_dir.join("user-symlink")).unwrap();
 
-       // Write the manifest with managed entries for p1, p2, broken; local entry for l1.
-       // Use serde_json directly to bypass needing tome::manifest's pub API.
-       let p1_hash = sha256_dir_simple(&plugin_cache.join("p1"));
-       let p2_hash = sha256_dir_simple(&plugin_cache.join("p2"));
-       let l1_hash = sha256_dir_simple(&l1_lib);
+       // Compute content_hashes using the production algorithm via the
+       // crate-root re-export added in Task 0 of this plan. This guarantees
+       // byte-for-byte identity with `manifest::hash_directory` — no risk of
+       // a duplicated SHA-256 helper drifting.
+       let p1_hash = tome::hash_directory(&plugin_cache.join("p1")).unwrap();
+       let p2_hash = tome::hash_directory(&plugin_cache.join("p2")).unwrap();
+       let l1_hash = tome::hash_directory(&l1_lib).unwrap();
        let manifest_json = serde_json::json!({
            "skills": {
                "p1": {
                    "source_path": plugin_cache.join("p1").to_string_lossy(),
                    "source_name": "plugins",
-                   "content_hash": p1_hash,
+                   "content_hash": p1_hash.as_str(),
                    "synced_at": "2024-01-01T00:00:00Z",
                    "managed": true
                },
                "p2": {
                    "source_path": plugin_cache.join("p2").to_string_lossy(),
                    "source_name": "plugins",
-                   "content_hash": p2_hash,
+                   "content_hash": p2_hash.as_str(),
                    "synced_at": "2024-01-01T00:00:00Z",
                    "managed": true
                },
@@ -214,7 +292,7 @@ follow the existing single-file convention).
                "l1": {
                    "source_path": l1.to_string_lossy(),
                    "source_name": "local",
-                   "content_hash": l1_hash,
+                   "content_hash": l1_hash.as_str(),
                    "synced_at": "2024-01-01T00:00:00Z",
                    "managed": false
                }
@@ -260,40 +338,17 @@ role = "source"
            machine_path,
        }
    }
-
-   /// Compute a SHA-256 hex of a directory's contents matching the algorithm
-   /// in `crates/tome/src/manifest.rs::hash_directory` (sorted relpath + content).
-   fn sha256_dir_simple(dir: &Path) -> String {
-       use sha2::{Digest, Sha256};
-       let mut entries: Vec<(String, PathBuf)> = Vec::new();
-       for e in walkdir::WalkDir::new(dir) {
-           let e = e.unwrap();
-           if e.file_type().is_file() {
-               let rel = e.path().strip_prefix(dir).unwrap().to_string_lossy().into_owned();
-               entries.push((rel, e.path().to_path_buf()));
-           }
-       }
-       entries.sort_by(|a, b| a.0.cmp(&b.0));
-       let mut hasher = Sha256::new();
-       for (rel, abs) in &entries {
-           hasher.update(rel.as_bytes());
-           hasher.update(b"\0");
-           hasher.update(std::fs::read(abs).unwrap());
-       }
-       hasher
-           .finalize()
-           .iter()
-           .map(|b| format!("{:02x}", b))
-           .collect()
-       // NOTE: must match `manifest::hash_directory` byte-for-byte. If that
-       // function changes its algorithm in a future phase, this helper must
-       // be updated; the test will fail with a hash-mismatch assertion.
-   }
    ```
 
-   If `walkdir` and `sha2` are not already imported in tests/cli.rs, add `use walkdir;` is unnecessary (use full paths above). Confirm `sha2` is available in dev-deps; if not, add via Cargo.toml dev-dependencies (it's already a regular dep, so it's accessible from integration tests via `tome::` is NOT possible — instead, the simpler approach is to add `sha2 = "0.11"` under `[dev-dependencies]` if not already there. Run `rg "sha2" /Users/martin/dev/opensource/tome/crates/tome/Cargo.toml` to check; if absent, add to dev-dependencies).
+   **Note on the SHA-256 helper:** the previous draft of this plan included a
+   parallel `sha256_dir_simple` helper that re-implemented the production
+   hashing algorithm. That has been REPLACED with direct calls to the
+   crate-root `tome::hash_directory` re-export added by Task 0 — there is
+   exactly one canonical hashing implementation in the codebase, and the
+   tests use it. If `manifest::hash_directory` ever changes shape, the tests
+   automatically pick up the new behavior with no parallel helper to update.
 
-2. **Add the migrate-library happy-path test:**
+3. **Add the migrate-library happy-path test:**
    ```rust
    #[test]
    fn migrate_library_converts_managed_symlinks_to_real_dirs() {
@@ -358,7 +413,7 @@ role = "source"
    }
    ```
 
-3. **Add the dry-run test:**
+4. **Add the dry-run test:**
    ```rust
    #[test]
    fn migrate_library_dry_run_makes_no_changes() {
@@ -400,10 +455,12 @@ role = "source"
   <acceptance_criteria>
     - `rg -n "fn build_v09_fixture" crates/tome/tests/cli.rs` returns 1 match
     - `rg -n "fn migrate_library_converts_managed_symlinks_to_real_dirs|fn migrate_library_dry_run_makes_no_changes" crates/tome/tests/cli.rs` returns 2 matches
+    - `rg -n "tome::hash_directory" crates/tome/tests/cli.rs` returns at least 3 matches (one per managed/local entry hashed in the fixture)
+    - `rg -n "fn sha256_dir_simple" crates/tome/tests/cli.rs` returns 0 matches (the parallel helper from the original draft is REPLACED with the production re-export — there must be no duplicated SHA-256 implementation)
     - `cargo test --package tome --test cli migrate_library_converts_managed_symlinks_to_real_dirs` exits 0
     - `cargo test --package tome --test cli migrate_library_dry_run_makes_no_changes` exits 0
   </acceptance_criteria>
-  <done>Fixture helper and the two core migrate-library tests are in place; happy-path conversion verified end-to-end; dry-run preserves filesystem state; broken-symlink and user-symlink boundary defenses are exercised.</done>
+  <done>Fixture helper and the two core migrate-library tests are in place; happy-path conversion verified end-to-end; dry-run preserves filesystem state; broken-symlink and user-symlink boundary defenses are exercised; the fixture builder uses the production `tome::hash_directory` re-export — no parallel SHA-256 helper exists.</done>
 </task>
 
 <task type="auto">
@@ -520,6 +577,7 @@ role = "source"
    #[test]
    fn sync_preserves_library_when_source_removed_from_config() {
        use std::os::unix::fs as unix_fs;
+       let _ = unix_fs::symlink as fn(_, _) -> _; // silence unused-import on the alias if needed
        let root = assert_fs::TempDir::new().unwrap();
        let tome_home = root.path().join("tome_home");
        let library_dir = tome_home.join("skills");
@@ -536,13 +594,14 @@ role = "source"
        std::fs::create_dir_all(&lib_alpha).unwrap();
        std::fs::write(lib_alpha.join("SKILL.md"), "# alpha").unwrap();
 
-       let alpha_hash = sha256_dir_simple(&lib_alpha);
+       // Use the production hash function via the crate-root re-export (Task 0).
+       let alpha_hash = tome::hash_directory(&lib_alpha).unwrap();
        let manifest_json = serde_json::json!({
            "skills": {
                "alpha": {
                    "source_path": src.to_string_lossy(),
                    "source_name": "local",
-                   "content_hash": alpha_hash,
+                   "content_hash": alpha_hash.as_str(),
                    "synced_at": "2024-01-01T00:00:00Z",
                    "managed": false
                }
@@ -617,7 +676,7 @@ role = "source"
        // content_hash unchanged.
        assert_eq!(
            alpha_entry["content_hash"].as_str().unwrap(),
-           alpha_hash,
+           alpha_hash.as_str(),
            "content_hash must remain unchanged across the Case 1 transition"
        );
    }
@@ -634,7 +693,7 @@ role = "source"
     - `cargo test --package tome --test cli` (full integration suite) exits 0 — no regressions in existing tests
     - `make ci` exits 0
   </acceptance_criteria>
-  <done>Three end-to-end CLI tests cover D-02 sync refuse-with-hint, D-09/D-10 trigger 2 source-removal preservation, and post-migration idempotent sync; the full integration suite still passes; the phase's success criteria 1, 2, 4 are now anchored by binary-level assertions.</done>
+  <done>Three end-to-end CLI tests cover D-02 sync refuse-with-hint, D-09/D-10 trigger 2 source-removal preservation, and post-migration idempotent sync; the full integration suite still passes; the phase's success criteria 1, 2, 4 are now anchored by binary-level assertions; the source-removal test also uses the production `tome::hash_directory` re-export for fixture hashing.</done>
 </task>
 
 </tasks>
@@ -649,6 +708,7 @@ role = "source"
   - `sync_refuses_on_v09_shape_library_with_hint`
   - `sync_succeeds_after_migrate_library`
   - `sync_preserves_library_when_source_removed_from_config`
+- `rg -n "fn sha256_dir_simple" crates/tome/tests/cli.rs` returns 0 matches (no parallel SHA-256 helper)
 </verification>
 
 <success_criteria>
@@ -657,12 +717,15 @@ role = "source"
 - ROADMAP.md Phase 11 success criterion 4 (migration idempotency / refuse-with-hint workflow) anchored by `sync_refuses_on_v09_shape_library_with_hint` + `sync_succeeds_after_migrate_library`.
 - The user-created-symlink and broken-symlink boundary defenses (D-03, D-04) are tested at the binary level.
 - The synthetic fixture mirrors Martin's real library shape per CONTEXT.md `<specifics>`, so Phase 17 / REL-04 (real-library smoke test) has high confidence the synthetic test transfers to production.
+- Test fixture hashing reuses the production `manifest::hash_directory` via the new `tome::hash_directory` re-export — no parallel SHA-256 helper exists, so there's no risk of algorithm drift between the fixture and the production code.
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/11-library-canonical-core/11-05-SUMMARY.md`
 documenting: the synthetic v0.9 fixture shape, all five integration tests added,
-the success criteria they anchor, and any quirks (e.g. SHA-256 helper duplication
-inside the test file vs. crate-internal `manifest::hash_directory` — note this for
-HARD-13 future test-file split).
+the success criteria they anchor, the new `tome::hash_directory` crate-root
+re-export rationale (option (a) from the checker — replaced the original parallel
+SHA-256 helper), and any quirks for HARD-13 future test-file split.
 </output>
+</content>
+</invoke>

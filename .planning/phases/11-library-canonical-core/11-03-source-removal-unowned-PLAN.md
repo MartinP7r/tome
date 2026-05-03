@@ -50,7 +50,9 @@ specified in CONTEXT.md D-10:
 D-09 scope: Case 1 only. Case 2 (source still configured but file vanished from disk)
 keeps today's "delete on next sync" behavior.
 
-Wave 2, runs in parallel with Plan 11-02. Both depend on Plan 11-01's schema lift.
+Wave 2, runs in parallel with Plan 11-02. Both depend on Plan 11-01's schema lift
+(specifically: Plan 11-01 also lifts the `Manifest::skills_get_mut` accessor — this
+plan calls it directly without re-touching `manifest.rs`).
 
 Output: `cleanup.rs::cleanup_library` partitions stale candidates by D-09 case, then
 either transitions (Case 1) or deletes (Case 2). `remove.rs::execute` adds the
@@ -109,6 +111,14 @@ pub(crate) fn execute(
     dry_run: bool,
 ) -> Result<RemoveResult>
 ```
+
+<!-- `Manifest::skills_get_mut` accessor — lifted into Plan 11-01 (it was originally
+     proposed here but moved upstream so all manifest.rs touches stay contained to
+     Plan 11-01). This plan just CALLS it; do NOT add it to manifest.rs from here. -->
+```rust
+// In crates/tome/src/manifest.rs (added by Plan 11-01 Task 1):
+pub(crate) fn skills_get_mut(&mut self, name: &str) -> Option<&mut SkillEntry>
+```
 </interfaces>
 </context>
 
@@ -121,6 +131,7 @@ pub(crate) fn execute(
     - crates/tome/src/cleanup.rs (the WHOLE file — current `cleanup_library`, all `mod tests`)
     - crates/tome/src/config.rs (Config::directories method/field — confirm it's `BTreeMap<DirectoryName, DirectoryConfig>`)
     - crates/tome/src/lib.rs (line ~1060 — current `cleanup::cleanup_library` call site, need to add `&config` arg)
+    - crates/tome/src/manifest.rs (post Plan 11-01 — confirm `Manifest::skills_get_mut` exists and is `pub(crate)`)
     - .planning/phases/11-library-canonical-core/11-CONTEXT.md (D-09, D-10, D-11)
   </read_first>
   <behavior>
@@ -209,6 +220,7 @@ pub(crate) fn execute(
            );
        }
        if !dry_run {
+           // skills_get_mut is provided by Plan 11-01 in manifest.rs; we just call it.
            if let Some(entry) = manifest.skills_get_mut(name.as_str()) {
                entry.source_name = None;
            }
@@ -292,14 +304,7 @@ pub(crate) fn execute(
    }
    ```
 
-4. **Add the `skills_get_mut` accessor to `Manifest`** if it doesn't already exist. Check first: `rg "fn skills_get_mut|fn get_mut" crates/tome/src/manifest.rs`. If neither exists, add to `impl Manifest` in `crates/tome/src/manifest.rs`:
-   ```rust
-       /// Mutable access to a skill entry by name.
-       pub(crate) fn skills_get_mut(&mut self, name: &str) -> Option<&mut SkillEntry> {
-           self.skills.get_mut(name)
-       }
-   ```
-   (Only add this if no equivalent `get_mut` accessor exists. Use `pub(crate)` to keep surface minimal.)
+4. **Confirm `Manifest::skills_get_mut` already exists in `manifest.rs`** (added by Plan 11-01 Task 1). Run `rg "fn skills_get_mut" crates/tome/src/manifest.rs` and verify exactly 1 match. If it does NOT exist, that means Plan 11-01 was implemented incorrectly — STOP and ping the user; this plan no longer adds the accessor itself (it was lifted upstream to keep manifest.rs touches contained to Plan 11-01).
 
 5. **Update the call site in `lib.rs`** (around line ~1060):
    - Find the existing call:
@@ -474,12 +479,13 @@ pub(crate) fn execute(
     - `rg -n "fn cleanup_library" crates/tome/src/cleanup.rs` returns 1 match with new signature including `config: &crate::config::Config`
     - `rg -n "transitioned_to_unowned" crates/tome/src/cleanup.rs` returns at least 3 matches (struct field, increment site, test assertions)
     - `rg -n "config\\.directories\\(\\)\\.contains_key" crates/tome/src/cleanup.rs` returns at least 1 match (Case 1 vs Case 2 dispatch)
+    - `rg -n "manifest\\.skills_get_mut" crates/tome/src/cleanup.rs` returns at least 1 match (call into the accessor added by Plan 11-01)
     - `rg -n "cleanup_case2_deletes_when_source_still_configured|cleanup_already_unowned_entry_is_preserved_and_not_counted|cleanup_case1_and_case2_in_same_run|cleanup_transitions_orphaned_to_unowned_when_source_removed_from_config" crates/tome/src/cleanup.rs` returns 4 matches
     - `rg -n "cleanup::cleanup_library\\(" crates/tome/src/lib.rs` shows the call passes `config` as 4th arg
     - `cargo test --package tome --lib cleanup::tests` exits 0
     - `cargo build --package tome` exits 0
   </acceptance_criteria>
-  <done>cleanup_library partitions stale candidates into Case 1 (transition to Unowned, preserve library) and Case 2 (today's delete behavior); already-Unowned entries are preserved untouched; the lib.rs call site is updated; new and renamed tests cover all four scenarios (Case 1, Case 2, already-Unowned, mixed).</done>
+  <done>cleanup_library partitions stale candidates into Case 1 (transition to Unowned, preserve library) and Case 2 (today's delete behavior); already-Unowned entries are preserved untouched; the lib.rs call site is updated; cleanup.rs uses the `Manifest::skills_get_mut` accessor added in Plan 11-01 (no manifest.rs touches in this plan); new and renamed tests cover all four scenarios (Case 1, Case 2, already-Unowned, mixed).</done>
 </task>
 
 <task type="auto" tdd="true">
@@ -487,7 +493,7 @@ pub(crate) fn execute(
   <files>crates/tome/src/remove.rs</files>
   <read_first>
     - crates/tome/src/remove.rs (the WHOLE file — current `execute`, `RemovePlan`, `RemoveResult`, `mod tests`)
-    - crates/tome/src/manifest.rs (post Plan 11-01 — confirm `source_name: Option<DirectoryName>` and `skills_get_mut` accessor)
+    - crates/tome/src/manifest.rs (post Plan 11-01 — confirm `source_name: Option<DirectoryName>` and that `skills_get_mut` exists as `pub(crate)`)
     - .planning/phases/11-library-canonical-core/11-CONTEXT.md (D-10 trigger 1, D-11 distribution semantics)
   </read_first>
   <behavior>
@@ -587,7 +593,7 @@ pub(crate) fn execute(
 
 5. **Rewrite `execute`** to: (a) keep step 1 (distribution symlink removal), (b) replace step 2 (library deletion) with the Unowned transition, (c) keep step 4 (git cache removal), (d) keep step 5 (config + manifest update on full success — but manifest now keeps the entries with source_name=None, doesn't remove them).
 
-   Replace the entire body of `execute` (lines ~297-392):
+   Replace the entire body of `execute` (lines ~297-392). Note: `manifest.skills_get_mut` is the accessor added in Plan 11-01 — call it directly (no need to add it here):
    ```rust
    pub(crate) fn execute(
        plan: &RemovePlan,
@@ -639,6 +645,8 @@ pub(crate) fn execute(
        //    On partial failure: preserve config + manifest entries unchanged so
        //    `tome remove <name>` can be re-run after addressing the underlying
        //    cause (matches Phase 8 SAFE-01 retention semantics).
+       //
+       //    skills_get_mut is provided by Plan 11-01 in manifest.rs.
        if !dry_run && failures.is_empty() {
            for skill_name in &plan.skills {
                if let Some(entry) = manifest.skills_get_mut(skill_name) {
@@ -755,13 +763,14 @@ pub(crate) fn execute(
     - `rg -n "FailureKind::ALL.len\\(\\) == 2" crates/tome/src/remove.rs` returns 1 match (the const assert)
     - `rg -n "FailureKind::LibraryDir|FailureKind::LibrarySymlink" crates/tome/src/remove.rs` returns 0 matches (variants removed)
     - `rg -n "entry\\.source_name = None" crates/tome/src/remove.rs` returns at least 1 match (the transition site)
+    - `rg -n "manifest\\.skills_get_mut" crates/tome/src/remove.rs` returns at least 1 match (call into the accessor added by Plan 11-01)
     - `rg -n "execute_transitions_to_unowned_and_preserves_library|execute_transitions_multiple_owned_skills_to_unowned" crates/tome/src/remove.rs` returns 2 matches
     - `rg -n "library_entries_removed" crates/tome/src/lib.rs` returns 0 matches (all updated)
     - `cargo test --package tome --lib remove::tests` exits 0
     - `cargo build --package tome` exits 0
     - `make ci` exits 0
   </acceptance_criteria>
-  <done>`tome remove` transitions owned manifest entries to Unowned, preserves library content, and removes the directory from config; `RemoveResult` exposes a `library_entries_transitioned_to_unowned` counter; `FailureKind` is reduced to 2 variants since library files are no longer touched; render_plan tells the user library content is "kept as Unowned"; lib.rs call site updated; partial-failure semantics unchanged (config + manifest preserved on partial failure).</done>
+  <done>`tome remove` transitions owned manifest entries to Unowned, preserves library content, and removes the directory from config; `RemoveResult` exposes a `library_entries_transitioned_to_unowned` counter; `FailureKind` is reduced to 2 variants since library files are no longer touched; render_plan tells the user library content is "kept as Unowned"; lib.rs call site updated; partial-failure semantics unchanged (config + manifest preserved on partial failure); uses the `Manifest::skills_get_mut` accessor added in Plan 11-01 (no manifest.rs touches in this plan).</done>
 </task>
 
 </tasks>
@@ -782,11 +791,15 @@ pub(crate) fn execute(
 - D-11 distribution semantics preserved: Unowned skills aren't filtered out at distribute time (no changes to `distribute.rs`); they continue to flow into target dirs as today.
 - Phase 14 (UNOWN-01/02) commands `tome adopt` and `tome forget` will build on this — they are NOT in scope for this plan.
 - The migrate-library command (Plan 11-04) does not touch this code; the two pieces of work are orthogonal.
+- `manifest.rs` is untouched in this plan: the only new accessor it needs (`skills_get_mut`) was lifted upstream to Plan 11-01 to keep cross-plan touches contained.
 </success_criteria>
 
 <output>
 After completion, create `.planning/phases/11-library-canonical-core/11-03-SUMMARY.md`
 documenting: cleanup_library partition logic, the new `transitioned_to_unowned`
 counter, `tome remove` execute flow change, FailureKind reduction, lib.rs call site
-updates, and a note pointing Phase 14 to the now-reachable Unowned manifest state.
+updates, the call into `Manifest::skills_get_mut` (added by Plan 11-01), and a note
+pointing Phase 14 to the now-reachable Unowned manifest state.
 </output>
+</content>
+</invoke>
