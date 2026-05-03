@@ -590,6 +590,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 );
             }
         }
+        Command::MigrateLibrary { dry_run } => {
+            // Per D-05: any skip or failure means non-zero exit. The
+            // run_migrate_library helper returns Ok(result) on partial;
+            // we interpret here and `process::exit(1)` on partial-or-failed.
+            let result = migration_v010::run_migrate_library(&paths, dry_run || cli.dry_run)?;
+            if result.is_partial_or_failed() {
+                std::process::exit(1);
+            }
+        }
         Command::Eject => {
             let plan = eject::plan(&config, &paths)?;
             eject::render_plan(&plan);
@@ -1005,6 +1014,22 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     if verbose {
         eprintln!("  Found {} skills", skills.len());
+    }
+
+    // v0.10 D-02: refuse to sync against a v0.9-shape library. Detection is an
+    // isolated check; the entire migration_v010 module deletes cleanly with
+    // this check in v0.11+.
+    {
+        let manifest_for_detection = manifest::load(paths.config_dir())?;
+        if migration_v010::detect_v09_shape(paths.library_dir(), &manifest_for_detection) {
+            anyhow::bail!(
+                "library is in v0.9 shape (one or more managed skills are stored as symlinks).\n\
+                 \n\
+                 Why: v0.10 stores managed skills as real directory copies (LIB-01).\n\
+                 Run `tome migrate-library` to convert the library, then re-run this command.\n\
+                 Pass `--dry-run` first to preview changes without touching the filesystem."
+            );
+        }
     }
 
     // 2. Consolidate into library (copy)
