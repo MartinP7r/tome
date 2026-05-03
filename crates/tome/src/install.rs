@@ -230,6 +230,7 @@ fn parse_installed_registry_ids(json_path: &Path) -> Result<HashSet<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DirectoryName;
     use tempfile::TempDir;
 
     fn write_installed_plugins_v2(dir: &Path, plugins: &[&str]) -> std::path::PathBuf {
@@ -254,7 +255,7 @@ mod tests {
             skills.insert(
                 skill_name,
                 LockEntry {
-                    source_name: "test".to_string(),
+                    source_name: DirectoryName::new("test").unwrap(),
                     content_hash: ContentHash::new("a".repeat(64)).unwrap(),
                     registry_id: registry_id.map(|s| s.to_string()),
                     version: registry_id.map(|_| "1.0.0".to_string()),

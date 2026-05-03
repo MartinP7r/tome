@@ -164,9 +164,7 @@ mod tests {
             path,
             directory_type: DirectoryType::Directory,
             role: None,
-            branch: None,
-            tag: None,
-            rev: None,
+            git_ref: None,
 
             subdir: None,
             override_applied: false,
@@ -474,7 +472,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: target_dir.path().join("my-skill"),
-                source_name: "my-dir".to_string(),
+                source_name: DirectoryName::new("my-dir").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -516,7 +514,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: std::path::PathBuf::from("/some/alpha/my-skill"),
-                source_name: "alpha".to_string(),
+                source_name: DirectoryName::new("alpha").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
@@ -594,7 +592,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: target_dir.path().join("my-skill"),
-                source_name: "my-dir".to_string(),
+                source_name: DirectoryName::new("my-dir").unwrap(),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

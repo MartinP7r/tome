@@ -146,8 +146,8 @@ pub struct DiscoveredSkill {
     pub name: SkillName,
     /// Path to the skill directory (contains SKILL.md)
     pub path: PathBuf,
-    /// Which source this skill came from
-    pub source_name: String,
+    /// Which configured directory this skill came from (matches a key in `Config::directories`).
+    pub source_name: DirectoryName,
     /// How this skill was sourced (managed vs local), with optional provenance metadata.
     pub origin: SkillOrigin,
     /// Parsed frontmatter from SKILL.md (None if parsing failed).
@@ -170,13 +170,13 @@ pub fn discover_all(
 ) -> Result<Vec<DiscoveredSkill>> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
-    let mut conflicts: Vec<(String, String, String)> = Vec::new();
+    let mut conflicts: Vec<(String, DirectoryName, DirectoryName)> = Vec::new();
 
     for (dir_name, dir_config) in config.discovery_dirs() {
         // For git directories, use the resolved local path instead of the URL
         let dir_skills = if let Some((resolved_path, _sha)) = resolved_paths.get(dir_name) {
             let is_managed = dir_config.role() == DirectoryRole::Managed;
-            discover_flat_directory(dir_name.as_str(), resolved_path, is_managed, warnings)?
+            discover_flat_directory(dir_name, resolved_path, is_managed, warnings)?
         } else if dir_config.directory_type == DirectoryType::Git {
             // Git directory not in resolved_paths — it failed to clone/update
             // and has no cached state. Skip silently (warning already emitted).
@@ -217,7 +217,7 @@ pub fn discover_all(
                     } => {
                         skill.origin = SkillOrigin::Managed {
                             provenance: Some(SkillProvenance {
-                                registry_id: skill.source_name.clone(),
+                                registry_id: skill.source_name.as_str().to_string(),
                                 version: None,
                                 git_commit_sha: Some(sha.clone()),
                             }),
@@ -227,7 +227,7 @@ pub fn discover_all(
                         // Local git skills get provenance with just the SHA
                         skill.origin = SkillOrigin::Managed {
                             provenance: Some(SkillProvenance {
-                                registry_id: skill.source_name.clone(),
+                                registry_id: skill.source_name.as_str().to_string(),
                                 version: None,
                                 git_commit_sha: Some(sha.clone()),
                             }),
@@ -275,10 +275,10 @@ pub fn discover_directory_entry(
     let is_managed = dir_config.role() == DirectoryRole::Managed;
     match dir_config.directory_type {
         DirectoryType::ClaudePlugins => {
-            discover_claude_plugins(dir_name.as_str(), &dir_config.path, is_managed, warnings)
+            discover_claude_plugins(dir_name, &dir_config.path, is_managed, warnings)
         }
         DirectoryType::Directory | DirectoryType::Git => {
-            discover_flat_directory(dir_name.as_str(), &dir_config.path, is_managed, warnings)
+            discover_flat_directory(dir_name, &dir_config.path, is_managed, warnings)
         }
     }
 }
@@ -288,7 +288,7 @@ pub fn discover_directory_entry(
 /// Reads `installed_plugins.json` from the directory path or its parent,
 /// then scans each plugin's `skills/*/SKILL.md`.
 fn discover_claude_plugins(
-    dir_name: &str,
+    dir_name: &DirectoryName,
     dir_path: &Path,
     _is_managed: bool,
     warnings: &mut Vec<String>,
@@ -316,7 +316,7 @@ fn discover_claude_plugins(
 
 fn discover_claude_plugins_from_json(
     json_path: &Path,
-    source_name: &str,
+    source_name: &DirectoryName,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
     let content = std::fs::read_to_string(json_path)
@@ -373,7 +373,7 @@ fn discover_claude_plugins_from_json(
 /// is attached to each discovered skill for lockfile generation.
 fn scan_install_records(
     records: &[serde_json::Value],
-    source_name: &str,
+    source_name: &DirectoryName,
     registry_id: Option<&str>,
     skills: &mut Vec<DiscoveredSkill>,
     warnings: &mut Vec<String>,
@@ -410,7 +410,7 @@ fn scan_install_records(
 
 /// Discover skills from a flat directory (scan for */SKILL.md).
 fn discover_flat_directory(
-    dir_name: &str,
+    dir_name: &DirectoryName,
     dir_path: &Path,
     is_managed: bool,
     warnings: &mut Vec<String>,
@@ -444,7 +444,7 @@ fn discover_flat_directory(
 /// `managed_provenance` is `None`, skills are marked as `Local`.
 fn scan_for_skills(
     dir: &Path,
-    source_name: &str,
+    source_name: &DirectoryName,
     managed_provenance: Option<Option<SkillProvenance>>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
@@ -520,7 +520,7 @@ fn scan_for_skills(
                     skills.push(DiscoveredSkill {
                         name,
                         path: skill_dir.to_path_buf(),
-                        source_name: source_name.to_string(),
+                        source_name: source_name.clone(),
                         origin,
                         frontmatter,
                     });
@@ -563,9 +563,7 @@ mod tests {
                     path,
                     directory_type: dir_type,
                     role,
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
 
                     subdir: None,
                     override_applied: false,
@@ -587,7 +585,9 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("not-a-skill")).unwrap();
         std::fs::write(tmp.path().join("not-a-skill/README.md"), "hi").unwrap();
 
-        let skills = discover_flat_directory("test", tmp.path(), false, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("test").unwrap();
+        let skills =
+            discover_flat_directory(&dir_name, tmp.path(), false, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
     }
 
@@ -595,7 +595,7 @@ mod tests {
     fn discover_flat_directory_warns_on_missing_path() {
         let mut warnings = Vec::new();
         let skills = discover_flat_directory(
-            "missing",
+            &DirectoryName::new("missing").unwrap(),
             Path::new("/nonexistent/path"),
             false,
             &mut warnings,
@@ -618,7 +618,9 @@ mod tests {
         // A legitimate skill in a subdirectory
         create_skill(tmp.path(), "real-skill");
 
-        let skills = discover_flat_directory("test", tmp.path(), false, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("test").unwrap();
+        let skills =
+            discover_flat_directory(&dir_name, tmp.path(), false, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "real-skill");
     }
@@ -688,7 +690,8 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("plugins").unwrap();
+        let skills = discover_claude_plugins(&dir_name, tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "plugin-skill");
     }
@@ -733,7 +736,8 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("plugins").unwrap();
+        let skills = discover_claude_plugins(&dir_name, tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 2);
 
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
@@ -779,7 +783,8 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("plugins").unwrap();
+        let skills = discover_claude_plugins(&dir_name, tmp.path(), true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
             skills[0].origin.provenance().is_none(),
@@ -805,7 +810,7 @@ mod tests {
         let mut warnings = Vec::new();
         let skills = discover_claude_plugins_from_json(
             &tmp.path().join("installed_plugins.json"),
-            "test",
+            &DirectoryName::new("test").unwrap(),
             &mut warnings,
         )
         .unwrap();
@@ -832,7 +837,8 @@ mod tests {
         )
         .unwrap();
 
-        let skills = discover_claude_plugins("plugins", tmp.path(), true, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("plugins").unwrap();
+        let skills = discover_claude_plugins(&dir_name, tmp.path(), true, &mut Vec::new()).unwrap();
         // Should deduplicate to 1, not produce a spurious conflict
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "shared-skill");
@@ -923,7 +929,8 @@ mod tests {
         // Verify the JSON is NOT in the cache dir itself
         assert!(!cache_dir.join("installed_plugins.json").exists());
 
-        let skills = discover_claude_plugins("plugins", &cache_dir, true, &mut Vec::new()).unwrap();
+        let dir_name = DirectoryName::new("plugins").unwrap();
+        let skills = discover_claude_plugins(&dir_name, &cache_dir, true, &mut Vec::new()).unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].name, "parent-skill");
     }
@@ -1003,8 +1010,13 @@ mod tests {
         create_skill(tmp.path(), "managed-skill");
 
         // A Managed-role directory (via flat scan) should produce Managed origin
-        let skills =
-            discover_flat_directory("managed-dir", tmp.path(), true, &mut Vec::new()).unwrap();
+        let skills = discover_flat_directory(
+            &DirectoryName::new("managed-dir").unwrap(),
+            tmp.path(),
+            true,
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
             skills[0].origin.is_managed(),
@@ -1018,8 +1030,13 @@ mod tests {
         create_skill(tmp.path(), "local-skill");
 
         // A Source-role directory should produce Local origin
-        let skills =
-            discover_flat_directory("source-dir", tmp.path(), false, &mut Vec::new()).unwrap();
+        let skills = discover_flat_directory(
+            &DirectoryName::new("source-dir").unwrap(),
+            tmp.path(),
+            false,
+            &mut Vec::new(),
+        )
+        .unwrap();
         assert_eq!(skills.len(), 1);
         assert!(
             !skills[0].origin.is_managed(),

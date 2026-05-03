@@ -379,6 +379,7 @@ pub fn generate_gitignore(library_dir: &Path, manifest: &Manifest) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::DirectoryName;
     use tempfile::TempDir;
 
     fn make_skill(dir: &Path, name: &str) -> DiscoveredSkill {
@@ -404,7 +405,7 @@ mod tests {
         DiscoveredSkill {
             name: crate::discover::SkillName::new(name).unwrap(),
             path: skill_dir,
-            source_name: "test".into(),
+            source_name: DirectoryName::new("test").unwrap(),
             origin,
             frontmatter: None,
         }
@@ -635,7 +636,7 @@ mod tests {
         let skill2 = DiscoveredSkill {
             name: crate::discover::SkillName::new("my-skill").unwrap(),
             path: skill2_dir,
-            source_name: "test2".into(),
+            source_name: DirectoryName::new("test2").unwrap(),
             origin: crate::discover::SkillOrigin::Local,
             frontmatter: None,
         };
@@ -717,7 +718,7 @@ mod tests {
         let skill = DiscoveredSkill {
             name: crate::discover::SkillName::new("deep-skill").unwrap(),
             path: skill_dir,
-            source_name: "test".into(),
+            source_name: DirectoryName::new("test").unwrap(),
             origin: crate::discover::SkillOrigin::Local,
             frontmatter: None,
         };
@@ -1303,7 +1304,7 @@ mod tests {
             crate::discover::SkillName::new("skill-a").unwrap(),
             SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/old-source/skill-a"),
-                source_name: "old-source".to_string(),
+                source_name: DirectoryName::new("old-source").unwrap(),
                 content_hash: crate::validation::test_hash("stale-hash"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -1319,7 +1320,7 @@ mod tests {
         let skill = DiscoveredSkill {
             name: crate::discover::SkillName::new("skill-a").unwrap(),
             path: source_skill.clone(),
-            source_name: "plugins".into(),
+            source_name: DirectoryName::new("plugins").unwrap(),
             origin: crate::discover::SkillOrigin::Managed { provenance: None },
             frontmatter: None,
         };

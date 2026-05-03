@@ -190,47 +190,83 @@ impl std::fmt::Display for DirectoryRole {
     }
 }
 
+/// A git reference pin — exactly one of branch / tag / rev.
+///
+/// Closes #490: replaces three mutually-exclusive `Option<String>` fields
+/// (`branch`, `tag`, `rev`) on `DirectoryConfig`. The TOML schema is
+/// preserved (custom serde shim reads the flat `branch = "..."` form),
+/// but the in-memory representation makes illegal states (e.g. all three
+/// fields set) unrepresentable.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitRef {
+    /// Track a branch (e.g. `"main"`). Implies pull-on-update semantics.
+    Branch(String),
+    /// Pin to an immutable tag (e.g. `"v1.2.0"`).
+    Tag(String),
+    /// Pin to an exact commit SHA.
+    Rev(String),
+}
+
+impl GitRef {
+    /// The branch name, if this is a `Branch` variant.
+    pub fn branch(&self) -> Option<&str> {
+        match self {
+            GitRef::Branch(s) => Some(s),
+            _ => None,
+        }
+    }
+    /// The tag name, if this is a `Tag` variant.
+    pub fn tag(&self) -> Option<&str> {
+        match self {
+            GitRef::Tag(s) => Some(s),
+            _ => None,
+        }
+    }
+    /// The commit SHA, if this is a `Rev` variant.
+    pub fn rev(&self) -> Option<&str> {
+        match self {
+            GitRef::Rev(s) => Some(s),
+            _ => None,
+        }
+    }
+}
+
 /// Configuration for a single directory in the unified model.
+///
+/// Custom serde shim (`DirectoryConfigRaw`) keeps the TOML schema flat:
+/// users still write `branch = "main"` (or `tag = ...` / `rev = ...`) and
+/// the shim collapses these into `Option<GitRef>` at deserialize time,
+/// rejecting combinations that set more than one. Eliminates ~20 lines of
+/// runtime exclusivity validation that previously lived in
+/// `Config::validate`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "DirectoryConfigRaw", into = "DirectoryConfigRaw")]
 pub struct DirectoryConfig {
     /// Path to the directory
     pub path: PathBuf,
 
     /// How to discover skills in this directory
-    #[serde(rename = "type", default)]
     pub directory_type: DirectoryType,
 
     /// Role in the sync pipeline (defaults based on directory_type)
-    #[serde(default)]
     pub(crate) role: Option<DirectoryRole>,
 
-    /// Git branch to track (git type only)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub branch: Option<String>,
-
-    /// Git tag to pin (git type only)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-
-    /// Git revision to pin (git type only)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rev: Option<String>,
+    /// Git ref pin (git type only). `None` means "track HEAD of default branch".
+    pub git_ref: Option<GitRef>,
 
     /// Subdirectory within the repo to scan for skills (git type only).
     /// When set, discovery scans `<clone_path>/<subdir>/` instead of the repo root.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subdir: Option<String>,
 
     /// True iff this directory's `path` was rewritten by a `[directory_overrides.<name>]`
     /// entry in `machine.toml` during config load. Set in `Config::apply_machine_overrides`.
-    /// `#[serde(skip)]` ensures this never appears in `tome.toml` (it's machine-local state,
-    /// not portable config). Default = `false`.
+    /// Never appears in `tome.toml` (it's machine-local state, not portable config) — see
+    /// `From<DirectoryConfig> for DirectoryConfigRaw` which drops it during serialization.
+    /// Default = `false`.
     ///
     /// Wired by Plan 09-03 (status/doctor surfacing — PORT-05): consumed by
     /// `status::gather` and `doctor::check` to render an `(override)` annotation
     /// in text output and an `override_applied: true|false` field in JSON output.
-    #[serde(skip)]
     pub(crate) override_applied: bool,
 }
 
@@ -240,6 +276,92 @@ impl DirectoryConfig {
         self.role
             .clone()
             .unwrap_or_else(|| self.directory_type.default_role())
+    }
+}
+
+/// On-disk shape for `DirectoryConfig` — preserves the v0.6 TOML schema
+/// (flat `branch` / `tag` / `rev` fields). Converted to/from
+/// `DirectoryConfig` via `TryFrom`/`From` so the public type can use the
+/// `Option<GitRef>` enum (closes #490).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DirectoryConfigRaw {
+    path: PathBuf,
+    #[serde(rename = "type", default)]
+    directory_type: DirectoryType,
+    #[serde(default)]
+    role: Option<DirectoryRole>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    branch: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rev: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subdir: Option<String>,
+}
+
+impl TryFrom<DirectoryConfigRaw> for DirectoryConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(raw: DirectoryConfigRaw) -> Result<Self> {
+        // Reject combinations that would have all three flat fields set.
+        // This validation used to live in `Config::validate`; lifting it
+        // here means an invalid config is rejected at deserialize time
+        // with line/column context, before any other code runs.
+        let git_ref = match (raw.branch, raw.tag, raw.rev) {
+            (None, None, None) => None,
+            (Some(b), None, None) => Some(GitRef::Branch(b)),
+            (None, Some(t), None) => Some(GitRef::Tag(t)),
+            (None, None, Some(r)) => Some(GitRef::Rev(r)),
+            (b, t, r) => {
+                let mut set = Vec::with_capacity(3);
+                if b.is_some() {
+                    set.push("branch");
+                }
+                if t.is_some() {
+                    set.push("tag");
+                }
+                if r.is_some() {
+                    set.push("rev");
+                }
+                anyhow::bail!(
+                    "directory: branch, tag, and rev are mutually exclusive — \
+                     {} are set; pick one",
+                    set.join(" and ")
+                );
+            }
+        };
+        Ok(Self {
+            path: raw.path,
+            directory_type: raw.directory_type,
+            role: raw.role,
+            git_ref,
+            subdir: raw.subdir,
+            override_applied: false,
+        })
+    }
+}
+
+impl From<DirectoryConfig> for DirectoryConfigRaw {
+    fn from(d: DirectoryConfig) -> Self {
+        let (branch, tag, rev) = match d.git_ref {
+            None => (None, None, None),
+            Some(GitRef::Branch(b)) => (Some(b), None, None),
+            Some(GitRef::Tag(t)) => (None, Some(t), None),
+            Some(GitRef::Rev(r)) => (None, None, Some(r)),
+        };
+        // `override_applied` is intentionally dropped: it's machine-local
+        // state, never written to portable `tome.toml`.
+        Self {
+            path: d.path,
+            directory_type: d.directory_type,
+            role: d.role,
+            branch,
+            tag,
+            rev,
+            subdir: d.subdir,
+        }
     }
 }
 
@@ -423,11 +545,13 @@ impl Config {
                 );
             }
 
-            // Git fields only valid with Git type
-            let has_git_fields = dir.branch.is_some() || dir.tag.is_some() || dir.rev.is_some();
-            if has_git_fields && dir.directory_type != DirectoryType::Git {
+            // Git ref only valid with Git type. Mutual exclusion of
+            // branch/tag/rev is enforced at deserialize time by
+            // `TryFrom<DirectoryConfigRaw> for DirectoryConfig` (closes
+            // #490), so we only need to check the type here.
+            if dir.git_ref.is_some() && dir.directory_type != DirectoryType::Git {
                 anyhow::bail!(
-                    "directory '{name}': git ref fields on non-git directory\n\
+                    "directory '{name}': git ref pin on non-git directory\n\
                      Conflict: branch/tag/rev is set but type is '{}'\n\
                      Why: branch, tag, and rev pin a remote git clone to a specific commit; they have no meaning for a local directory or a claude-plugins cache.\n\
                      hint: either change type to 'git', or remove the branch/tag/rev fields from this directory.",
@@ -1252,7 +1376,7 @@ branch = "main"
             .expect("remote-skills missing");
         assert_eq!(dir.directory_type, DirectoryType::Git);
         assert_eq!(dir.role(), DirectoryRole::Source);
-        assert_eq!(dir.branch.as_deref(), Some("main"));
+        assert_eq!(dir.git_ref.as_ref().and_then(|r| r.branch()), Some("main"));
     }
 
     #[test]
@@ -1355,9 +1479,7 @@ bogus = true
                     path: PathBuf::from("/tmp"),
                     directory_type: DirectoryType::Directory,
                     role: Some(DirectoryRole::Managed),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -1383,9 +1505,7 @@ bogus = true
                     path: PathBuf::from("/tmp"),
                     directory_type: DirectoryType::Git,
                     role: Some(DirectoryRole::Target),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -1411,9 +1531,7 @@ bogus = true
                     path: PathBuf::from("/tmp"),
                     directory_type: DirectoryType::Directory,
                     role: None,
-                    branch: Some("main".to_string()),
-                    tag: None,
-                    rev: None,
+                    git_ref: Some(GitRef::Branch("main".to_string())),
                     subdir: None,
                     override_applied: false,
                 },
@@ -1439,9 +1557,7 @@ bogus = true
                     path: PathBuf::from("/tmp"),
                     directory_type: DirectoryType::Directory,
                     role: None,
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: Some("nested".to_string()),
                     override_applied: false,
                 },
@@ -1466,9 +1582,7 @@ bogus = true
                         path: PathBuf::from("/tmp/plugins"),
                         directory_type: DirectoryType::ClaudePlugins,
                         role: Some(DirectoryRole::Managed),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1480,9 +1594,7 @@ bogus = true
                         path: PathBuf::from("/tmp/skills"),
                         directory_type: DirectoryType::Directory,
                         role: None, // defaults to Synced
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1506,9 +1618,7 @@ bogus = true
                         path: PathBuf::from("/tmp/a"),
                         directory_type: DirectoryType::ClaudePlugins,
                         role: Some(DirectoryRole::Managed),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1520,9 +1630,7 @@ bogus = true
                         path: PathBuf::from("/tmp/b"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Synced),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1534,9 +1642,7 @@ bogus = true
                         path: PathBuf::from("/tmp/c"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Source),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1548,9 +1654,7 @@ bogus = true
                         path: PathBuf::from("/tmp/d"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Target),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1574,9 +1678,7 @@ bogus = true
                         path: PathBuf::from("/tmp/a"),
                         directory_type: DirectoryType::ClaudePlugins,
                         role: Some(DirectoryRole::Managed),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1588,9 +1690,7 @@ bogus = true
                         path: PathBuf::from("/tmp/b"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Synced),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1602,9 +1702,7 @@ bogus = true
                         path: PathBuf::from("/tmp/c"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Source),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1616,9 +1714,7 @@ bogus = true
                         path: PathBuf::from("/tmp/d"),
                         directory_type: DirectoryType::Directory,
                         role: Some(DirectoryRole::Target),
-                        branch: None,
-                        tag: None,
-                        rev: None,
+                        git_ref: None,
 
                         subdir: None,
                         override_applied: false,
@@ -1702,9 +1798,7 @@ bogus = true
                     path: PathBuf::from("/tmp/source"),
                     directory_type: DirectoryType::Directory,
                     role: None,
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -1780,9 +1874,7 @@ role = "target"
             path: PathBuf::from(path),
             directory_type: dt,
             role,
-            branch: None,
-            tag: None,
-            rev: None,
+            git_ref: None,
             subdir: None,
             override_applied: false,
         }
@@ -1954,9 +2046,7 @@ role = "target"
                     path: PathBuf::from("/tmp/src"),
                     directory_type: DirectoryType::Git,
                     role: Some(DirectoryRole::Target),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -1987,9 +2077,7 @@ role = "target"
                     path: PathBuf::from("/tmp/shared-sc"),
                     directory_type: DirectoryType::Directory,
                     role: Some(DirectoryRole::Synced),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -2018,9 +2106,7 @@ role = "target"
                     path: PathBuf::from("/tmp/ok"),
                     directory_type: DirectoryType::Directory,
                     role: Some(DirectoryRole::Synced),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -2100,9 +2186,7 @@ role = "target"
                 path: entry_path,
                 directory_type: dir_type,
                 role: Some(role),
-                branch: None,
-                tag: None,
-                rev: None,
+                git_ref: None,
                 subdir: None,
                 override_applied: false,
             },
@@ -2503,9 +2587,7 @@ role = "target"
                     path: PathBuf::from(path),
                     directory_type: DirectoryType::Directory,
                     role: Some(DirectoryRole::Source),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: false,
                 },
@@ -2683,9 +2765,7 @@ role = "target"
                     path: tmp.path().join("skills"),
                     directory_type: DirectoryType::Directory,
                     role: Some(DirectoryRole::Source),
-                    branch: None,
-                    tag: None,
-                    rev: None,
+                    git_ref: None,
                     subdir: None,
                     override_applied: true,
                 },

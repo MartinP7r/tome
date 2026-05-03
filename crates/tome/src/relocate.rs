@@ -571,7 +571,7 @@ mod tests {
             SkillName::new(skill_name).unwrap(),
             SkillEntry::new(
                 PathBuf::from("/tmp/source").join(skill_name),
-                "test-source".to_string(),
+                DirectoryName::new("test-source").unwrap(),
                 hash,
                 false,
             ),
@@ -737,9 +737,7 @@ mod tests {
                 path: target_dir.clone(),
                 directory_type: DirectoryType::Directory,
                 role: Some(DirectoryRole::Target),
-                branch: None,
-                tag: None,
-                rev: None,
+                git_ref: None,
 
                 subdir: None,
                 override_applied: false,
@@ -800,7 +798,7 @@ mod tests {
             SkillName::new("managed-skill").unwrap(),
             SkillEntry::new(
                 ext_skill_dir.clone(),
-                "plugins".to_string(),
+                DirectoryName::new("plugins").unwrap(),
                 hash,
                 true, // managed
             ),
@@ -901,7 +899,7 @@ mod tests {
             SkillName::new("corrupt-skill").unwrap(),
             SkillEntry::new(
                 ext_skill_dir.clone(),
-                "plugins".to_string(),
+                DirectoryName::new("plugins").unwrap(),
                 hash,
                 true, // managed
             ),

@@ -25,7 +25,7 @@ pub fn browse(skills: Vec<DiscoveredSkill>, manifest: &crate::manifest::Manifest
             let managed = s.origin.is_managed();
             SkillRow {
                 name: skill_name,
-                source: s.source_name,
+                source: s.source_name.as_str().to_string(),
                 path: s.path.display().to_string(),
                 managed,
                 synced_at,
