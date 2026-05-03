@@ -255,7 +255,7 @@ mod tests {
             skills.insert(
                 skill_name,
                 LockEntry {
-                    source_name: DirectoryName::new("test").unwrap(),
+                    source_name: Some(DirectoryName::new("test").unwrap()),
                     content_hash: ContentHash::new("a".repeat(64)).unwrap(),
                     registry_id: registry_id.map(|s| s.to_string()),
                     version: registry_id.map(|_| "1.0.0".to_string()),

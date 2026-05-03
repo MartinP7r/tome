@@ -1304,7 +1304,7 @@ mod tests {
             crate::discover::SkillName::new("skill-a").unwrap(),
             SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/old-source/skill-a"),
-                source_name: DirectoryName::new("old-source").unwrap(),
+                source_name: Some(DirectoryName::new("old-source").unwrap()),
                 content_hash: crate::validation::test_hash("stale-hash"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,

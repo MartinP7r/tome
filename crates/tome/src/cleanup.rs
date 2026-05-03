@@ -53,7 +53,7 @@ pub fn cleanup_library(
     for name in &stale {
         let source = manifest
             .get(name.as_str())
-            .map(|e| e.source_name.as_str().to_string())
+            .and_then(|e| e.source_name.as_ref().map(|d| d.as_str().to_string()))
             .unwrap_or_else(|| "unknown".to_string());
         stale_by_source
             .entry(source)
@@ -228,7 +228,7 @@ mod tests {
             crate::discover::SkillName::new("old-skill").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/old-skill"),
-                source_name: DirectoryName::new("test").unwrap(),
+                source_name: Some(DirectoryName::new("test").unwrap()),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -264,7 +264,7 @@ mod tests {
             crate::discover::SkillName::new("keep-me").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/keep-me"),
-                source_name: DirectoryName::new("test").unwrap(),
+                source_name: Some(DirectoryName::new("test").unwrap()),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -298,7 +298,7 @@ mod tests {
             crate::discover::SkillName::new("stale").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/source/stale"),
-                source_name: DirectoryName::new("test").unwrap(),
+                source_name: Some(DirectoryName::new("test").unwrap()),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -442,7 +442,7 @@ mod tests {
             crate::discover::SkillName::new("plugin-skill").unwrap(),
             crate::manifest::SkillEntry {
                 source_path: skill_source,
-                source_name: DirectoryName::new("plugins").unwrap(),
+                source_name: Some(DirectoryName::new("plugins").unwrap()),
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
