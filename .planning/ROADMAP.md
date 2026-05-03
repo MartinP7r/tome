@@ -83,7 +83,12 @@
   3. `Manifest` deserialization accepts both old (`source_name: DirectoryName`) and new (`source_name: Option<DirectoryName>`) shapes via `#[serde(default)]`; entries with `source_name: None` are correctly classified as `Unowned`.
   4. On a machine with an existing v0.9-shape library (mix of symlinks + real dirs), `tome sync` detects the symlink entries, prompts with a diff summary listing affected skills and approximate disk delta, and on user consent persists `migration_v010_acknowledged: true` in `machine.toml`. Subsequent syncs are idempotent (no re-prompt, no re-conversion).
   5. The cleanup phase no longer auto-deletes orphan library entries; orphans surface in `tome status` and `tome doctor` output as the new unowned set (Phase 14 wires the surfacing; this phase ensures cleanup leaves them in place).
-**Plans**: TBD
+**Plans**: 5 plans
+- [ ] 11-01-PLAN.md — Manifest + lockfile schema lift (`source_name: Option<DirectoryName>`, `new_unowned` constructor; LIB-03)
+- [ ] 11-02-PLAN.md — `consolidate_managed` rewrite (symlink → real-dir copy; LIB-01, LIB-02)
+- [ ] 11-03-PLAN.md — Source-removal → Unowned transition (cleanup Case 1/2 split + `tome remove` explicit trigger; LIB-04)
+- [ ] 11-04-PLAN.md — `tome migrate-library` CLI command + sync v0.9-shape refuse-with-hint (LIB-05)
+- [ ] 11-05-PLAN.md — Integration tests for migrate-library, sync refuse-with-hint, source-removal preservation (LIB-01/04/05 binary-level anchoring)
 
 ### Phase 12: Marketplace adapter
 **Goal**: A pluggable `MarketplaceAdapter` trait isolates marketplace-specific install/update logic. v0.10 ships two production adapters (Claude marketplace, git) plus partial-failure aggregation matching the v0.8 SAFE-01 pattern.
