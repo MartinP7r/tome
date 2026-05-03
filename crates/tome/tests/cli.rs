@@ -5882,3 +5882,248 @@ fn migrate_library_dry_run_makes_no_changes() {
         "output must mention dry-run, got: {combined}"
     );
 }
+
+#[test]
+fn sync_refuses_on_v09_shape_library_with_hint() {
+    let fix = build_v09_fixture();
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "sync",
+            "--no-input",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // D-02: sync must refuse with a Conflict/Why/Suggestion error.
+    assert!(
+        !output.status.success(),
+        "sync must exit non-zero on v0.9-shape library"
+    );
+    assert!(
+        stderr.contains("v0.9 shape"),
+        "stderr must mention 'v0.9 shape': {stderr}"
+    );
+    assert!(
+        stderr.contains("tome migrate-library"),
+        "stderr must point at `tome migrate-library`: {stderr}"
+    );
+
+    // Library must NOT have been modified by the refused sync.
+    assert!(
+        fix.library_dir.join("p1").is_symlink(),
+        "refused sync must not modify library"
+    );
+    assert!(fix.library_dir.join("p2").is_symlink());
+}
+
+#[test]
+fn sync_succeeds_after_migrate_library() {
+    let fix = build_v09_fixture();
+
+    // Remove the broken symlink first so migrate-library exits cleanly
+    // (otherwise the broken-symlink D-04 path would block this test from
+    // reaching the post-migration sync).
+    std::fs::remove_file(fix.library_dir.join("broken")).unwrap();
+
+    // Drop the broken manifest entry too — otherwise sync's v0.9-shape
+    // detection would still fire (`broken` would still be in the manifest
+    // with managed=true and no library entry).
+    let manifest_path = fix.tome_home.join(".tome-manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["skills"].as_object_mut().unwrap().remove("broken");
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    // Step 1: migrate-library.
+    let migrate = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        migrate.status.success(),
+        "migrate-library must succeed cleanly when no broken symlinks remain.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&migrate.stdout),
+        String::from_utf8_lossy(&migrate.stderr),
+    );
+
+    // Step 2: sync. Should NOT refuse anymore (no v0.9-shape symlinks left).
+    let sync = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "sync",
+            "--no-input",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    let sync_stderr = String::from_utf8_lossy(&sync.stderr);
+    assert!(
+        !sync_stderr.contains("v0.9 shape"),
+        "sync after migrate must NOT refuse with v0.9 hint, got: {sync_stderr}"
+    );
+    // We don't assert sync.status.success() because the synthetic fixture
+    // doesn't have a real claude-plugins source so the managed entries
+    // become orphans — but that's a Phase 13 concern. The KEY assertion
+    // is that the v0.9 refuse-with-hint check no longer fires.
+}
+
+#[test]
+fn sync_preserves_library_when_source_removed_from_config() {
+    // LIB-04 / D-09 Case 1 / D-10 trigger 2: user edits tome.toml outside
+    // `tome remove` to drop a source directory; the next `tome sync` cleanup
+    // phase must transition the orphaned manifest entries to Unowned and
+    // preserve their library content (NOT delete).
+    //
+    // Note on config shape: `lib.rs::sync` has a CFG-06 safety guard that
+    // returns early ("no directories configured") if `config.directories`
+    // is empty — this would skip cleanup entirely. To exercise the cleanup
+    // path we keep ONE source in config (`other`, with no skills) and remove
+    // the one that owned the orphan (`local`). Manifest entry for `alpha`
+    // still references `local`, which is no longer in `config.directories` —
+    // the exact D-09 Case 1 trigger.
+    let root = assert_fs::TempDir::new().unwrap();
+    let tome_home = root.path().join("tome_home");
+    let library_dir = tome_home.join("skills");
+    let local_source = root.path().join("local_source");
+    let other_source = root.path().join("other_source");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    std::fs::create_dir_all(&local_source).unwrap();
+    std::fs::create_dir_all(&other_source).unwrap();
+
+    // Create a real skill in `other` so sync's `skills.is_empty()` early-exit
+    // doesn't fire (cleanup only runs after discover finds at least one skill).
+    let other_skill = other_source.join("beta");
+    std::fs::create_dir_all(&other_skill).unwrap();
+    std::fs::write(
+        other_skill.join("SKILL.md"),
+        "---\nname: beta\n---\n# beta\nA filler skill so sync proceeds past discover.",
+    )
+    .unwrap();
+
+    // Create a local skill in source and pre-populate library + manifest.
+    let src = local_source.join("alpha");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(src.join("SKILL.md"), "# alpha").unwrap();
+
+    let lib_alpha = library_dir.join("alpha");
+    std::fs::create_dir_all(&lib_alpha).unwrap();
+    std::fs::write(lib_alpha.join("SKILL.md"), "# alpha").unwrap();
+
+    // Use the production hash function via the crate-root re-export (Task 0).
+    let alpha_hash = tome::hash_directory(&lib_alpha).unwrap();
+    let manifest_json = serde_json::json!({
+        "skills": {
+            "alpha": {
+                "source_path": src.to_string_lossy(),
+                "source_name": "local",
+                "content_hash": alpha_hash.as_str(),
+                "synced_at": "2024-01-01T00:00:00Z",
+                "managed": false
+            }
+        }
+    });
+    std::fs::write(
+        tome_home.join(".tome-manifest.json"),
+        serde_json::to_string_pretty(&manifest_json).unwrap(),
+    )
+    .unwrap();
+
+    // Final config: drops `[directories.local]`, keeps `[directories.other]`.
+    // The `local` entry was the previous owner of `alpha`; with `local` gone,
+    // the cleanup phase classifies `alpha` as a Case 1 orphan (source no
+    // longer in config) → transition to Unowned + preserve library content.
+    let config_path = tome_home.join("tome.toml");
+    let machine_path = root.path().join("machine.toml");
+    std::fs::write(&machine_path, "").unwrap();
+    let config_without_source = format!(
+        r#"library_dir = "{}"
+
+[directories.other]
+path = "{}"
+type = "directory"
+role = "source"
+"#,
+        library_dir.display(),
+        other_source.display(),
+    );
+    std::fs::write(&config_path, &config_without_source).unwrap();
+
+    // Step 2: run sync. Cleanup phase should detect the orphan (alpha's
+    // source_name "local" is no longer in config.directories) and
+    // transition it to Unowned — preserving the library content per LIB-04.
+    let sync = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "sync",
+            "--no-input",
+            "--config",
+            config_path.to_str().unwrap(),
+            "--tome-home",
+            tome_home.to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let sync_stderr = String::from_utf8_lossy(&sync.stderr);
+    let sync_stdout = String::from_utf8_lossy(&sync.stdout);
+
+    // The library directory MUST still exist with the same content.
+    assert!(
+        library_dir.join("alpha").is_dir(),
+        "LIB-04: library content must be preserved on source removal.\nstdout: {sync_stdout}\nstderr: {sync_stderr}"
+    );
+    let preserved = std::fs::read_to_string(library_dir.join("alpha/SKILL.md")).unwrap();
+    assert_eq!(preserved, "# alpha", "library content must be unchanged");
+
+    // The manifest entry must have transitioned to Unowned (source_name omitted/null).
+    let manifest_after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(tome_home.join(".tome-manifest.json")).unwrap())
+            .unwrap();
+    let alpha_entry = &manifest_after["skills"]["alpha"];
+    assert!(
+        alpha_entry
+            .get("source_name")
+            .map(|v| v.is_null())
+            .unwrap_or(true),
+        "manifest entry's source_name must be omitted or null after source removal: {alpha_entry}"
+    );
+    // content_hash unchanged.
+    assert_eq!(
+        alpha_entry["content_hash"].as_str().unwrap(),
+        alpha_hash.as_str(),
+        "content_hash must remain unchanged across the Case 1 transition"
+    );
+}
