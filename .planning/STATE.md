@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 11-03-source-removal-unowned-PLAN.md
-last_updated: "2026-05-03T13:37:07.566Z"
+stopped_at: Completed 11-04-migrate-library-command-PLAN.md
+last_updated: "2026-05-03T13:46:14.976Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 7
   completed_phases: 0
   total_plans: 5
-  completed_plans: 3
+  completed_plans: 4
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 11 (library-canonical-core) — EXECUTING
-Plan: 4 of 5
+Plan: 5 of 5
 Status: Ready to execute
 Last activity: 2026-05-03
 
@@ -57,6 +57,7 @@ Historical decisions are archived in:
 - [Phase 11]: LIB-03: SkillEntry/LockEntry source_name lifted to Option<DirectoryName>; SkillEntry::new signature unchanged via twin-constructor pattern (new + new_unowned); Manifest::skills_get_mut accessor lifted into Plan 11-01 to keep manifest.rs touches contained
 - [Phase 11]: LIB-01/LIB-02: consolidate_managed rewritten as recursive copy; managed flag semantics shift to 'update channel'; consolidate_local mirrors hash-match flag flip for symmetry; v0.9-shape symlinks refused (not auto-converted) per D-02 boundary defense
 - [Phase 11]: LIB-04 D-10 hybrid triggers: tome remove explicitly transitions owned manifest entries to Unowned (source_name = None) and preserves library content; cleanup phase adds the same safety-net transition for users who manually edit tome.toml. Already-Unowned entries are preserved by definition. RemoveResult.library_entries_transitioned_to_unowned replaces library_entries_removed; FailureKind shrunk to 2 variants (DistributionSymlink, GitCache).
+- [Phase 11-library-canonical-core]: LIB-05: tome migrate-library is one-shot CLI command (D-01) with manifest-anchored detection (D-03), broken-symlink preservation (D-04), SAFE-01 failure aggregation (D-05), idempotent re-runs (D-06). Sync refuses on v0.9-shape libraries with Conflict/Why/Suggestion error pointing at the new command (D-02). Entire migration_v010 module + sync gate deletes cleanly in v0.11+.
 
 ### v0.10 design context (consume during planning)
 
@@ -95,6 +96,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-03T13:37:07.563Z
-Stopped at: Completed 11-03-source-removal-unowned-PLAN.md
+Last session: 2026-05-03T13:46:14.973Z
+Stopped at: Completed 11-04-migrate-library-command-PLAN.md
 Resume file: None

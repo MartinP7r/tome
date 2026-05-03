@@ -16,7 +16,7 @@ The library becomes the single source of truth. Managed and local skills are sto
 - [x] **LIB-02**: `Manifest.managed: bool` semantics shift from "stored as symlink" to "update channel" (managed = upstream sync feeds updates into the library; local = library is canonical). Field name kept; documentation updated.
 - [x] **LIB-03**: `SkillEntry.source_name` becomes `Option<DirectoryName>` (`None` = unowned, source removed but library content preserved). Existing manifest schema accepts both shapes via `#[serde(default)]`.
 - [x] **LIB-04**: Source removal (removing a `[directories.*]` entry from `tome.toml`) preserves library content. Manifest entries enter `Unowned` state. The cleanup phase no longer auto-deletes orphaned skills.
-- [ ] **LIB-05**: First-sync migration converts existing symlink-based libraries to real-directory copies. Detection via `dest.is_symlink() && manifest.contains_key(name)`. Prompt with diff summary; persist consent in `machine.toml::migration_v010_acknowledged: true`. Idempotent (no-op on subsequent syncs).
+- [x] **LIB-05**: First-sync migration converts existing symlink-based libraries to real-directory copies. Detection via `dest.is_symlink() && manifest.contains_key(name)`. Prompt with diff summary; persist consent in `machine.toml::migration_v010_acknowledged: true`. Idempotent (no-op on subsequent syncs).
 
 ### Marketplace adapter (ADP)
 
