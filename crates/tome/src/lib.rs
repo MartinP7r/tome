@@ -66,6 +66,13 @@ use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
 
+/// Re-exported for integration tests so the synthetic-fixture builder in
+/// `tests/cli.rs` can hash directories with the exact same algorithm the
+/// production manifest uses (avoids a duplicated SHA-256 helper that could
+/// drift). Production code should still call `manifest::hash_directory`
+/// directly via the crate path.
+pub use manifest::hash_directory;
+
 /// Summary of a complete sync operation.
 pub struct SyncReport {
     pub consolidate: ConsolidateResult,
