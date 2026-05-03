@@ -1773,6 +1773,10 @@ fn symlink_chain_local_skill() {
 
 #[test]
 fn symlink_chain_managed_skill() {
+    // v0.10 (LIB-01): managed skills become real directory copies in the
+    // library, NOT symlinks into machine-specific cache paths. The previous
+    // (v0.9) shape — library entry is a symlink → source install dir — has
+    // been replaced by the copy model. Targets still symlink into the library.
     let env = TestEnvBuilder::new()
         .source("plugins", "claude-plugins")
         .target("test-tool")
@@ -1784,40 +1788,48 @@ fn symlink_chain_managed_skill() {
     let library_skill = env.library_dir().join("managed-skill");
     let target_skill = env.target_dir("test-tool").join("managed-skill");
 
-    // Library entry should be a SYMLINK for managed skills (library → source)
+    // v0.10 shape: library entry is a real directory, NOT a symlink.
     assert!(
-        library_skill.is_symlink(),
-        "managed skill in library should be a symlink"
+        library_skill.is_dir(),
+        "managed skill in library should be a real directory after v0.10 (LIB-01)"
+    );
+    assert!(
+        !library_skill.is_symlink(),
+        "managed skill in library must NOT be a symlink in v0.10 (LIB-01)"
     );
 
-    // Verify library symlink points to source install path
+    // The library copy's content_hash must match the source's content_hash
+    // (using the production hash function via the crate-root re-export from
+    // Plan 11-05 Task 0). This is the LIB-01 invariant: copy fidelity.
     let source_skill_dir = env
         .source_dir("plugins")
         .join("installs/managed-skill/skills/managed-skill");
-    let library_resolved = std::fs::canonicalize(&library_skill).unwrap();
-    let source_canonical = std::fs::canonicalize(&source_skill_dir).unwrap();
+    let library_hash = tome::hash_directory(&library_skill).unwrap();
+    let source_hash = tome::hash_directory(&source_skill_dir).unwrap();
     assert_eq!(
-        library_resolved, source_canonical,
-        "library symlink should resolve to source install dir"
+        library_hash, source_hash,
+        "library copy must hash identically to the managed source"
     );
 
-    // Target should also be a symlink (target → library)
+    // Target is still a symlink (target → library).
     assert!(
         target_skill.is_symlink(),
         "target skill should be a symlink"
     );
     let target_resolved = std::fs::canonicalize(&target_skill).unwrap();
+    let library_canonical = std::fs::canonicalize(&library_skill).unwrap();
     assert_eq!(
-        target_resolved, source_canonical,
-        "target symlink should resolve through library to source"
+        target_resolved, library_canonical,
+        "target symlink should resolve to the (real-dir) library entry"
     );
 
-    // Two-hop chain: reading SKILL.md through target should get source content
+    // Reading SKILL.md through the target should return the same content as
+    // the source — proves the copy fidelity end-to-end.
     let source_content = std::fs::read_to_string(source_skill_dir.join("SKILL.md")).unwrap();
     let target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
     assert_eq!(
         source_content, target_content,
-        "reading through two-hop symlink chain should return source content"
+        "reading through target → library should match the original source content"
     );
 }
 
@@ -5589,5 +5601,284 @@ fn machine_override_validation_failure_blames_machine_toml() {
     assert!(
         !stderr.contains("edit tome.toml") && !stderr.contains("Edit tome.toml"),
         "wrapped error must NOT direct the user to edit tome.toml, got:\n{stderr}"
+    );
+}
+
+// ============================================================================
+// v0.10 Phase 11 — library-canonical-core integration tests
+// (LIB-01, LIB-04, LIB-05; CONTEXT.md D-01..D-06, D-09..D-14)
+// ============================================================================
+
+/// Synthetic v0.9 library fixture — exercises the migration boundary defenses.
+///
+/// Layout produced (per CONTEXT.md <specifics>):
+///   tome_home/
+///     tome.toml                  ← references local source dir
+///     .tome-manifest.json        ← entries for managed + local + broken skills
+///     skills/
+///       p1/                      ← v0.9-shape symlink → plugin_cache/p1
+///       p2/                      ← v0.9-shape symlink → plugin_cache/p2
+///       l1/                      ← v0.10-shape real dir copy of local_source/l1
+///       broken/                  ← v0.9-shape symlink to /nonexistent (D-04)
+///       user-symlink/            ← user-created symlink, NOT in manifest (D-03)
+///   plugin_cache/
+///     p1/SKILL.md
+///     p2/SKILL.md
+///   local_source/
+///     l1/SKILL.md
+#[allow(dead_code)]
+struct V09Fixture {
+    _root: assert_fs::TempDir, // owns the temp dir; drop = cleanup
+    tome_home: PathBuf,
+    library_dir: PathBuf,
+    plugin_cache: PathBuf,
+    local_source: PathBuf,
+    config_path: PathBuf,
+    machine_path: PathBuf,
+}
+
+fn build_v09_fixture() -> V09Fixture {
+    use std::os::unix::fs as unix_fs;
+    let root = assert_fs::TempDir::new().unwrap();
+    let tome_home = root.path().join("tome_home");
+    let library_dir = tome_home.join("skills");
+    let plugin_cache = root.path().join("plugin_cache");
+    let local_source = root.path().join("local_source");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    std::fs::create_dir_all(&plugin_cache).unwrap();
+    std::fs::create_dir_all(&local_source).unwrap();
+
+    // Plugin cache (acts as managed source — claude-plugins style).
+    for n in &["p1", "p2"] {
+        let d = plugin_cache.join(n);
+        std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("SKILL.md"), format!("# {n}")).unwrap();
+    }
+    // Local source.
+    let l1 = local_source.join("l1");
+    std::fs::create_dir_all(&l1).unwrap();
+    std::fs::write(l1.join("SKILL.md"), "# l1").unwrap();
+
+    // v0.9-shape symlinks for managed skills.
+    unix_fs::symlink(plugin_cache.join("p1"), library_dir.join("p1")).unwrap();
+    unix_fs::symlink(plugin_cache.join("p2"), library_dir.join("p2")).unwrap();
+
+    // v0.10-shape real-dir copy for local skill (already correct shape).
+    let l1_lib = library_dir.join("l1");
+    std::fs::create_dir_all(&l1_lib).unwrap();
+    std::fs::write(l1_lib.join("SKILL.md"), "# l1").unwrap();
+
+    // D-04: broken symlink (managed manifest entry, target gone).
+    unix_fs::symlink("/nonexistent/target", library_dir.join("broken")).unwrap();
+
+    // D-03 conservatism: user-created symlink NOT in manifest.
+    let user_target = root.path().join("user_target");
+    std::fs::create_dir_all(&user_target).unwrap();
+    std::fs::write(user_target.join("SKILL.md"), "# user").unwrap();
+    unix_fs::symlink(&user_target, library_dir.join("user-symlink")).unwrap();
+
+    // Compute content_hashes using the production algorithm via the
+    // crate-root re-export added in Plan 11-05 Task 0. This guarantees
+    // byte-for-byte identity with `manifest::hash_directory` — no risk of
+    // a duplicated SHA-256 helper drifting.
+    let p1_hash = tome::hash_directory(&plugin_cache.join("p1")).unwrap();
+    let p2_hash = tome::hash_directory(&plugin_cache.join("p2")).unwrap();
+    let l1_hash = tome::hash_directory(&l1_lib).unwrap();
+    let manifest_json = serde_json::json!({
+        "skills": {
+            "p1": {
+                "source_path": plugin_cache.join("p1").to_string_lossy(),
+                "source_name": "plugins",
+                "content_hash": p1_hash.as_str(),
+                "synced_at": "2024-01-01T00:00:00Z",
+                "managed": true
+            },
+            "p2": {
+                "source_path": plugin_cache.join("p2").to_string_lossy(),
+                "source_name": "plugins",
+                "content_hash": p2_hash.as_str(),
+                "synced_at": "2024-01-01T00:00:00Z",
+                "managed": true
+            },
+            "broken": {
+                "source_path": "/nonexistent/target",
+                "source_name": "plugins",
+                "content_hash": "0".repeat(64),
+                "synced_at": "2024-01-01T00:00:00Z",
+                "managed": true
+            },
+            "l1": {
+                "source_path": l1.to_string_lossy(),
+                "source_name": "local",
+                "content_hash": l1_hash.as_str(),
+                "synced_at": "2024-01-01T00:00:00Z",
+                "managed": false
+            }
+        }
+    });
+    std::fs::write(
+        tome_home.join(".tome-manifest.json"),
+        serde_json::to_string_pretty(&manifest_json).unwrap(),
+    )
+    .unwrap();
+
+    // Minimal tome.toml. Declare a local source directory only — for sync's
+    // refuse-with-hint test, only valid syntax + a library_dir is needed; the
+    // managed entries already in the manifest are what trigger the v0.9 shape
+    // detection in `lib.rs::sync` (it reads the manifest, not the config).
+    let config_path = tome_home.join("tome.toml");
+    let toml = format!(
+        r#"library_dir = "{}"
+
+[directories.local]
+path = "{}"
+type = "directory"
+role = "source"
+"#,
+        library_dir.display(),
+        local_source.display(),
+    );
+    std::fs::write(&config_path, toml).unwrap();
+
+    let machine_path = root.path().join("machine.toml");
+    std::fs::write(&machine_path, "").unwrap();
+
+    V09Fixture {
+        _root: root,
+        tome_home,
+        library_dir,
+        plugin_cache,
+        local_source,
+        config_path,
+        machine_path,
+    }
+}
+
+#[test]
+fn migrate_library_converts_managed_symlinks_to_real_dirs() {
+    let fix = build_v09_fixture();
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // p1 and p2: managed symlinks should now be real directories with copied content.
+    for n in &["p1", "p2"] {
+        let dest = fix.library_dir.join(n);
+        assert!(
+            dest.is_dir(),
+            "{n} must be a real directory after migration"
+        );
+        assert!(
+            !dest.is_symlink(),
+            "{n} must NOT be a symlink after migration"
+        );
+        assert!(dest.join("SKILL.md").is_file(), "{n}/SKILL.md must exist");
+        let content = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
+        assert_eq!(content, format!("# {n}"), "content for {n} must match source");
+    }
+
+    // l1: local skill, was already real-dir — UNCHANGED.
+    let l1 = fix.library_dir.join("l1");
+    assert!(l1.is_dir() && !l1.is_symlink());
+    assert_eq!(std::fs::read_to_string(l1.join("SKILL.md")).unwrap(), "# l1");
+
+    // broken: D-04 — symlink preserved, NOT deleted.
+    let broken = fix.library_dir.join("broken");
+    assert!(
+        broken.is_symlink(),
+        "broken symlink must be preserved per D-04, got: {stdout}\n{stderr}"
+    );
+    // D-04 stderr warning surfaced.
+    assert!(
+        stderr.contains("broken") && stderr.contains("unreachable"),
+        "stderr must mention broken-source skip, got: {stderr}"
+    );
+
+    // user-symlink: D-03 conservatism — NOT in manifest, must be untouched.
+    let user_sym = fix.library_dir.join("user-symlink");
+    assert!(
+        user_sym.is_symlink(),
+        "user-created symlink (NOT in manifest) must be preserved per D-03"
+    );
+
+    // D-05: exit code non-zero because of the broken-symlink skip.
+    assert!(
+        !output.status.success(),
+        "must exit non-zero on broken-symlink skip per D-05"
+    );
+
+    // SAFE-01 banner format check.
+    let combined = format!("{stdout}{stderr}");
+    assert!(
+        combined.contains("converted") && combined.contains("skipped"),
+        "output must include SAFE-01 summary banner, got: {combined}"
+    );
+
+    // Silence dead-code warnings on unused fixture fields.
+    let _ = (&fix.plugin_cache, &fix.local_source);
+}
+
+#[test]
+fn migrate_library_dry_run_makes_no_changes() {
+    let fix = build_v09_fixture();
+
+    // Snapshot library state pre-run.
+    let p1_was_symlink = fix.library_dir.join("p1").is_symlink();
+    let p2_was_symlink = fix.library_dir.join("p2").is_symlink();
+    assert!(p1_was_symlink && p2_was_symlink, "fixture sanity");
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--dry-run",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    // Filesystem unchanged.
+    assert!(
+        fix.library_dir.join("p1").is_symlink(),
+        "dry-run must not convert p1"
+    );
+    assert!(
+        fix.library_dir.join("p2").is_symlink(),
+        "dry-run must not convert p2"
+    );
+    assert!(
+        fix.library_dir.join("broken").is_symlink(),
+        "dry-run must not touch broken"
+    );
+
+    // Output should mention dry-run.
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        combined.contains("dry-run"),
+        "output must mention dry-run, got: {combined}"
     );
 }
