@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: executing
-stopped_at: Completed 11-04-migrate-library-command-PLAN.md
-last_updated: "2026-05-03T13:46:14.976Z"
+status: verifying
+stopped_at: Completed 11-05-integration-tests-PLAN.md
+last_updated: "2026-05-03T13:58:12.920Z"
 last_activity: 2026-05-03
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
-  completed_plans: 4
+  completed_plans: 5
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 
 Phase: 11 (library-canonical-core) — EXECUTING
 Plan: 5 of 5
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-03
 
 **v0.10 phase shape (Phases 11–17):**
@@ -58,6 +58,7 @@ Historical decisions are archived in:
 - [Phase 11]: LIB-01/LIB-02: consolidate_managed rewritten as recursive copy; managed flag semantics shift to 'update channel'; consolidate_local mirrors hash-match flag flip for symmetry; v0.9-shape symlinks refused (not auto-converted) per D-02 boundary defense
 - [Phase 11]: LIB-04 D-10 hybrid triggers: tome remove explicitly transitions owned manifest entries to Unowned (source_name = None) and preserves library content; cleanup phase adds the same safety-net transition for users who manually edit tome.toml. Already-Unowned entries are preserved by definition. RemoveResult.library_entries_transitioned_to_unowned replaces library_entries_removed; FailureKind shrunk to 2 variants (DistributionSymlink, GitCache).
 - [Phase 11-library-canonical-core]: LIB-05: tome migrate-library is one-shot CLI command (D-01) with manifest-anchored detection (D-03), broken-symlink preservation (D-04), SAFE-01 failure aggregation (D-05), idempotent re-runs (D-06). Sync refuses on v0.9-shape libraries with Conflict/Why/Suggestion error pointing at the new command (D-02). Entire migration_v010 module + sync gate deletes cleanly in v0.11+.
+- [Phase 11]: Plan 11-05: Re-exported manifest::hash_directory at crate root for integration test reuse — single canonical hashing implementation, no parallel SHA-256 helper. Five end-to-end CLI tests anchor LIB-01/LIB-04/LIB-05 success criteria via assert_cmd binary invocations against a synthetic v0.9 library fixture mirroring CONTEXT.md <specifics>. Resolved deferred-items.md entry for symlink_chain_managed_skill (cli.rs:1775).
 
 ### v0.10 design context (consume during planning)
 
@@ -96,6 +97,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-03T13:46:14.973Z
-Stopped at: Completed 11-04-migrate-library-command-PLAN.md
+Last session: 2026-05-03T13:58:12.917Z
+Stopped at: Completed 11-05-integration-tests-PLAN.md
 Resume file: None

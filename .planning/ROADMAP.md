@@ -63,7 +63,7 @@
 
 **Phase Numbering:** Continues from Phase 10 (v0.9). Phase 11 is the first new phase.
 
-- [ ] **Phase 11: Library-canonical core** — Managed skills become real directory copies; source removal preserves library content; first-sync migration converts symlink libraries (LIB-01..05)
+- [x] **Phase 11: Library-canonical core** — Managed skills become real directory copies; source removal preserves library content; first-sync migration converts symlink libraries (LIB-01..05) (completed 2026-05-03)
 - [ ] **Phase 12: Marketplace adapter** — `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` + `GitAdapter`; aggregated install/update failure surfacing (ADP-01..04)
 - [ ] **Phase 13: Lockfile-authoritative sync** — `tome sync` reconciles installed plugins to lockfile state; Match/Drift/Vanished classification; auto-install consent; edit-in-library detection (RECON-01..05) — **alpha cut**
 - [ ] **Phase 14: Unowned-library lifecycle** — `tome adopt` / `tome forget` commands; `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03)
@@ -88,7 +88,7 @@
 - [x] 11-02-PLAN.md — `consolidate_managed` rewrite (symlink → real-dir copy; LIB-01, LIB-02)
 - [x] 11-03-PLAN.md — Source-removal → Unowned transition (cleanup Case 1/2 split + `tome remove` explicit trigger; LIB-04)
 - [x] 11-04-PLAN.md — `tome migrate-library` CLI command + sync v0.9-shape refuse-with-hint (LIB-05)
-- [ ] 11-05-PLAN.md — Integration tests for migrate-library, sync refuse-with-hint, source-removal preservation (LIB-01/04/05 binary-level anchoring)
+- [x] 11-05-PLAN.md — Integration tests for migrate-library, sync refuse-with-hint, source-removal preservation (LIB-01/04/05 binary-level anchoring)
 
 ### Phase 12: Marketplace adapter
 **Goal**: A pluggable `MarketplaceAdapter` trait isolates marketplace-specific install/update logic. v0.10 ships two production adapters (Claude marketplace, git) plus partial-failure aggregation matching the v0.8 SAFE-01 pattern.
@@ -176,7 +176,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
 | 9. Cross-Machine Path Overrides | v0.9 | 3/3 | Complete | 2026-04-28 |
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
-| 11. Library-canonical core | v0.10 | 4/5 | In Progress|  |
+| 11. Library-canonical core | v0.10 | 5/5 | Complete   | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 0/TBD | Not started | - |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/TBD | Not started | - |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
