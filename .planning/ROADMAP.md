@@ -86,7 +86,7 @@
 **Plans**: 5 plans
 - [x] 11-01-PLAN.md — Manifest + lockfile schema lift (`source_name: Option<DirectoryName>`, `new_unowned` constructor; LIB-03)
 - [x] 11-02-PLAN.md — `consolidate_managed` rewrite (symlink → real-dir copy; LIB-01, LIB-02)
-- [ ] 11-03-PLAN.md — Source-removal → Unowned transition (cleanup Case 1/2 split + `tome remove` explicit trigger; LIB-04)
+- [x] 11-03-PLAN.md — Source-removal → Unowned transition (cleanup Case 1/2 split + `tome remove` explicit trigger; LIB-04)
 - [ ] 11-04-PLAN.md — `tome migrate-library` CLI command + sync v0.9-shape refuse-with-hint (LIB-05)
 - [ ] 11-05-PLAN.md — Integration tests for migrate-library, sync refuse-with-hint, source-removal preservation (LIB-01/04/05 binary-level anchoring)
 
@@ -176,7 +176,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 8.1. v0.8.1 hotfix — lockfile regen + save chain | v0.8 | 3/3 | Complete | 2026-04-27 |
 | 9. Cross-Machine Path Overrides | v0.9 | 3/3 | Complete | 2026-04-28 |
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
-| 11. Library-canonical core | v0.10 | 2/5 | In Progress|  |
+| 11. Library-canonical core | v0.10 | 3/5 | In Progress|  |
 | 12. Marketplace adapter | v0.10 | 0/TBD | Not started | - |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/TBD | Not started | - |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
