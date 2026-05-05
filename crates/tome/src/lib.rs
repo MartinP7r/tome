@@ -43,6 +43,7 @@ pub mod marketplace;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
 pub(crate) mod reassign;
+pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
 pub(crate) mod skill;
