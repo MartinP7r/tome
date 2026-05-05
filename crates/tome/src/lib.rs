@@ -39,7 +39,7 @@ pub(crate) mod lint;
 pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
-pub(crate) mod marketplace;
+pub mod marketplace;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
 pub(crate) mod reassign;
