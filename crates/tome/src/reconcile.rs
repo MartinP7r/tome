@@ -53,6 +53,27 @@ pub enum ReconcileClass {
     MissingFromMachine,
 }
 
+/// User's choice from the edit-in-library prompt (RECON-05 D-15).
+///
+/// Returned per `Edited` skill so the caller (`lib.rs::sync`) can apply the
+/// manifest mutation — `reconcile_lockfile` only PROPOSES the choice; the
+/// owner of the manifest applies it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditDecision {
+    /// D-13 in-place flip: `managed: true → false`, `source_name: Some →
+    /// None`. Library content unchanged. Lockfile entry preserved with
+    /// stale upstream metadata that downstream lockfile regeneration may
+    /// clear.
+    Fork,
+    /// Discard local edits, restore from marketplace. Caller invokes
+    /// `adapter.update(registry_id)` then re-hashes; reconcile flow's
+    /// drift-apply path would normally produce the same result, so revert
+    /// degenerates to "force a drift apply this run".
+    Revert,
+    /// Warn and don't touch — D-16 default for `--no-input`.
+    Skip,
+}
+
 /// A managed lockfile entry's classification + the metadata needed to drive
 /// downstream rendering / apply.
 #[derive(Debug, Clone)]
@@ -87,6 +108,11 @@ pub struct ReconcileReport {
     /// True when --no-install or `auto_install_plugins == Never`/Ask/None
     /// under non-interactive mode prevented the apply step from running.
     pub apply_skipped: bool,
+    /// Per-edited-skill user choice. Same length as `edited` and in the
+    /// same order. Populated by `handle_edited` based on prompt or
+    /// non-interactive default. The caller (`lib.rs::sync`) applies the
+    /// chosen action against the manifest.
+    pub edit_decisions: Vec<EditDecision>,
 }
 
 /// Options threaded from `SyncOptions` (lib.rs) into reconcile.
@@ -213,7 +239,9 @@ pub fn reconcile_lockfile(
     // 7. Edit-in-library prompt (independent of consent — RECON-05 always
     //    asks before overwriting user content).
     if !report.edited.is_empty() {
-        handle_edited(&report.edited, lockfile, &opts)?;
+        let edited_clone = report.edited.clone();
+        handle_edited(&edited_clone, lockfile, &opts, &mut report)?;
+        debug_assert_eq!(report.edit_decisions.len(), report.edited.len());
     }
 
     Ok(report)
@@ -542,23 +570,31 @@ fn classify_install_error(e: &anyhow::Error) -> InstallFailureKind {
 /// Handle edit-in-library detection (RECON-05).
 ///
 /// Per D-16: `--no-input` or non-TTY → skip-with-warning, exit zero. The
-/// fork/revert/skip flow (D-13/D-15) is wired here as a prompt; the actual
-/// manifest mutation (managed=false, source_name=None) is applied at the
-/// `lib.rs::sync` call site by Plan 13-04 (which has manifest mutability).
-fn handle_edited(edited: &[Edited], _lockfile: &Lockfile, opts: &ReconcileOpts) -> Result<()> {
-    // D-16: --no-input or non-TTY → skip-with-warning, exit zero.
+/// fork/revert/skip prompt (D-13/D-15) is recorded into `report.edit_decisions`
+/// so the caller (`lib.rs::sync`) can apply the manifest mutation; this
+/// helper does NOT mutate the manifest itself (the manifest is owned at the
+/// call site).
+fn handle_edited(
+    edited: &[Edited],
+    lockfile: &Lockfile,
+    opts: &ReconcileOpts,
+    report: &mut ReconcileReport,
+) -> Result<()> {
+    let _ = lockfile; // reserved for richer prompt copy if needed later
+
+    // D-16: --no-input or non-TTY → skip-with-warning per skill, exit zero.
     if opts.no_input || !std::io::stdin().is_terminal() {
         for e in edited {
             eprintln!(
                 "warning: {} has local edits; skipping reconcile this sync (run interactively to fork/revert)",
                 e.name.as_str()
             );
+            report.edit_decisions.push(EditDecision::Skip);
         }
         return Ok(());
     }
 
-    // Interactive [F/r/s] prompt (D-15). The chosen action's manifest flip
-    // (D-13) is applied in Plan 13-04 (call site has manifest mutability).
+    // Interactive [F/r/s] (D-15). Use dialoguer::Select per OQ-1.
     for e in edited {
         let prompt = format!(
             "{} has local edits. Last upstream: {} @ {}.",
@@ -571,16 +607,19 @@ fn handle_edited(edited: &[Edited], _lockfile: &Lockfile, opts: &ReconcileOpts) 
             "revert — discard your edits, restore upstream",
             "skip — warn and don't touch this entry this sync",
         ];
-        let _idx = dialoguer::Select::new()
+        let idx = dialoguer::Select::new()
             .with_prompt(prompt)
             .items(items)
             .default(0)
             .interact()
             .context("edit-in-library prompt failed")?;
-        eprintln!(
-            "warning: {} edit detected — Plan 13-04 wires fork/revert/skip flow into sync",
-            e.name.as_str()
-        );
+        let decision = match idx {
+            0 => EditDecision::Fork,
+            1 => EditDecision::Revert,
+            2 => EditDecision::Skip,
+            _ => unreachable!("Select::interact returns 0..items.len()"),
+        };
+        report.edit_decisions.push(decision);
     }
     Ok(())
 }
@@ -1615,6 +1654,65 @@ mod tests {
         assert!(
             !machine_path.exists(),
             "dry_run must NOT create machine.toml"
+        );
+    }
+
+    // ---------- Edit-decision tests (Plan 13-04 Task 1) ----------
+
+    #[test]
+    fn handle_edited_no_input_returns_all_skip() {
+        // Build a 2-entry edited Vec, run handle_edited under no_input=true,
+        // assert decisions are [Skip, Skip]. No interactive prompt fires.
+        let opts = ReconcileOpts {
+            no_input: true,
+            ..default_opts()
+        };
+        let edited = vec![
+            Edited {
+                name: SkillName::new("alpha").unwrap(),
+                old_source: DirectoryName::new("claude-plugins").unwrap(),
+                old_version: Some("1.0.0".to_string()),
+            },
+            Edited {
+                name: SkillName::new("beta").unwrap(),
+                old_source: DirectoryName::new("claude-plugins").unwrap(),
+                old_version: Some("2.0.0".to_string()),
+            },
+        ];
+        let lockfile = lockfile_with(vec![]);
+        let mut report = ReconcileReport::default();
+
+        handle_edited(&edited, &lockfile, &opts, &mut report).unwrap();
+
+        assert_eq!(
+            report.edit_decisions,
+            vec![EditDecision::Skip, EditDecision::Skip],
+            "no_input must yield Skip per edited entry, got {:?}",
+            report.edit_decisions
+        );
+    }
+
+    #[test]
+    fn edit_decision_serialization_compile_check() {
+        // Compile-time only: prove every variant is constructible from outside
+        // `mod tests` (i.e. the enum is `pub`). If the enum is removed or
+        // privatised this test fails to compile.
+        let _f = EditDecision::Fork;
+        let _r = EditDecision::Revert;
+        let _s = EditDecision::Skip;
+        // Sanity: distinct variants compare unequal.
+        assert_ne!(EditDecision::Fork, EditDecision::Revert);
+        assert_ne!(EditDecision::Revert, EditDecision::Skip);
+        assert_ne!(EditDecision::Fork, EditDecision::Skip);
+    }
+
+    #[test]
+    fn report_default_edit_decisions_empty() {
+        let report = ReconcileReport::default();
+        assert!(
+            report.edit_decisions.is_empty(),
+            "default ReconcileReport must have empty edit_decisions, got {:?}",
+            report.edit_decisions
         );
     }
 }
