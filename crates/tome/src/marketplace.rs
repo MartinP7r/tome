@@ -8,6 +8,7 @@
 //! dispatch into `lib.rs::sync`. All trait methods return [`anyhow::Result`]
 //! per the project-wide error-handling convention.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
@@ -436,12 +437,18 @@ impl MarketplaceAdapter for GitAdapter {
     }
 }
 
-// ---- ClaudeMarketplaceAdapter helpers — pure parser + heuristic classifier ----
+// ---- ClaudeMarketplaceAdapter — production adapter shelling to `claude` CLI ----
 //
-// Phase 12 Plan 12-04 Task 1: ships the JSON parser and the stderr -> kind
-// heuristic as standalone functions so they can be unit-tested without
-// requiring `claude` on PATH. Task 2 of the same plan wires them into the
-// production `ClaudeMarketplaceAdapter` (subprocess invocation + cache).
+// Per CONTEXT.md D-01..D-04, D-08, D-09 (locked, verbatim):
+// - D-01: subprocesses run with `stdin = Stdio::null()`, no env tweaks, stderr
+//   captured verbatim, non-zero exit = failure, no timeout.
+// - D-02: `available()` reads the cached `claude plugin list --json` snapshot's
+//   `errors[]` field for the entry — zero extra subprocess calls.
+// - D-04: internal `RefCell<Option<Vec<InstalledPlugin>>>` cache. First read
+//   populates; `install()`/`update()` returning `Ok` auto-invalidates; public
+//   `refresh()` forces re-query.
+// - D-08: id() is the stable string `"claude-plugins"`.
+// - D-09: install/update use default scope (user) — no `--scope` flag.
 
 /// Wire format for `claude plugin list --json` entries.
 ///
@@ -468,12 +475,6 @@ struct ClaudePluginListEntry {
 /// installed. Tolerates extra fields (the live snapshot includes `scope`,
 /// `enabled`, `installedAt`, `lastUpdated`, `mcpServers`) and the literal
 /// `version: "unknown"` string observed on some entries.
-//
-// dead_code allow: Plan 12-04 Task 2 wires this into `populate_cache` on the
-// production `ClaudeMarketplaceAdapter`. Until Task 2 lands the only
-// consumer is the parser unit tests in this same plan. Drop this attr when
-// Task 2's adapter constructor fires.
-#[allow(dead_code)]
 pub(crate) fn parse_claude_plugin_list_json(input: &str) -> Result<Vec<InstalledPlugin>> {
     let entries: Vec<ClaudePluginListEntry> = serde_json::from_str(input)
         .context("failed to parse `claude plugin list --json` output")?;
@@ -522,6 +523,238 @@ pub(crate) fn classify_claude_install_stderr(stderr: &str) -> InstallFailureKind
         InstallFailureKind::NotFound
     } else {
         InstallFailureKind::Unknown
+    }
+}
+
+/// Check whether the `claude` CLI is available on PATH.
+///
+/// Mirrors [`crate::git::is_git_available`]. Used at adapter construction to
+/// fail fast with a clear actionable error if the binary is missing, and by
+/// smoke tests to skip subprocess-dependent assertions in CI environments
+/// that lack the binary.
+//
+// dead_code allow: production caller is `ClaudeMarketplaceAdapter::new`, which
+// itself has no non-test consumer until Phase 13's D-11 dispatcher constructs
+// the adapter. Smoke tests in this module also call this directly. Drop this
+// attr when the dispatcher lands.
+#[allow(dead_code)]
+pub fn is_claude_available() -> bool {
+    std::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Run a `claude` subcommand with stdin closed (per D-01).
+///
+/// Returns the raw `Output` so callers can inspect stdout AND stderr. Maps
+/// `ErrorKind::NotFound` to a clear error message naming the binary — this
+/// shouldn't happen in practice because [`ClaudeMarketplaceAdapter::new`]
+/// probes `claude --version` at construction, but provides a safety net if
+/// the binary disappears between construction and use (mirrors
+/// `install.rs:57` for the existing pattern).
+fn run_claude_subcommand(args: &[&str]) -> Result<std::process::Output> {
+    match std::process::Command::new("claude")
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+    {
+        Ok(output) => Ok(output),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(anyhow::anyhow!(
+            "claude CLI not found on PATH (vanished between adapter construction and `claude {}`)",
+            args.join(" ")
+        )),
+        Err(e) => {
+            Err(anyhow::Error::from(e)
+                .context(format!("failed to run `claude {}`", args.join(" "))))
+        }
+    }
+}
+
+/// Marketplace adapter for the Claude Code plugin ecosystem.
+///
+/// Per CONTEXT.md D-01..D-04, D-08, D-09: shells out synchronously to
+/// `claude plugin install/update/list`, holds an internal cache of the
+/// `claude plugin list --json` snapshot to amortize subprocess cost, and
+/// auto-invalidates the cache on successful install/update.
+///
+/// - D-01: stdin closed; no env tweaks; stderr captured verbatim; non-zero
+///   exit = failure; no timeout.
+/// - D-02: `available()` reads the cached snapshot's `errors[]` field for
+///   the entry — zero extra subprocess calls.
+/// - D-04: `RefCell<Option<Vec<InstalledPlugin>>>` cache; first read
+///   populates; `install()`/`update()` returning `Ok` auto-invalidates;
+///   public [`Self::refresh`] forces re-query.
+/// - D-08: [`MarketplaceAdapter::id`] returns the stable string
+///   `"claude-plugins"`.
+/// - D-09: uses default scope (user) — no `--scope` flag passed.
+//
+// dead_code allow: Phase 12 ships the adapter + tests. Phase 13's sync flow
+// (D-11 dispatcher) is the first non-test consumer — it constructs a
+// `ClaudeMarketplaceAdapter::new()` for `DirectoryType::ClaudePlugins`
+// directories. Drop this attr (and the `#[allow]` on the inherent impl block
+// below) when the dispatcher lands. The trait impl block follows the trait's
+// reachability and does not need its own attr.
+#[allow(dead_code)]
+pub struct ClaudeMarketplaceAdapter {
+    cache: RefCell<Option<Vec<InstalledPlugin>>>,
+}
+
+#[allow(dead_code)]
+impl ClaudeMarketplaceAdapter {
+    /// Construct a `ClaudeMarketplaceAdapter`, probing `claude --version` to
+    /// fail fast if the binary is missing.
+    ///
+    /// Per ADP-02: surfaces "claude not on PATH" as a clear, actionable
+    /// error naming the binary and suggesting the user either install Claude
+    /// Code or remove `[directories.<name>]` entries with
+    /// `type = "claude-plugins"` from `tome.toml`.
+    pub fn new() -> Result<Self> {
+        if !is_claude_available() {
+            anyhow::bail!(
+                "claude CLI not found on PATH — install Claude Code, \
+                 or remove [directories.<name>] entries with \
+                 type = \"claude-plugins\" from tome.toml"
+            );
+        }
+        Ok(Self {
+            cache: RefCell::new(None),
+        })
+    }
+
+    /// Test-only constructor that bypasses the binary probe.
+    ///
+    /// Used by unit tests that exercise trait methods against a
+    /// pre-populated cache without requiring `claude` on PATH. Production
+    /// code MUST go through [`Self::new`] so the actionable error message
+    /// fires for users who haven't installed Claude Code.
+    #[cfg(test)]
+    pub(crate) fn new_for_test() -> Self {
+        Self {
+            cache: RefCell::new(None),
+        }
+    }
+
+    /// Force re-query of the `claude plugin list --json` snapshot.
+    ///
+    /// Per D-04: `install()`/`update()` auto-invalidate on success — explicit
+    /// `refresh()` is for cases where external state may have changed
+    /// between trait calls (e.g. user ran `claude plugin install` from
+    /// another shell while `tome` was running).
+    pub fn refresh(&self) -> Result<()> {
+        *self.cache.borrow_mut() = None;
+        self.populate_cache()
+    }
+
+    /// Run `claude plugin list --json`, parse the output, and populate the
+    /// cache.
+    ///
+    /// No-op if the cache is already populated. Called by the read-side
+    /// trait methods (`current_version`, `list_installed`, `available`) and
+    /// by `refresh()`.
+    fn populate_cache(&self) -> Result<()> {
+        if self.cache.borrow().is_some() {
+            return Ok(());
+        }
+        let output = run_claude_subcommand(&["plugin", "list", "--json"])?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("`claude plugin list --json` failed: {}", stderr.trim());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let parsed = parse_claude_plugin_list_json(&stdout)?;
+        *self.cache.borrow_mut() = Some(parsed);
+        Ok(())
+    }
+
+    /// Construct an [`InstallFailure`] from a stderr string using the
+    /// heuristic classifier.
+    ///
+    /// Pulled out as a testable `pub(crate)` helper so the stderr-to-failure
+    /// conversion can be exercised in unit tests without spawning a
+    /// subprocess. Phase 13's sync flow may also call this helper directly
+    /// when it wraps adapter `install`/`update` errors into
+    /// `Vec<InstallFailure>` for the grouped renderer.
+    pub(crate) fn build_install_failure(
+        adapter_id: &str,
+        plugin_id: &str,
+        op: InstallOp,
+        stderr: &str,
+    ) -> InstallFailure {
+        InstallFailure {
+            adapter_id: adapter_id.to_string(),
+            plugin_id: plugin_id.to_string(),
+            operation: op,
+            kind: classify_claude_install_stderr(stderr),
+            source: anyhow::anyhow!("{}", stderr.trim()),
+        }
+    }
+}
+
+impl MarketplaceAdapter for ClaudeMarketplaceAdapter {
+    fn id(&self) -> &str {
+        "claude-plugins"
+    }
+
+    fn current_version(&self, plugin_id: &str) -> Result<Option<String>> {
+        self.populate_cache()?;
+        Ok(self
+            .cache
+            .borrow()
+            .as_ref()
+            .and_then(|list| list.iter().find(|p| p.id == plugin_id))
+            .map(|p| p.version.clone()))
+    }
+
+    fn install(&self, plugin_id: &str) -> Result<()> {
+        // Per D-09: no `--scope` flag — uses the default scope (user).
+        let output = run_claude_subcommand(&["plugin", "install", plugin_id])?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("{}", stderr.trim());
+        }
+        // Per D-04: auto-invalidate cache on Ok so the next read re-queries.
+        *self.cache.borrow_mut() = None;
+        Ok(())
+    }
+
+    fn update(&self, plugin_id: &str) -> Result<()> {
+        let output = run_claude_subcommand(&["plugin", "update", plugin_id])?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("{}", stderr.trim());
+        }
+        *self.cache.borrow_mut() = None;
+        Ok(())
+    }
+
+    fn list_installed(&self) -> Result<Vec<InstalledPlugin>> {
+        self.populate_cache()?;
+        Ok(self.cache.borrow().clone().unwrap_or_default())
+    }
+
+    fn available(&self, plugin_id: &str) -> Result<bool> {
+        // Per D-02: zero extra subprocess calls. Reads the cached snapshot's
+        // errors[] field for the entry.
+        self.populate_cache()?;
+        let cache = self.cache.borrow();
+        let list = cache.as_ref().expect("populate_cache populates the cache");
+        match list.iter().find(|p| p.id == plugin_id) {
+            Some(entry)
+                if entry
+                    .errors
+                    .iter()
+                    .any(|e| e.contains("not found in marketplace")) =>
+            {
+                Ok(false)
+            }
+            // Conservative default: entry exists with no marketplace error,
+            // OR plugin isn't in the snapshot at all (not yet installed) —
+            // report `available = true`. The "vanished" signal is purely the
+            // errors[] substring.
+            _ => Ok(true),
+        }
     }
 }
 
@@ -1161,5 +1394,145 @@ mod tests {
             classify_claude_install_stderr(""),
             InstallFailureKind::Unknown
         );
+    }
+
+    // ---- ClaudeMarketplaceAdapter pure unit tests (no subprocess) ----
+    //
+    // Use `new_for_test()` to bypass the binary probe; tests pre-populate
+    // the cache directly so they exercise trait method shape without
+    // requiring `claude` on PATH.
+
+    fn make_test_plugin(id: &str, version: &str, errors: Vec<String>) -> InstalledPlugin {
+        InstalledPlugin {
+            id: id.to_string(),
+            version: version.to_string(),
+            install_path: PathBuf::from("/test"),
+            errors,
+        }
+    }
+
+    #[test]
+    fn claude_adapter_id_is_stable_constant() {
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        assert_eq!(adapter.id(), "claude-plugins");
+    }
+
+    #[test]
+    fn claude_adapter_available_returns_false_for_errored_entry() {
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        // Pre-populate the cache directly with an errored entry — bypasses
+        // the subprocess call so the test runs deterministically without
+        // claude on PATH.
+        *adapter.cache.borrow_mut() = Some(vec![make_test_plugin(
+            "vanished@m1",
+            "1.0.0",
+            vec!["Plugin vanished not found in marketplace m1".into()],
+        )]);
+        assert!(!adapter.available("vanished@m1").unwrap());
+    }
+
+    #[test]
+    fn claude_adapter_available_returns_true_for_clean_entry() {
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        *adapter.cache.borrow_mut() = Some(vec![make_test_plugin("happy@m1", "1.0.0", vec![])]);
+        assert!(adapter.available("happy@m1").unwrap());
+    }
+
+    #[test]
+    fn claude_adapter_available_returns_true_for_entry_not_in_cache() {
+        // Conservative default: if the plugin isn't in the snapshot at all,
+        // it's "available" — only `errors[]` containing the substring marks
+        // unavailable. Per D-02.
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        *adapter.cache.borrow_mut() = Some(vec![]);
+        assert!(adapter.available("never-seen").unwrap());
+    }
+
+    #[test]
+    fn claude_adapter_current_version_returns_some_for_known_plugin() {
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        *adapter.cache.borrow_mut() = Some(vec![make_test_plugin("axiom@m1", "3.3.0", vec![])]);
+        assert_eq!(
+            adapter.current_version("axiom@m1").unwrap(),
+            Some("3.3.0".to_string())
+        );
+    }
+
+    #[test]
+    fn claude_adapter_current_version_returns_none_for_unknown_plugin() {
+        let adapter = ClaudeMarketplaceAdapter::new_for_test();
+        *adapter.cache.borrow_mut() = Some(vec![]);
+        assert_eq!(adapter.current_version("never-seen").unwrap(), None);
+    }
+
+    #[test]
+    fn claude_adapter_build_install_failure_uses_heuristic_for_not_found() {
+        let f = ClaudeMarketplaceAdapter::build_install_failure(
+            "claude-plugins",
+            "x@y",
+            InstallOp::Install,
+            r#"Plugin "x" not found in marketplace "y""#,
+        );
+        assert_eq!(f.kind, InstallFailureKind::NotFound);
+        assert_eq!(f.adapter_id, "claude-plugins");
+        assert_eq!(f.plugin_id, "x@y");
+        assert_eq!(f.operation, InstallOp::Install);
+    }
+
+    #[test]
+    fn claude_adapter_build_install_failure_unknown_for_novel_stderr() {
+        let f = ClaudeMarketplaceAdapter::build_install_failure(
+            "claude-plugins",
+            "x@y",
+            InstallOp::Update,
+            "some entirely novel error",
+        );
+        assert_eq!(f.kind, InstallFailureKind::Unknown);
+        assert_eq!(f.operation, InstallOp::Update);
+    }
+
+    // ---- Smoke tests (gated behind is_claude_available) ----
+    //
+    // Per RESEARCH "Test Strategy for Shelled Code" recommendation #3: smoke
+    // tests run against real `claude` when available, eprintln+return when
+    // not. CI without claude exits cleanly; dev machines exercise the real
+    // subprocess path.
+
+    #[test]
+    fn smoke_claude_available_or_skip() {
+        if !is_claude_available() {
+            eprintln!("SKIP smoke_claude_available_or_skip: claude CLI not on PATH");
+            return;
+        }
+        // If we're here, claude is on PATH — construction must succeed.
+        assert!(ClaudeMarketplaceAdapter::new().is_ok());
+    }
+
+    #[test]
+    fn smoke_claude_marketplace_adapter_lists_installed() {
+        if !is_claude_available() {
+            eprintln!(
+                "SKIP smoke_claude_marketplace_adapter_lists_installed: claude CLI not on PATH"
+            );
+            return;
+        }
+        let adapter = ClaudeMarketplaceAdapter::new().unwrap();
+        let list = adapter
+            .list_installed()
+            .expect("list_installed should succeed when claude is on PATH");
+        // Don't assert on the count — only that the call shape works. On
+        // Martin's machine this is ~37; on a fresh machine it may be 0.
+        let _ = list.len();
+    }
+
+    #[test]
+    fn smoke_claude_install_nonexistent_returns_err() {
+        if !is_claude_available() {
+            eprintln!("SKIP smoke_claude_install_nonexistent_returns_err: claude CLI not on PATH");
+            return;
+        }
+        let adapter = ClaudeMarketplaceAdapter::new().unwrap();
+        let result = adapter.install("definitely-nonexistent-xyz@nonexistent-marketplace-xyz");
+        assert!(result.is_err(), "install of nonexistent plugin should fail");
     }
 }
