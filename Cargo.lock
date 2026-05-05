@@ -2255,6 +2255,7 @@ dependencies = [
  "tabled",
  "tempfile",
  "terminal_size",
+ "tome",
  "toml",
  "walkdir",
 ]
