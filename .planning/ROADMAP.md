@@ -115,7 +115,15 @@
   3. When auto-install consent is set and drift is detected, `tome sync` renders a per-skill diff (`plugin X: 5.0.5 → 5.0.7`), invokes `adapter.install`/`adapter.update`, re-discovers the skill, and verifies the resulting library `content_hash` matches the freshly-recorded lockfile entry. When auto-install is off, the same drift surfaces as a warning block without filesystem modification.
   4. A skill whose `adapter.available()` returns false produces a stderr warning (`plugin X vanished from marketplace Y; using preserved library copy`) and `tome sync` continues; downstream distribution still symlinks the preserved library copy into target tool directories. An integration test simulates a vanished plugin via a mock adapter and asserts the symlink is created.
   5. When `managed: true` and `content_hash(library/<skill>) != lockfile.content_hash`, `tome sync` prompts the user with three choices (fork / revert / skip); default is fork; in `--no-input` mode, the default is **skip with warning** (never silently overwrites edited content). Each choice is wired to existing semantics: fork uses `tome fork` machinery, revert overwrites from the marketplace copy, skip emits a single-line warning.
-**Plans**: TBD
+
+**Note (planner traceability flag — D-01 supersedes RECON-01 wording):** The drift basis is **content_hash mismatch**, not version. RECON-01's literal "version differs from lockfile or older" phrasing in `REQUIREMENTS.md` is superseded by Phase 13 D-01 (Phase 11 D-08 inheritance). The version string is display-only in the diff output (`plugin X: 5.0.5 → 5.0.7`); it never causes drift on its own. Cleanup commit to update REQUIREMENTS.md may follow in a future hardening phase.
+
+**Plans**: 5 plans (Wave 1: 13-01, 13-02 — schema + mock lift; Wave 2: 13-03 — reconcile module; Wave 3: 13-04 — sync integration + install.rs deletion; Wave 4: 13-05 — integration tests)
+- [ ] 13-01-PLAN.md — `AutoInstall` enum + `MachinePrefs.auto_install_plugins` field + `--no-install` CLI flag + `SyncOptions` plumbing (RECON-02 schema)
+- [ ] 13-02-PLAN.md — Lift `MockMarketplaceAdapter` into feature-gated `pub mod testing` + `[features] test-support = []` in `Cargo.toml` (RECON-01 test surface)
+- [ ] 13-03-PLAN.md — New `reconcile.rs` module: `ReconcileClass`/`ReconcileReport`/`ReconcileOpts`, classify_lockfile, detect_edited, apply_drift_and_missing, resolve_consent, prompt_consent, handle_edited, format_summary + 25 unit tests (RECON-01..05 core)
+- [ ] 13-04-PLAN.md — Wire `reconcile::reconcile_lockfile` into `lib.rs::sync` (replaces `reconcile_managed_plugins` at line 978); add `build_claude_adapter` dispatcher; add `apply_edit_decisions` for D-13 fork-in-place flip; delete `crates/tome/src/install.rs` per D-17; bail on partial install failure per OQ-6 (RECON-01..05 wiring)
+- [ ] 13-05-PLAN.md — Integration tests in `crates/tome/tests/cli_sync_reconcile.rs` exercising `--no-input` flow paths (`--no-install`, D-20 missing-claude error, machine.toml round-trip for `auto_install_plugins`, vanished-distribution preservation proxy) — interactive prompts covered by Plan 13-03 unit tests per RESEARCH Pitfall 6
 
 ### Phase 14: Unowned-library lifecycle
 **Goal**: Two new commands explicitly manage skills whose source has been removed. The unowned set is a first-class concept surfaced in status/doctor.
@@ -182,7 +190,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
-| 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/TBD | Not started | - |
+| 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/5 | Not started | - |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
