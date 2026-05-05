@@ -13,6 +13,10 @@ use std::path::PathBuf;
 use anyhow::Result;
 use console::style;
 
+use crate::config::{DirectoryConfig, GitRef};
+use crate::git;
+use crate::paths::TomePaths;
+
 /// A plugin currently installed via a marketplace adapter.
 ///
 /// Adapters return `Vec<InstalledPlugin>` from [`MarketplaceAdapter::list_installed`].
@@ -20,10 +24,10 @@ use console::style;
 /// what's in the library, while `InstalledPlugin` describes what's installed at
 /// the marketplace level. Phase 13's reconciliation flow bridges the two.
 //
-// dead_code allow: Phase 12 only ships the contract + a `#[cfg(test)]` mock.
-// Real consumers (`ClaudeMarketplaceAdapter`, `GitAdapter`) arrive in Plans
-// 12-03 and 12-04; Phase 13's sync flow wires the dispatch. Drop this attr
-// when the first non-test caller lands.
+// dead_code allow: Phase 12 ships the trait + adapters + tests. The first
+// non-test consumer is Phase 13's sync dispatcher (RECON-*), which calls
+// `list_installed()` and stores `InstalledPlugin` values for drift detection.
+// Drop this attr when Phase 13 wires the call from `lib.rs::sync`.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InstalledPlugin {
@@ -69,9 +73,10 @@ pub struct InstalledPlugin {
 /// because marketplace identifiers carry an `@marketplace` suffix that's
 /// incompatible with `SkillName` validation (e.g. `"axiom@axiom-marketplace"`).
 //
-// dead_code allow: see InstalledPlugin above. Drop when Plan 12-03 / 12-04
-// add real `impl MarketplaceAdapter for ...` blocks consumed from non-test
-// code, or when Phase 13's sync dispatcher lands.
+// dead_code allow: see InstalledPlugin above. The trait is implemented by
+// `GitAdapter` (Plan 12-03) and `MockMarketplaceAdapter` (Plan 12-01 tests),
+// but neither has a non-test caller yet. Drop when Phase 13's sync dispatcher
+// constructs `Box<dyn MarketplaceAdapter>` for each `DirectoryConfig`.
 #[allow(dead_code)]
 pub trait MarketplaceAdapter {
     /// Stable identifier for this adapter instance (e.g. git URL, or
@@ -311,6 +316,122 @@ pub fn render_install_failures(failures: &[InstallFailure]) {
     let rendered = format_install_failures(failures);
     if !rendered.is_empty() {
         eprint!("{rendered}");
+    }
+}
+
+/// Marketplace adapter for git-type directories.
+///
+/// Per CONTEXT.md D-05: one `GitAdapter` per `[directories.<git-name>]` config
+/// entry. The adapter is bound to a single URL + ref pin and delegates all
+/// operations to [`crate::git`] verbatim — behavior is byte-for-byte unchanged
+/// from v0.9 (D-05a regression contract).
+///
+/// The `plugin_id: &str` argument on trait methods is ignored: there's only
+/// one "plugin" per git directory (the repo itself).
+//
+// dead_code allow: Phase 12 ships the adapter + tests. Phase 13's sync flow
+// (D-11 dispatcher) is the first non-test consumer — it constructs a
+// `GitAdapter::for_directory(...)` for each `DirectoryType::Git` entry. Drop
+// this attr (and the `#[allow]`s on the inherent methods below) when Phase 13
+// wires the dispatch.
+#[allow(dead_code)]
+pub struct GitAdapter {
+    url: String,
+    cache_dir: PathBuf,
+    git_ref: Option<GitRef>,
+}
+
+#[allow(dead_code)]
+impl GitAdapter {
+    /// Construct a `GitAdapter` from a git-type [`DirectoryConfig`].
+    ///
+    /// Returns `Err` if the directory's `path` field (which holds the git URL
+    /// for git-type directories) is not valid UTF-8. Mirrors the existing
+    /// pattern at `crate::remove::plan` (remove.rs:241-244).
+    ///
+    /// The cache directory is precomputed at construction so repeat calls to
+    /// trait methods don't re-hash the URL.
+    pub fn for_directory(dir_config: &DirectoryConfig, paths: &TomePaths) -> Result<Self> {
+        let url = dir_config
+            .path
+            .to_str()
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "git directory path is not valid UTF-8: {}",
+                    dir_config.path.display()
+                )
+            })?
+            .to_string();
+        let cache_dir = git::repo_cache_dir(&paths.repos_dir(), &url);
+        Ok(Self {
+            url,
+            cache_dir,
+            git_ref: dir_config.git_ref.clone(),
+        })
+    }
+
+    fn ref_branch(&self) -> Option<&str> {
+        self.git_ref.as_ref().and_then(|r| r.branch())
+    }
+    fn ref_tag(&self) -> Option<&str> {
+        self.git_ref.as_ref().and_then(|r| r.tag())
+    }
+    fn ref_rev(&self) -> Option<&str> {
+        self.git_ref.as_ref().and_then(|r| r.rev())
+    }
+}
+
+impl MarketplaceAdapter for GitAdapter {
+    fn id(&self) -> &str {
+        &self.url
+    }
+
+    fn current_version(&self, _plugin_id: &str) -> Result<Option<String>> {
+        if !self.cache_dir.exists() {
+            return Ok(None);
+        }
+        git::read_head_sha(&self.cache_dir).map(Some)
+    }
+
+    fn install(&self, _plugin_id: &str) -> Result<()> {
+        git::clone_repo(
+            &self.url,
+            &self.cache_dir,
+            self.ref_branch(),
+            self.ref_tag(),
+            self.ref_rev(),
+        )
+    }
+
+    fn update(&self, _plugin_id: &str) -> Result<()> {
+        git::update_repo(
+            &self.cache_dir,
+            self.ref_branch(),
+            self.ref_tag(),
+            self.ref_rev(),
+        )
+    }
+
+    fn list_installed(&self) -> Result<Vec<InstalledPlugin>> {
+        if !self.cache_dir.exists() {
+            return Ok(vec![]);
+        }
+        let version = git::read_head_sha(&self.cache_dir)?;
+        Ok(vec![InstalledPlugin {
+            id: self.url.clone(),
+            version,
+            install_path: self.cache_dir.clone(),
+            errors: vec![],
+        }])
+    }
+
+    fn available(&self, _plugin_id: &str) -> Result<bool> {
+        // Per RESEARCH Q #5: trust local-clone existence. Git URLs don't
+        // "vanish" the way marketplace plugins do; a missing local clone is a
+        // "not yet installed" signal, not a "vanished" signal. If a future
+        // feature needs a true vanished probe, add a
+        // `git ls-remote --exit-code` call here.
+        Ok(self.cache_dir.exists())
     }
 }
 
@@ -650,5 +771,178 @@ mod tests {
         // Pure no-op for empty input — exercising both the wrapper and the
         // formatter's empty-string short-circuit.
         render_install_failures(&[]);
+    }
+
+    // ---- GitAdapter tests (mirrors git.rs::tests::read_head_sha_returns_40_char_hex
+    // pattern at git.rs:252-289 — real `git init` repos in TempDirs, no network) ----
+
+    /// Initialize a real git repo in `tmp/origin` with one commit. The
+    /// resulting directory's path is a valid `clone` source for
+    /// `git::clone_repo` — file paths work as git URLs.
+    fn make_local_test_repo(tmp: &std::path::Path) -> std::path::PathBuf {
+        let repo = tmp.join("origin");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::fs::write(repo.join("README.md"), "hi").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "-A"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        repo
+    }
+
+    fn make_test_dir_config(path: std::path::PathBuf, git_ref: Option<GitRef>) -> DirectoryConfig {
+        DirectoryConfig {
+            path,
+            directory_type: crate::config::DirectoryType::Git,
+            role: None,
+            git_ref,
+            subdir: None,
+            override_applied: false,
+        }
+    }
+
+    #[test]
+    fn git_adapter_id_returns_url() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir_config = make_test_dir_config(
+            std::path::PathBuf::from("https://example.com/repo.git"),
+            None,
+        );
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        assert_eq!(adapter.id(), "https://example.com/repo.git");
+    }
+
+    #[test]
+    fn git_adapter_current_version_none_when_not_cloned() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir_config = make_test_dir_config(
+            std::path::PathBuf::from("https://example.com/never-cloned.git"),
+            None,
+        );
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        assert_eq!(adapter.current_version("ignored").unwrap(), None);
+    }
+
+    #[test]
+    fn git_adapter_available_returns_false_when_not_cloned() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir_config = make_test_dir_config(
+            std::path::PathBuf::from("https://example.com/never-cloned.git"),
+            None,
+        );
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        assert!(!adapter.available("ignored").unwrap());
+    }
+
+    #[test]
+    fn git_adapter_list_installed_empty_when_not_cloned() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir_config = make_test_dir_config(
+            std::path::PathBuf::from("https://example.com/never-cloned.git"),
+            None,
+        );
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        assert!(adapter.list_installed().unwrap().is_empty());
+    }
+
+    #[test]
+    fn git_adapter_for_directory_extracts_url_and_ref() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir_config = make_test_dir_config(
+            std::path::PathBuf::from("https://example.com/repo.git"),
+            Some(GitRef::Branch("main".into())),
+        );
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        assert_eq!(adapter.url, "https://example.com/repo.git");
+        assert_eq!(
+            adapter.git_ref.as_ref().and_then(|r| r.branch()),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn git_adapter_install_invokes_clone_repo() {
+        // D-05a regression anchor: install delegates verbatim to git::clone_repo.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = make_local_test_repo(tmp.path());
+        let dir_config = make_test_dir_config(origin.clone(), None);
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        adapter.install("ignored").unwrap();
+        assert!(
+            adapter.cache_dir.join(".git").is_dir(),
+            "expected .git in cache dir after install, cache_dir={}",
+            adapter.cache_dir.display()
+        );
+    }
+
+    #[test]
+    fn git_adapter_current_version_after_install_is_head_sha() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = make_local_test_repo(tmp.path());
+        let dir_config = make_test_dir_config(origin.clone(), None);
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        adapter.install("ignored").unwrap();
+        let v = adapter.current_version("ignored").unwrap();
+        let sha = v.expect("current_version should be Some after install");
+        assert_eq!(sha.len(), 40, "expected 40-char SHA, got: {sha}");
+        assert!(
+            sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "SHA must be hex: {sha}"
+        );
+    }
+
+    #[test]
+    fn git_adapter_list_installed_after_install_returns_one_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = make_local_test_repo(tmp.path());
+        let dir_config = make_test_dir_config(origin.clone(), None);
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        adapter.install("ignored").unwrap();
+        let entries = adapter.list_installed().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, adapter.url);
+        assert_eq!(entries[0].version.len(), 40);
+        assert!(entries[0].errors.is_empty());
+        assert_eq!(entries[0].install_path, adapter.cache_dir);
+    }
+
+    #[test]
+    fn git_adapter_available_returns_true_after_install() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = make_local_test_repo(tmp.path());
+        let dir_config = make_test_dir_config(origin.clone(), None);
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+        adapter.install("ignored").unwrap();
+        assert!(adapter.available("ignored").unwrap());
     }
 }
