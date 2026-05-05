@@ -15,6 +15,23 @@ use serde::{Deserialize, Serialize};
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
 
+/// 3-state auto-install consent persisted in `machine.toml` (RECON-02 D-07).
+///
+/// `None` (field absent / unset) means "first-time prompt" — distinguished
+/// from `Some(Ask)` which means "user picked 'n' last time, ask again."
+///
+/// Per CONTEXT.md D-08:
+/// - `Always` — auto-apply drift on every sync (default Y).
+/// - `Ask` — re-prompt every sync that detects drift (n).
+/// - `Never` — surface drift as warnings; no install/update (never).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AutoInstall {
+    Always,
+    Ask,
+    Never,
+}
+
 /// Per-machine path override for a specific directory.
 ///
 /// Allows a single `tome.toml` checked into dotfiles to be applied across
@@ -69,6 +86,12 @@ pub struct MachinePrefs {
     /// See `Config::apply_machine_overrides` for the apply step.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub(crate) directory_overrides: BTreeMap<DirectoryName, DirectoryOverride>,
+
+    /// Per-machine auto-install consent for missing/drifted managed plugins
+    /// (RECON-02 D-07). `None` = first-time prompt; `Some(Always|Ask|Never)`
+    /// is the persisted user choice. Reconcile reads/writes this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) auto_install_plugins: Option<AutoInstall>,
 }
 
 impl MachinePrefs {
@@ -593,6 +616,119 @@ bogus = "y"
         assert!(
             result.is_err(),
             "expected parse failure for unknown field, got: {result:?}"
+        );
+    }
+
+    // === auto_install_plugins schema tests (RECON-02 D-07) ===
+
+    #[test]
+    fn auto_install_default_is_none() {
+        let prefs = MachinePrefs::default();
+        assert!(prefs.auto_install_plugins.is_none());
+    }
+
+    #[test]
+    fn auto_install_round_trip() {
+        // Always
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Always),
+            ..Default::default()
+        };
+        save(&prefs, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.auto_install_plugins, Some(AutoInstall::Always));
+
+        // Ask
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Ask),
+            ..Default::default()
+        };
+        save(&prefs, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.auto_install_plugins, Some(AutoInstall::Ask));
+
+        // Never
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Never),
+            ..Default::default()
+        };
+        save(&prefs, &path).unwrap();
+        let loaded = load(&path).unwrap();
+        assert_eq!(loaded.auto_install_plugins, Some(AutoInstall::Never));
+    }
+
+    #[test]
+    fn auto_install_unset_omitted_on_save() {
+        // Default MachinePrefs (auto_install_plugins = None) must NOT serialize
+        // an `auto_install_plugins` key — skip_serializing_if = "Option::is_none".
+        let prefs = MachinePrefs::default();
+        let toml_str = toml::to_string_pretty(&prefs).unwrap();
+        assert!(
+            !toml_str.contains("auto_install_plugins"),
+            "empty auto_install_plugins should not be serialized, got:\n{toml_str}"
+        );
+    }
+
+    #[test]
+    fn auto_install_lowercase_serde() {
+        // Always
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Always),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&prefs).unwrap();
+        assert!(
+            toml_str.contains("auto_install_plugins = \"always\""),
+            "expected lowercase 'always', got:\n{toml_str}"
+        );
+
+        // Ask
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Ask),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&prefs).unwrap();
+        assert!(
+            toml_str.contains("auto_install_plugins = \"ask\""),
+            "expected lowercase 'ask', got:\n{toml_str}"
+        );
+
+        // Never
+        let prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Never),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&prefs).unwrap();
+        assert!(
+            toml_str.contains("auto_install_plugins = \"never\""),
+            "expected lowercase 'never', got:\n{toml_str}"
+        );
+    }
+
+    #[test]
+    fn auto_install_existing_machine_toml_without_field_parses() {
+        // Backward compat: existing machine.toml without auto_install_plugins
+        // must still parse, with the field defaulting to None.
+        let toml_str = "disabled = [\"x\"]\n";
+        let prefs: MachinePrefs = toml::from_str(toml_str).unwrap();
+        assert!(prefs.auto_install_plugins.is_none());
+        assert!(prefs.is_disabled("x"));
+    }
+
+    #[test]
+    fn auto_install_unknown_value_rejected() {
+        // serde rename_all = "lowercase" only accepts the 3 known variants.
+        let toml_str = "auto_install_plugins = \"sometimes\"\n";
+        let result: Result<MachinePrefs, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "expected parse failure for unknown auto_install_plugins value, got: {result:?}"
         );
     }
 }
