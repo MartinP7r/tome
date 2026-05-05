@@ -11,6 +11,7 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use console::style;
 
 /// A plugin currently installed via a marketplace adapter.
 ///
@@ -251,6 +252,68 @@ pub struct InstallFailure {
     pub source: anyhow::Error,
 }
 
+/// Format a slice of [`InstallFailure`] into the SAFE-01 grouped failure summary.
+///
+/// Mirrors the inline rendering block in `lib.rs::Command::Remove` (search for
+/// `"operations failed during remove"`) but adapted for marketplace adapter
+/// failures. Returns the rendered string so tests can assert on exact output;
+/// production callers go through [`render_install_failures`] which `eprint!`s
+/// the result.
+///
+/// Returns an empty string when `failures` is empty so callers can safely
+/// concatenate without checking length first.
+//
+// dead_code allow: the production caller is Phase 13's sync flow (RECON-*).
+// Plan 12-02 ships only the renderer + tests; the wrapper [`render_install_failures`]
+// and the renderer tests in this file exercise both functions. Drop this attr
+// when Phase 13 wires the call from `lib.rs::sync`.
+#[allow(dead_code)]
+pub(crate) fn format_install_failures(failures: &[InstallFailure]) -> String {
+    if failures.is_empty() {
+        return String::new();
+    }
+    let k = failures.len();
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{} {} install operations failed\n",
+        style("⚠").yellow(),
+        k,
+    ));
+    for kind in InstallFailureKind::ALL {
+        let group: Vec<&InstallFailure> = failures.iter().filter(|f| f.kind == kind).collect();
+        if group.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("  {} ({}):\n", kind.label(), group.len()));
+        for f in group {
+            out.push_str(&format!(
+                "    {}/{} ({:?}): {:#}\n",
+                f.adapter_id, f.plugin_id, f.operation, f.source,
+            ));
+        }
+    }
+    out
+}
+
+/// Emit the SAFE-01 grouped failure summary to stderr.
+///
+/// Per ADP-04 / D-07: aggregates `Vec<InstallFailure>` from adapter calls into
+/// a grouped summary. Phase 13's sync flow calls this before deciding the
+/// process exit code; the renderer itself does not return `Err` —
+/// non-zero-exit-on-partial-failure is the caller's responsibility per ADP-04.
+///
+/// Empty input is a no-op (zero stderr output).
+//
+// dead_code allow: see [`format_install_failures`] above. Drop when Phase 13
+// wires the call from `lib.rs::sync`.
+#[allow(dead_code)]
+pub fn render_install_failures(failures: &[InstallFailure]) {
+    let rendered = format_install_failures(failures);
+    if !rendered.is_empty() {
+        eprint!("{rendered}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -487,5 +550,105 @@ mod tests {
             ],
             "InstallFailureKind::ALL ordering is part of the user-visible grouping contract"
         );
+    }
+
+    // ---- render_install_failures / format_install_failures tests ----
+
+    fn make_failure(
+        adapter: &str,
+        plugin: &str,
+        op: InstallOp,
+        kind: InstallFailureKind,
+        msg: &str,
+    ) -> InstallFailure {
+        InstallFailure {
+            adapter_id: adapter.to_string(),
+            plugin_id: plugin.to_string(),
+            operation: op,
+            kind,
+            source: anyhow::anyhow!("{msg}"),
+        }
+    }
+
+    #[test]
+    fn format_install_failures_empty_returns_empty_string() {
+        assert_eq!(format_install_failures(&[]), "");
+    }
+
+    #[test]
+    fn format_install_failures_groups_by_kind_and_skips_empty_groups() {
+        let failures = vec![
+            make_failure(
+                "claude-plugins",
+                "axiom@m1",
+                InstallOp::Install,
+                InstallFailureKind::NotFound,
+                "boom-1",
+            ),
+            make_failure(
+                "claude-plugins",
+                "beta@m1",
+                InstallOp::Install,
+                InstallFailureKind::NotFound,
+                "boom-2",
+            ),
+            make_failure(
+                "git+ssh://example",
+                "repo",
+                InstallOp::Update,
+                InstallFailureKind::Unknown,
+                "boom-3",
+            ),
+        ];
+        let out = format_install_failures(&failures);
+
+        // Header: count + summary text.
+        assert!(
+            out.contains("3 install operations failed"),
+            "header missing count/text; got: {out}"
+        );
+
+        // Groups present (non-empty).
+        assert!(out.contains("Not found (2):"), "got: {out}");
+        assert!(out.contains("Unknown (1):"), "got: {out}");
+
+        // Empty groups skipped (no NetworkError or PermissionDenied entries).
+        assert!(
+            !out.contains("Network error"),
+            "empty group should not appear: {out}"
+        );
+        assert!(
+            !out.contains("Permission denied"),
+            "empty group should not appear: {out}"
+        );
+
+        // Per-failure lines: adapter_id/plugin_id (Op): source.
+        assert!(
+            out.contains("claude-plugins/axiom@m1 (Install): boom-1"),
+            "missing per-failure detail line for axiom; got: {out}"
+        );
+        assert!(
+            out.contains("claude-plugins/beta@m1 (Install): boom-2"),
+            "missing per-failure detail line for beta; got: {out}"
+        );
+        assert!(
+            out.contains("git+ssh://example/repo (Update): boom-3"),
+            "missing per-failure detail line for git; got: {out}"
+        );
+
+        // Declaration-order grouping: NotFound appears before Unknown.
+        let np = out.find("Not found").expect("'Not found' header missing");
+        let up = out.find("Unknown").expect("'Unknown' header missing");
+        assert!(
+            np < up,
+            "ordering pinned: NotFound must precede Unknown; got: {out}"
+        );
+    }
+
+    #[test]
+    fn render_install_failures_empty_is_noop() {
+        // Pure no-op for empty input — exercising both the wrapper and the
+        // formatter's empty-string short-circuit.
+        render_install_failures(&[]);
     }
 }
