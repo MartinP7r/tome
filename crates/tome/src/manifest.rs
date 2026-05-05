@@ -503,11 +503,8 @@ mod tests {
 
     #[test]
     fn serialize_unowned_entry_omits_source_name_key() {
-        let entry = SkillEntry::new_unowned(
-            PathBuf::from("/tmp/orphan"),
-            test_hash("orphan"),
-            false,
-        );
+        let entry =
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("orphan"), false);
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
             !json.contains("source_name"),
@@ -533,11 +530,7 @@ mod tests {
 
     #[test]
     fn new_unowned_constructor_sets_source_name_none() {
-        let entry = SkillEntry::new_unowned(
-            PathBuf::from("/tmp/x"),
-            test_hash("h"),
-            false,
-        );
+        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false);
         assert_eq!(entry.source_name, None);
         assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
         assert_eq!(entry.content_hash, test_hash("h"));
