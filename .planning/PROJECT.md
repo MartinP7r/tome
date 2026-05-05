@@ -154,6 +154,16 @@ v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requir
 - Sized at ~7 phases, ~10–14 weeks of focused work. Phase numbering continues from 10 → starts at Phase 11.
 - Design doc: [`.planning/research/v0.10-library-canonical-design.md`](research/v0.10-library-canonical-design.md) (468 lines, 9 open questions resolved with rationale + alternatives).
 
+**Phase progress (v0.10):**
+
+- [x] Phase 11: Library-canonical core (LIB-01..05) — completed 2026-05-03
+- [x] Phase 12: Marketplace adapter (ADP-01..04) — completed 2026-05-05
+- [x] Phase 13: Lockfile-authoritative sync (RECON-01..05) — **alpha cut** completed 2026-05-05; `reconcile.rs` (1714 LOC, 28 unit tests) replaces deleted `install.rs`; `cli_sync_reconcile.rs` integration suite (10 tests) green; `MockMarketplaceAdapter` lifted into feature-gated `pub mod testing`; `--no-install` flag + `auto_install_plugins` consent persisted in `machine.toml`
+- [ ] Phase 14: Unowned-library lifecycle (UNOWN-01..03)
+- [ ] Phase 15: CLI hardening (HARD-01..22) — **beta cut**
+- [ ] Phase 16: Cleanup-message UX + docs (UX-01..02, DOC-01..03) — **rc cut**
+- [ ] Phase 17: Migration polish + UAT + release (REL-01..05) — **v0.10 final**
+
 <details>
 <summary>Previous milestones (recap)</summary>
 
@@ -250,6 +260,8 @@ This document evolves at phase transitions and milestone boundaries.
 *Last updated: 2026-05-02 — v0.10 milestone started. Goal: library-canonical model (managed-as-copy, source removal preserves content) + lockfile-authoritative cross-machine sync via marketplace adapters + CLI hardening bundle (19 review-followups + ~10 older bug backlog issues). Closes epic #459 (cross-machine library-as-dotfiles). v1.0 (Tauri GUI) deferred — drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`, ratifies after v0.10 ships so it can build on the stable type surface and durable library. Design doc: `.planning/research/v0.10-library-canonical-design.md` (468 lines, 9 OQs resolved). Phase 11 is the next planning unit. Discussion lineage: PR #484 codebase review → "no longer configured" UX question → library-as-dotfiles realization → managed-as-copy resilience requirement → cross-machine reconciliation requirement.*
 
 *Last updated: 2026-04-29 after v0.9 milestone — v0.9.0 shipped via cargo-dist (commits c183e3f Phase 10 + 0ae6288 version bump on main). v0.9 milestone archived: 16 v0.9 requirements (5 PORT + 6 POLISH + 5 TEST) shipped across Phases 9 and 10 (10 in 1 wave, 9 in 2 waves). 662 tests passing (526 unit + 136 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` carried over for the third consecutive milestone (still pending hardware). Ready for v1.0 — Tauri GUI milestone artifacts already drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`; ratify via `/gsd:new-milestone` to start phase planning.*
+
+*Last updated: 2026-05-05 — Phase 13 complete (Lockfile-authoritative sync, **v0.10 alpha cut**). All 5 RECON requirements shipped: classification (Match/Drift/Vanished/MissingFromMachine), `auto_install_plugins` consent + `--no-install` flag, drift apply with re-hash, vanished warnings + preserved distribution, edit-in-library 3-way prompt with `--no-input` skip-default. New `reconcile.rs` module (1714 LOC, 28 unit tests) replaces deleted `install.rs` (-312 LOC); `MockMarketplaceAdapter` lifted into feature-gated `pub mod testing`; new `cli_sync_reconcile.rs` integration suite (10 tests). Test count: 781 (630 unit + 141 integration cli + 10 cli_sync_reconcile). Modulo pre-existing HARD-14 timing flake.*
 
 *Last updated: 2026-04-29 — Phase 10 complete (Phase 8 Review Tail). All 11 v0.8 review-tail items shipped: POLISH-01..06 (#463 D1-D6) + TEST-01..05 (#462 P1-P5). 662 tests passing. v0.9 milestone functionally complete — ready for milestone closure.*
 
