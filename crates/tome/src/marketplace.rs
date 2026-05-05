@@ -104,6 +104,153 @@ pub trait MarketplaceAdapter {
     fn available(&self, plugin_id: &str) -> Result<bool>;
 }
 
+/// Which adapter operation produced an [`InstallFailure`].
+///
+/// `Install` originates from [`MarketplaceAdapter::install`]; `Update` from
+/// [`MarketplaceAdapter::update`]. Used by the grouped failure renderer to
+/// surface "what was attempted" alongside "what went wrong".
+//
+// dead_code allow: variants are constructed by Task 2's renderer tests in this
+// same plan; the production renderer formats them via `{:?}` (Debug derive).
+// First non-test producer arrives in Plan 12-04 (ClaudeMarketplaceAdapter).
+// Drop this attr when the first non-test caller lands.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallOp {
+    Install,
+    Update,
+}
+
+/// Heuristic classification of an install/update failure.
+///
+/// The mapping from upstream stderr to a variant is best-effort
+/// (e.g. `"not found in marketplace"` -> `NotFound`). Default is `Unknown`
+/// when no specific signal matches; the `source` field of [`InstallFailure`]
+/// always carries the verbatim upstream error chain so the user-visible
+/// grouped summary can fall back to it.
+///
+/// Mirrors `crate::remove::FailureKind` (POLISH-04 pattern from Phase 10) —
+/// a fixed-size [`Self::ALL`] array + compile-time exhaustiveness sentinel
+/// pin "every variant is enumerated" at compile time.
+//
+// dead_code allow: variants are first constructed in Task 2's renderer tests
+// in this same plan; the renderer iterates `Self::ALL` and calls `label()`
+// from production code in Task 2. First non-test producer arrives in Plan
+// 12-04 (ClaudeMarketplaceAdapter heuristic stderr -> kind mapper). Drop this
+// attr when the first non-test caller lands.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstallFailureKind {
+    /// Plugin / URL not in marketplace or not reachable.
+    NotFound,
+    /// Transient network failure — retry might succeed.
+    NetworkError,
+    /// Filesystem or auth permission denied.
+    PermissionDenied,
+    /// Catch-all; the [`InstallFailure::source`] field carries the detail.
+    Unknown,
+}
+
+impl InstallFailureKind {
+    /// All variants, in the order preferred for user-facing grouped output.
+    ///
+    /// Exposed as an associated constant so the renderer doesn't maintain a
+    /// parallel hand-written array that could silently drop a variant when
+    /// new variants are added. Mirrors `crate::remove::FailureKind::ALL`
+    /// (POLISH-04 pattern).
+    pub const ALL: [InstallFailureKind; 4] = [
+        InstallFailureKind::NotFound,
+        InstallFailureKind::NetworkError,
+        InstallFailureKind::PermissionDenied,
+        InstallFailureKind::Unknown,
+    ];
+
+    /// Human-readable label used in the grouped failure summary.
+    //
+    // dead_code allow: Task 2 of this plan adds the production renderer that
+    // calls `kind.label()`; once that lands, this attr is dropped. The method
+    // is also exercised by the `install_failure_kind_label_coverage` test.
+    #[allow(dead_code)]
+    pub fn label(self) -> &'static str {
+        match self {
+            InstallFailureKind::NotFound => "Not found",
+            InstallFailureKind::NetworkError => "Network error",
+            InstallFailureKind::PermissionDenied => "Permission denied",
+            InstallFailureKind::Unknown => "Unknown",
+        }
+    }
+}
+
+/// Compile-time drift guard for [`InstallFailureKind::ALL`] (POLISH-04 option c).
+///
+/// If a new variant is added to [`InstallFailureKind`], this `const fn` fails
+/// to compile because the match below is exhaustive. The fix is to (a) add an
+/// arm here AND (b) append the new variant to `ALL`. Mirrors the
+/// `_ensure_failure_kind_all_exhaustive` sentinel in `crate::remove`.
+///
+/// The function is dead-code at runtime — its sole purpose is the
+/// exhaustiveness check. The `const _: () = ...` block below additionally
+/// pins `ALL.len() == 4` at compile time so a hand-edit that adds a match
+/// arm here without growing `ALL` (or vice versa) also fails.
+#[allow(dead_code)]
+const fn _ensure_install_failure_kind_all_exhaustive(k: InstallFailureKind) -> usize {
+    match k {
+        InstallFailureKind::NotFound => 0,
+        InstallFailureKind::NetworkError => 1,
+        InstallFailureKind::PermissionDenied => 2,
+        InstallFailureKind::Unknown => 3,
+    }
+}
+
+const _: () = {
+    // If this fails: InstallFailureKind::ALL is missing or has extra variants.
+    // The match arms in _ensure_install_failure_kind_all_exhaustive are the
+    // source of truth — ALL must contain exactly one entry per arm.
+    assert!(InstallFailureKind::ALL.len() == 4);
+};
+
+/// A single install/update failure aggregated across adapter calls.
+///
+/// Mirrors `crate::remove::RemoveFailure` (SAFE-01 pattern from Phase 8) but
+/// with marketplace-meaningful fields:
+///
+/// - No `path` field — install-time failures don't have a stable filesystem
+///   path the way distribution-symlink removals do.
+/// - Adds `adapter_id`, `plugin_id`, and `operation` so the grouped renderer
+///   can show "which adapter, which plugin, install vs update".
+/// - `source` is `anyhow::Error` (vs `RemoveFailure::error: std::io::Error`)
+///   to preserve the upstream `claude` / `git` error chain verbatim.
+///
+/// Derives `Debug` only — `anyhow::Error` is neither `Clone` nor `PartialEq`,
+/// so test assertions inspect individual fields rather than struct equality.
+//
+// dead_code allow: Phase 12 ships the type + the renderer (Plan 12-02 Task 2).
+// The first non-test producer arrives in Plan 12-04 (ClaudeMarketplaceAdapter
+// constructs `InstallFailure` from upstream stderr); Phase 13 aggregates the
+// `Vec<InstallFailure>` across adapter calls. Drop this attr when the first
+// non-test caller lands.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub struct InstallFailure {
+    /// Adapter that produced the failure — typically the adapter's
+    /// [`MarketplaceAdapter::id`] (e.g. `"claude-plugins-official"`, or a git URL).
+    pub adapter_id: String,
+
+    /// Plugin identifier passed to the failed call (e.g.
+    /// `"axiom@axiom-marketplace"`, or a skill name for git).
+    pub plugin_id: String,
+
+    /// Which adapter operation was attempted.
+    pub operation: InstallOp,
+
+    /// Best-effort kind classification (see [`InstallFailureKind`]).
+    pub kind: InstallFailureKind,
+
+    /// Verbatim upstream error chain — the renderer surfaces this with `{:#}`
+    /// so users see the full anyhow chain.
+    pub source: anyhow::Error,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +415,77 @@ mod tests {
         // contract requirement of the trait surface.
         let mock = make_mock();
         let _boxed: Box<dyn MarketplaceAdapter> = Box::new(mock);
+    }
+
+    // ---- InstallFailureKind tests (mirrors remove::tests::failure_kind_*) ----
+
+    #[test]
+    fn install_failure_kind_label_coverage() {
+        assert_eq!(InstallFailureKind::NotFound.label(), "Not found");
+        assert_eq!(InstallFailureKind::NetworkError.label(), "Network error");
+        assert_eq!(
+            InstallFailureKind::PermissionDenied.label(),
+            "Permission denied"
+        );
+        assert_eq!(InstallFailureKind::Unknown.label(), "Unknown");
+    }
+
+    /// `InstallFailureKind::ALL` is consumed by the grouped failure summary;
+    /// pinning length to 4 also pairs with the const-fn drift guard
+    /// `_ensure_install_failure_kind_all_exhaustive` so a hand-edit that
+    /// grows the enum without growing ALL fails to compile.
+    #[test]
+    fn install_failure_kind_all_pinned_size_four() {
+        assert_eq!(InstallFailureKind::ALL.len(), 4);
+        assert!(InstallFailureKind::ALL.contains(&InstallFailureKind::NotFound));
+        assert!(InstallFailureKind::ALL.contains(&InstallFailureKind::NetworkError));
+        assert!(InstallFailureKind::ALL.contains(&InstallFailureKind::PermissionDenied));
+        assert!(InstallFailureKind::ALL.contains(&InstallFailureKind::Unknown));
+    }
+
+    // POLISH-04: Pins the runtime drift check that complements the
+    // compile-time `_ensure_install_failure_kind_all_exhaustive` sentinel.
+    // Uses a hand-rolled uniqueness check (InstallFailureKind only derives
+    // PartialEq/Eq, not Ord/Hash, so BTreeSet/HashSet are unavailable).
+    #[test]
+    fn install_failure_kind_all_length_matches_variant_count() {
+        let all = InstallFailureKind::ALL;
+        assert_eq!(
+            all.len(),
+            4,
+            "InstallFailureKind::ALL must contain every variant exactly once"
+        );
+        // Pairwise-unique: no duplicates in ALL.
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(
+                    a, b,
+                    "InstallFailureKind::ALL contains duplicate variant {a:?}"
+                );
+            }
+        }
+        // Membership: every variant appears.
+        assert!(all.contains(&InstallFailureKind::NotFound));
+        assert!(all.contains(&InstallFailureKind::NetworkError));
+        assert!(all.contains(&InstallFailureKind::PermissionDenied));
+        assert!(all.contains(&InstallFailureKind::Unknown));
+    }
+
+    // POLISH-04: The grouped failure-summary output iterates
+    // InstallFailureKind::ALL in declaration order. The user-visible grouping
+    // therefore depends on this exact order. A reorder is a UI change and
+    // must require an explicit code edit (this test fails on reorder).
+    #[test]
+    fn install_failure_kind_all_ordering_pinned() {
+        assert_eq!(
+            InstallFailureKind::ALL,
+            [
+                InstallFailureKind::NotFound,
+                InstallFailureKind::NetworkError,
+                InstallFailureKind::PermissionDenied,
+                InstallFailureKind::Unknown,
+            ],
+            "InstallFailureKind::ALL ordering is part of the user-visible grouping contract"
+        );
     }
 }
