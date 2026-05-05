@@ -119,7 +119,7 @@
 **Note (planner traceability flag — D-01 supersedes RECON-01 wording):** The drift basis is **content_hash mismatch**, not version. RECON-01's literal "version differs from lockfile or older" phrasing in `REQUIREMENTS.md` is superseded by Phase 13 D-01 (Phase 11 D-08 inheritance). The version string is display-only in the diff output (`plugin X: 5.0.5 → 5.0.7`); it never causes drift on its own. Cleanup commit to update REQUIREMENTS.md may follow in a future hardening phase.
 
 **Plans**: 5 plans (Wave 1: 13-01, 13-02 — schema + mock lift; Wave 2: 13-03 — reconcile module; Wave 3: 13-04 — sync integration + install.rs deletion; Wave 4: 13-05 — integration tests)
-- [ ] 13-01-PLAN.md — `AutoInstall` enum + `MachinePrefs.auto_install_plugins` field + `--no-install` CLI flag + `SyncOptions` plumbing (RECON-02 schema)
+- [x] 13-01-PLAN.md — `AutoInstall` enum + `MachinePrefs.auto_install_plugins` field + `--no-install` CLI flag + `SyncOptions` plumbing (RECON-02 schema)
 - [x] 13-02-PLAN.md — Lift `MockMarketplaceAdapter` into feature-gated `pub mod testing` + `[features] test-support = []` in `Cargo.toml` (RECON-01 test surface)
 - [ ] 13-03-PLAN.md — New `reconcile.rs` module: `ReconcileClass`/`ReconcileReport`/`ReconcileOpts`, classify_lockfile, detect_edited, apply_drift_and_missing, resolve_consent, prompt_consent, handle_edited, format_summary + 25 unit tests (RECON-01..05 core)
 - [ ] 13-04-PLAN.md — Wire `reconcile::reconcile_lockfile` into `lib.rs::sync` (replaces `reconcile_managed_plugins` at line 978); add `build_claude_adapter` dispatcher; add `apply_edit_decisions` for D-13 fork-in-place flip; delete `crates/tome/src/install.rs` per D-17; bail on partial install failure per OQ-6 (RECON-01..05 wiring)
@@ -190,7 +190,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
-| 13. Lockfile-authoritative sync (alpha) | v0.10 | 1/5 | In Progress|  |
+| 13. Lockfile-authoritative sync (alpha) | v0.10 | 2/5 | In Progress|  |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
