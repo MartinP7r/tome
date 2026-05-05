@@ -33,9 +33,9 @@ A pluggable adapter trait isolates marketplace-specific install/update logic. v0
 
 - [x] **RECON-01**: For each managed skill in the lockfile, classify the actual installation as Match (version + hash agree) / Drift (version differs or older) / Vanished (`available()` returns false). Output a per-class summary on every sync.
 - [x] **RECON-02**: First-time-on-machine prompt: "Auto-install missing plugins on every sync? [Y/n/never]". Persists choice in `machine.toml::auto_install_plugins`. Honors `--no-install` global flag override.
-- [ ] **RECON-03**: When auto-install consent is set and drift is detected, render a diff summary ("plugin X: 5.0.5 → 5.0.7"), apply via adapter, re-discover, and verify resulting `content_hash` against lockfile. When auto-install is off, surface drift as warnings without modification.
-- [ ] **RECON-04**: Vanished plugins (no longer available from marketplace) emit a clear stderr warning ("plugin X vanished from marketplace Y; using preserved library copy"). Distribution continues from library copy.
-- [ ] **RECON-05**: Edit-in-library detection: when `managed: true` and `content_hash(library/<skill>) != lockfile.content_hash`, prompt the user with three choices: fork (default — promote to local via existing `tome fork` semantics), revert (overwrite with marketplace copy), skip (warn and don't touch this entry this sync). In `--no-input` mode, default to skip with a warning.
+- [x] **RECON-03**: When auto-install consent is set and drift is detected, render a diff summary ("plugin X: 5.0.5 → 5.0.7"), apply via adapter, re-discover, and verify resulting `content_hash` against lockfile. When auto-install is off, surface drift as warnings without modification.
+- [x] **RECON-04**: Vanished plugins (no longer available from marketplace) emit a clear stderr warning ("plugin X vanished from marketplace Y; using preserved library copy"). Distribution continues from library copy.
+- [x] **RECON-05**: Edit-in-library detection: when `managed: true` and `content_hash(library/<skill>) != lockfile.content_hash`, prompt the user with three choices: fork (default — promote to local via existing `tome fork` semantics), revert (overwrite with marketplace copy), skip (warn and don't touch this entry this sync). In `--no-input` mode, default to skip with a warning.
 
 ### Unowned-library lifecycle (UNOWN)
 
