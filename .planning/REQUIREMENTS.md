@@ -23,7 +23,7 @@ The library becomes the single source of truth. Managed and local skills are sto
 A pluggable adapter trait isolates marketplace-specific install/update logic. v0.10 ships two adapters; future marketplaces extend the trait without core changes.
 
 - [x] **ADP-01**: `MarketplaceAdapter` trait defined in a new `crates/tome/src/marketplace.rs` module: `id()`, `current_version()`, `install()`, `update()`, `list_installed()`, `available()`. All methods return `anyhow::Result`.
-- [ ] **ADP-02**: `ClaudeMarketplaceAdapter` shells out to `claude plugin install <plugin>@<marketplace>`, `claude plugin update <plugin>`, and parses `claude plugin list --json` for current state. Surfaces `claude` not on `PATH` as a clear error message.
+- [x] **ADP-02**: `ClaudeMarketplaceAdapter` shells out to `claude plugin install <plugin>@<marketplace>`, `claude plugin update <plugin>`, and parses `claude plugin list --json` for current state. Surfaces `claude` not on `PATH` as a clear error message.
 - [x] **ADP-03**: `GitAdapter` wraps existing `crates/tome/src/git.rs::clone_repo` / `update_repo` into the `MarketplaceAdapter` trait shape. Behavior unchanged for existing git directories.
 - [x] **ADP-04**: Adapter `install`/`update` failures aggregate into a `Vec<InstallFailure>` and surface as a grouped failure summary (mirrors v0.8 SAFE-01 `RemoveFailure` pattern). `tome sync` exits non-zero on partial install failure but library distribution still completes.
 
