@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-05-05T02:34:36.552Z"
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-05-05T02:43:06.409Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 7
   completed_phases: 1
   total_plans: 9
-  completed_plans: 6
+  completed_plans: 7
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 12 (marketplace-adapter) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-05-05
 
@@ -60,6 +60,7 @@ Historical decisions are archived in:
 - [Phase 11-library-canonical-core]: LIB-05: tome migrate-library is one-shot CLI command (D-01) with manifest-anchored detection (D-03), broken-symlink preservation (D-04), SAFE-01 failure aggregation (D-05), idempotent re-runs (D-06). Sync refuses on v0.9-shape libraries with Conflict/Why/Suggestion error pointing at the new command (D-02). Entire migration_v010 module + sync gate deletes cleanly in v0.11+.
 - [Phase 11]: Plan 11-05: Re-exported manifest::hash_directory at crate root for integration test reuse — single canonical hashing implementation, no parallel SHA-256 helper. Five end-to-end CLI tests anchor LIB-01/LIB-04/LIB-05 success criteria via assert_cmd binary invocations against a synthetic v0.9 library fixture mirroring CONTEXT.md <specifics>. Resolved deferred-items.md entry for symlink_chain_managed_skill (cli.rs:1775).
 - [Phase 12]: Plan 12-01 (Marketplace adapter trait scaffolding): trait + InstalledPlugin + MockMarketplaceAdapter shipped per D-08/D-10. Module placed in strict-alphabetical position (between manifest and migration_v010), not literally between library and lint as the plan said — plan's intent was alphabetical sibling order. #[allow(dead_code)] applied to trait + struct + pre-existing SkillEntry::new_unowned (Rule 3 deviation, documented in deferred-items.md) so cargo clippy --all-targets -- -D warnings exits 0; attrs drop when Plans 12-03/12-04 / Phase 14 add real consumers.
+- [Phase 12]: Plan 12-02 (Marketplace failure types + renderer): InstallFailure struct + InstallOp/InstallFailureKind enums + ALL fixed-size [_;4] array + POLISH-04 sentinel + format_install_failures pure formatter + render_install_failures eprint! wrapper, all in marketplace.rs. Renderer split (pure-formatter returning String + thin eprint! wrapper) for testability — replaces lib.rs's inline rendering pattern. #[allow(dead_code)] applied per Rule 3 (drops in Plan 12-04 / Phase 13 when consumers land).
 
 ### v0.10 design context (consume during planning)
 
@@ -98,6 +99,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-05T02:34:36.549Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-05-05T02:43:06.407Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
