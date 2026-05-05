@@ -757,23 +757,34 @@ impl MarketplaceAdapter for ClaudeMarketplaceAdapter {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Test-support surface — intentionally feature-gated.
+///
+/// Per OQ-2 in `13-RESEARCH.md`: integration tests in
+/// `crates/tome/tests/cli_sync_reconcile.rs` need a `MarketplaceAdapter` that
+/// doesn't shell out to `claude`. Production builds (no features, no
+/// `cfg(test)`) MUST NOT compile this module — the gate `cfg(any(test,
+/// feature = "test-support"))` excludes it from `cargo build -p tome` and
+/// from any v1.0 GUI build that consumes `marketplace::*` via Tauri IPC.
+///
+/// `pub` (not `pub(crate)`) so external test crates can name
+/// `tome::marketplace::testing::MockMarketplaceAdapter`. The `marketplace`
+/// module itself is `pub` at lib.rs:42 for the same reason.
+#[cfg(any(test, feature = "test-support"))]
+pub mod testing {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
-    /// In-memory test double for [`MarketplaceAdapter`].
+    use anyhow::Result;
+
+    use super::{InstalledPlugin, MarketplaceAdapter};
+
+    /// In-memory `MarketplaceAdapter` for unit + integration tests.
     ///
-    /// Combines static fixtures (`installed`, `available`) with failure
-    /// injection (`fail_install`, `fail_update`) so a single mock instance
-    /// can drive both happy-path and partial-failure tests.
-    ///
-    /// `pub(super)` so nested test fns in this same module can construct it
-    /// freely. Per D-10 the mock stays `#[cfg(test)]`-only for Phase 12;
-    /// Phase 13 may lift it to `pub(crate) marketplace::testing` for
-    /// integration-test reuse.
-    pub(super) struct MockMarketplaceAdapter {
+    /// Construct with explicit fields; no builder. Failure injection via
+    /// `fail_install` / `fail_update` `HashSet<String>` lookup. Mirrors the
+    /// `#[cfg(test)] pub(super)` mock that lived inside `mod tests` in Phase
+    /// 12 — same shape, lifted to the feature-gated surface.
+    pub struct MockMarketplaceAdapter {
         pub id: String,
         pub installed: Vec<InstalledPlugin>,
         pub available: HashSet<String>,
@@ -818,7 +829,7 @@ mod tests {
     }
 
     /// Build an `InstalledPlugin` fixture with sensible defaults.
-    fn fixture_plugin(id: &str, version: &str) -> InstalledPlugin {
+    pub fn fixture_plugin(id: &str, version: &str) -> InstalledPlugin {
         InstalledPlugin {
             id: id.to_string(),
             version: version.to_string(),
@@ -826,6 +837,14 @@ mod tests {
             errors: Vec::new(),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::testing::{MockMarketplaceAdapter, fixture_plugin};
+    use std::collections::HashSet;
+    use std::path::PathBuf;
 
     /// Build a mock with one installed plugin "known@mp" at version 1.2.3,
     /// "present" available, "doomed" failing both install and update.
@@ -1533,5 +1552,21 @@ mod tests {
         let adapter = ClaudeMarketplaceAdapter::new().unwrap();
         let result = adapter.install("definitely-nonexistent-xyz@nonexistent-marketplace-xyz");
         assert!(result.is_err(), "install of nonexistent plugin should fail");
+    }
+
+    #[test]
+    fn testing_module_visible_under_test_cfg() {
+        // Proves `crate::marketplace::testing::*` resolves when cfg(test)
+        // is on. Plan 13-05's integration tests rely on the same path
+        // resolving when feature = "test-support" is on.
+        let adapter = MockMarketplaceAdapter {
+            id: "visibility-probe".to_string(),
+            installed: vec![],
+            available: HashSet::new(),
+            fail_install: HashSet::new(),
+            fail_update: HashSet::new(),
+        };
+        let dyn_ref: &dyn MarketplaceAdapter = &adapter;
+        assert_eq!(dyn_ref.id(), "visibility-probe");
     }
 }
