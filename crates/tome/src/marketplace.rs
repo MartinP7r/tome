@@ -10,8 +10,9 @@
 
 use std::path::PathBuf;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use console::style;
+use serde::Deserialize;
 
 use crate::config::{DirectoryConfig, GitRef};
 use crate::git;
@@ -432,6 +433,95 @@ impl MarketplaceAdapter for GitAdapter {
         // feature needs a true vanished probe, add a
         // `git ls-remote --exit-code` call here.
         Ok(self.cache_dir.exists())
+    }
+}
+
+// ---- ClaudeMarketplaceAdapter helpers — pure parser + heuristic classifier ----
+//
+// Phase 12 Plan 12-04 Task 1: ships the JSON parser and the stderr -> kind
+// heuristic as standalone functions so they can be unit-tested without
+// requiring `claude` on PATH. Task 2 of the same plan wires them into the
+// production `ClaudeMarketplaceAdapter` (subprocess invocation + cache).
+
+/// Wire format for `claude plugin list --json` entries.
+///
+/// Verified live 2026-05-05 against claude 2.1.128. The full shape includes
+/// additional fields (`scope`, `enabled`, `installedAt`, `lastUpdated`,
+/// `mcpServers`) that the adapter does NOT consume — serde silently drops the
+/// rest because we don't apply `#[serde(deny_unknown_fields)]`. The `errors`
+/// field is OPTIONAL (absent when an entry has no marketplace errors);
+/// `#[serde(default)]` handles the absence case.
+#[derive(Deserialize)]
+struct ClaudePluginListEntry {
+    id: String,
+    version: String,
+    #[serde(rename = "installPath")]
+    install_path: PathBuf,
+    #[serde(default)]
+    errors: Vec<String>,
+}
+
+/// Parse `claude plugin list --json` output into `Vec<InstalledPlugin>`.
+///
+/// Pure function (no I/O) so the JSON deserialization can be tested with
+/// hand-rolled fixtures in CI environments that don't have `claude`
+/// installed. Tolerates extra fields (the live snapshot includes `scope`,
+/// `enabled`, `installedAt`, `lastUpdated`, `mcpServers`) and the literal
+/// `version: "unknown"` string observed on some entries.
+//
+// dead_code allow: Plan 12-04 Task 2 wires this into `populate_cache` on the
+// production `ClaudeMarketplaceAdapter`. Until Task 2 lands the only
+// consumer is the parser unit tests in this same plan. Drop this attr when
+// Task 2's adapter constructor fires.
+#[allow(dead_code)]
+pub(crate) fn parse_claude_plugin_list_json(input: &str) -> Result<Vec<InstalledPlugin>> {
+    let entries: Vec<ClaudePluginListEntry> = serde_json::from_str(input)
+        .context("failed to parse `claude plugin list --json` output")?;
+    Ok(entries
+        .into_iter()
+        .map(|e| InstalledPlugin {
+            id: e.id,
+            version: e.version,
+            install_path: e.install_path,
+            errors: e.errors,
+        })
+        .collect())
+}
+
+/// Heuristic mapping from a `claude plugin install/update` stderr message to
+/// an [`InstallFailureKind`] variant.
+///
+/// Substring-based and best-effort. Empirical mapping (verified against
+/// claude 2.1.128, 2026-05-05):
+///
+/// - `Plugin "X" not found in marketplace "Y"` -> `NotFound`
+/// - `Plugin "X" not found` (update path) -> `NotFound`
+/// - all else -> `Unknown` (the [`InstallFailure::source`] field carries the
+///   verbatim error chain so the user-visible grouped summary still surfaces
+///   the upstream message).
+///
+/// `NetworkError` and `PermissionDenied` are reserved for future heuristics
+/// once empirical evidence surfaces; they exist in the enum so the renderer's
+/// grouped output is forward-compatible.
+//
+// dead_code allow: only producer is `ClaudeMarketplaceAdapter::build_install_failure`,
+// which is itself only consumed from tests until Phase 13's sync flow wraps
+// adapter `install`/`update` errors into `Vec<InstallFailure>`. Drop this
+// attr when Phase 13's first non-test caller lands.
+#[allow(dead_code)]
+pub(crate) fn classify_claude_install_stderr(stderr: &str) -> InstallFailureKind {
+    // Both "not found in marketplace" and bare "not found" map to NotFound,
+    // expressed as a single OR rather than two arms with identical bodies
+    // (clippy::if_same_then_else). Comments below preserve the empirical
+    // mapping the heuristic was derived from.
+    if stderr.contains("not found in marketplace")
+        // ^ install path: `Plugin "X" not found in marketplace "Y"`
+        || stderr.contains("not found")
+    // ^ update path (less specific): `Plugin "X" not found`
+    {
+        InstallFailureKind::NotFound
+    } else {
+        InstallFailureKind::Unknown
     }
 }
 
@@ -944,5 +1034,132 @@ mod tests {
         let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
         adapter.install("ignored").unwrap();
         assert!(adapter.available("ignored").unwrap());
+    }
+
+    // ---- parse_claude_plugin_list_json tests (no subprocess) ----
+    //
+    // Hand-rolled JSON fixtures verified live 2026-05-05 against claude
+    // 2.1.128. Pure parser tests give CI coverage of the JSON shape without
+    // requiring `claude` on PATH.
+
+    #[test]
+    fn parse_claude_plugin_list_json_empty_array() {
+        let result = parse_claude_plugin_list_json("[]").unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn parse_claude_plugin_list_json_single_entry_no_errors() {
+        let json = r#"[
+            {
+                "id": "axiom@axiom-marketplace",
+                "version": "3.3.0",
+                "scope": "user",
+                "enabled": true,
+                "installPath": "/Users/x/.claude/plugins/cache/axiom-marketplace/axiom/3.3.0",
+                "installedAt": "2026-03-17T12:18:08.229Z",
+                "lastUpdated": "2026-05-04T11:49:50.948Z"
+            }
+        ]"#;
+        let result = parse_claude_plugin_list_json(json).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].id, "axiom@axiom-marketplace");
+        assert_eq!(result[0].version, "3.3.0");
+        assert_eq!(
+            result[0].install_path,
+            std::path::PathBuf::from(
+                "/Users/x/.claude/plugins/cache/axiom-marketplace/axiom/3.3.0"
+            )
+        );
+        assert!(
+            result[0].errors.is_empty(),
+            "errors field should default to empty when absent"
+        );
+    }
+
+    #[test]
+    fn parse_claude_plugin_list_json_entry_with_errors() {
+        let json = r#"[
+            {
+                "id": "claude-md-management@claude-plugins-official",
+                "version": "1.0.0",
+                "installPath": "/path",
+                "errors": ["Plugin claude-md-management not found in marketplace claude-plugins-official"]
+            }
+        ]"#;
+        let result = parse_claude_plugin_list_json(json).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].errors.len(), 1);
+        assert!(result[0].errors[0].contains("not found in marketplace"));
+    }
+
+    #[test]
+    fn parse_claude_plugin_list_json_version_unknown_string() {
+        // Per RESEARCH "claude CLI JSON Shape": `version` is sometimes the
+        // literal string "unknown". Adapter must accept it without parsing
+        // as semver — the type is `String`, not a semver newtype.
+        let json = r#"[{"id": "x@y", "version": "unknown", "installPath": "/p"}]"#;
+        let result = parse_claude_plugin_list_json(json).unwrap();
+        assert_eq!(result[0].version, "unknown");
+    }
+
+    #[test]
+    fn parse_claude_plugin_list_json_extra_fields_ignored() {
+        // `mcpServers` is a real field in the live snapshot we don't consume.
+        // The parser uses the default serde behavior (drop unknown keys), NOT
+        // `#[serde(deny_unknown_fields)]`, so future claude versions can add
+        // fields without breaking parsing.
+        let json = r#"[{"id": "x@y", "version": "1.0", "installPath": "/p", "mcpServers": [{"name": "x"}]}]"#;
+        let result = parse_claude_plugin_list_json(json).unwrap();
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn parse_claude_plugin_list_json_malformed_returns_err() {
+        let result = parse_claude_plugin_list_json("not json");
+        assert!(result.is_err());
+        let msg = format!("{:#}", result.unwrap_err());
+        assert!(
+            msg.contains("claude plugin list"),
+            "context should mention the command: {msg}"
+        );
+    }
+
+    // ---- classify_claude_install_stderr tests ----
+
+    #[test]
+    fn classify_stderr_not_found_in_marketplace_is_not_found() {
+        let stderr =
+            r#"✘ Failed to install plugin "x@y": Plugin "x" not found in marketplace "y"."#;
+        assert_eq!(
+            classify_claude_install_stderr(stderr),
+            InstallFailureKind::NotFound
+        );
+    }
+
+    #[test]
+    fn classify_stderr_not_found_bare_is_not_found() {
+        let stderr = r#"✘ Failed to update plugin "x": Plugin "x" not found"#;
+        assert_eq!(
+            classify_claude_install_stderr(stderr),
+            InstallFailureKind::NotFound
+        );
+    }
+
+    #[test]
+    fn classify_stderr_unrecognized_is_unknown() {
+        let stderr = "some entirely novel error from a future claude version";
+        assert_eq!(
+            classify_claude_install_stderr(stderr),
+            InstallFailureKind::Unknown
+        );
+    }
+
+    #[test]
+    fn classify_stderr_empty_is_unknown() {
+        assert_eq!(
+            classify_claude_install_stderr(""),
+            InstallFailureKind::Unknown
+        );
     }
 }
