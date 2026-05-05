@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: "Completed Plan 13-04 (lib.rs::sync wired to reconcile::reconcile_lockfile; install.rs deleted; D-13 fork flip applied; OQ-6 bail on install failures)"
-last_updated: "2026-05-05T21:29:57.637Z"
+stopped_at: "Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)"
+last_updated: "2026-05-05T21:40:45.860Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 7
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 14
-  completed_plans: 13
+  completed_plans: 14
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 13 (lockfile-authoritative-sync) — EXECUTING
-Plan: 4 of 5 complete (13-01 schema scaffolding, 13-02 test-support feature gate)
+Plan: 5 of 5 complete (13-01 schema scaffolding, 13-02 test-support feature gate)
 Status: Ready to execute
 Last activity: 2026-05-05
 
@@ -67,6 +67,7 @@ Historical decisions are archived in:
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-01: AutoInstall enum + Option<AutoInstall> field on MachinePrefs (D-07) + --no-install CLI flag plumbed through SyncOptions (D-09); schema-only — Plan 13-04 wires consumers
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-03 (reconcile module): pub fn reconcile_lockfile + ReconcileClass (4 variants) + ReconcileReport + 7 internal helpers + 25 unit tests in crates/tome/src/reconcile.rs (1620 LOC). Implements RECON-01..05 + Pitfalls 2/4/5 + OQ-3/4. D-22 partial-failure invariant verified by partial-failure test. Plan 13-04 wires the consumer (replaces install.rs reconcile_managed_plugins call site).
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-04 (call-site wiring + install.rs deletion): lib.rs::sync invokes reconcile::reconcile_lockfile through ClaudeMarketplaceAdapter (D-11/D-18); legacy install.rs (312 LOC) deleted; D-13 fork in-place flip applied at the manifest call site via apply_edit_decisions; sync exits non-zero via anyhow::bail when reconcile install_failures non-empty (RESEARCH OQ-6); revert decision parked behind a warning (D-16 safety guarantee preserved, dedicated revert path is a Phase 14 follow-up). RECON-01..05 fully wired.
+- [Phase 13]: Plan 13-05 (CLI sync reconcile integration tests): 10 end-to-end integration tests in tests/cli_sync_reconcile.rs covering RECON-01..05 non-interactive flow paths via assert_cmd; D-20 verbatim error contract is now CI-asserted; dev-dep self-reference (tome = { path = ".", features = ["test-support"] }) keeps marketplace::testing reachable for future binary-level mock injection. Two plan-spec bugs auto-fixed (Rule 1): role naming (distribution → target/managed) + missing library_dir in fixtures.
 
 ### v0.10 design context (consume during planning)
 
@@ -105,6 +106,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:29:57.634Z
-Stopped at: Completed Plan 13-04 (lib.rs::sync wired to reconcile::reconcile_lockfile; install.rs deleted; D-13 fork flip applied; OQ-6 bail on install failures)
+Last session: 2026-05-05T21:40:45.857Z
+Stopped at: Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)
 Resume file: None
