@@ -117,11 +117,10 @@ pub struct ReconcileReport {
 
 /// Options threaded from `SyncOptions` (lib.rs) into reconcile.
 //
-// dead_code allow on `quiet` / `verbose`: these are read by the renderer
-// (`render_summary` consumes `quiet`) and reserved for verbose-mode tracing
-// in Plan 13-04's call site. The lint fires here because the struct itself
-// is not yet constructed from production code (Plan 13-04 wires it).
-#[allow(dead_code)]
+// `verbose` is reserved for Plan 13-04's call site (verbose-mode tracing in
+// reconcile internals will be added in a follow-up); kept as a public field
+// because it is part of the contract from `SyncOptions`.
+#[allow(dead_code)] // verbose field is reserved (read fields: dry_run, no_input, no_install, quiet)
 #[derive(Debug, Clone, Copy)]
 pub struct ReconcileOpts {
     pub dry_run: bool,
@@ -157,7 +156,6 @@ pub struct ReconcileOpts {
 /// process exit code (RESEARCH OQ-6: caller does `anyhow::bail!` after
 /// rendering).
 #[allow(clippy::too_many_arguments)]
-#[allow(dead_code)] // wired in Plan 13-04
 pub fn reconcile_lockfile(
     old_lockfile: Option<&Lockfile>,
     manifest: &Manifest,
@@ -634,7 +632,6 @@ fn handle_edited(
 /// vanished`) — predictable output is greppable across runs. Per D-03: when
 /// drift+vanished are zero AND matches > 0, prepends a positive `✓ N plugins
 /// in sync` line.
-#[allow(dead_code)] // wired in Plan 13-04 (lib.rs::sync invokes render_summary)
 pub fn format_summary(report: &ReconcileReport) -> String {
     let total = report.matches + report.drift.len() + report.vanished.len();
     if total == 0 {
@@ -687,7 +684,6 @@ pub fn format_summary(report: &ReconcileReport) -> String {
 }
 
 /// Print the summary string to stdout. Suppressed under `--quiet`.
-#[allow(dead_code)] // wired in Plan 13-04
 pub fn render_summary(report: &ReconcileReport, quiet: bool) {
     if quiet {
         return;

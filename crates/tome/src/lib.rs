@@ -33,7 +33,6 @@ pub(crate) mod distribute;
 pub(crate) mod doctor;
 pub(crate) mod eject;
 pub(crate) mod git;
-pub(crate) mod install;
 pub(crate) mod library;
 pub(crate) mod lint;
 pub(crate) mod lockfile;
@@ -917,6 +916,100 @@ fn resolve_git_directories(
     resolved
 }
 
+/// Build the marketplace adapter for `[directories.<name>] type = "claude-plugins"`.
+///
+/// Returns `Ok(None)` when no claude-plugins directory is configured. Returns
+/// `Err` per D-20 when at least one claude-plugins entry exists but the
+/// `claude` binary is missing — the error message names the binary and points
+/// to the actionable remedy.
+///
+/// Per D-11: dispatch is by `DirectoryType`. Per D-21: GitAdapter is NOT
+/// constructed here — git directories flow through `resolve_git_directories`
+/// instead, preserving the v0.9 byte-for-byte regression contract.
+fn build_claude_adapter(config: &Config) -> Result<Option<marketplace::ClaudeMarketplaceAdapter>> {
+    let needs_claude = config
+        .directories
+        .values()
+        .any(|d| d.directory_type == DirectoryType::ClaudePlugins);
+    if !needs_claude {
+        return Ok(None);
+    }
+    // D-20: hard error with the Conflict / Why / Suggestion shape.
+    let adapter = marketplace::ClaudeMarketplaceAdapter::new().with_context(|| {
+        "claude binary not found on PATH.\n\n\
+         Why: at least one [directories.<name>] in tome.toml has type = \
+         \"claude-plugins\" — tome reconciles those entries via the claude CLI.\n\
+         Suggestion: install Claude Code (https://claude.ai/code), or remove the \
+         claude-plugins directory entry from tome.toml."
+    })?;
+    Ok(Some(adapter))
+}
+
+/// Apply the user's edit-in-library decisions to the on-disk manifest.
+///
+/// Per RECON-05 D-13:
+/// - Fork: `managed: true → false`, `source_name: Some → None`. Library
+///   content stays in place. Provenance history is dropped (one-time UX gap;
+///   Phase 14 may add fields retroactively).
+/// - Revert: leave the manifest untouched here — the apply_drift loop in
+///   reconcile_lockfile would have applied an `adapter.update()` (revert
+///   degenerates to "force a drift apply"); if the user picked revert here,
+///   they're saying "I want the upstream copy" — emit a warning that revert
+///   is not yet wired (deferred to a follow-up; D-16's safety guarantee is
+///   "never silently overwrite", and revert is opt-in so a warn-and-skip is
+///   acceptable for v0.10).
+/// - Skip: emit nothing additional (the per-skill warning already fired in
+///   `handle_edited`).
+fn apply_edit_decisions(
+    report: &reconcile::ReconcileReport,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
+    if report.edited.is_empty() || dry_run {
+        return Ok(());
+    }
+    debug_assert_eq!(report.edit_decisions.len(), report.edited.len());
+
+    let mut manifest = manifest::load(paths.config_dir())?;
+    let mut mutated = false;
+
+    for (edit, decision) in report.edited.iter().zip(report.edit_decisions.iter()) {
+        match decision {
+            reconcile::EditDecision::Fork => {
+                if let Some(entry) = manifest.skills_get_mut(edit.name.as_str()) {
+                    entry.managed = false;
+                    entry.source_name = None;
+                    mutated = true;
+                }
+            }
+            reconcile::EditDecision::Revert => {
+                eprintln!(
+                    "warning: revert chosen for {} but is not wired in v0.10 — \
+                     left as-is. Re-run with `tome sync` after manually \
+                     deleting library/{} to force a fresh install.",
+                    edit.name.as_str(),
+                    edit.name.as_str(),
+                );
+            }
+            reconcile::EditDecision::Skip => {}
+        }
+    }
+
+    if mutated {
+        manifest::save(&manifest, paths.config_dir())
+            .context("failed to save manifest after edit-in-library fork-in-place flip")?;
+    }
+    Ok(())
+}
+
+/// Move install_failures out of a ReconcileReport so the caller can hold
+/// them across the rest of the sync flow without keeping the report alive.
+fn take_install_failures(
+    mut report: reconcile::ReconcileReport,
+) -> Vec<marketplace::InstallFailure> {
+    std::mem::take(&mut report.install_failures)
+}
+
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
     let SyncOptions {
@@ -924,7 +1017,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         force,
         no_triage,
         no_input,
-        no_install: _no_install,
+        no_install,
         verbose,
         quiet,
         machine_path,
@@ -936,6 +1029,11 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             style("[dry-run] No changes will be made").yellow().bold()
         );
     }
+
+    // RESEARCH OQ-6: surface non-zero exit when reconcile failed any
+    // install/update. Declared up here so the bail at end-of-sync can read
+    // it after the reconcile block (below) populates it.
+    let mut reconcile_install_failures: Vec<marketplace::InstallFailure> = Vec::new();
 
     let show_progress = !quiet && !verbose;
 
@@ -978,13 +1076,48 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // here so triage (below) can mutate locally without affecting the caller.
     let mut machine_prefs = prefs_in.clone();
 
-    // Load existing lockfile for diffing and auto-install
+    // Load existing lockfile for diffing and reconciliation
     let old_lockfile = lockfile::load(paths.config_dir())?;
+    // Load manifest once for reconcile's edit-in-library detection. (sync()
+    // reloads it later post-consolidate; reading it twice is cheap and keeps
+    // reconcile's signature simple.)
+    let manifest_for_reconcile = manifest::load(paths.config_dir())?;
 
-    // Auto-install missing managed plugins (before discovery so they're found).
-    // Run even with --no-input so users get the info message about missing plugins.
-    if !dry_run {
-        reconcile_managed_plugins(&old_lockfile, config, quiet, no_input)?;
+    // v0.10 RECON-01..05: replaces the v0.9 reconcile_managed_plugins flow.
+    // Adapter dispatch by DirectoryType (D-11); git stays separate (D-21).
+    if let Some(claude_adapter) = build_claude_adapter(config)? {
+        let report = reconcile::reconcile_lockfile(
+            old_lockfile.as_ref(),
+            &manifest_for_reconcile,
+            paths.library_dir(),
+            &claude_adapter,
+            &mut machine_prefs,
+            machine_path,
+            paths,
+            reconcile::ReconcileOpts {
+                dry_run,
+                no_input,
+                no_install,
+                quiet,
+                verbose,
+            },
+        )?;
+
+        if !quiet {
+            reconcile::render_summary(&report, quiet);
+        }
+
+        // Apply edit-in-library decisions to the manifest. The manifest is
+        // owned by sync(); reconcile_lockfile only proposed the user's
+        // choice (RECON-05 D-13).
+        apply_edit_decisions(&report, paths, dry_run)?;
+
+        // ADP-04: render grouped install failures. Sync exits non-zero at end
+        // when this Vec is non-empty (RESEARCH OQ-6).
+        if !report.install_failures.is_empty() {
+            marketplace::render_install_failures(&report.install_failures);
+            reconcile_install_failures = take_install_failures(report);
+        }
     }
 
     // Safety guard: warn and skip cleanup when no directories are configured (CFG-06)
@@ -1215,6 +1348,18 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             }
             Err(e) => eprintln!("warning: remote push failed: {e}"),
         }
+    }
+
+    // RESEARCH OQ-6: surface non-zero exit when reconcile failed any
+    // install/update. The grouped failure summary already printed via
+    // marketplace::render_install_failures; this bail surfaces the exit
+    // code only.
+    if !reconcile_install_failures.is_empty() {
+        anyhow::bail!(
+            "{} plugin install/update operation(s) failed during reconcile (see \
+             grouped summary above)",
+            reconcile_install_failures.len()
+        );
     }
 
     Ok(())
@@ -1618,32 +1763,6 @@ fn show_config(config: &Config, path_only: bool, config_path: &Path) -> Result<(
     } else {
         let toml_str = toml::to_string_pretty(config)?;
         println!("{}", toml_str);
-    }
-    Ok(())
-}
-
-/// Auto-install managed plugins that are in the lockfile but not installed locally.
-fn reconcile_managed_plugins(
-    old_lockfile: &Option<lockfile::Lockfile>,
-    config: &config::Config,
-    quiet: bool,
-    no_input: bool,
-) -> Result<()> {
-    let Some(lf) = old_lockfile else {
-        return Ok(());
-    };
-    let Some(json_path) = install::find_installed_plugins_json(config) else {
-        return Ok(());
-    };
-    match install::reconcile(lf, &json_path, false, quiet, no_input) {
-        Ok(n) if n > 0 && !quiet => {
-            println!(
-                "  {} Installed {n} managed plugin(s)",
-                console::style("✓").green()
-            );
-        }
-        Ok(_) => {}
-        Err(e) => eprintln!("warning: plugin auto-install failed: {e}"),
     }
     Ok(())
 }

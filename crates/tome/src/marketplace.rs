@@ -310,10 +310,6 @@ pub(crate) fn format_install_failures(failures: &[InstallFailure]) -> String {
 /// non-zero-exit-on-partial-failure is the caller's responsibility per ADP-04.
 ///
 /// Empty input is a no-op (zero stderr output).
-//
-// dead_code allow: see [`format_install_failures`] above. Drop when Phase 13
-// wires the call from `lib.rs::sync`.
-#[allow(dead_code)]
 pub fn render_install_failures(failures: &[InstallFailure]) {
     let rendered = format_install_failures(failures);
     if !rendered.is_empty() {
