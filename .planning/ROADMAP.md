@@ -181,7 +181,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 9. Cross-Machine Path Overrides | v0.9 | 3/3 | Complete | 2026-04-28 |
 | 10. Phase 8 Review Tail — Type Design, TUI Polish & Test Coverage | v0.9 | 3/3 | Complete | 2026-04-29 |
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
-| 12. Marketplace adapter | v0.10 | 4/4 | Complete   | 2026-05-05 |
+| 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 0/TBD | Not started | - |
 | 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
