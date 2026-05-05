@@ -85,7 +85,7 @@ pub enum Command {
 
     /// Discover, consolidate, and distribute skills
     #[command(
-        after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input"
+        after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input\n  tome sync --no-install"
     )]
     Sync {
         /// Recreate all symlinks even if they appear up-to-date
@@ -94,6 +94,12 @@ pub enum Command {
         /// Skip interactive triage of new/changed skills
         #[arg(long)]
         no_triage: bool,
+        /// Skip auto-install/update of missing or drifted managed plugins this run.
+        ///
+        /// Doesn't change the persisted `auto_install_plugins` setting in
+        /// `machine.toml`. Mirrors Cargo's `--frozen` / `--locked`.
+        #[arg(long)]
+        no_install: bool,
     },
 
     /// Show library, sources, targets, and health summary

@@ -293,6 +293,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     force: false,
                     no_triage: true, // skip on initial sync after init
                     no_input: cli.no_input,
+                    no_install: false,
                     verbose: cli.verbose,
                     quiet: cli.quiet,
                     machine_path: &machine_path,
@@ -349,7 +350,11 @@ pub fn run(cli: Cli) -> Result<()> {
                 },
             )?;
         }
-        Command::Sync { force, no_triage } => sync(
+        Command::Sync {
+            force,
+            no_triage,
+            no_install,
+        } => sync(
             &config,
             &paths,
             SyncOptions {
@@ -357,6 +362,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 force,
                 no_triage: no_triage || cli.no_input,
                 no_input: cli.no_input,
+                no_install,
                 verbose: cli.verbose,
                 quiet: cli.quiet,
                 machine_path: &machine_path,
@@ -763,6 +769,7 @@ struct SyncOptions<'a> {
     force: bool,
     no_triage: bool,
     no_input: bool,
+    no_install: bool,
     verbose: bool,
     quiet: bool,
     /// Path where `machine.toml` should be saved after triage. Loaded once
@@ -916,6 +923,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         force,
         no_triage,
         no_input,
+        no_install: _no_install,
         verbose,
         quiet,
         machine_path,
