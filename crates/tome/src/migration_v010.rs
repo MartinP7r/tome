@@ -266,27 +266,7 @@ pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationRe
             continue;
         }
 
-        // 1. Capture source content_hash before conversion (used to verify post-copy).
-        // hash_directory works on a symlink path: WalkDir follows the symlink root
-        // even when follow_links is false, so this hashes the source content correctly.
-        let pre_hash = match manifest::hash_directory(&entry.library_path) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!(
-                    "error: could not hash source for '{}': {e}",
-                    entry.skill_name
-                );
-                result.failed += 1;
-                result.failures.push(MigrationFailure::new(
-                    MigrationFailureKind::IoError,
-                    entry.library_path.clone(),
-                    None,
-                ));
-                continue;
-            }
-        };
-
-        // 2. Resolve the symlink target into an owned PathBuf so we can copy
+        // 1. Resolve the symlink target into an owned PathBuf so we can copy
         //    from it after removing the symlink. is_dir() already confirmed
         //    reachability above; canonicalize for safety against TOCTOU on a
         //    relative-target symlink whose CWD interpretation differs from
@@ -308,7 +288,7 @@ pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationRe
             }
         };
 
-        // 3. Remove the symlink (NOT the target — remove_file unlinks the
+        // 2. Remove the symlink (NOT the target — remove_file unlinks the
         //    symlink itself even if the target is a directory).
         if let Err(e) = std::fs::remove_file(&entry.library_path) {
             eprintln!(
@@ -324,9 +304,20 @@ pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationRe
             continue;
         }
 
-        // 4. Recursive copy from resolved source → library_path. Resolves
+        // 3. Recursive copy from resolved source → library_path. Resolves
         //    nested symlinks (follow_links(true)) so the library is fully
         //    materialized with no symlink content.
+        //
+        // No post-copy hash check: copy_dir_recursive_resolving returning
+        // Ok(()) already implies every file copied successfully (each
+        // std::fs::copy is checked individually). A pre-vs-post hash
+        // comparison would also be incorrect: hash_directory uses
+        // WalkDir::follow_links(false) which treats nested symlinks as
+        // opaque entries, while copy_dir_recursive_resolving uses
+        // follow_links(true) which materializes them — so a source with
+        // any nested directory symlink would always compare unequal even
+        // on a perfectly correct copy. (See #515 for the false-failure
+        // mode this caused before.)
         if let Err(e) = copy_dir_recursive_resolving(&resolved_source, &entry.library_path) {
             eprintln!("error: copy failed for '{}': {e:#}", entry.skill_name);
             result.failed += 1;
@@ -338,37 +329,7 @@ pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationRe
             continue;
         }
 
-        // 5. Verify content_hash after copy matches pre-copy hash. If not,
-        //    flag IoError but don't roll back — the user can re-run.
-        match manifest::hash_directory(&entry.library_path) {
-            Ok(post_hash) if post_hash == pre_hash => {
-                result.converted += 1;
-            }
-            Ok(post_hash) => {
-                eprintln!(
-                    "error: content_hash mismatch for '{}' after copy (expected {pre_hash}, got {post_hash})",
-                    entry.skill_name
-                );
-                result.failed += 1;
-                result.failures.push(MigrationFailure::new(
-                    MigrationFailureKind::IoError,
-                    entry.library_path.clone(),
-                    None,
-                ));
-            }
-            Err(e) => {
-                eprintln!(
-                    "error: could not hash post-copy library for '{}': {e}",
-                    entry.skill_name
-                );
-                result.failed += 1;
-                result.failures.push(MigrationFailure::new(
-                    MigrationFailureKind::IoError,
-                    entry.library_path.clone(),
-                    None,
-                ));
-            }
-        }
+        result.converted += 1;
     }
 
     Ok(result)
@@ -639,6 +600,42 @@ mod tests {
         // Manifest unchanged (D-06).
         assert!(manifest.contains_key("broken"));
         assert!(manifest.get("broken").unwrap().managed);
+    }
+
+    #[test]
+    fn execute_succeeds_with_nested_directory_symlink_in_source() {
+        // Regression for #515: pre-fix, the migration's pre/post hash check
+        // used WalkDir::follow_links(false) for pre_hash but follow_links(true)
+        // (via copy_dir_recursive_resolving) for post_hash. A source containing
+        // any nested directory symlink would always hash unequal between the
+        // two walks, producing a false IoError on a perfectly correct copy.
+        let (_tmp, library, source, mut manifest) = setup_fixture();
+
+        // Build a managed source dir whose SKILL.md sits next to a nested
+        // directory symlink (e.g. plugin caches use these for shared assets).
+        let src = make_managed_source(&source, "with-nested-symlink", "# main");
+        let shared_target = source.join("shared-assets");
+        std::fs::create_dir_all(&shared_target).unwrap();
+        std::fs::write(shared_target.join("data.txt"), "shared").unwrap();
+        unix_fs::symlink(&shared_target, src.join("shared")).unwrap();
+        add_managed_entry(&mut manifest, &library, &src, "with-nested-symlink");
+
+        let p = plan(&library, &manifest).unwrap();
+        let result = execute(&p, false).unwrap();
+
+        assert_eq!(result.converted, 1, "nested-symlink source must convert cleanly");
+        assert_eq!(result.failed, 0, "must not record a false IoError");
+        assert!(!result.is_partial_or_failed());
+
+        // Post-conversion library is materialized real dir with the nested
+        // symlink dereferenced into a real directory copy.
+        let dest = library.join("with-nested-symlink");
+        assert!(dest.is_dir() && !dest.is_symlink());
+        assert!(dest.join("shared").is_dir());
+        assert_eq!(
+            std::fs::read_to_string(dest.join("shared").join("data.txt")).unwrap(),
+            "shared"
+        );
     }
 
     #[test]
