@@ -147,6 +147,11 @@ impl SkillEntry {
     /// Create a new `SkillEntry` for an **Unowned** skill — its source was
     /// removed from `tome.toml` but the library copy is preserved (per LIB-04).
     /// Records the current timestamp automatically.
+    ///
+    /// Test-only: production transitions to Unowned in-place via
+    /// `entry.source_name = None` (which preserves the original `synced_at`
+    /// timestamp — see `cleanup_library` Case 1 and `remove::execute`).
+    #[cfg(test)]
     pub fn new_unowned(
         source_path: PathBuf,
         content_hash: ContentHash,
