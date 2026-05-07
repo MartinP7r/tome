@@ -39,6 +39,7 @@ pub(crate) mod lint;
 pub(crate) mod lockfile;
 pub(crate) mod machine;
 pub(crate) mod manifest;
+pub(crate) mod migration_v010;
 pub(crate) mod paths;
 pub(crate) mod reassign;
 pub(crate) mod relocate;
@@ -64,6 +65,13 @@ use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
+
+/// Re-exported for integration tests so the synthetic-fixture builder in
+/// `tests/cli.rs` can hash directories with the exact same algorithm the
+/// production manifest uses (avoids a duplicated SHA-256 helper that could
+/// drift). Production code should still call `manifest::hash_directory`
+/// directly via the crate path.
+pub use manifest::hash_directory;
 
 /// Summary of a complete sync operation.
 pub struct SyncReport {
@@ -483,10 +491,10 @@ pub fn run(cli: Cli) -> Result<()> {
             // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
             // in tests/cli.rs.
             println!(
-                "\n{} Removed directory '{}': {} library entries, {} symlinks{}",
+                "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
                 style("✓").green(),
                 name,
-                result.library_entries_removed,
+                result.library_entries_transitioned_to_unowned,
                 result.symlinks_removed,
                 if result.git_cache_removed {
                     ", git cache"
@@ -587,6 +595,15 @@ pub fn run(cli: Cli) -> Result<()> {
                     style(&skill).cyan(),
                     style(&to).cyan(),
                 );
+            }
+        }
+        Command::MigrateLibrary { dry_run } => {
+            // Per D-05: any skip or failure means non-zero exit. The
+            // run_migrate_library helper returns Ok(result) on partial;
+            // we interpret here and `process::exit(1)` on partial-or-failed.
+            let result = migration_v010::run_migrate_library(&paths, dry_run || cli.dry_run)?;
+            if result.is_partial_or_failed() {
+                std::process::exit(1);
             }
         }
         Command::Eject => {
@@ -1006,6 +1023,22 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         eprintln!("  Found {} skills", skills.len());
     }
 
+    // v0.10 D-02: refuse to sync against a v0.9-shape library. Detection is an
+    // isolated check; the entire migration_v010 module deletes cleanly with
+    // this check in v0.11+.
+    {
+        let manifest_for_detection = manifest::load(paths.config_dir())?;
+        if migration_v010::detect_v09_shape(paths.library_dir(), &manifest_for_detection) {
+            anyhow::bail!(
+                "library is in v0.9 shape (one or more managed skills are stored as symlinks).\n\
+                 \n\
+                 Why: v0.10 stores managed skills as real directory copies (LIB-01).\n\
+                 Run `tome migrate-library` to convert the library, then re-run this command.\n\
+                 Pass `--dry-run` first to preview changes without touching the filesystem."
+            );
+        }
+    }
+
     // 2. Consolidate into library (copy)
     let sp = show_progress.then(|| spinner("Consolidating to library..."));
     if verbose {
@@ -1061,6 +1094,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         paths.library_dir(),
         &discovered_names,
         &mut manifest,
+        config,
         dry_run,
         quiet,
         no_input,

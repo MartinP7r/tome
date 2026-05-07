@@ -67,17 +67,33 @@ impl Manifest {
         self.skills.len()
     }
 
-    /// Update the source_name for an existing skill entry.
+    /// Update the source_name for an existing **owned** skill entry.
     ///
-    /// Returns `true` if the skill was found and updated, `false` if missing.
-    /// Preserves `content_hash`, `synced_at`, and other fields.
+    /// Returns `true` if the skill was found AND was owned (source_name = Some),
+    /// `false` if missing or already Unowned. Preserves `content_hash`,
+    /// `synced_at`, and other fields. Does NOT transition Unowned → Owned —
+    /// callers wanting that semantic should re-insert with `SkillEntry::new`.
     pub fn update_source_name(&mut self, skill_name: &str, new_source: &DirectoryName) -> bool {
-        if let Some(entry) = self.skills.get_mut(skill_name) {
-            entry.source_name = new_source.clone();
+        if let Some(entry) = self.skills.get_mut(skill_name)
+            && entry.source_name.is_some()
+        {
+            entry.source_name = Some(new_source.clone());
             true
         } else {
             false
         }
+    }
+
+    /// Mutable access to a skill entry by name. Used by downstream code that
+    /// needs to mutate an entry's fields in place (e.g. transitioning
+    /// `source_name` to `None` for the Unowned state per LIB-04 / D-10
+    /// trigger 2 in `cleanup::cleanup_library`).
+    ///
+    /// Returns `None` if no entry exists with that name. Keep the surface
+    /// minimal (`pub(crate)`) — external callers should use higher-level
+    /// helpers like `update_source_name`.
+    pub(crate) fn skills_get_mut(&mut self, name: &str) -> Option<&mut SkillEntry> {
+        self.skills.get_mut(name)
     }
 }
 
@@ -86,24 +102,33 @@ impl Manifest {
 pub struct SkillEntry {
     /// Where this skill was originally copied from.
     pub source_path: PathBuf,
-    /// Which directory config entry contributed this skill.
-    /// In v0.6+, this is the directory name from `[directories.*]` in `tome.toml`.
-    /// On-disk JSON representation is unchanged (`DirectoryName` is `#[serde(transparent)]`
-    /// over `String`); the type lift to `DirectoryName` (closes #489) tightens validation
-    /// at deserialize time so a corrupted manifest with an invalid identifier fails fast.
-    pub source_name: DirectoryName,
+    /// Which directory config entry contributed this skill, or `None` if the
+    /// skill is **Unowned** (its source was removed from `tome.toml` but the
+    /// library copy is preserved per LIB-04).
+    ///
+    /// Old manifests with `"source_name": "foo"` parse as `Some(DirectoryName::new("foo")?)`
+    /// via serde's natural `Option` handling + `DirectoryName`'s transparent
+    /// validating `Deserialize`. New Unowned entries serialize without the key
+    /// (per `skip_serializing_if`) and read back as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<DirectoryName>,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
     pub synced_at: String,
-    /// Whether this skill is managed by a package manager (symlinked, not copied).
-    /// Defaults to `false` for backwards compatibility with pre-v0.2.1 manifests.
+    /// Whether upstream sync feeds updates into this library entry (true =
+    /// managed update channel, e.g. claude plugin install/update; false =
+    /// local, library is canonical). Per LIB-02, this is now an "update
+    /// channel" indicator — both managed and local skills live as real
+    /// directory copies in the library after Phase 11. Defaults to `false`
+    /// for backwards compatibility with pre-v0.2.1 manifests.
     #[serde(default)]
     pub managed: bool,
 }
 
 impl SkillEntry {
-    /// Create a new `SkillEntry`, recording the current timestamp automatically.
+    /// Create a new `SkillEntry` for an **owned** skill (source_name known).
+    /// Records the current timestamp automatically.
     pub fn new(
         source_path: PathBuf,
         source_name: DirectoryName,
@@ -112,7 +137,30 @@ impl SkillEntry {
     ) -> Self {
         Self {
             source_path,
-            source_name,
+            source_name: Some(source_name),
+            content_hash,
+            synced_at: now_iso8601(),
+            managed,
+        }
+    }
+
+    /// Create a new `SkillEntry` for an **Unowned** skill — its source was
+    /// removed from `tome.toml` but the library copy is preserved (per LIB-04).
+    /// Records the current timestamp automatically.
+    //
+    // dead_code allow: Phase 11 LIB-03 lifted the schema to support Unowned
+    // entries; the first non-test caller arrives in Phase 14
+    // (`tome adopt`/`tome forget` — UNOWN-01..03). Tests in this module
+    // exercise the constructor today. Drop this attr when Phase 14 lands.
+    //
+    // Note: production transitions to Unowned in-place via
+    // `entry.source_name = None` (which preserves the original `synced_at`
+    // timestamp — see `cleanup_library` Case 1 and `remove::execute`).
+    #[allow(dead_code)]
+    pub fn new_unowned(source_path: PathBuf, content_hash: ContentHash, managed: bool) -> Self {
+        Self {
+            source_path,
+            source_name: None,
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -300,7 +348,7 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: DirectoryName::new("test").unwrap(),
+                source_name: Some(DirectoryName::new("test").unwrap()),
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -409,7 +457,10 @@ mod tests {
         let new_source = DirectoryName::new("new-source").unwrap();
         let updated = manifest.update_source_name("my-skill", &new_source);
         assert!(updated, "should return true for existing skill");
-        assert_eq!(manifest.get("my-skill").unwrap().source_name, new_source);
+        assert_eq!(
+            manifest.get("my-skill").unwrap().source_name,
+            Some(new_source)
+        );
     }
 
     #[test]
@@ -418,5 +469,99 @@ mod tests {
         let new_source = DirectoryName::new("new-source").unwrap();
         let updated = manifest.update_source_name("nonexistent", &new_source);
         assert!(!updated, "should return false for missing skill");
+    }
+
+    #[test]
+    fn deserialize_old_shape_with_source_name_string() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_path":"/tmp/x","source_name":"foo","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
+        );
+        let entry: SkillEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+    }
+
+    #[test]
+    fn deserialize_new_shape_with_null_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_path":"/tmp/x","source_name":null,"content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
+        );
+        let entry: SkillEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn deserialize_new_shape_missing_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_path":"/tmp/x","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
+        );
+        let entry: SkillEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn serialize_unowned_entry_omits_source_name_key() {
+        let entry =
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("orphan"), false);
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("source_name"),
+            "Unowned entry must omit source_name key, got: {json}"
+        );
+        assert!(json.contains("\"managed\":false"));
+    }
+
+    #[test]
+    fn serialize_owned_entry_preserves_string_shape() {
+        let entry = SkillEntry::new(
+            PathBuf::from("/tmp/x"),
+            DirectoryName::new("foo").unwrap(),
+            test_hash("h"),
+            false,
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"source_name\":\"foo\""),
+            "Owned entry must serialize source_name as string, got: {json}"
+        );
+    }
+
+    #[test]
+    fn new_unowned_constructor_sets_source_name_none() {
+        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false);
+        assert_eq!(entry.source_name, None);
+        assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
+        assert_eq!(entry.content_hash, test_hash("h"));
+        assert!(!entry.managed);
+        assert!(!entry.synced_at.is_empty());
+    }
+
+    #[test]
+    fn skills_get_mut_returns_some_for_existing_entry() {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("my-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/source/my-skill"),
+                DirectoryName::new("src").unwrap(),
+                test_hash("h"),
+                false,
+            ),
+        );
+        {
+            let entry = manifest
+                .skills_get_mut("my-skill")
+                .expect("should be present");
+            entry.source_name = None;
+        }
+        assert_eq!(manifest.get("my-skill").unwrap().source_name, None);
+    }
+
+    #[test]
+    fn skills_get_mut_returns_none_for_missing_entry() {
+        let mut manifest = Manifest::default();
+        assert!(manifest.skills_get_mut("nonexistent").is_none());
     }
 }

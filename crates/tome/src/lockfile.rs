@@ -30,10 +30,15 @@ pub struct Lockfile {
 /// A single skill entry in the lockfile.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LockEntry {
-    /// Directory name (maps to a `[directories.*]` entry in `tome.toml`).
-    /// On-disk JSON shape is unchanged (`DirectoryName` is `#[serde(transparent)]`); the
-    /// type lift to `DirectoryName` (closes #489) tightens validation at deserialize time.
-    pub source_name: DirectoryName,
+    /// Directory name (maps to a `[directories.*]` entry in `tome.toml`), or
+    /// `None` if the skill is **Unowned** (source removed from `tome.toml`,
+    /// library copy preserved per LIB-04).
+    ///
+    /// Mirrors `SkillEntry.source_name` (D-12/D-14): old lockfiles with
+    /// `"source_name": "foo"` parse as `Some(DirectoryName::new("foo")?)`;
+    /// Unowned entries omit the key on serialize.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<DirectoryName>,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: ContentHash,
     /// Registry identifier (e.g. "my-plugin@npm"). Present for managed plugins.
@@ -142,9 +147,13 @@ pub(crate) fn resolved_paths_from_lockfile_cache(
         std::collections::BTreeMap::new();
     if let Some(ref lf) = previous {
         for entry in lf.skills.values() {
-            sha_by_dir
-                .entry(entry.source_name.as_str())
-                .or_insert_with(|| entry.git_commit_sha.clone());
+            if let Some(source) = &entry.source_name {
+                sha_by_dir
+                    .entry(source.as_str())
+                    .or_insert_with(|| entry.git_commit_sha.clone());
+            }
+            // Unowned entries (source_name == None) are skipped — they have no
+            // directory in the current config to resolve against.
         }
     }
 
@@ -286,7 +295,10 @@ mod tests {
 
         let key = SkillName::new("my-skill").unwrap();
         let entry = &lockfile.skills[&key];
-        assert_eq!(entry.source_name, "standalone");
+        assert_eq!(
+            entry.source_name.as_ref().map(|d| d.as_str()),
+            Some("standalone")
+        );
         assert_eq!(entry.content_hash, test_hash("abc123"));
         assert!(entry.registry_id.is_none());
         assert!(entry.version.is_none());
@@ -394,7 +406,7 @@ mod tests {
             skills: BTreeMap::from([(
                 SkillName::new("my-skill").unwrap(),
                 LockEntry {
-                    source_name: DirectoryName::new("test").unwrap(),
+                    source_name: Some(DirectoryName::new("test").unwrap()),
                     content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
@@ -482,12 +494,12 @@ mod tests {
 
         let a_key = SkillName::new("a-skill").unwrap();
         let a = &lockfile.skills[&a_key];
-        assert_eq!(a.source_name, "src");
+        assert_eq!(a.source_name.as_ref().map(|d| d.as_str()), Some("src"));
         assert_eq!(a.content_hash, test_hash("hash_a"));
 
         let b_key = SkillName::new("b-skill").unwrap();
         let b = &lockfile.skills[&b_key];
-        assert_eq!(b.source_name, "src");
+        assert_eq!(b.source_name.as_ref().map(|d| d.as_str()), Some("src"));
         assert_eq!(b.content_hash, test_hash("hash_b"));
         assert!(b.registry_id.is_none());
         assert!(b.version.is_none());
@@ -623,7 +635,7 @@ mod tests {
         skills.insert(
             SkillName::new("seed-skill").unwrap(),
             LockEntry {
-                source_name: DirectoryName::new(source).unwrap(),
+                source_name: Some(DirectoryName::new(source).unwrap()),
                 content_hash: test_hash("seed"),
                 registry_id: None,
                 version: None,
@@ -836,6 +848,48 @@ mod tests {
         assert!(
             my_skill.get("version").is_none(),
             "should omit null version in JSON"
+        );
+    }
+
+    #[test]
+    fn deserialize_old_shape_lockfile_source_name_string() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+    }
+
+    #[test]
+    fn deserialize_new_shape_lockfile_null_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"source_name":null,"content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn deserialize_new_shape_lockfile_missing_source_name() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.source_name, None);
+    }
+
+    #[test]
+    fn unowned_skill_omits_source_name_in_lockfile_json() {
+        use crate::manifest::SkillEntry;
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false),
+        );
+        let lockfile = generate(&manifest, &[]);
+        let json = serde_json::to_string_pretty(&lockfile).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let orphan = &parsed["skills"]["orphan"];
+        assert!(
+            orphan.get("source_name").is_none(),
+            "Unowned skill must omit source_name in lockfile JSON, got: {json}"
         );
     }
 }

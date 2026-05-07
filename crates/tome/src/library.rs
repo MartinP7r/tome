@@ -1,19 +1,22 @@
 //! Consolidate discovered skills into the library directory.
 //!
-//! Two consolidation strategies based on source type:
-//! - **Managed** (ClaudePlugins): symlink in library → source dir (package manager owns the files)
-//! - **Local** (Directory): copy into library (library is the canonical home)
+//! Per LIB-01 (v0.10), all library entries are real directory copies — both
+//! managed and local skills. The `managed: bool` flag on manifest entries is
+//! the **update channel** indicator (LIB-02):
+//! - **Managed**: upstream sync (e.g. `claude plugin install/update`) feeds
+//!   updates into the library on every `tome sync`.
+//! - **Local**: the library is canonical; the source-on-disk pattern feeds
+//!   the library only when the source content changes.
 //!
-//! Idempotent — unchanged skills are skipped. Handles strategy transitions when a skill's
-//! source type changes between syncs.
+//! Idempotent — unchanged skills (matching content_hash) are skipped. Handles
+//! strategy transitions when a skill's `managed` flag flips between syncs.
 
 use anyhow::{Context, Result};
-use std::os::unix::fs as unix_fs;
 use std::path::Path;
 
 use crate::discover::DiscoveredSkill;
 use crate::manifest::{self, Manifest, SkillEntry};
-use crate::paths::{TomePaths, symlink_points_to};
+use crate::paths::TomePaths;
 
 /// What already exists at the library destination path.
 enum DestinationState {
@@ -45,12 +48,6 @@ pub struct ConsolidateResult {
     pub skipped: usize,
 }
 
-/// Create a symlink from `dest` pointing to `src`.
-fn create_symlink(src: &Path, dest: &Path) -> Result<()> {
-    unix_fs::symlink(src, dest)
-        .with_context(|| format!("failed to symlink {} -> {}", dest.display(), src.display()))
-}
-
 /// Record a skill in the manifest after consolidation.
 fn record_in_manifest(
     manifest: &mut Manifest,
@@ -70,9 +67,10 @@ fn record_in_manifest(
 
 /// Consolidate discovered skills into the library directory.
 ///
-/// Managed skills are symlinked; local skills are copied.
-/// A manifest tracks content hashes and provenance for idempotent updates.
-/// When `force` is true, all skills are re-synced regardless of state.
+/// Per LIB-01 (v0.10), both managed and local skills are stored as real
+/// directory copies in the library. A manifest tracks content hashes and
+/// provenance for idempotent updates. When `force` is true, all skills are
+/// re-synced regardless of state.
 ///
 /// `paths.tome_home` is the top-level `~/.tome/` directory where metadata files
 /// (manifest, lockfile, config) are stored. `paths.library_dir` is the subdirectory
@@ -125,7 +123,24 @@ pub fn consolidate(
     Ok((result, manifest))
 }
 
-/// Consolidate a managed skill: create a symlink in the library pointing to the source.
+/// Consolidate a managed skill: copy the source directory into the library.
+///
+/// Per LIB-01 (v0.10), managed skills are stored as real directory copies in
+/// the library — not symlinks. The `managed: true` flag in the manifest entry
+/// is the "update channel" indicator (per LIB-02): managed = upstream sync
+/// (e.g. claude plugin install/update) feeds updates into the library; local
+/// = library is canonical and never auto-overwritten.
+///
+/// Idempotency: when the source's content_hash matches the manifest entry,
+/// this is a no-op (`result.unchanged += 1`).
+///
+/// v0.9-shape detection: if a symlink already exists at `dest` AND the skill
+/// is in the manifest, this function refuses to auto-convert and returns
+/// `result.skipped += 1` with a stderr warning. The user must run
+/// `tome migrate-library` to convert the v0.9-shape library to v0.10-shape
+/// (per D-01). Normally this branch is unreachable because `lib.rs::sync`
+/// performs an isolated v0.9-shape detection check before consolidate (per
+/// D-02) and refuses with a hint.
 fn consolidate_managed(
     skill: &DiscoveredSkill,
     dest: &Path,
@@ -137,24 +152,44 @@ fn consolidate_managed(
     let content_hash = manifest::hash_directory(&skill.path)?;
 
     match classify_destination(dest) {
+        DestinationState::Symlink => {
+            // v0.9-shape (managed-as-symlink) — refuse to auto-convert.
+            // The user must run `tome migrate-library` (per D-01).
+            // Normally `lib.rs::sync` blocks this path entirely (per D-02);
+            // this branch defends the boundary in case sync's gate is bypassed
+            // (e.g. direct call to consolidate from a test or future helper).
+            eprintln!(
+                "warning: {} is a v0.9-shape symlink for managed skill — \
+                 run `tome migrate-library` to convert to v0.10 shape, skipping",
+                dest.display()
+            );
+            result.skipped += 1;
+        }
         DestinationState::Directory => {
-            // A managed skill should always be a symlink. If a real directory exists
-            // instead (e.g., from a prior local-to-managed transition or manual
-            // intervention), replace it with a symlink.
-            if manifest.contains_key(skill.name.as_str()) {
+            if let Some(entry) = manifest.get(skill.name.as_str()) {
+                if entry.content_hash == content_hash && !force {
+                    // Hash matches — possibly flip managed flag if it changed
+                    // (e.g. local→managed strategy transition where content
+                    // happens to be identical).
+                    if !entry.managed {
+                        record_in_manifest(manifest, skill, content_hash.clone());
+                        result.updated += 1;
+                    } else {
+                        result.unchanged += 1;
+                    }
+                    return Ok(());
+                }
+                // Content changed or force — re-copy.
                 if !dry_run {
                     std::fs::remove_dir_all(dest).with_context(|| {
-                        format!(
-                            "failed to remove stale dir for managed skill {}",
-                            dest.display()
-                        )
+                        format!("failed to remove old managed skill dir {}", dest.display())
                     })?;
-                    create_symlink(&skill.path, dest)?;
+                    copy_dir_recursive(&skill.path, dest)?;
                 }
                 record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
             } else {
-                // Dir exists but not in manifest — skip with warning
+                // Real dir exists but not in manifest — user-created collision, skip.
                 eprintln!(
                     "warning: {} exists but is not in the manifest, skipping",
                     dest.display()
@@ -162,29 +197,10 @@ fn consolidate_managed(
                 result.skipped += 1;
             }
         }
-        DestinationState::Symlink => {
-            if symlink_points_to(dest, &skill.path) && !force {
-                // Check if managed flag needs updating in manifest (v0.1 migration)
-                if let Some(entry) = manifest.get(skill.name.as_str())
-                    && !entry.managed
-                {
-                    record_in_manifest(manifest, skill, content_hash.clone());
-                }
-                result.unchanged += 1;
-            } else {
-                // Wrong target or force — remove and recreate
-                if !dry_run {
-                    std::fs::remove_file(dest)
-                        .with_context(|| format!("failed to remove symlink {}", dest.display()))?;
-                    create_symlink(&skill.path, dest)?;
-                }
-                record_in_manifest(manifest, skill, content_hash.clone());
-                result.updated += 1;
-            }
-        }
         DestinationState::Empty => {
+            // New managed skill — copy from source.
             if !dry_run {
-                create_symlink(&skill.path, dest)?;
+                copy_dir_recursive(&skill.path, dest)?;
             }
             record_in_manifest(manifest, skill, content_hash.clone());
             result.created += 1;
@@ -257,7 +273,16 @@ fn consolidate_local(
         DestinationState::Directory | DestinationState::Empty | DestinationState::Other => {
             if let Some(entry) = manifest.get(skill.name.as_str()) {
                 if entry.content_hash == content_hash && !force {
-                    result.unchanged += 1;
+                    // Hash matches — flip managed flag if it changed (e.g.
+                    // managed→local strategy transition where content happens
+                    // to be identical). Mirrors the symmetric branch in
+                    // consolidate_managed (per LIB-02 "update channel" semantics).
+                    if entry.managed {
+                        record_in_manifest(manifest, skill, content_hash.clone());
+                        result.updated += 1;
+                    } else {
+                        result.unchanged += 1;
+                    }
                     return Ok(());
                 }
                 // Content changed or force — re-copy
@@ -336,8 +361,11 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
 
 /// Generate or update `.gitignore` in the library directory.
 ///
-/// Managed (symlinked) skill entries are gitignored — they are recreated by `tome sync`.
-/// Local (copied) skill entries and `.tome-manifest.json` are tracked.
+/// Managed skill entries are gitignored — even though v0.10 stores them as
+/// real directory copies (LIB-01), they are regenerated by `tome sync` on
+/// every machine via the marketplace adapter (Phase 12+ work). Gitignoring
+/// them avoids cross-machine churn in the dotfiles repo. Local (canonical)
+/// skill entries and `.tome-manifest.json` are tracked.
 /// Only writes the file if the content would change, to avoid unnecessary git noise.
 pub fn generate_gitignore(library_dir: &Path, manifest: &Manifest) -> Result<()> {
     let mut managed: Vec<&str> = manifest
@@ -833,7 +861,7 @@ mod tests {
     // -- Managed skill tests --
 
     #[test]
-    fn consolidate_symlinks_managed_skill() {
+    fn consolidate_managed_creates_real_dir() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
@@ -848,8 +876,12 @@ mod tests {
         assert_eq!(result.created, 1);
 
         let dest = library.path().join("plugin-skill");
-        assert!(dest.is_symlink(), "managed skill should be a symlink");
-        assert!(dest.is_dir(), "symlink should point to a valid directory");
+        assert!(dest.is_dir());
+        assert!(
+            !dest.is_symlink(),
+            "managed skill should be a real directory copy in v0.10"
+        );
+        assert!(dest.join("SKILL.md").is_file());
 
         let entry = manifest.get("plugin-skill").unwrap();
         assert!(entry.managed);
@@ -861,13 +893,17 @@ mod tests {
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        consolidate(
+        // Per LIB-01 / D-08, idempotency is manifest-driven (content_hash
+        // comparison) — the manifest must be persisted between syncs for the
+        // hash-match check to fire on the second call.
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -887,16 +923,18 @@ mod tests {
         let library = TempDir::new().unwrap();
 
         let skill1 = make_managed_skill(source1.path(), "plugin-skill");
-        consolidate(
+        let (_, manifest) = consolidate(
             &[skill1],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
 
-        // Same skill name from different path
+        // Same skill name from a different path with different content
         let skill2 = make_managed_skill(source2.path(), "plugin-skill");
+        std::fs::write(skill2.path.join("SKILL.md"), "# updated managed content").unwrap();
         let (result, _) = consolidate(
             std::slice::from_ref(&skill2),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -906,11 +944,15 @@ mod tests {
         .unwrap();
         assert_eq!(result.updated, 1);
 
-        // Should point to the new path
+        // Library copy should reflect the new source's content (real dir, not symlink).
         let dest = library.path().join("plugin-skill");
-        assert!(dest.is_symlink());
-        let target = std::fs::read_link(&dest).unwrap();
-        assert_eq!(target, skill2.path);
+        assert!(dest.is_dir());
+        assert!(
+            !dest.is_symlink(),
+            "managed skill should remain a real directory in v0.10"
+        );
+        let copied = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
+        assert_eq!(copied, "# updated managed content");
     }
 
     #[test]
@@ -932,7 +974,7 @@ mod tests {
         assert!(dest.is_dir());
         assert!(!dest.is_symlink(), "should be a real dir initially");
 
-        // Now: same skill but managed
+        // Now: same skill but managed (per LIB-01, still a real dir copy)
         let managed_skill = make_managed_skill(source.path(), "my-skill");
         let (result, manifest) = consolidate(
             &[managed_skill],
@@ -942,7 +984,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.updated, 1);
-        assert!(dest.is_symlink(), "should now be a symlink");
+        assert!(dest.is_dir());
+        assert!(
+            !dest.is_symlink(),
+            "managed skill should remain a real directory in v0.10"
+        );
         assert!(manifest.get("my-skill").unwrap().managed);
     }
 
@@ -951,31 +997,36 @@ mod tests {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
 
-        // First: consolidate as managed (symlink)
+        // First: consolidate as managed (real dir copy per LIB-01)
         let managed_skill = make_managed_skill(source.path(), "my-skill");
-        consolidate(
+        let (_, manifest) = consolidate(
             &[managed_skill],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let dest = library.path().join("my-skill");
-        assert!(dest.is_symlink(), "should be a symlink initially");
+        assert!(dest.is_dir());
+        assert!(!dest.is_symlink(), "managed should be a real dir in v0.10");
+        assert!(manifest.get("my-skill").unwrap().managed);
 
-        // Now: same skill but local
+        // Now: same skill but local — still a real dir copy, managed flag flips false
         let local_skill = make_skill(source.path(), "my-skill");
-        let (result, manifest) = consolidate(
+        let (_, manifest) = consolidate(
             &[local_skill],
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
-        assert_eq!(result.updated, 1);
         assert!(dest.is_dir());
-        assert!(!dest.is_symlink(), "should now be a real directory");
-        assert!(!manifest.get("my-skill").unwrap().managed);
+        assert!(!dest.is_symlink(), "should remain a real directory");
+        assert!(
+            !manifest.get("my-skill").unwrap().managed,
+            "managed flag should flip false on managed→local transition"
+        );
     }
 
     #[test]
@@ -1073,7 +1124,7 @@ mod tests {
     }
 
     #[test]
-    fn consolidate_managed_dry_run_no_symlink_created() {
+    fn consolidate_managed_dry_run_no_dir_created() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
@@ -1087,10 +1138,9 @@ mod tests {
         .unwrap();
         assert_eq!(result.created, 1);
 
-        // Symlink should NOT exist on disk
+        // Library directory should NOT exist on disk
         let dest = library.path().join("plugin-skill");
-        assert!(!dest.exists(), "dry-run should not create symlink");
-        assert!(!dest.is_symlink(), "dry-run should not create symlink");
+        assert!(!dest.exists(), "dry-run should not create the directory");
 
         // But manifest should reflect the would-be state
         let entry = manifest.get("plugin-skill").expect("should have entry");
@@ -1098,18 +1148,19 @@ mod tests {
     }
 
     #[test]
-    fn consolidate_managed_force_recreates_symlink() {
+    fn consolidate_managed_force_recopies() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        consolidate(
+        let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
             false,
             false,
         )
         .unwrap();
+        manifest::save(&manifest, library.path()).unwrap();
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -1117,20 +1168,23 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(result.updated, 1, "force should recreate managed symlink");
+        assert_eq!(result.updated, 1, "force should re-copy managed skill");
         assert_eq!(result.unchanged, 0);
 
         let dest = library.path().join("plugin-skill");
-        assert!(dest.is_symlink(), "should still be a symlink after force");
+        assert!(
+            dest.is_dir() && !dest.is_symlink(),
+            "should be a real directory after force"
+        );
     }
 
     #[test]
-    fn consolidate_managed_repairs_stale_directory() {
+    fn consolidate_managed_recopies_when_content_diverges() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
         let skill = make_managed_skill(source.path(), "plugin-skill");
 
-        // First: consolidate normally (creates symlink)
+        // First: consolidate normally (creates real dir copy)
         let (_, manifest) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -1140,18 +1194,32 @@ mod tests {
         .unwrap();
         manifest::save(&manifest, library.path()).unwrap();
         let dest = library.path().join("plugin-skill");
-        assert!(dest.is_symlink(), "should be a symlink initially");
-
-        // Replace symlink with a real directory (simulating stale state)
-        std::fs::remove_file(&dest).unwrap();
-        std::fs::create_dir_all(&dest).unwrap();
-        std::fs::write(dest.join("SKILL.md"), "# stale").unwrap();
         assert!(
             dest.is_dir() && !dest.is_symlink(),
-            "should be a real dir now"
+            "should be a real dir initially"
         );
 
-        // Re-consolidate — should repair by replacing dir with symlink
+        // Modify the library copy directly so it diverges from the source hash
+        // (e.g., simulating a manual edit). The next consolidate must overwrite
+        // it from source because the manifest's recorded hash no longer matches
+        // what hash_directory(&skill.path) returns.
+        std::fs::write(
+            dest.join("SKILL.md"),
+            "# locally modified divergent content",
+        )
+        .unwrap();
+
+        // Re-consolidate — content_hash mismatch (manifest hash vs source hash
+        // is identical because source didn't change; but to actually trigger
+        // re-copy we need the source content to differ from the LIBRARY copy.
+        // The branch we hit compares `entry.content_hash == content_hash` where
+        // both are computed from the SOURCE — so a manifest hash that matches
+        // the source returns unchanged, regardless of library divergence.
+        //
+        // To simulate true divergence (source-side content drift after the
+        // last sync), modify the SOURCE so its hash differs from manifest:
+        std::fs::write(skill.path.join("SKILL.md"), "# new upstream content").unwrap();
+
         let (result, _) = consolidate(
             std::slice::from_ref(&skill),
             &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
@@ -1159,9 +1227,21 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(result.updated, 1, "should repair stale directory");
+        assert_eq!(
+            result.updated, 1,
+            "content_hash mismatch should trigger re-copy from source"
+        );
         assert_eq!(result.unchanged, 0);
-        assert!(dest.is_symlink(), "should be a symlink again after repair");
+        // The library copy should now reflect the SOURCE content, not the local edit.
+        let copied = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
+        assert_eq!(
+            copied, "# new upstream content",
+            "library should be re-copied from source"
+        );
+        assert!(
+            dest.is_dir() && !dest.is_symlink(),
+            "should remain a real directory after re-copy"
+        );
     }
 
     #[test]
@@ -1288,7 +1368,7 @@ mod tests {
     }
 
     #[test]
-    fn consolidate_managed_replaces_local_dir_with_symlink() {
+    fn consolidate_managed_replaces_local_dir_with_managed_copy() {
         let source = TempDir::new().unwrap();
         let library = TempDir::new().unwrap();
 
@@ -1298,13 +1378,14 @@ mod tests {
         std::fs::write(dest.join("SKILL.md"), "# local version").unwrap();
         assert!(dest.is_dir() && !dest.is_symlink());
 
-        // Add a manifest entry for skill-a with managed: false
+        // Add a manifest entry for skill-a with managed: false (and a stale hash
+        // that won't match the new managed source content)
         let mut manifest = Manifest::default();
         manifest.insert(
             crate::discover::SkillName::new("skill-a").unwrap(),
             SkillEntry {
                 source_path: std::path::PathBuf::from("/tmp/old-source/skill-a"),
-                source_name: DirectoryName::new("old-source").unwrap(),
+                source_name: Some(DirectoryName::new("old-source").unwrap()),
                 content_hash: crate::validation::test_hash("stale-hash"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -1329,23 +1410,91 @@ mod tests {
         let mut result = ConsolidateResult::default();
         consolidate_managed(&skill, &dest, &mut manifest, &mut result, false, false).unwrap();
 
-        // Assert: the real directory was replaced with a symlink pointing to the source
+        // Per LIB-01: the destination remains a real directory (the local copy
+        // is replaced by a copy of the managed source, not a symlink).
+        assert!(dest.is_dir());
         assert!(
-            dest.is_symlink(),
-            "real directory should be replaced with a symlink"
+            !dest.is_symlink(),
+            "managed skill should remain a real directory in v0.10"
         );
-        let target = std::fs::read_link(&dest).unwrap();
+        let copied = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
         assert_eq!(
-            target, source_skill,
-            "symlink should point to the source skill dir"
+            copied, "# managed version",
+            "library copy should reflect the managed source content"
         );
 
-        // Assert: the manifest entry is now managed: true
+        // Manifest entry now has managed: true
         let entry = manifest.get("skill-a").expect("manifest should have entry");
         assert!(
             entry.managed,
             "manifest entry should be updated to managed: true"
         );
         assert_eq!(result.updated, 1);
+    }
+
+    #[test]
+    fn consolidate_refuses_v09_shape_managed_symlink() {
+        use std::os::unix::fs as unix_fs;
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_managed_skill(source.path(), "plugin-skill");
+
+        // Pre-create a v0.9-shape symlink + manifest entry simulating an
+        // un-migrated library that bypassed the lib.rs::sync gate.
+        unix_fs::symlink(&skill.path, library.path().join("plugin-skill")).unwrap();
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            skill.name.clone(),
+            SkillEntry::new(
+                skill.path.clone(),
+                skill.source_name.clone(),
+                manifest::hash_directory(&skill.path).unwrap(),
+                true,
+            ),
+        );
+        manifest::save(&manifest, library.path()).unwrap();
+
+        let (result, _) = consolidate(
+            std::slice::from_ref(&skill),
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        // consolidate_managed must NOT auto-convert — that's migration's job.
+        assert_eq!(result.skipped, 1);
+        assert_eq!(result.created, 0);
+        assert_eq!(result.updated, 0);
+        assert!(
+            library.path().join("plugin-skill").is_symlink(),
+            "v0.9 symlink must be preserved (skipped, not auto-converted)"
+        );
+    }
+
+    #[test]
+    fn consolidate_post_sync_no_symlinks_in_library() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let local = make_skill(source.path(), "local-skill");
+        let managed = make_managed_skill(source.path(), "managed-skill");
+
+        consolidate(
+            &[local, managed],
+            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        let symlink_count = walkdir::WalkDir::new(library.path())
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.path_is_symlink())
+            .count();
+        assert_eq!(
+            symlink_count, 0,
+            "LIB-01: library must contain zero symlinks after sync (managed and local are both real-dir copies)"
+        );
     }
 }

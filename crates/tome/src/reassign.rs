@@ -55,7 +55,12 @@ pub(crate) fn plan(
         .get(skill_name)
         .ok_or_else(|| anyhow::anyhow!("skill '{}' not found in library", skill_name))?;
 
-    let from_directory = entry.source_name.clone();
+    let from_directory = entry.source_name.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "skill '{}' is Unowned (no source directory); use `tome adopt` (Phase 14) to assign a directory before reassigning",
+            skill_name
+        )
+    })?;
 
     // Validate target directory exists in config
     let to_dir_name =

@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: ready-to-plan
-stopped_at: ROADMAP.md created (7 phases, 49 reqs mapped, 100% coverage); next is /gsd:plan-phase 11
-last_updated: "2026-05-02T00:00:00.000Z"
-last_activity: 2026-05-02
+status: verifying
+stopped_at: Completed 11-05-integration-tests-PLAN.md
+last_updated: "2026-05-03T14:04:53.514Z"
+last_activity: 2026-05-03
 progress:
   total_phases: 7
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
-  percent: 0
+  completed_phases: 1
+  total_plans: 5
+  completed_plans: 5
 ---
 
 # Project State
@@ -21,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** v0.10 — Library-canonical Model + Cross-Machine Plugin Reconciliation. Reshape the library to be a single source of truth (managed-as-copy), make the lockfile authoritative for cross-machine reproducibility, ship marketplace adapters for plugin install/update on sync, and bundle the v0.9-review CLI hardening backlog.
+**Current focus:** Phase 11 — library-canonical-core
 
 ## Current Position
 
-Phase: 11 — Library-canonical core
-Plan: — (none yet; awaiting `/gsd:plan-phase 11`)
-Status: Ready to plan Phase 11
-Last activity: 2026-05-02 — ROADMAP.md created (7 phases, 49 reqs, 100% coverage)
+Phase: 12
+Plan: Not started
+Status: Phase complete — ready for verification
+Last activity: 2026-05-03
 
 **v0.10 phase shape (Phases 11–17):**
 
@@ -55,6 +54,11 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.7-ROADMAP.md` — per-phase decisions for v0.7
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — Tauri GUI milestone (drafted, deferred to after v0.10 ships)
+- [Phase 11]: LIB-03: SkillEntry/LockEntry source_name lifted to Option<DirectoryName>; SkillEntry::new signature unchanged via twin-constructor pattern (new + new_unowned); Manifest::skills_get_mut accessor lifted into Plan 11-01 to keep manifest.rs touches contained
+- [Phase 11]: LIB-01/LIB-02: consolidate_managed rewritten as recursive copy; managed flag semantics shift to 'update channel'; consolidate_local mirrors hash-match flag flip for symmetry; v0.9-shape symlinks refused (not auto-converted) per D-02 boundary defense
+- [Phase 11]: LIB-04 D-10 hybrid triggers: tome remove explicitly transitions owned manifest entries to Unowned (source_name = None) and preserves library content; cleanup phase adds the same safety-net transition for users who manually edit tome.toml. Already-Unowned entries are preserved by definition. RemoveResult.library_entries_transitioned_to_unowned replaces library_entries_removed; FailureKind shrunk to 2 variants (DistributionSymlink, GitCache).
+- [Phase 11-library-canonical-core]: LIB-05: tome migrate-library is one-shot CLI command (D-01) with manifest-anchored detection (D-03), broken-symlink preservation (D-04), SAFE-01 failure aggregation (D-05), idempotent re-runs (D-06). Sync refuses on v0.9-shape libraries with Conflict/Why/Suggestion error pointing at the new command (D-02). Entire migration_v010 module + sync gate deletes cleanly in v0.11+.
+- [Phase 11]: Plan 11-05: Re-exported manifest::hash_directory at crate root for integration test reuse — single canonical hashing implementation, no parallel SHA-256 helper. Five end-to-end CLI tests anchor LIB-01/LIB-04/LIB-05 success criteria via assert_cmd binary invocations against a synthetic v0.9 library fixture mirroring CONTEXT.md <specifics>. Resolved deferred-items.md entry for symlink_chain_managed_skill (cli.rs:1775).
 
 ### v0.10 design context (consume during planning)
 
@@ -93,6 +97,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-02T00:00:00.000Z
-Stopped at: ROADMAP.md created — 7 phases (11–17), 49 v0.10 requirements mapped 1:1, 100% coverage validated. REQUIREMENTS.md traceability table filled. Next: `/gsd:plan-phase 11` to decompose Library-canonical core into executable plans.
-Resume file: `.planning/ROADMAP.md` (Phase 11 details + success criteria) + `.planning/research/v0.10-library-canonical-design.md` (design source-of-truth).
+Last session: 2026-05-03T13:58:12.917Z
+Stopped at: Completed 11-05-integration-tests-PLAN.md
+Resume file: None

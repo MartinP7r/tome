@@ -87,8 +87,12 @@ pub fn present_changes(
             SkillChange::Changed { new, .. } => &new.source_name,
             SkillChange::Removed(e) => &e.source_name,
         };
+        let source_label = source
+            .as_ref()
+            .map(|d| d.as_str().to_string())
+            .unwrap_or_else(|| "unowned".to_string());
         by_source
-            .entry(source.as_str().to_string())
+            .entry(source_label)
             .or_default()
             .push((name, change));
     }
@@ -175,7 +179,7 @@ mod tests {
 
     fn entry(source: &str, hash_seed: &str) -> LockEntry {
         LockEntry {
-            source_name: DirectoryName::new(source).unwrap(),
+            source_name: Some(DirectoryName::new(source).unwrap()),
             content_hash: test_hash(hash_seed),
             registry_id: None,
             version: None,
@@ -185,7 +189,7 @@ mod tests {
 
     fn managed_entry(source: &str, hash_seed: &str, registry_id: &str) -> LockEntry {
         LockEntry {
-            source_name: DirectoryName::new(source).unwrap(),
+            source_name: Some(DirectoryName::new(source).unwrap()),
             content_hash: test_hash(hash_seed),
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),
@@ -306,7 +310,7 @@ mod tests {
 
         // Verify Added carries the new entry
         if let SkillChange::Added(ref e) = d.changes["fresh"] {
-            assert_eq!(e.source_name, "plugins");
+            assert_eq!(e.source_name.as_ref().map(|d| d.as_str()), Some("plugins"));
             assert_eq!(e.content_hash, test_hash("ddd"));
             assert_eq!(e.registry_id.as_deref(), Some("new-pkg@npm"));
         } else {

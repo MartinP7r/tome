@@ -138,6 +138,22 @@ pub enum Command {
         format: LintFormat,
     },
 
+    /// One-shot migration: convert a v0.9-shape library (managed skills as
+    /// symlinks) to v0.10 shape (real directory copies). Run once after
+    /// upgrading from v0.9.x. Idempotent on re-run.
+    ///
+    /// Commit your library (or back it up) BEFORE running — there is no
+    /// path back to v0.9 shape.
+    #[command(
+        after_help = "Examples:\n  tome migrate-library --dry-run\n  tome migrate-library\n\nThis is a one-shot command for migrating from tome v0.9.x to v0.10. \
+                       On v0.10 fresh installs it has nothing to do."
+    )]
+    MigrateLibrary {
+        /// Preview changes without modifying filesystem
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Interactively browse discovered skills
     #[command(after_help = "Examples:\n  tome browse")]
     Browse,
