@@ -168,21 +168,23 @@ pub enum Command {
     #[command(after_help = "Examples:\n  tome eject\n  tome eject --dry-run")]
     Eject,
 
-    /// Remove a directory entry and clean up its artifacts
+    /// Manage skills and directories — remove a configured directory entry
+    /// or delete an Unowned skill from the library.
     #[command(
-        after_help = "Examples:\n  tome remove my-git-source\n  tome remove my-git-source --dry-run\n  tome remove my-git-source --force"
+        after_help = "Examples:\n  tome remove dir my-git-source\n  tome remove dir my-git-source --force\n  tome remove skill orphaned-foo\n  tome remove skill orphaned-foo --yes"
     )]
     Remove {
-        /// Name of the directory to remove (as shown in `tome status`)
-        #[arg(value_name = "NAME")]
-        name: String,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        force: bool,
+        #[command(subcommand)]
+        kind: RemoveKind,
     },
 
-    /// Reassign a skill to a different directory
-    #[command(after_help = "Examples:\n  tome reassign my-skill --to local-skills")]
+    /// Reassign a skill to a different directory. Accepts both Owned skills
+    /// (today's behaviour) and Unowned skills (re-anchors them per UNOWN-01 /
+    /// D-API-1). Refuses to overwrite an existing skill in the target with
+    /// different content unless `--force` is passed (D-A1).
+    #[command(
+        after_help = "Examples:\n  tome reassign my-skill --to local-skills\n  tome reassign orphaned-foo --to local-skills\n  tome reassign my-skill --to local-skills --force"
+    )]
     Reassign {
         /// Skill name to reassign
         #[arg(value_name = "SKILL")]
@@ -190,6 +192,11 @@ pub enum Command {
         /// Target directory name
         #[arg(long)]
         to: String,
+        /// Overwrite an existing skill in the target if its content hash
+        /// differs from the library copy (D-A1). Same-content collisions
+        /// always relink without `--force`.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Fork a managed skill to a local directory for customization
@@ -248,6 +255,37 @@ pub enum Command {
     },
 }
 
+/// Variant of `tome remove` — directory removal vs unowned-skill deletion.
+/// Per D-API-2 (Phase 14): the merge replaces today's `tome remove <name>`
+/// shape (BREAKING). `tome remove dir` keeps today's directory-removal
+/// behaviour; `tome remove skill` deletes an Unowned skill from the library.
+#[derive(Debug, Subcommand)]
+pub enum RemoveKind {
+    /// Remove a directory entry from `tome.toml` and clean up its artifacts
+    /// (today's `tome remove <name>` behaviour, renamed). Owned skills
+    /// transition to Unowned per LIB-04.
+    Dir {
+        /// Name of the directory to remove (as shown in `tome status`)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+    /// Delete an Unowned skill from the library — manifest entry, library
+    /// directory, distribution symlinks, lockfile entry, and machine.toml
+    /// membership all cleaned. Owned skills are refused with a hint to
+    /// run `tome remove dir` first (D-B2).
+    Skill {
+        /// Skill name to forget (must currently be Unowned)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum BackupCommand {
     /// Initialize git repo in the library for backup tracking
@@ -279,4 +317,74 @@ pub enum BackupCommand {
         #[arg(default_value = "HEAD")]
         target: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_remove_dir_with_force() {
+        let cli = Cli::try_parse_from(["tome", "remove", "dir", "my-source", "--force"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Dir { name, force },
+            } => {
+                assert_eq!(name, "my-source");
+                assert!(force);
+            }
+            _ => panic!("expected Remove::Dir"),
+        }
+    }
+
+    #[test]
+    fn parse_remove_skill_with_yes() {
+        let cli = Cli::try_parse_from(["tome", "remove", "skill", "orphan-foo", "--yes"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Skill { name, yes },
+            } => {
+                assert_eq!(name, "orphan-foo");
+                assert!(yes);
+            }
+            _ => panic!("expected Remove::Skill"),
+        }
+    }
+
+    #[test]
+    fn parse_remove_skill_short_y() {
+        let cli = Cli::try_parse_from(["tome", "remove", "skill", "orphan-foo", "-y"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Skill { yes, .. },
+            } => assert!(yes),
+            _ => panic!("expected Remove::Skill"),
+        }
+    }
+
+    #[test]
+    fn parse_reassign_force_flag_recognised() {
+        let cli = Cli::try_parse_from(["tome", "reassign", "my-skill", "--to", "dst", "--force"])
+            .unwrap();
+        match cli.command {
+            Command::Reassign { skill, to, force } => {
+                assert_eq!(skill, "my-skill");
+                assert_eq!(to, "dst");
+                assert!(force);
+            }
+            _ => panic!("expected Reassign"),
+        }
+    }
+
+    #[test]
+    fn old_shape_remove_with_bare_name_fails() {
+        // Today's `tome remove my-source` should NO LONGER parse — clap
+        // requires an explicit subcommand. BREAKING per D-API-2.
+        let result = Cli::try_parse_from(["tome", "remove", "my-source"]);
+        assert!(
+            result.is_err(),
+            "bare `tome remove <name>` must fail post-restructure (BREAKING)"
+        );
+    }
 }
