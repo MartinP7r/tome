@@ -198,6 +198,18 @@ pub fn reconcile_lockfile(
     }
     report.edited = edited;
 
+    // #512: when a managed skill is BOTH classified as Drift AND detected
+    // as Edited, route it exclusively through the edit-in-library prompt
+    // (handle_edited at step 7). Without this filter the apply loop would
+    // call adapter.update() BEFORE the prompt fires, and for managed skills
+    // library/<skill> symlinks the source dir — `claude plugin update`
+    // would overwrite the user's edits before fork/revert/skip is asked.
+    // D-16 / RECON-05 require: never silently overwrite edited content.
+    let edited_names: std::collections::HashSet<&SkillName> =
+        report.edited.iter().map(|e| &e.name).collect();
+    drift_to_apply.retain(|c| !edited_names.contains(&c.name));
+    report.drift.retain(|c| !edited_names.contains(&c.name));
+
     // 4. Decide whether to apply drift+missing (consent + no_install gate).
     let needs_apply = !drift_to_apply.is_empty() || !missing_to_apply.is_empty();
     let consent = if needs_apply {
@@ -1274,6 +1286,104 @@ mod tests {
             "expected apply_skipped=true under Never consent"
         );
         assert!(report.install_failures.is_empty());
+    }
+
+    // ---------- #512: Edit + Drift overlap regression (D-16 / RECON-05) ----------
+
+    #[test]
+    fn edited_skill_with_drift_is_steered_to_prompt_not_apply_loop() {
+        // Regression for #512 / D-16: when a managed skill is BOTH classified
+        // as Drift AND detected as Edited with auto_install_plugins = Always,
+        // the prior implementation called adapter.update() before the
+        // edit-in-library prompt could fire — for managed skills the library
+        // symlinks the source dir, so claude plugin update would overwrite
+        // the user's edits. RECON-05 / D-16: never silently overwrite edited
+        // content. The fix steers the skill to handle_edited exclusively.
+        use crate::manifest::SkillEntry;
+        let tmp = TempDir::new().unwrap();
+        let (paths, lib) = paths_with_lib(tmp.path());
+
+        // The user edited library/alpha — its on-disk content_hash differs
+        // from the value recorded in the lockfile. Both classify_lockfile
+        // and detect_edited compare live_hash vs lock_entry.content_hash,
+        // so both will flag this skill.
+        let _live_hash = make_skill_dir(&lib, "alpha", "user edited body");
+        let stale_lockfile_hash = ContentHash::new("1".repeat(64)).unwrap();
+
+        // Manifest: alpha is managed + owned (source_name=Some). detect_edited
+        // requires both flags AND a hash mismatch with the lockfile.
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("alpha").unwrap(),
+            SkillEntry::new(
+                lib.join("alpha"),
+                DirectoryName::new("claude-plugins").unwrap(),
+                stale_lockfile_hash.clone(),
+                true,
+            ),
+        );
+
+        // Lockfile records the OLD (now-stale) content_hash.
+        let lockfile = lockfile_with(vec![(
+            "alpha",
+            lock_entry(
+                "claude-plugins",
+                stale_lockfile_hash.clone(),
+                Some("alpha@mp"),
+                Some("1.0.0"),
+            ),
+        )]);
+
+        // Mock adapter: alpha is installed, available, with a NEWER version
+        // (so classify_lockfile would otherwise put it in Drift).
+        let mut mock = empty_mock("mp");
+        mock.installed.push(fixture_plugin("alpha@mp", "2.0.0"));
+        mock.available.insert("alpha@mp".to_string());
+
+        // Always consent + no_input → the prior bug would call adapter.update()
+        // for alpha. With the fix, the skill is filtered out of drift_to_apply
+        // and routed through handle_edited (which under no_input defaults to
+        // Skip per D-16).
+        let mut prefs = MachinePrefs {
+            auto_install_plugins: Some(AutoInstall::Always),
+            ..Default::default()
+        };
+        let machine_path = tmp.path().join("machine.toml");
+
+        let report = reconcile_lockfile(
+            Some(&lockfile),
+            &manifest,
+            &lib,
+            &mock,
+            &mut prefs,
+            &machine_path,
+            &paths,
+            default_opts(),
+        )
+        .unwrap();
+
+        // The skill must surface as Edited (handled by the prompt).
+        assert_eq!(
+            report.edited.len(),
+            1,
+            "edited skill must surface in report.edited"
+        );
+        assert_eq!(report.edited[0].name.as_str(), "alpha");
+
+        // The skill must NOT be in report.drift — it was filtered out so the
+        // prompt is the only path that touches it.
+        assert!(
+            report.drift.is_empty(),
+            "edited skill must be filtered out of drift (would otherwise drive adapter.update)"
+        );
+
+        // No install failures — apply loop never ran for alpha.
+        assert!(report.install_failures.is_empty());
+
+        // Library content unchanged (the mock update wouldn't actually mutate
+        // anything, but this is the user-visible safety property under D-16).
+        let body = std::fs::read_to_string(lib.join("alpha").join("SKILL.md")).unwrap();
+        assert!(body.contains("user edited body"));
     }
 
     // ---------- Consent state machine tests (RECON-02 + D-07/08/11) ----------
