@@ -947,7 +947,10 @@ mod tests {
         // Library copy should reflect the new source's content (real dir, not symlink).
         let dest = library.path().join("plugin-skill");
         assert!(dest.is_dir());
-        assert!(!dest.is_symlink(), "managed skill should remain a real directory in v0.10");
+        assert!(
+            !dest.is_symlink(),
+            "managed skill should remain a real directory in v0.10"
+        );
         let copied = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
         assert_eq!(copied, "# updated managed content");
     }
@@ -1200,7 +1203,11 @@ mod tests {
         // (e.g., simulating a manual edit). The next consolidate must overwrite
         // it from source because the manifest's recorded hash no longer matches
         // what hash_directory(&skill.path) returns.
-        std::fs::write(dest.join("SKILL.md"), "# locally modified divergent content").unwrap();
+        std::fs::write(
+            dest.join("SKILL.md"),
+            "# locally modified divergent content",
+        )
+        .unwrap();
 
         // Re-consolidate — content_hash mismatch (manifest hash vs source hash
         // is identical because source didn't change; but to actually trigger

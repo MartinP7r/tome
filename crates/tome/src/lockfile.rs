@@ -854,9 +854,7 @@ mod tests {
     #[test]
     fn deserialize_old_shape_lockfile_source_name_string() {
         let valid_hash = "a".repeat(64);
-        let json = format!(
-            r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#
-        );
+        let json = format!(r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#);
         let entry: LockEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
     }
@@ -864,9 +862,7 @@ mod tests {
     #[test]
     fn deserialize_new_shape_lockfile_null_source_name() {
         let valid_hash = "a".repeat(64);
-        let json = format!(
-            r#"{{"source_name":null,"content_hash":"{valid_hash}"}}"#
-        );
+        let json = format!(r#"{{"source_name":null,"content_hash":"{valid_hash}"}}"#);
         let entry: LockEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry.source_name, None);
     }

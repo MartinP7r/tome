@@ -292,9 +292,7 @@ mod tests {
     }
 
     fn config_with_dir(name: &str) -> crate::config::Config {
-        use crate::config::{
-            Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType,
-        };
+        use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
         use std::collections::BTreeMap;
         let mut directories = BTreeMap::new();
         directories.insert(

@@ -341,8 +341,7 @@ pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationRe
 fn copy_dir_recursive_resolving(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst).with_context(|| format!("failed to create {}", dst.display()))?;
     for entry in walkdir::WalkDir::new(src).follow_links(true).into_iter() {
-        let entry =
-            entry.with_context(|| format!("failed to walk source {}", src.display()))?;
+        let entry = entry.with_context(|| format!("failed to walk source {}", src.display()))?;
         let rel = entry.path().strip_prefix(src).with_context(|| {
             format!(
                 "BUG: WalkDir yielded path {} not under root {}",
@@ -471,12 +470,7 @@ mod tests {
         dir
     }
 
-    fn add_managed_entry(
-        manifest: &mut Manifest,
-        library: &Path,
-        source: &Path,
-        name: &str,
-    ) {
+    fn add_managed_entry(manifest: &mut Manifest, library: &Path, source: &Path, name: &str) {
         // Create the v0.9-shape symlink in library.
         unix_fs::symlink(source, library.join(name)).unwrap();
         let hash = manifest::hash_directory(source).unwrap();
@@ -512,7 +506,10 @@ mod tests {
         unix_fs::symlink(&user_target, library.join("user-symlink")).unwrap();
 
         let p = plan(&library, &manifest).unwrap();
-        assert!(p.entries.is_empty(), "user-created symlink must NOT be in plan");
+        assert!(
+            p.entries.is_empty(),
+            "user-created symlink must NOT be in plan"
+        );
     }
 
     #[test]
@@ -596,7 +593,10 @@ mod tests {
         assert!(result.is_partial_or_failed(), "D-05 non-zero exit on skip");
 
         // D-04: broken symlink preserved on disk.
-        assert!(library.join("broken").is_symlink(), "broken symlink must be preserved");
+        assert!(
+            library.join("broken").is_symlink(),
+            "broken symlink must be preserved"
+        );
         // Manifest unchanged (D-06).
         assert!(manifest.contains_key("broken"));
         assert!(manifest.get("broken").unwrap().managed);
@@ -623,7 +623,10 @@ mod tests {
         let p = plan(&library, &manifest).unwrap();
         let result = execute(&p, false).unwrap();
 
-        assert_eq!(result.converted, 1, "nested-symlink source must convert cleanly");
+        assert_eq!(
+            result.converted, 1,
+            "nested-symlink source must convert cleanly"
+        );
         assert_eq!(result.failed, 0, "must not record a false IoError");
         assert!(!result.is_partial_or_failed());
 
@@ -670,7 +673,10 @@ mod tests {
         assert_eq!(r2.converted, 0);
         assert_eq!(r2.skipped_broken_source, 0);
         assert_eq!(r2.failed, 0);
-        assert!(!r2.is_partial_or_failed(), "idempotent re-run must succeed cleanly");
+        assert!(
+            !r2.is_partial_or_failed(),
+            "idempotent re-run must succeed cleanly"
+        );
     }
 
     #[test]
@@ -709,7 +715,10 @@ mod tests {
         assert_eq!(MigrationFailureKind::ALL.len(), 2);
         assert_eq!(
             MigrationFailureKind::ALL,
-            [MigrationFailureKind::BrokenSource, MigrationFailureKind::IoError]
+            [
+                MigrationFailureKind::BrokenSource,
+                MigrationFailureKind::IoError
+            ]
         );
     }
 

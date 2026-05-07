@@ -5788,13 +5788,20 @@ fn migrate_library_converts_managed_symlinks_to_real_dirs() {
         );
         assert!(dest.join("SKILL.md").is_file(), "{n}/SKILL.md must exist");
         let content = std::fs::read_to_string(dest.join("SKILL.md")).unwrap();
-        assert_eq!(content, format!("# {n}"), "content for {n} must match source");
+        assert_eq!(
+            content,
+            format!("# {n}"),
+            "content for {n} must match source"
+        );
     }
 
     // l1: local skill, was already real-dir — UNCHANGED.
     let l1 = fix.library_dir.join("l1");
     assert!(l1.is_dir() && !l1.is_symlink());
-    assert_eq!(std::fs::read_to_string(l1.join("SKILL.md")).unwrap(), "# l1");
+    assert_eq!(
+        std::fs::read_to_string(l1.join("SKILL.md")).unwrap(),
+        "# l1"
+    );
 
     // broken: D-04 — symlink preserved, NOT deleted.
     let broken = fix.library_dir.join("broken");
@@ -6109,9 +6116,10 @@ role = "source"
     assert_eq!(preserved, "# alpha", "library content must be unchanged");
 
     // The manifest entry must have transitioned to Unowned (source_name omitted/null).
-    let manifest_after: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(tome_home.join(".tome-manifest.json")).unwrap())
-            .unwrap();
+    let manifest_after: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tome_home.join(".tome-manifest.json")).unwrap(),
+    )
+    .unwrap();
     let alpha_entry = &manifest_after["skills"]["alpha"];
     assert!(
         alpha_entry

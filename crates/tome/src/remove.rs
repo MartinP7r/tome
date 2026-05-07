@@ -75,10 +75,8 @@ impl FailureKind {
     /// Exposed as an associated constant so the `lib.rs` consumer doesn't
     /// maintain a parallel hand-written array that could silently drop a
     /// variant when new variants are added.
-    pub(crate) const ALL: [FailureKind; 2] = [
-        FailureKind::DistributionSymlink,
-        FailureKind::GitCache,
-    ];
+    pub(crate) const ALL: [FailureKind; 2] =
+        [FailureKind::DistributionSymlink, FailureKind::GitCache];
 
     /// Human-readable label used in the grouped failure summary.
     pub(crate) fn label(self) -> &'static str {
