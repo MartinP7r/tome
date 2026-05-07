@@ -739,22 +739,21 @@ impl MarketplaceAdapter for ClaudeMarketplaceAdapter {
         // errors[] field for the entry.
         self.populate_cache()?;
         let cache = self.cache.borrow();
-        let list = cache.as_ref().expect("populate_cache populates the cache");
-        match list.iter().find(|p| p.id == plugin_id) {
-            Some(entry)
-                if entry
-                    .errors
-                    .iter()
-                    .any(|e| e.contains("not found in marketplace")) =>
-            {
-                Ok(false)
-            }
-            // Conservative default: entry exists with no marketplace error,
-            // OR plugin isn't in the snapshot at all (not yet installed) —
-            // report `available = true`. The "vanished" signal is purely the
-            // errors[] substring.
-            _ => Ok(true),
-        }
+        // #514: never panic from a trait method called in the production sync
+        // flow. populate_cache()? guarantees Some(_) on success today, but
+        // .as_deref().unwrap_or(&[]) degrades safely if a future refactor
+        // ever leaves the cache None transiently. The other two cache-read
+        // sites (current_version, list_installed) already use this pattern.
+        let list = cache.as_deref().unwrap_or(&[]);
+        let errored = list
+            .iter()
+            .find(|p| p.id == plugin_id)
+            .is_some_and(|e| e.errors.iter().any(|s| s.contains("not found in marketplace")));
+        // Conservative default: entry exists with no marketplace error, OR
+        // plugin isn't in the snapshot at all (not yet installed), OR the
+        // cache is empty — report `available = true`. The "vanished" signal
+        // is purely the errors[] substring.
+        Ok(!errored)
     }
 }
 
