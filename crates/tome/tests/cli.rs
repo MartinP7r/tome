@@ -6161,3 +6161,543 @@ role = "source"
         "content_hash must remain unchanged across the Case 1 transition"
     );
 }
+
+// ============================================================================
+// Phase 14 — UNOWN-01..03 end-to-end integration tests
+//
+// Per HARD-13 (Phase 15) these tests will eventually split into per-domain
+// `tests/cli_remove.rs` / `tests/cli_reassign.rs` / `tests/cli_status.rs`.
+// For now they live in this monolith.
+//
+// Fixtures pre-populate `.tome-manifest.json` directly so we can stage
+// Unowned skills (`source_name = None`) without having to first sync, then
+// remove a directory, then re-sync. The skills they describe are real
+// directories on disk inside the library_dir so commands that touch
+// filesystem state (remove skill, reassign content-hash check) operate on
+// actual data — only the manifest provenance is fabricated.
+// ============================================================================
+
+/// Phase 14 fixture builder. Holds tome_home + config_path + library_dir
+/// and the on-disk locations of pre-staged skills so individual tests
+/// can assert filesystem-level state changes.
+#[allow(dead_code)]
+struct Phase14Fixture {
+    /// Held to keep the TempDir alive for the duration of the test.
+    tmp: TempDir,
+    tome_home: PathBuf,
+    config_path: PathBuf,
+    library_dir: PathBuf,
+    machine_path: PathBuf,
+    /// Optional pre-staged target dir (for reassign / distribution-symlink tests).
+    target_dir: Option<PathBuf>,
+}
+
+impl Phase14Fixture {
+    fn cmd(&self) -> Command {
+        let mut cmd = cargo_bin_cmd!("tome");
+        cmd.args(["--tome-home", self.tome_home.to_str().unwrap()]);
+        cmd.args(["--config", self.config_path.to_str().unwrap()]);
+        cmd.args(["--machine", self.machine_path.to_str().unwrap()]);
+        cmd.env("NO_COLOR", "1");
+        cmd
+    }
+
+    fn manifest_value(&self) -> serde_json::Value {
+        let raw = std::fs::read_to_string(self.tome_home.join(".tome-manifest.json")).unwrap();
+        serde_json::from_str(&raw).unwrap()
+    }
+}
+
+/// Build a manifest entry value. `source_name = None` produces an Unowned
+/// entry (the key is omitted, matching the `skip_serializing_if` shape on
+/// `SkillEntry`). When `previous_source` is set, it's emitted regardless of
+/// owned-ness.
+fn phase14_manifest_entry(
+    source_path: &Path,
+    source_name: Option<&str>,
+    previous_source: Option<&str>,
+    content_hash: &str,
+) -> serde_json::Value {
+    let mut entry = serde_json::json!({
+        "source_path": source_path.to_string_lossy(),
+        "content_hash": content_hash,
+        "synced_at": "2026-05-07T00:00:00Z",
+        "managed": false,
+    });
+    if let Some(name) = source_name {
+        entry["source_name"] = serde_json::Value::String(name.to_string());
+    }
+    if let Some(prev) = previous_source {
+        entry["previous_source"] = serde_json::Value::String(prev.to_string());
+    }
+    entry
+}
+
+/// Write a skill directory inside `library_dir/<name>/` containing a SKILL.md
+/// with the given body, and return the SHA-256 content hash recorded by
+/// `tome::hash_directory` so manifest fixtures stay consistent.
+fn phase14_write_library_skill(library_dir: &Path, name: &str, body: &str) -> String {
+    let dir = library_dir.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("SKILL.md"),
+        format!("---\nname: {name}\n---\n# {name}\n{body}"),
+    )
+    .unwrap();
+    tome::hash_directory(&dir).unwrap().as_str().to_string()
+}
+
+/// Build a Phase 14 fixture with pre-staged Unowned skills.
+///
+/// `unowned_skills` = list of `(skill_name, previous_source_dir_name)` tuples.
+/// Each is materialized as a real directory in `library_dir/<name>/` and an
+/// Unowned manifest entry with `previous_source = Some(<dir>)`.
+///
+/// `synced_dirs` = list of `(dir_name, role)` tuples for `[directories.*]`
+/// entries (role = "source" / "synced" / "target" / "managed"). Each gets a
+/// real on-disk path under `tmp/<name>/`.
+///
+/// `owned_skills` = list of `(skill_name, source_dir_name)` Owned entries
+/// (manifest entry with `source_name = Some(...)`, no `previous_source`).
+fn phase14_build_fixture(
+    synced_dirs: &[(&str, &str)],
+    owned_skills: &[(&str, &str)],
+    unowned_skills: &[(&str, &str)],
+) -> Phase14Fixture {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join("tome_home");
+    let library_dir = tome_home.join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let mut config_toml = format!("library_dir = \"{}\"\n\n", library_dir.display());
+
+    let mut first_target_dir: Option<PathBuf> = None;
+    let mut dir_paths: std::collections::HashMap<String, PathBuf> =
+        std::collections::HashMap::new();
+    for (name, role) in synced_dirs {
+        let dir_path = tmp.path().join(format!("dir-{name}"));
+        std::fs::create_dir_all(&dir_path).unwrap();
+        dir_paths.insert(name.to_string(), dir_path.clone());
+        if first_target_dir.is_none() && (*role == "target" || *role == "synced") {
+            first_target_dir = Some(dir_path.clone());
+        }
+        config_toml.push_str(&format!(
+            "[directories.{name}]\npath = \"{}\"\ntype = \"directory\"\nrole = \"{role}\"\n\n",
+            dir_path.display()
+        ));
+    }
+
+    let mut skills_obj = serde_json::Map::new();
+    for (name, source) in owned_skills {
+        let body = format!("owned skill {name}");
+        let content_hash = phase14_write_library_skill(&library_dir, name, &body);
+        let source_path = dir_paths
+            .get(*source)
+            .map(|p| p.join(name))
+            .unwrap_or_else(|| std::path::PathBuf::from(format!("/tmp/orig-{name}")));
+        skills_obj.insert(
+            name.to_string(),
+            phase14_manifest_entry(&source_path, Some(source), None, &content_hash),
+        );
+    }
+    for (name, previous) in unowned_skills {
+        let body = format!("unowned skill {name}");
+        let content_hash = phase14_write_library_skill(&library_dir, name, &body);
+        // Use a synthetic source_path the dir no longer covers (Unowned skills
+        // were materialised by an earlier sync; their source_path lives at the
+        // old location which may no longer exist).
+        let source_path = std::path::PathBuf::from(format!("/tmp/old/{previous}/{name}"));
+        skills_obj.insert(
+            name.to_string(),
+            phase14_manifest_entry(&source_path, None, Some(previous), &content_hash),
+        );
+    }
+    let manifest = serde_json::json!({ "skills": skills_obj });
+
+    let config_path = tome_home.join("tome.toml");
+    std::fs::write(&config_path, &config_toml).unwrap();
+
+    let manifest_path = tome_home.join(".tome-manifest.json");
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, "").unwrap();
+
+    Phase14Fixture {
+        tmp,
+        tome_home,
+        config_path,
+        library_dir,
+        machine_path,
+        target_dir: first_target_dir,
+    }
+}
+
+// ── UNOWN-01 / D-API-1: tome reassign accepts Unowned input ────────────────
+
+/// Re-anchoring an Unowned skill via `tome reassign <skill> --to <dir>`
+/// flips manifest source_name from None to Some(<dir>) and clears
+/// previous_source per D-C1 closure.
+#[test]
+fn phase14_reassign_unowned_input_succeeds() {
+    let fix = phase14_build_fixture(
+        &[("local-target", "synced")],
+        &[],
+        &[("orphan-foo", "removed-dir")],
+    );
+
+    fix.cmd()
+        .args(["reassign", "orphan-foo", "--to", "local-target"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Reassigned"));
+
+    // Manifest: source_name flipped from None to Some("local-target");
+    // previous_source cleared.
+    let manifest = fix.manifest_value();
+    let entry = &manifest["skills"]["orphan-foo"];
+    assert_eq!(
+        entry["source_name"].as_str(),
+        Some("local-target"),
+        "source_name must be Some(local-target) after re-anchor: {entry}"
+    );
+    assert!(
+        entry
+            .get("previous_source")
+            .map(|v| v.is_null())
+            .unwrap_or(true),
+        "previous_source must be cleared on re-anchor (D-C1 closure): {entry}"
+    );
+
+    // Skill content materialised in the target directory on disk.
+    let target_skill_md = fix.target_dir.unwrap().join("orphan-foo").join("SKILL.md");
+    assert!(
+        target_skill_md.exists(),
+        "skill content must be copied to target dir on re-anchor"
+    );
+}
+
+/// D-A2: target-only roles are rejected because nothing rediscovers the
+/// reassigned skill on next sync.
+#[test]
+fn phase14_reassign_into_target_only_role_rejected() {
+    let fix = phase14_build_fixture(
+        &[("claude-target", "target")],
+        &[],
+        &[("orphan-foo", "removed-dir")],
+    );
+
+    fix.cmd()
+        .args(["reassign", "orphan-foo", "--to", "claude-target"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("target-only"));
+}
+
+/// D-A1: different-content collision at the target is refused without
+/// `--force`; passing `--force` overwrites the target with library content.
+#[test]
+fn phase14_reassign_force_bypasses_different_content_collision() {
+    let fix = phase14_build_fixture(
+        &[("local-target", "synced")],
+        &[],
+        &[("orphan-foo", "removed-dir")],
+    );
+
+    // Pre-populate target dir with a DIFFERENT-content version of the skill
+    // so plan() hits the D-A1 hash mismatch path.
+    let target = fix.target_dir.clone().unwrap();
+    let collision = target.join("orphan-foo");
+    std::fs::create_dir_all(&collision).unwrap();
+    std::fs::write(
+        collision.join("SKILL.md"),
+        "---\nname: orphan-foo\n---\n# orphan-foo\nDIFFERENT content at target\n",
+    )
+    .unwrap();
+
+    // Without --force: refused, exits non-zero, error names "different content".
+    fix.cmd()
+        .args(["reassign", "orphan-foo", "--to", "local-target"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("different content"));
+
+    // With --force: succeeds; target contents now match the library copy.
+    fix.cmd()
+        .args(["reassign", "orphan-foo", "--to", "local-target", "--force"])
+        .assert()
+        .success();
+
+    let target_body = std::fs::read_to_string(collision.join("SKILL.md")).unwrap();
+    assert!(
+        target_body.contains("unowned skill orphan-foo"),
+        "with --force, target content must match the library copy: {target_body}"
+    );
+}
+
+// ── UNOWN-02 / D-API-2: tome remove skill ──────────────────────────────────
+
+/// D-B1: full cleanup — manifest + library dir + distribution symlinks +
+/// lockfile entry + machine.toml `disabled` set + per-directory memberships
+/// all cleaned in a single pass.
+#[test]
+fn phase14_remove_skill_full_cleanup() {
+    let fix = phase14_build_fixture(
+        &[("local-target", "synced")],
+        &[],
+        &[("orphan-foo", "removed-dir")],
+    );
+
+    // Stage a distribution symlink pointing at the library skill.
+    let library_skill = fix.library_dir.join("orphan-foo");
+    let target = fix.target_dir.clone().unwrap();
+    let dist_link = target.join("orphan-foo");
+    std::os::unix::fs::symlink(&library_skill, &dist_link).unwrap();
+    assert!(dist_link.is_symlink());
+
+    // Stage a lockfile entry for the skill.
+    let lockfile_path = fix.tome_home.join("tome.lock");
+    let lockfile_json = serde_json::json!({
+        "version": 1,
+        "skills": {
+            "orphan-foo": {
+                "previous_source": "removed-dir",
+                "content_hash": "a".repeat(64),
+            }
+        }
+    });
+    std::fs::write(
+        &lockfile_path,
+        serde_json::to_string_pretty(&lockfile_json).unwrap(),
+    )
+    .unwrap();
+
+    // Stage machine.toml `disabled` membership.
+    std::fs::write(&fix.machine_path, "disabled = [\"orphan-foo\"]\n").unwrap();
+
+    fix.cmd()
+        .args(["remove", "skill", "orphan-foo", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Forgot skill 'orphan-foo'"));
+
+    // Library directory removed.
+    assert!(
+        !library_skill.exists(),
+        "library/orphan-foo must be removed after `remove skill`"
+    );
+
+    // Distribution symlink removed.
+    assert!(
+        !dist_link.exists() && !dist_link.is_symlink(),
+        "distribution symlink must be removed"
+    );
+
+    // Manifest entry removed.
+    let manifest = fix.manifest_value();
+    assert!(
+        manifest["skills"].get("orphan-foo").is_none(),
+        "manifest entry must be removed: {manifest}"
+    );
+
+    // Lockfile entry removed.
+    let lockfile_after: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&lockfile_path).unwrap()).unwrap();
+    assert!(
+        lockfile_after["skills"].get("orphan-foo").is_none(),
+        "lockfile entry must be removed: {lockfile_after}"
+    );
+
+    // machine.toml disabled membership removed.
+    let machine_after = std::fs::read_to_string(&fix.machine_path).unwrap();
+    assert!(
+        !machine_after.contains("orphan-foo"),
+        "machine.toml disabled-set membership must be removed: {machine_after}"
+    );
+}
+
+/// D-B2: tome remove skill on an Owned skill is refused with a hint pointing
+/// at `tome remove dir`. Manifest entry preserved.
+#[test]
+fn phase14_remove_skill_refuses_owned() {
+    let fix = phase14_build_fixture(&[("active-dir", "synced")], &[("kept", "active-dir")], &[]);
+
+    let assert = fix
+        .cmd()
+        .args(["remove", "skill", "kept", "--yes"])
+        .assert()
+        .failure();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is owned by directory"),
+        "stderr must contain 'is owned by directory': {stderr}"
+    );
+    assert!(
+        stderr.contains("tome remove dir"),
+        "stderr must hint at `tome remove dir`: {stderr}"
+    );
+
+    // Manifest entry preserved (no destructive changes on owned-skill refusal).
+    let manifest = fix.manifest_value();
+    assert!(
+        manifest["skills"].get("kept").is_some(),
+        "manifest entry for owned skill must be preserved on refusal: {manifest}"
+    );
+}
+
+/// D-B3: `--no-input` without `--yes` bails with a confirmation-required
+/// message — non-interactive mode never silently destroys.
+#[test]
+fn phase14_remove_skill_no_input_without_yes_bails() {
+    let fix = phase14_build_fixture(&[], &[], &[("orphan-foo", "removed-dir")]);
+
+    fix.cmd()
+        .args(["--no-input", "remove", "skill", "orphan-foo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires confirmation"));
+
+    // Manifest entry preserved.
+    let manifest = fix.manifest_value();
+    assert!(
+        manifest["skills"].get("orphan-foo").is_some(),
+        "manifest entry must be preserved when bail occurred: {manifest}"
+    );
+}
+
+// ── UNOWN-03: status + doctor surface the Unowned set ──────────────────────
+
+/// D-D1 / D-D2: `tome status` text output renders an `Unowned skills (N):`
+/// section with NAME / LAST-KNOWN SOURCE / SYNCED columns. Per D-C1 the
+/// LAST-KNOWN SOURCE column shows the recorded `previous_source`.
+#[test]
+fn phase14_status_text_shows_unowned_section() {
+    let fix = phase14_build_fixture(&[], &[], &[("orphan", "removed-dir")]);
+
+    let output = fix.cmd().arg("status").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Unowned skills (1)"),
+        "stdout must include 'Unowned skills (1)': {stdout}"
+    );
+    assert!(
+        stdout.contains("orphan"),
+        "stdout must include the skill name: {stdout}"
+    );
+    assert!(
+        stdout.contains("removed-dir"),
+        "stdout must show LAST-KNOWN SOURCE = previous_source per D-C1: {stdout}"
+    );
+}
+
+/// UNOWN-03 JSON shape: `tome status --json` includes a top-level `unowned`
+/// array of `SkillSummary` entries.
+#[test]
+fn phase14_status_json_includes_unowned_field() {
+    let fix = phase14_build_fixture(&[], &[], &[("orphan", "removed-dir")]);
+
+    let output = fix.cmd().args(["status", "--json"]).output().unwrap();
+    assert!(output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status --json must produce valid JSON");
+    let unowned = json["unowned"]
+        .as_array()
+        .expect("status --json must include 'unowned' as an array");
+    assert_eq!(unowned.len(), 1, "expected 1 unowned skill: {json}");
+    let entry = &unowned[0];
+    assert_eq!(entry["name"], "orphan");
+    assert_eq!(entry["previous_source"], "removed-dir");
+    // Stable shape: SkillSummary always exposes these fields.
+    for key in [
+        "name",
+        "previous_source",
+        "source_path_display",
+        "synced_at",
+        "managed",
+    ] {
+        assert!(
+            entry.get(key).is_some(),
+            "SkillSummary JSON must contain '{key}': {entry}"
+        );
+    }
+}
+
+/// D-D3: doctor's Unowned section is informational only — it does NOT
+/// contribute to total_issues and does NOT affect exit code. With zero
+/// actionable issues, exit code is 0 regardless of how many Unowned skills
+/// are present.
+#[test]
+fn phase14_doctor_informational_unowned_does_not_affect_exit_code() {
+    let fix = phase14_build_fixture(
+        &[],
+        &[],
+        &[("orphan-a", "removed-1"), ("orphan-b", "removed-2")],
+    );
+
+    let output = fix.cmd().arg("doctor").output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Exit code 0 — Unowned alone never escalates doctor.
+    assert!(
+        output.status.success(),
+        "doctor must exit 0 when only Unowned skills are present (D-D3). stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("Unowned skills (2)"),
+        "doctor stdout must include 'Unowned skills (2)': {stdout}"
+    );
+    assert!(
+        stdout.contains("No issues found"),
+        "doctor must report 'No issues found' since unowned doesn't count (D-D3): {stdout}"
+    );
+
+    // JSON: total_issues derivation excludes unowned_skills.
+    let json_output = fix.cmd().args(["doctor", "--json"]).output().unwrap();
+    let json: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("doctor --json must produce valid JSON");
+    assert_eq!(
+        json["unowned_skills"].as_array().map(|a| a.len()),
+        Some(2),
+        "doctor --json must include 'unowned_skills' with 2 entries: {json}"
+    );
+    assert!(
+        json["library_issues"]
+            .as_array()
+            .map(|a| a.is_empty())
+            .unwrap_or(false),
+        "library_issues must be empty: {json}"
+    );
+}
+
+/// Empty-set rendering: `tome status` with zero Unowned skills omits the
+/// section cleanly (no header, no blank line).
+#[test]
+fn phase14_status_text_omits_unowned_section_when_empty() {
+    let fix = phase14_build_fixture(&[("active-dir", "synced")], &[("alpha", "active-dir")], &[]);
+
+    let output = fix.cmd().arg("status").output().unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains("Unowned skills"),
+        "stdout must NOT include 'Unowned skills' header when set is empty: {stdout}"
+    );
+
+    // JSON shape stays stable: empty array, not omitted.
+    let json_output = fix.cmd().args(["status", "--json"]).output().unwrap();
+    let json: serde_json::Value =
+        serde_json::from_slice(&json_output.stdout).expect("status --json must produce valid JSON");
+    let unowned = json["unowned"]
+        .as_array()
+        .expect("status --json must include 'unowned' as an array even when empty");
+    assert!(
+        unowned.is_empty(),
+        "unowned array must be empty (not omitted): {json}"
+    );
+}
