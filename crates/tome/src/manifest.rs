@@ -112,6 +112,12 @@ pub struct SkillEntry {
     /// (per `skip_serializing_if`) and read back as `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<DirectoryName>,
+    /// Last directory that owned this skill before transition to Unowned.
+    /// Surfaced in `tome status`/`tome doctor` Unowned section. Cleared
+    /// (set to None) when an Unowned skill is re-anchored via
+    /// `tome reassign`. Per D-C1 (14-CONTEXT.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_source: Option<DirectoryName>,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
@@ -138,6 +144,7 @@ impl SkillEntry {
         Self {
             source_path,
             source_name: Some(source_name),
+            previous_source: None,
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -146,21 +153,30 @@ impl SkillEntry {
 
     /// Create a new `SkillEntry` for an **Unowned** skill — its source was
     /// removed from `tome.toml` but the library copy is preserved (per LIB-04).
-    /// Records the current timestamp automatically.
-    //
-    // dead_code allow: Phase 11 LIB-03 lifted the schema to support Unowned
-    // entries; the first non-test caller arrives in Phase 14
-    // (`tome adopt`/`tome forget` — UNOWN-01..03). Tests in this module
-    // exercise the constructor today. Drop this attr when Phase 14 lands.
+    /// Records the current timestamp automatically. Optionally records the
+    /// `previous_source` (D-C1) — the last directory that owned this skill
+    /// before the transition.
     //
     // Note: production transitions to Unowned in-place via
-    // `entry.source_name = None` (which preserves the original `synced_at`
-    // timestamp — see `cleanup_library` Case 1 and `remove::execute`).
+    // `entry.previous_source = entry.source_name.take()` (which preserves the
+    // original `synced_at` timestamp — see `cleanup_library` Case 1,
+    // `remove::execute`, and `apply_edit_decisions` Fork branch).
+    //
+    // dead_code allow: Phase 14 Plan 14-01 widens the signature with
+    // `previous_source`. Production callers arrive in Plans 14-04 (reassign
+    // re-anchor flow) and 14-05 (remove-skill plan/render/execute). Drop
+    // this attr when those plans land. Tracked in deferred-items.md.
     #[allow(dead_code)]
-    pub fn new_unowned(source_path: PathBuf, content_hash: ContentHash, managed: bool) -> Self {
+    pub fn new_unowned(
+        source_path: PathBuf,
+        content_hash: ContentHash,
+        managed: bool,
+        previous_source: Option<DirectoryName>,
+    ) -> Self {
         Self {
             source_path,
             source_name: None,
+            previous_source,
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -349,6 +365,7 @@ mod tests {
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -503,8 +520,12 @@ mod tests {
 
     #[test]
     fn serialize_unowned_entry_omits_source_name_key() {
-        let entry =
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("orphan"), false);
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/orphan"),
+            test_hash("orphan"),
+            false,
+            None,
+        );
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
             !json.contains("source_name"),
@@ -530,12 +551,91 @@ mod tests {
 
     #[test]
     fn new_unowned_constructor_sets_source_name_none() {
-        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false);
+        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false, None);
         assert_eq!(entry.source_name, None);
+        assert_eq!(entry.previous_source, None);
         assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
         assert_eq!(entry.content_hash, test_hash("h"));
         assert!(!entry.managed);
         assert!(!entry.synced_at.is_empty());
+    }
+
+    #[test]
+    fn deserialize_old_shape_without_previous_source_key() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_path":"/tmp/x","source_name":"foo","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
+        );
+        let entry: SkillEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.previous_source, None);
+        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+    }
+
+    #[test]
+    fn serialize_owned_entry_omits_previous_source_when_none() {
+        let entry = SkillEntry::new(
+            PathBuf::from("/tmp/x"),
+            DirectoryName::new("foo").unwrap(),
+            test_hash("h"),
+            false,
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("previous_source"),
+            "Owned entry with previous_source=None must omit key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn serialize_unowned_entry_with_previous_source_includes_key() {
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/x"),
+            test_hash("h"),
+            false,
+            Some(DirectoryName::new("old-dir").unwrap()),
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"previous_source\":\"old-dir\""),
+            "Unowned entry with previous_source=Some must include key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn new_unowned_records_previous_source() {
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/x"),
+            test_hash("h"),
+            false,
+            Some(DirectoryName::new("old").unwrap()),
+        );
+        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.previous_source,
+            Some(DirectoryName::new("old").unwrap())
+        );
+    }
+
+    #[test]
+    fn previous_source_round_trips_through_save_load() {
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/orphan"),
+                test_hash("h"),
+                false,
+                Some(DirectoryName::new("old-source").unwrap()),
+            ),
+        );
+        save(&manifest, tmp.path()).unwrap();
+        let loaded = load(tmp.path()).unwrap();
+        assert_eq!(
+            loaded.get("orphan").unwrap().previous_source,
+            Some(DirectoryName::new("old-source").unwrap()),
+        );
+        assert_eq!(loaded.get("orphan").unwrap().source_name, None);
     }
 
     #[test]

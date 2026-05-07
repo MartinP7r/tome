@@ -39,6 +39,11 @@ pub struct LockEntry {
     /// Unowned entries omit the key on serialize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<DirectoryName>,
+    /// Last directory that owned this skill before transition to Unowned.
+    /// Mirrors `SkillEntry.previous_source` (D-C1) for cross-machine
+    /// surfacing in `tome status` / `tome doctor` Unowned section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_source: Option<DirectoryName>,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: ContentHash,
     /// Registry identifier (e.g. "my-plugin@npm"). Present for managed plugins.
@@ -79,6 +84,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
             name.clone(),
             LockEntry {
                 source_name: entry.source_name.clone(),
+                previous_source: entry.previous_source.clone(),
                 content_hash: entry.content_hash.clone(),
                 registry_id,
                 version,
@@ -407,6 +413,7 @@ mod tests {
                 SkillName::new("my-skill").unwrap(),
                 LockEntry {
                     source_name: Some(DirectoryName::new("test").unwrap()),
+                    previous_source: None,
                     content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
@@ -636,6 +643,7 @@ mod tests {
             SkillName::new("seed-skill").unwrap(),
             LockEntry {
                 source_name: Some(DirectoryName::new(source).unwrap()),
+                previous_source: None,
                 content_hash: test_hash("seed"),
                 registry_id: None,
                 version: None,
@@ -881,7 +889,7 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.insert(
             SkillName::new("orphan").unwrap(),
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false, None),
         );
         let lockfile = generate(&manifest, &[]);
         let json = serde_json::to_string_pretty(&lockfile).unwrap();
@@ -891,5 +899,40 @@ mod tests {
             orphan.get("source_name").is_none(),
             "Unowned skill must omit source_name in lockfile JSON, got: {json}"
         );
+    }
+
+    #[test]
+    fn lockentry_round_trip_with_previous_source() {
+        use crate::manifest::SkillEntry;
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/orphan"),
+                test_hash("h"),
+                false,
+                Some(DirectoryName::new("old-source").unwrap()),
+            ),
+        );
+        let lf = generate(&manifest, &[]);
+        let key = SkillName::new("orphan").unwrap();
+        assert_eq!(
+            lf.skills[&key].previous_source,
+            Some(DirectoryName::new("old-source").unwrap()),
+            "generate() must copy previous_source from manifest entry"
+        );
+
+        // Round-trip through JSON.
+        let json = serde_json::to_string_pretty(&lf).unwrap();
+        let parsed: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, lf);
+    }
+
+    #[test]
+    fn deserialize_old_shape_lockfile_without_previous_source() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.previous_source, None);
     }
 }

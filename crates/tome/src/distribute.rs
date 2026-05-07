@@ -476,6 +476,7 @@ mod tests {
             SkillEntry {
                 source_path: target_dir.path().join("my-skill"),
                 source_name: Some(DirectoryName::new("my-dir").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -518,6 +519,7 @@ mod tests {
             SkillEntry {
                 source_path: std::path::PathBuf::from("/some/alpha/my-skill"),
                 source_name: Some(DirectoryName::new("alpha").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
@@ -596,6 +598,7 @@ mod tests {
             SkillEntry {
                 source_path: target_dir.path().join("my-skill"),
                 source_name: Some(DirectoryName::new("my-dir").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

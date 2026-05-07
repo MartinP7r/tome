@@ -591,6 +591,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -630,6 +631,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -663,6 +665,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: Some(DirectoryName::new("plugins").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

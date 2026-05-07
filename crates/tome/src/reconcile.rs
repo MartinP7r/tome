@@ -771,6 +771,7 @@ mod tests {
     ) -> LockEntry {
         LockEntry {
             source_name: Some(DirectoryName::new(source).unwrap()),
+            previous_source: None,
             content_hash: hash,
             registry_id: registry_id.map(|s| s.to_string()),
             version: version.map(|s| s.to_string()),
@@ -950,6 +951,7 @@ mod tests {
         let mock = empty_mock("mp");
         let entry = LockEntry {
             source_name: None, // Unowned
+            previous_source: None,
             content_hash: placeholder_hash(),
             registry_id: Some("orphan@mp".to_string()),
             version: Some("1.0.0".to_string()),
@@ -1041,7 +1043,7 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.insert(
             SkillName::new("orphan").unwrap(),
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), stale_hash.clone(), true),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), stale_hash.clone(), true, None),
         );
 
         let lockfile = lockfile_with(vec![(
