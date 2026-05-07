@@ -18,6 +18,7 @@ use console::style;
 use std::path::PathBuf;
 
 use crate::config::{Config, DirectoryName, DirectoryRole, DirectoryType};
+use crate::discover::SkillName;
 use crate::manifest::Manifest;
 use crate::paths::TomePaths;
 
@@ -143,6 +144,132 @@ impl RemoveFailure {
         );
         RemoveFailure { kind, path, error }
     }
+}
+
+/// Which step of `tome remove skill` produced a partial-cleanup failure.
+///
+/// Variants follow D-B1 cleanup scope (Phase 14):
+/// 1. `LibraryDir` — `remove_dir_all` failed on `library_dir/<name>/`
+/// 2. `DistributionSymlink` — `remove_file` failed on a per-skill
+///    distribution symlink in some Target/Synced directory
+/// 3. `Lockfile` — `lockfile::save` failed after removing the entry
+/// 4. `MachineToml` — `machine::save` failed after removing memberships
+///
+/// Manifest mutation is in-memory and saves last; if `manifest::save`
+/// fails the error propagates via `?` and never lands here. The aggregate
+/// failure-summary semantic only kicks in for filesystem-touch steps that
+/// need group reporting (Phase 8 SAFE-01 + Phase 10 POLISH-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoveSkillFailureKind {
+    LibraryDir,
+    DistributionSymlink,
+    Lockfile,
+    MachineToml,
+}
+
+impl RemoveSkillFailureKind {
+    /// All variants, in the order preferred for user-facing grouped output.
+    // dead_code allow: consumed by lib.rs::run RemoveKind::Skill arm in Task 3
+    // (this plan, plan 14-05). Drop the attr when that wiring lands.
+    #[allow(dead_code)]
+    pub(crate) const ALL: [RemoveSkillFailureKind; 4] = [
+        RemoveSkillFailureKind::LibraryDir,
+        RemoveSkillFailureKind::DistributionSymlink,
+        RemoveSkillFailureKind::Lockfile,
+        RemoveSkillFailureKind::MachineToml,
+    ];
+
+    /// Human-readable label used in the grouped failure summary.
+    // dead_code allow: consumed by lib.rs::run RemoveKind::Skill arm in Task 3
+    // (this plan, plan 14-05). Drop the attr when that wiring lands.
+    #[allow(dead_code)]
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            RemoveSkillFailureKind::LibraryDir => "Library directory",
+            RemoveSkillFailureKind::DistributionSymlink => "Distribution symlinks",
+            RemoveSkillFailureKind::Lockfile => "Lockfile",
+            RemoveSkillFailureKind::MachineToml => "Machine prefs",
+        }
+    }
+}
+
+/// Compile-time drift guard for `RemoveSkillFailureKind::ALL` (POLISH-04 option c).
+/// Mirrors `_ensure_failure_kind_all_exhaustive` for `FailureKind`.
+#[allow(dead_code)]
+const fn _ensure_remove_skill_failure_kind_all_exhaustive(k: RemoveSkillFailureKind) -> usize {
+    match k {
+        RemoveSkillFailureKind::LibraryDir => 0,
+        RemoveSkillFailureKind::DistributionSymlink => 1,
+        RemoveSkillFailureKind::Lockfile => 2,
+        RemoveSkillFailureKind::MachineToml => 3,
+    }
+}
+
+const _: () = {
+    // If this fails: RemoveSkillFailureKind::ALL is missing or has extra
+    // variants. The match arms in
+    // _ensure_remove_skill_failure_kind_all_exhaustive are the source
+    // of truth — ALL must contain exactly one entry per arm.
+    assert!(RemoveSkillFailureKind::ALL.len() == 4);
+};
+
+/// A single partial-cleanup failure aggregated from `skill_execute`.
+/// Mirror of `RemoveFailure` for the `skill` flavour.
+//
+// dead_code allow: consumed by `skill_execute` (Task 2) and the
+// lib.rs::run RemoveKind::Skill arm (Task 3) in this plan.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct RemoveSkillFailure {
+    pub path: PathBuf,
+    pub kind: RemoveSkillFailureKind,
+    pub error: std::io::Error,
+}
+
+impl RemoveSkillFailure {
+    /// Construct a `RemoveSkillFailure` (POLISH-05 mirror).
+    ///
+    /// The path MUST be absolute — downstream rendering uses
+    /// `paths::collapse_home(&f.path)` which expects an absolute path.
+    /// Debug-only via `debug_assert!` to keep release builds zero-cost.
+    // dead_code allow: consumed in Task 2 of this plan.
+    #[allow(dead_code)]
+    pub(crate) fn new(
+        kind: RemoveSkillFailureKind,
+        path: PathBuf,
+        error: std::io::Error,
+    ) -> Self {
+        debug_assert!(
+            path.is_absolute(),
+            "RemoveSkillFailure::path must be absolute, got: {}",
+            path.display()
+        );
+        RemoveSkillFailure { kind, path, error }
+    }
+}
+
+/// What `tome remove skill <name>` will do (per D-B1).
+//
+// dead_code allow: consumed by `skill_plan`/`skill_render_plan`/`skill_execute`
+// (Task 2) in this plan.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct RemoveSkillPlan {
+    /// Skill name being deleted.
+    pub skill_name: SkillName,
+    /// Library directory path (`library_dir/<skill_name>/`). Absolute.
+    pub library_path: PathBuf,
+    /// Distribution symlinks pointing at this skill in target/synced dirs.
+    /// Each path is absolute.
+    pub symlinks_to_remove: Vec<PathBuf>,
+    /// Whether the skill has a lockfile entry that needs deleting.
+    pub has_lockfile_entry: bool,
+    /// Whether the skill is in `machine.toml::disabled`.
+    pub in_machine_disabled: bool,
+    /// Per-directory machine.toml memberships to clean. Each tuple is
+    /// `(directory_name, in_enabled, in_disabled)`. Empty when the skill
+    /// isn't referenced by any per-directory list.
+    pub per_directory_memberships: Vec<(DirectoryName, bool, bool)>,
 }
 
 /// Result of executing the remove plan.
@@ -743,5 +870,94 @@ mod tests {
         );
         assert_eq!(f.kind, FailureKind::DistributionSymlink);
         assert_eq!(f.path, PathBuf::from("/abs/path"));
+    }
+
+    // === Phase 14 Plan 14-05 Task 1: RemoveSkillFailureKind tests ===
+    //
+    // Mirror of the `FailureKind` runtime tests above. Pin the variant
+    // count, label coverage, ALL ordering, and pairwise uniqueness so a
+    // hand-edit that grows the enum without growing ALL fails CI.
+
+    #[test]
+    fn remove_skill_failure_kind_all_pinned_size_four() {
+        assert_eq!(RemoveSkillFailureKind::ALL.len(), 4);
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::LibraryDir));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::DistributionSymlink));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::Lockfile));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::MachineToml));
+    }
+
+    #[test]
+    fn remove_skill_failure_kind_label_coverage() {
+        assert_eq!(
+            RemoveSkillFailureKind::LibraryDir.label(),
+            "Library directory"
+        );
+        assert_eq!(
+            RemoveSkillFailureKind::DistributionSymlink.label(),
+            "Distribution symlinks"
+        );
+        assert_eq!(RemoveSkillFailureKind::Lockfile.label(), "Lockfile");
+        assert_eq!(RemoveSkillFailureKind::MachineToml.label(), "Machine prefs");
+    }
+
+    #[test]
+    fn remove_skill_failure_kind_all_unique() {
+        let all = RemoveSkillFailureKind::ALL;
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(a, b, "ALL contains duplicate variant {a:?}");
+            }
+        }
+    }
+
+    /// `RemoveSkillFailureKind::ALL` ordering is part of the user-visible
+    /// grouping contract (consumed by lib.rs::run in Task 3). A reorder is
+    /// a UI change that must require an explicit code edit.
+    #[test]
+    fn remove_skill_failure_kind_all_ordering_pinned() {
+        assert_eq!(
+            RemoveSkillFailureKind::ALL,
+            [
+                RemoveSkillFailureKind::LibraryDir,
+                RemoveSkillFailureKind::DistributionSymlink,
+                RemoveSkillFailureKind::Lockfile,
+                RemoveSkillFailureKind::MachineToml,
+            ],
+            "RemoveSkillFailureKind::ALL ordering is part of the user-visible grouping contract"
+        );
+    }
+
+    /// POLISH-05 mirror: `RemoveSkillFailure::new` carries a debug-only
+    /// `is_absolute` invariant. Debug builds panic on relative paths;
+    /// release builds compile out the assert.
+    #[test]
+    fn remove_skill_failure_new_relative_path_panics_in_debug() {
+        let result = std::panic::catch_unwind(|| {
+            RemoveSkillFailure::new(
+                RemoveSkillFailureKind::LibraryDir,
+                PathBuf::from("relative/path"),
+                std::io::Error::other("test"),
+            )
+        });
+        if cfg!(debug_assertions) {
+            assert!(result.is_err(), "debug build must panic on relative path");
+        } else {
+            assert!(
+                result.is_ok(),
+                "release build must allow construction (debug_assert compiled out)"
+            );
+        }
+    }
+
+    #[test]
+    fn remove_skill_failure_new_absolute_path_succeeds() {
+        let f = RemoveSkillFailure::new(
+            RemoveSkillFailureKind::Lockfile,
+            PathBuf::from("/abs/lock.toml"),
+            std::io::Error::other("test"),
+        );
+        assert_eq!(f.kind, RemoveSkillFailureKind::Lockfile);
+        assert_eq!(f.path, PathBuf::from("/abs/lock.toml"));
     }
 }
