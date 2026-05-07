@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: verifying
-stopped_at: Completed 11-05-integration-tests-PLAN.md
-last_updated: "2026-05-03T14:04:53.514Z"
-last_activity: 2026-05-03
+stopped_at: Completed 12-04-PLAN.md
+last_updated: "2026-05-05T03:11:17.808Z"
+last_activity: 2026-05-05
 progress:
   total_phases: 7
-  completed_phases: 1
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 2
+  total_plans: 9
+  completed_plans: 9
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 11 — library-canonical-core
+**Current focus:** Phase 12 — marketplace-adapter
 
 ## Current Position
 
-Phase: 12
+Phase: 13
 Plan: Not started
 Status: Phase complete — ready for verification
-Last activity: 2026-05-03
+Last activity: 2026-05-05
 
 **v0.10 phase shape (Phases 11–17):**
 
@@ -59,6 +59,10 @@ Historical decisions are archived in:
 - [Phase 11]: LIB-04 D-10 hybrid triggers: tome remove explicitly transitions owned manifest entries to Unowned (source_name = None) and preserves library content; cleanup phase adds the same safety-net transition for users who manually edit tome.toml. Already-Unowned entries are preserved by definition. RemoveResult.library_entries_transitioned_to_unowned replaces library_entries_removed; FailureKind shrunk to 2 variants (DistributionSymlink, GitCache).
 - [Phase 11-library-canonical-core]: LIB-05: tome migrate-library is one-shot CLI command (D-01) with manifest-anchored detection (D-03), broken-symlink preservation (D-04), SAFE-01 failure aggregation (D-05), idempotent re-runs (D-06). Sync refuses on v0.9-shape libraries with Conflict/Why/Suggestion error pointing at the new command (D-02). Entire migration_v010 module + sync gate deletes cleanly in v0.11+.
 - [Phase 11]: Plan 11-05: Re-exported manifest::hash_directory at crate root for integration test reuse — single canonical hashing implementation, no parallel SHA-256 helper. Five end-to-end CLI tests anchor LIB-01/LIB-04/LIB-05 success criteria via assert_cmd binary invocations against a synthetic v0.9 library fixture mirroring CONTEXT.md <specifics>. Resolved deferred-items.md entry for symlink_chain_managed_skill (cli.rs:1775).
+- [Phase 12]: Plan 12-01 (Marketplace adapter trait scaffolding): trait + InstalledPlugin + MockMarketplaceAdapter shipped per D-08/D-10. Module placed in strict-alphabetical position (between manifest and migration_v010), not literally between library and lint as the plan said — plan's intent was alphabetical sibling order. #[allow(dead_code)] applied to trait + struct + pre-existing SkillEntry::new_unowned (Rule 3 deviation, documented in deferred-items.md) so cargo clippy --all-targets -- -D warnings exits 0; attrs drop when Plans 12-03/12-04 / Phase 14 add real consumers.
+- [Phase 12]: Plan 12-02 (Marketplace failure types + renderer): InstallFailure struct + InstallOp/InstallFailureKind enums + ALL fixed-size [_;4] array + POLISH-04 sentinel + format_install_failures pure formatter + render_install_failures eprint! wrapper, all in marketplace.rs. Renderer split (pure-formatter returning String + thin eprint! wrapper) for testability — replaces lib.rs's inline rendering pattern. #[allow(dead_code)] applied per Rule 3 (drops in Plan 12-04 / Phase 13 when consumers land).
+- [Phase 12]: Plan 12-03 (GitAdapter): thin shim over crate::git per D-05; for_directory uses path.to_str().ok_or_else(...)? (mirrors remove.rs:241-244, NOT to_string_lossy); available() trusts local-clone existence per RESEARCH Q #5; #[allow(dead_code)] dropped from MarketplaceAdapter trait (GitAdapter is the first impl) but kept on InstalledPlugin and added to GitAdapter struct/impl block (Rule 3) until Phase 13's D-11 dispatcher lands. 9 unit tests anchor empty-cache and post-install paths of every trait method. D-05a regression contract honored: cargo test -p tome --test cli passes 141 tests byte-for-byte same as baseline; git.rs and tests/cli.rs unchanged.
+- [Phase 12]: Plan 12-04 (ClaudeMarketplaceAdapter): D-01 subprocess invocation with stdin = Stdio::null() and verbatim stderr capture; D-02 zero-extra-subprocess available() via cached errors[] substring match; D-04 RefCell<Option<Vec<InstalledPlugin>>> cache auto-invalidates on Ok install/update with public refresh(); D-09 default scope (no --scope flag); twin-constructor pattern (new probes claude --version + new_for_test bypasses for unit tests); pure parser + heuristic classifier as pub(crate) siblings testable without claude on PATH. clippy::if_same_then_else fix collapses two NotFound arms into a single OR with inline mapping comments. ADP-02 satisfied; Phase 12 complete (all 4 ADP requirements wired).
 
 ### v0.10 design context (consume during planning)
 
@@ -97,6 +101,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-03T13:58:12.917Z
-Stopped at: Completed 11-05-integration-tests-PLAN.md
+Last session: 2026-05-05T03:03:58.164Z
+Stopped at: Completed 12-04-PLAN.md
 Resume file: None
