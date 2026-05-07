@@ -430,8 +430,7 @@ pub(crate) fn apply_consent_decision(
     machine_path: &Path,
 ) -> Result<()> {
     prefs.auto_install_plugins = Some(choice);
-    machine::save(prefs, machine_path)
-        .context("failed to persist auto_install_plugins consent")?;
+    machine::save(prefs, machine_path).context("failed to persist auto_install_plugins consent")?;
     Ok(())
 }
 
@@ -849,7 +848,12 @@ mod tests {
 
         let lockfile = lockfile_with(vec![(
             "alpha",
-            lock_entry("claude-plugins", stale_hash, Some("alpha@mp"), Some("5.0.5")),
+            lock_entry(
+                "claude-plugins",
+                stale_hash,
+                Some("alpha@mp"),
+                Some("5.0.5"),
+            ),
         )]);
 
         let result = classify_lockfile(&lockfile, &lib, &mock).unwrap();
@@ -1187,7 +1191,12 @@ mod tests {
             ),
             (
                 "beta",
-                lock_entry("claude-plugins", stale_b.clone(), Some("beta@mp"), Some("2.5.0")),
+                lock_entry(
+                    "claude-plugins",
+                    stale_b.clone(),
+                    Some("beta@mp"),
+                    Some("2.5.0"),
+                ),
             ),
         ]);
         let mut report = ReconcileReport::default();
@@ -1243,7 +1252,10 @@ mod tests {
         )
         .unwrap();
 
-        assert!(report.apply_skipped, "expected apply_skipped=true under --no-install");
+        assert!(
+            report.apply_skipped,
+            "expected apply_skipped=true under --no-install"
+        );
         assert!(report.install_failures.is_empty());
     }
 
@@ -1748,7 +1760,12 @@ mod tests {
 
         let lockfile = lockfile_with(vec![(
             "alpha",
-            lock_entry("claude-plugins", stale_hash, Some("alpha@mp"), Some("1.0.0")),
+            lock_entry(
+                "claude-plugins",
+                stale_hash,
+                Some("alpha@mp"),
+                Some("1.0.0"),
+            ),
         )]);
         // Persist initial lockfile, capture bytes for byte-equal assertion.
         lockfile::save(&lockfile, paths.config_dir()).unwrap();

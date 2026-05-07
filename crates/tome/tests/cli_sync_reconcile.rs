@@ -196,9 +196,7 @@ path = "{dist}"
 fn write_skill(dir: &Path, name: &str, body: &str) -> Result<PathBuf> {
     let skill_dir = dir.join(name);
     std::fs::create_dir_all(&skill_dir)?;
-    let frontmatter = format!(
-        "---\nname: {name}\ndescription: Test skill {name}\n---\n\n{body}\n"
-    );
+    let frontmatter = format!("---\nname: {name}\ndescription: Test skill {name}\n---\n\n{body}\n");
     std::fs::write(skill_dir.join("SKILL.md"), frontmatter)?;
     Ok(skill_dir)
 }
@@ -327,13 +325,9 @@ fn sync_machine_toml_with_invalid_auto_install_errors() -> Result<()> {
 
     std::fs::write(&f.machine_path, "auto_install_plugins = \"sometimes\"\n")?;
 
-    f.run_sync(&["--no-input"])
-        .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("auto_install_plugins")
-                .or(predicate::str::contains("sometimes")),
-        );
+    f.run_sync(&["--no-input"]).assert().failure().stderr(
+        predicate::str::contains("auto_install_plugins").or(predicate::str::contains("sometimes")),
+    );
     Ok(())
 }
 

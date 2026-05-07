@@ -838,8 +838,8 @@ pub mod testing {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::testing::{MockMarketplaceAdapter, fixture_plugin};
+    use super::*;
     use std::collections::HashSet;
     use std::path::PathBuf;
 
