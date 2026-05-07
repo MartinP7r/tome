@@ -409,113 +409,126 @@ pub fn run(cli: Cli) -> Result<()> {
             let manifest = manifest::load(paths.config_dir())?;
             browse::browse(skills, &manifest)?;
         }
-        Command::Remove { name, force } => {
-            let manifest = manifest::load(paths.config_dir())?;
-            let plan = remove::plan(&name, &config, &paths, &manifest)?;
-            remove::render_plan(&plan);
+        Command::Remove { kind } => match kind {
+            cli::RemoveKind::Dir { name, force } => {
+                let manifest = manifest::load(paths.config_dir())?;
+                let plan = remove::plan(&name, &config, &paths, &manifest)?;
+                remove::render_plan(&plan);
 
-            if cli.dry_run {
-                println!("\n{}", style("Dry run — no changes made.").yellow());
-                return Ok(());
-            }
+                if cli.dry_run {
+                    println!("\n{}", style("Dry run — no changes made.").yellow());
+                    return Ok(());
+                }
 
-            if !force {
-                if !cli.no_input && std::io::stdin().is_terminal() {
-                    let confirmed = dialoguer::Confirm::new()
-                        .with_prompt(format!("Remove directory '{}'?", name))
-                        .default(false)
-                        .interact()?;
-                    if !confirmed {
-                        println!("Aborted.");
-                        return Ok(());
+                if !force {
+                    if !cli.no_input && std::io::stdin().is_terminal() {
+                        let confirmed = dialoguer::Confirm::new()
+                            .with_prompt(format!("Remove directory '{}'?", name))
+                            .default(false)
+                            .interact()?;
+                        if !confirmed {
+                            println!("Aborted.");
+                            return Ok(());
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "tome remove requires confirmation — use --force in non-interactive mode"
+                        );
                     }
-                } else {
-                    anyhow::bail!(
-                        "tome remove requires confirmation — use --force in non-interactive mode"
+                }
+
+                let mut config = config;
+                let mut manifest = manifest;
+                let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
+
+                // Surface partial-cleanup failures BEFORE the save chain. If any of
+                // config.save / manifest::save / discover_all / lockfile::save returns
+                // Err, `?` would otherwise propagate and the user would only see a
+                // disk-write error — never the ⚠ block or the I2/I3 retention messaging
+                // ("config entry and manifest retained so you can retry"). Returning
+                // here also means in-memory mutations to `config` and `manifest` are
+                // never persisted on the failure path, which is correct: remove::execute
+                // deliberately leaves them in their pre-mutation state when failures
+                // occur, so the disk state on retry matches the in-memory state.
+                if !result.failures.is_empty() {
+                    let k = result.failures.len();
+                    eprintln!(
+                        "{} {} operations failed during remove of '{}' — config entry and \
+                         manifest retained so you can retry after addressing these. \
+                         Run {} after resolving:",
+                        style("⚠").yellow(),
+                        k,
+                        name,
+                        style("`tome doctor`").bold(),
                     );
+
+                    for kind in crate::remove::FailureKind::ALL {
+                        let group: Vec<&crate::remove::RemoveFailure> =
+                            result.failures.iter().filter(|f| f.kind == kind).collect();
+                        if group.is_empty() {
+                            continue;
+                        }
+                        eprintln!("  {} ({}):", kind.label(), group.len());
+                        for f in group {
+                            eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+                        }
+                    }
+
+                    return Err(anyhow::anyhow!("remove completed with {k} failures"));
                 }
-            }
 
-            let mut config = config;
-            let mut manifest = manifest;
-            let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
+                // Save updated config
+                config.save(&paths.config_path())?;
+                // Save updated manifest
+                manifest::save(&manifest, paths.config_dir())?;
+                // Regenerate lockfile. Recover git-skill provenance offline from
+                // the previous lockfile + on-disk cache so git-type directories
+                // are not silently dropped during regen (#461 H1). Warnings
+                // collected here are deferred until AFTER the success banner —
+                // see comment below (TEST-04 option a).
+                let (resolved_paths, mut regen_warnings) =
+                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
+                let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+                let lockfile = lockfile::generate(&manifest, &skills);
+                lockfile::save(&lockfile, paths.config_dir())?;
 
-            // Surface partial-cleanup failures BEFORE the save chain. If any of
-            // config.save / manifest::save / discover_all / lockfile::save returns
-            // Err, `?` would otherwise propagate and the user would only see a
-            // disk-write error — never the ⚠ block or the I2/I3 retention messaging
-            // ("config entry and manifest retained so you can retry"). Returning
-            // here also means in-memory mutations to `config` and `manifest` are
-            // never persisted on the failure path, which is correct: remove::execute
-            // deliberately leaves them in their pre-mutation state when failures
-            // occur, so the disk state on retry matches the in-memory state.
-            if !result.failures.is_empty() {
-                let k = result.failures.len();
-                eprintln!(
-                    "{} {} operations failed during remove of '{}' — config entry and \
-                     manifest retained so you can retry after addressing these. \
-                     Run {} after resolving:",
-                    style("⚠").yellow(),
-                    k,
+                // Success banner FIRST (TEST-04 option a — deferred regen-warnings).
+                // The banner is the user's anchor for "what just happened"; warnings
+                // come after as a footnote. Without this ordering, multi-warning
+                // regen output buries the green ✓ confirmation and the user has to
+                // scroll up to find it. The deferred ordering is regression-tested
+                // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
+                // in tests/cli.rs.
+                println!(
+                    "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
+                    style("✓").green(),
                     name,
-                    style("`tome doctor`").bold(),
+                    result.library_entries_transitioned_to_unowned,
+                    result.symlinks_removed,
+                    if result.git_cache_removed {
+                        ", git cache"
+                    } else {
+                        ""
+                    },
                 );
-
-                for kind in crate::remove::FailureKind::ALL {
-                    let group: Vec<&crate::remove::RemoveFailure> =
-                        result.failures.iter().filter(|f| f.kind == kind).collect();
-                    if group.is_empty() {
-                        continue;
-                    }
-                    eprintln!("  {} ({}):", kind.label(), group.len());
-                    for f in group {
-                        eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
-                    }
+                for w in &regen_warnings {
+                    eprintln!("warning: {}", w);
                 }
-
-                return Err(anyhow::anyhow!("remove completed with {k} failures"));
             }
-
-            // Save updated config
-            config.save(&paths.config_path())?;
-            // Save updated manifest
-            manifest::save(&manifest, paths.config_dir())?;
-            // Regenerate lockfile. Recover git-skill provenance offline from
-            // the previous lockfile + on-disk cache so git-type directories
-            // are not silently dropped during regen (#461 H1). Warnings
-            // collected here are deferred until AFTER the success banner —
-            // see comment below (TEST-04 option a).
-            let (resolved_paths, mut regen_warnings) =
-                lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
-            let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-            let lockfile = lockfile::generate(&manifest, &skills);
-            lockfile::save(&lockfile, paths.config_dir())?;
-
-            // Success banner FIRST (TEST-04 option a — deferred regen-warnings).
-            // The banner is the user's anchor for "what just happened"; warnings
-            // come after as a footnote. Without this ordering, multi-warning
-            // regen output buries the green ✓ confirmation and the user has to
-            // scroll up to find it. The deferred ordering is regression-tested
-            // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
-            // in tests/cli.rs.
-            println!(
-                "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
-                style("✓").green(),
-                name,
-                result.library_entries_transitioned_to_unowned,
-                result.symlinks_removed,
-                if result.git_cache_removed {
-                    ", git cache"
-                } else {
-                    ""
-                },
-            );
-            for w in &regen_warnings {
-                eprintln!("warning: {}", w);
+            cli::RemoveKind::Skill { name, yes } => {
+                // Stub for Phase 14 plan 14-05 to replace. Discards args
+                // intentionally — the real flow lands in remove::skill_*.
+                let _ = (name, yes);
+                anyhow::bail!("tome remove skill is not yet implemented — see Phase 14 plan 14-05");
             }
-        }
-        Command::Reassign { skill, to } => {
+        },
+        Command::Reassign { skill, to, force } => {
             let mut manifest = manifest::load(paths.config_dir())?;
+            // force flag is consumed by reassign::plan in 14-04 (Phase 14
+            // D-A1). Currently a placeholder; the call below still passes
+            // is_fork=false. 14-04 changes reassign::plan's signature to
+            // accept force.
+            let _ = force;
             let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false)?;
             reassign::render_plan(&plan);
 

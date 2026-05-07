@@ -3230,6 +3230,7 @@ fn test_remove_nonexistent_directory() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "nonexistent",
             "--force",
         ])
@@ -3279,6 +3280,7 @@ fn test_remove_local_directory() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3345,6 +3347,7 @@ fn test_remove_dry_run() {
             tmp.path().to_str().unwrap(),
             "--dry-run",
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3392,6 +3395,7 @@ fn test_remove_no_input_without_force_fails() {
             tmp.path().to_str().unwrap(),
             "--no-input",
             "remove",
+            "dir",
             "local",
         ])
         .env("NO_COLOR", "1")
@@ -3451,6 +3455,7 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3563,6 +3568,7 @@ fn remove_partial_failure_does_not_save_disk_state() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3664,6 +3670,7 @@ fn remove_retry_succeeds_after_failure_resolved() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3696,6 +3703,7 @@ fn remove_retry_succeeds_after_failure_resolved() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3836,6 +3844,7 @@ fn remove_failure_summary_wording() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
@@ -3981,6 +3990,7 @@ fn remove_preserves_git_lockfile_entries() {
             "--tome-home",
             tmp.path().to_str().unwrap(),
             "remove",
+            "dir",
             "local",
             "--force",
         ])
