@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation**
+milestone is in progress. Phase 14 (Unowned-library lifecycle) lands the
+user-facing flows for skills whose source has been removed from `tome.toml`.
+Behaviour follows UNOWN-01..03; CLI vocabulary differs from the original
+proposal — see "BREAKING Changes" below for the migration.
+
+### Added
+
+- `tome reassign <skill> --to <dir>` accepts Unowned skills (re-anchors per UNOWN-01 / D-API-1). Replaces the proposed `tome adopt` command — same mechanical work as Owned→Owned reassign, single verb regardless of starting state.
+- `tome remove skill <name>` deletes an Unowned skill: manifest entry, library directory, distribution symlinks, lockfile entry, and `machine.toml` memberships (`disabled` set + per-directory `enabled`/`disabled` lists) all cleaned (UNOWN-02 / D-API-2 / D-B1). Replaces the proposed `tome forget` command. Confirmation prompt defaults to no; `--yes` / `-y` skips. Owned skills are refused with a hint to `tome remove dir` first (D-B2).
+- `tome reassign --force` flag bypasses the new D-A1 different-content collision check (refuses to overwrite a target with different content unless explicit). Same flag also covers the Fork path's existing collision check.
+- `tome reassign` rejects target-only directory roles (D-A2): a target-only dir cannot receive reassigned skills since nothing rediscovers them on next sync.
+- `tome status` and `tome doctor` show an `Unowned skills (N):` section with `NAME` / `LAST-KNOWN SOURCE` / `SYNCED` columns; JSON output includes a new `unowned` (`StatusReport`) / `unowned_skills` (`DoctorReport`) array of `SkillSummary` entries. Per D-D3, the unowned set is informational and does not contribute to `tome doctor` exit code (UNOWN-03).
+- `SkillEntry.previous_source` and `LockEntry.previous_source` schema fields capture the last directory that owned a skill before transition to Unowned (D-C1). Closes the Phase 13 D-13 lossy fork-in-place gap; new transitions get clean provenance, pre-Phase-14 entries fall back to `source_path` rendering per D-C2 (no backfill).
+
+### Changed
+
+- **BREAKING:** `tome remove <name>` is now `tome remove dir <name>` (D-API-2). The new `tome remove skill <name>` subcommand handles unowned-skill deletion. Bare `tome remove <name>` no longer parses. Project policy `Backward compat: None` makes this acceptable; users running shell aliases or scripts must update them.
+- The literal stub error in `reassign.rs` pointing at "Phase 14 / `tome adopt`" is deleted; Unowned input is now accepted directly.
+
 ## [0.9.0] - 2026-04-29
 
 The **v0.9 Cross-Machine Path Overrides** milestone. Adds a per-machine path-remapping layer in `machine.toml` so the same `tome.toml` can ship in dotfiles across machines with divergent on-disk layouts. Bundles a Phase-8 review-tail pass that hardens the v0.8 `tome browse` partial-failure UX and lifts a `StatusMessage` enum.

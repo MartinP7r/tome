@@ -39,11 +39,16 @@ A pluggable adapter trait isolates marketplace-specific install/update logic. v0
 
 ### Unowned-library lifecycle (UNOWN)
 
-Two new commands explicitly manage skills whose source has been removed.
+Two new user-facing flows explicitly manage skills whose source has been
+removed. The verbs were folded into existing commands during Phase 14
+discussion (CONTEXT.md D-API-1 / D-API-2): `tome adopt` is delivered by
+extending `tome reassign`; `tome forget` is delivered as a new
+`tome remove skill <name>` subcommand. Behaviour is delivered in full;
+the verbs are different from the original wording.
 
-- [x] **UNOWN-01**: `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set.
-- [x] **UNOWN-02**: `tome forget <skill>` explicitly deletes an unowned skill from the library. Confirms via interactive prompt unless `--yes`. Removes manifest entry, library directory, and downstream distribution symlinks.
-- [x] **UNOWN-03**: `tome status` and `tome doctor` surface the unowned set: count + per-skill list with last-known source. JSON output includes an `unowned: [SkillSummary]` array.
+- [x] **UNOWN-01**: ~~`tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory.~~ **(superseded by Phase 14 D-API-1)** Re-anchor an unowned skill via `tome reassign <skill> --to <directory>`. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set. `tome reassign foo --to nonexistent` fails fast naming the missing directory. Different-content collisions at the target are refused without `--force` (D-A1); target-only directory roles are rejected (D-A2).
+- [x] **UNOWN-02**: ~~`tome forget <skill>` explicitly deletes an unowned skill from the library.~~ **(superseded by Phase 14 D-API-2)** Delete an unowned skill via `tome remove skill <name>`. Confirms via interactive prompt unless `--yes`. Removes manifest entry, library directory, downstream distribution symlinks, lockfile entry, and machine.toml memberships (D-B1). Owned skills are refused with a hint to use `tome remove dir` first (D-B2).
+- [x] **UNOWN-03**: `tome status` and `tome doctor` surface the unowned set: count + per-skill list with last-known source. JSON output includes `unowned: [SkillSummary]` (status) / `unowned_skills: [SkillSummary]` (doctor). Doctor's `total_issues()` is unaffected by the unowned set per D-D3.
 
 ### Cleanup UX rewrite (UX)
 
@@ -137,9 +142,9 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | RECON-03 | Phase 13 | — | Pending |
 | RECON-04 | Phase 13 | — | Pending |
 | RECON-05 | Phase 13 | — | Pending |
-| UNOWN-01 | Phase 14 | — | Pending |
-| UNOWN-02 | Phase 14 | — | Pending |
-| UNOWN-03 | Phase 14 | — | Pending |
+| UNOWN-01 | Phase 14 | — | Validated (D-API-1 — `tome reassign` Unowned input) |
+| UNOWN-02 | Phase 14 | — | Validated (D-API-2 — `tome remove skill`) |
+| UNOWN-03 | Phase 14 | — | Validated |
 | HARD-01 | Phase 15 | #485 | Pending |
 | HARD-02 | Phase 15 | #486 | Pending |
 | HARD-03 | Phase 15 | #487 | Pending |
@@ -172,6 +177,13 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | REL-03 | Phase 17 | — | Pending |
 | REL-04 | Phase 17 | — | Pending |
 | REL-05 | Phase 17 | — | Pending |
+
+**Phase 14 vocabulary note:** UNOWN-01's "tome adopt" wording is
+superseded by Phase 14 D-API-1 (folded into `tome reassign`); UNOWN-02's
+"tome forget" wording is superseded by Phase 14 D-API-2 (subcommand on
+`tome remove`). Behaviour is delivered in full; verbs are different. See
+`.planning/phases/14-unowned-library-lifecycle/14-CONTEXT.md` for
+rationale.
 
 **Coverage:**
 - v0.10 requirements: 49 total (5 LIB + 4 ADP + 5 RECON + 3 UNOWN + 2 UX + 22 HARD + 3 DOC + 5 REL)
