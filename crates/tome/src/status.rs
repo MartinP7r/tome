@@ -162,11 +162,7 @@ fn format_unowned_section(unowned: &[crate::summary::SkillSummary]) -> Option<St
     if unowned.is_empty() {
         return None;
     }
-    let heading = format!(
-        "{} ({}):",
-        style("Unowned skills").bold(),
-        unowned.len()
-    );
+    let heading = format!("{} ({}):", style("Unowned skills").bold(), unowned.len());
     let mut rows: Vec<[String; 3]> = Vec::with_capacity(unowned.len() + 1);
     rows.push([
         "NAME".to_string(),
@@ -1041,7 +1037,10 @@ mod tests {
             "missing SYNCED column: {rendered}"
         );
         // Body row.
-        assert!(rendered.contains("orphan"), "missing skill name: {rendered}");
+        assert!(
+            rendered.contains("orphan"),
+            "missing skill name: {rendered}"
+        );
         assert!(
             rendered.contains("removed-dir"),
             "missing previous_source value: {rendered}"
