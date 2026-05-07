@@ -41,7 +41,7 @@ A pluggable adapter trait isolates marketplace-specific install/update logic. v0
 
 Two new commands explicitly manage skills whose source has been removed.
 
-- [ ] **UNOWN-01**: `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set.
+- [x] **UNOWN-01**: `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set.
 - [ ] **UNOWN-02**: `tome forget <skill>` explicitly deletes an unowned skill from the library. Confirms via interactive prompt unless `--yes`. Removes manifest entry, library directory, and downstream distribution symlinks.
 - [x] **UNOWN-03**: `tome status` and `tome doctor` surface the unowned set: count + per-skill list with last-known source. JSON output includes an `unowned: [SkillSummary]` array.
 
