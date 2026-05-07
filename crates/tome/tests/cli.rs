@@ -1777,6 +1777,18 @@ fn symlink_chain_managed_skill() {
     // library, NOT symlinks into machine-specific cache paths. The previous
     // (v0.9) shape — library entry is a symlink → source install dir — has
     // been replaced by the copy model. Targets still symlink into the library.
+    //
+    // Phase 13 added a hard requirement that the `claude` binary be on PATH
+    // whenever ANY [directories.<name>] has type = "claude-plugins" (D-20):
+    // `build_claude_adapter` calls `ClaudeMarketplaceAdapter::new()` which
+    // probes for the binary unconditionally. Skip this test on machines
+    // without claude — the same skip-gate pattern as marketplace.rs's smoke
+    // tests.
+    if !tome::marketplace::is_claude_available() {
+        eprintln!("skipping symlink_chain_managed_skill: claude binary not on PATH");
+        return;
+    }
+
     let env = TestEnvBuilder::new()
         .source("plugins", "claude-plugins")
         .target("test-tool")
