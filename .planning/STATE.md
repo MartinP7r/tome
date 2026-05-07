@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: verifying
-stopped_at: Completed 12-04-PLAN.md
-last_updated: "2026-05-05T03:11:17.808Z"
+status: executing
+stopped_at: "Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)"
+last_updated: "2026-05-05T21:47:05.315Z"
 last_activity: 2026-05-05
 progress:
   total_phases: 7
-  completed_phases: 2
-  total_plans: 9
-  completed_plans: 9
+  completed_phases: 3
+  total_plans: 14
+  completed_plans: 14
 ---
 
 # Project State
@@ -20,13 +20,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 12 — marketplace-adapter
+**Current focus:** Phase 13 — lockfile-authoritative-sync (executing)
 
 ## Current Position
 
-Phase: 13
+Phase: 14
 Plan: Not started
-Status: Phase complete — ready for verification
+Status: Ready to execute
 Last activity: 2026-05-05
 
 **v0.10 phase shape (Phases 11–17):**
@@ -63,6 +63,11 @@ Historical decisions are archived in:
 - [Phase 12]: Plan 12-02 (Marketplace failure types + renderer): InstallFailure struct + InstallOp/InstallFailureKind enums + ALL fixed-size [_;4] array + POLISH-04 sentinel + format_install_failures pure formatter + render_install_failures eprint! wrapper, all in marketplace.rs. Renderer split (pure-formatter returning String + thin eprint! wrapper) for testability — replaces lib.rs's inline rendering pattern. #[allow(dead_code)] applied per Rule 3 (drops in Plan 12-04 / Phase 13 when consumers land).
 - [Phase 12]: Plan 12-03 (GitAdapter): thin shim over crate::git per D-05; for_directory uses path.to_str().ok_or_else(...)? (mirrors remove.rs:241-244, NOT to_string_lossy); available() trusts local-clone existence per RESEARCH Q #5; #[allow(dead_code)] dropped from MarketplaceAdapter trait (GitAdapter is the first impl) but kept on InstalledPlugin and added to GitAdapter struct/impl block (Rule 3) until Phase 13's D-11 dispatcher lands. 9 unit tests anchor empty-cache and post-install paths of every trait method. D-05a regression contract honored: cargo test -p tome --test cli passes 141 tests byte-for-byte same as baseline; git.rs and tests/cli.rs unchanged.
 - [Phase 12]: Plan 12-04 (ClaudeMarketplaceAdapter): D-01 subprocess invocation with stdin = Stdio::null() and verbatim stderr capture; D-02 zero-extra-subprocess available() via cached errors[] substring match; D-04 RefCell<Option<Vec<InstalledPlugin>>> cache auto-invalidates on Ok install/update with public refresh(); D-09 default scope (no --scope flag); twin-constructor pattern (new probes claude --version + new_for_test bypasses for unit tests); pure parser + heuristic classifier as pub(crate) siblings testable without claude on PATH. clippy::if_same_then_else fix collapses two NotFound arms into a single OR with inline mapping comments. ADP-02 satisfied; Phase 12 complete (all 4 ADP requirements wired).
+- [Phase 13]: [Phase 13]: Plan 13-02 (marketplace test-support feature gate): MockMarketplaceAdapter + fixture_plugin lifted from #[cfg(test)] pub(super) into pub mod testing gated by cfg(any(test, feature = "test-support")); marketplace module widened from pub(crate) to pub at lib.rs:42; production-symbol scan proves zero leakage; +1 visibility-probe test (41→42 marketplace tests). Per OQ-2 option 2 (feature-gated, not plain pub mod testing) — keeps mock out of v1.0 GUI Tauri IPC surface.
+- [Phase 13-lockfile-authoritative-sync]: Plan 13-01: AutoInstall enum + Option<AutoInstall> field on MachinePrefs (D-07) + --no-install CLI flag plumbed through SyncOptions (D-09); schema-only — Plan 13-04 wires consumers
+- [Phase 13-lockfile-authoritative-sync]: Plan 13-03 (reconcile module): pub fn reconcile_lockfile + ReconcileClass (4 variants) + ReconcileReport + 7 internal helpers + 25 unit tests in crates/tome/src/reconcile.rs (1620 LOC). Implements RECON-01..05 + Pitfalls 2/4/5 + OQ-3/4. D-22 partial-failure invariant verified by partial-failure test. Plan 13-04 wires the consumer (replaces install.rs reconcile_managed_plugins call site).
+- [Phase 13-lockfile-authoritative-sync]: Plan 13-04 (call-site wiring + install.rs deletion): lib.rs::sync invokes reconcile::reconcile_lockfile through ClaudeMarketplaceAdapter (D-11/D-18); legacy install.rs (312 LOC) deleted; D-13 fork in-place flip applied at the manifest call site via apply_edit_decisions; sync exits non-zero via anyhow::bail when reconcile install_failures non-empty (RESEARCH OQ-6); revert decision parked behind a warning (D-16 safety guarantee preserved, dedicated revert path is a Phase 14 follow-up). RECON-01..05 fully wired.
+- [Phase 13]: Plan 13-05 (CLI sync reconcile integration tests): 10 end-to-end integration tests in tests/cli_sync_reconcile.rs covering RECON-01..05 non-interactive flow paths via assert_cmd; D-20 verbatim error contract is now CI-asserted; dev-dep self-reference (tome = { path = ".", features = ["test-support"] }) keeps marketplace::testing reachable for future binary-level mock injection. Two plan-spec bugs auto-fixed (Rule 1): role naming (distribution → target/managed) + missing library_dir in fixtures.
 
 ### v0.10 design context (consume during planning)
 
@@ -101,6 +106,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-05T03:03:58.164Z
-Stopped at: Completed 12-04-PLAN.md
+Last session: 2026-05-05T21:40:45.857Z
+Stopped at: Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)
 Resume file: None

@@ -41,3 +41,17 @@ assert_fs.workspace = true
 insta.workspace = true
 predicates.workspace = true
 tempfile.workspace = true
+
+# Self-reference with `test-support` enabled so integration tests in
+# `tests/cli_sync_reconcile.rs` can construct `MockMarketplaceAdapter`.
+# Plan 13-02 added `[features] test-support = []`; this dev-dep flips it on
+# for the test target only. Production builds (`cargo build`) and library
+# unit tests (`cargo test --lib`) are NOT affected.
+tome = { path = ".", features = ["test-support"] }
+
+[features]
+# Expose `marketplace::testing::MockMarketplaceAdapter` to integration tests
+# in `crates/tome/tests/`. Phase 13 (RECON-*) and downstream phases that
+# need a synthetic MarketplaceAdapter without `claude` on PATH enable this
+# feature in `[dev-dependencies]`. See OQ-2 in 13-RESEARCH.md.
+test-support = []
