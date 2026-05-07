@@ -133,7 +133,15 @@
   1. `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory: manifest `source_name` updates from `None` to `Some(<directory>)`, the skill content is copied into the directory's path on disk, and the skill leaves the unowned set on next discovery. `tome adopt foo nonexistent-dir` fails fast with a clear error naming the missing directory.
   2. `tome forget <skill>` deletes an unowned skill: manifest entry removed, library directory removed, downstream distribution symlinks removed. Interactive confirmation prompt unless `--yes` is passed. `tome forget` on a still-owned skill fails fast with a message directing the user to remove the source directory first.
   3. `tome status` and `tome doctor` text output include an `Unowned skills (N):` section listing each unowned skill with its last-known source name; JSON output of both commands includes an `unowned: [SkillSummary]` array. When the unowned set is empty, the section omits cleanly (no empty header).
-**Plans**: TBD
+**Plans**: 8 plans
+- [ ] 14-01-previous-source-schema-PLAN.md — Add `previous_source` field to SkillEntry/LockEntry + capture at all 3 Owned→Unowned transition sites (closes Phase 13 D-13 lossy-fork-in-place gap)
+- [ ] 14-02-skill-summary-type-PLAN.md — Shared `SkillSummary` type in new `summary.rs` module (consumed by 14-06 status + 14-07 doctor)
+- [ ] 14-03-cli-restructure-PLAN.md — `Remove { kind: RemoveKind::Dir | Skill }` clap split + `Reassign --force` flag + lib.rs dispatch (BREAKING: `tome remove <name>` → `tome remove dir <name>`)
+- [ ] 14-04-reassign-unowned-input-PLAN.md — `tome reassign` accepts Unowned input (UNOWN-01 / D-API-1) + D-A1 content-hash collision check + D-A2 target-only role rejection + D-C1 clear-on-re-anchor
+- [ ] 14-05-remove-skill-PLAN.md — `tome remove skill <name>` plan/render/execute triple + RemoveSkillFailureKind (4 variants, ALL array, compile-time guard) + D-B1 full cleanup (manifest+library+dist+lockfile+machine.toml) + D-B2 owned guard + D-B3 confirmation default-no
+- [ ] 14-06-status-unowned-section-PLAN.md — `StatusReport.unowned: Vec<SkillSummary>` field + text Unowned-skills section + JSON shape (UNOWN-03 status side)
+- [ ] 14-07-doctor-unowned-section-PLAN.md — `DoctorReport.unowned_skills` field + parallel informational section + D-D3 (does NOT contribute to total_issues; exit code unaffected)
+- [ ] 14-08-docs-and-integration-tests-PLAN.md — REQUIREMENTS.md/ROADMAP.md/PROJECT.md vocabulary update for D-API-1/-2 merge + CHANGELOG.md BREAKING callout + 8+ end-to-end integration tests in tests/cli.rs
 
 ### Phase 15: CLI hardening
 **Goal**: Bundle of v0.9-review followups (#485-#503) plus older bug backlog (#416, #430, #433, #447, #457) lands as a single hardening pass. Most touch the same modules as the library-canonical work, so doing them together is more efficient than serializing.
@@ -191,7 +199,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
-| 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
+| 14. Unowned-library lifecycle | v0.10 | 0/8 | Not started | - |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
