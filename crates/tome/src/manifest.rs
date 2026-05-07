@@ -147,16 +147,17 @@ impl SkillEntry {
     /// Create a new `SkillEntry` for an **Unowned** skill — its source was
     /// removed from `tome.toml` but the library copy is preserved (per LIB-04).
     /// Records the current timestamp automatically.
-    ///
-    /// Test-only: production transitions to Unowned in-place via
-    /// `entry.source_name = None` (which preserves the original `synced_at`
-    /// timestamp — see `cleanup_library` Case 1 and `remove::execute`).
-    #[cfg(test)]
-    pub fn new_unowned(
-        source_path: PathBuf,
-        content_hash: ContentHash,
-        managed: bool,
-    ) -> Self {
+    //
+    // dead_code allow: Phase 11 LIB-03 lifted the schema to support Unowned
+    // entries; the first non-test caller arrives in Phase 14
+    // (`tome adopt`/`tome forget` — UNOWN-01..03). Tests in this module
+    // exercise the constructor today. Drop this attr when Phase 14 lands.
+    //
+    // Note: production transitions to Unowned in-place via
+    // `entry.source_name = None` (which preserves the original `synced_at`
+    // timestamp — see `cleanup_library` Case 1 and `remove::execute`).
+    #[allow(dead_code)]
+    pub fn new_unowned(source_path: PathBuf, content_hash: ContentHash, managed: bool) -> Self {
         Self {
             source_path,
             source_name: None,
