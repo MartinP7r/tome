@@ -139,7 +139,7 @@
 - [x] 14-03-cli-restructure-PLAN.md — `Remove { kind: RemoveKind::Dir | Skill }` clap split + `Reassign --force` flag + lib.rs dispatch (BREAKING: `tome remove <name>` → `tome remove dir <name>`)
 - [ ] 14-04-reassign-unowned-input-PLAN.md — `tome reassign` accepts Unowned input (UNOWN-01 / D-API-1) + D-A1 content-hash collision check + D-A2 target-only role rejection + D-C1 clear-on-re-anchor
 - [ ] 14-05-remove-skill-PLAN.md — `tome remove skill <name>` plan/render/execute triple + RemoveSkillFailureKind (4 variants, ALL array, compile-time guard) + D-B1 full cleanup (manifest+library+dist+lockfile+machine.toml) + D-B2 owned guard + D-B3 confirmation default-no
-- [ ] 14-06-status-unowned-section-PLAN.md — `StatusReport.unowned: Vec<SkillSummary>` field + text Unowned-skills section + JSON shape (UNOWN-03 status side)
+- [x] 14-06-status-unowned-section-PLAN.md — `StatusReport.unowned: Vec<SkillSummary>` field + text Unowned-skills section + JSON shape (UNOWN-03 status side)
 - [x] 14-07-doctor-unowned-section-PLAN.md — `DoctorReport.unowned_skills` field + parallel informational section + D-D3 (does NOT contribute to total_issues; exit code unaffected)
 - [ ] 14-08-docs-and-integration-tests-PLAN.md — REQUIREMENTS.md/ROADMAP.md/PROJECT.md vocabulary update for D-API-1/-2 merge + CHANGELOG.md BREAKING callout + 8+ end-to-end integration tests in tests/cli.rs
 
@@ -199,7 +199,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
-| 14. Unowned-library lifecycle | v0.10 | 4/8 | In Progress|  |
+| 14. Unowned-library lifecycle | v0.10 | 5/8 | In Progress|  |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |

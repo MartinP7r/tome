@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 14-07-doctor-unowned-section-PLAN.md
-last_updated: "2026-05-07T13:23:55.902Z"
+stopped_at: Completed 14-06-status-unowned-section-PLAN.md
+last_updated: "2026-05-07T13:28:56.852Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 22
-  completed_plans: 18
+  completed_plans: 19
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 14 (unowned-library-lifecycle) — EXECUTING
-Plan: 4 of 8
+Plan: 5 of 8
 Status: Ready to execute
 Last activity: 2026-05-07
 
@@ -72,6 +72,7 @@ Historical decisions are archived in:
 - [Phase 14]: Plan 14-01: Schema lift adds previous_source: Option<DirectoryName> to SkillEntry + LockEntry with serde-default skip_serializing_if; lockfile::generate propagates from manifest. Three Owned->Unowned transition sites (cleanup Case 1, remove::execute dir flavour, apply_edit_decisions Fork branch) capture via .take(). #[allow(dead_code)] retained on SkillEntry::new_unowned (Rule 3 deviation) — production callers land in 14-04/14-05; tracked in phase deferred-items.md.
 - [Phase 14-unowned-library-lifecycle]: Plan 14-03: Command::Remove restructured into nested clap subcommand (RemoveKind::Dir | RemoveKind::Skill) per D-API-2; Command::Reassign gains force: bool per D-A1. lib.rs::run preserves Dir flow byte-for-byte; Skill arm stubs to anyhow::bail awaiting 14-05; force shimmed via let _ = force; awaiting 14-04. All 10 tests/cli.rs sites migrated to remove dir <name>. 5 new clap-parse unit tests including BREAKING-rejection of bare tome remove <name>.
 - [Phase 14-unowned-library-lifecycle]: Plan 14-07 (doctor unowned section): DoctorReport.unowned_skills field added in parallel to library_issues/directory_issues/config_issues; total_issues() body unchanged (D-D3 contract pinned by test); render_unowned_skills helper uses tabled NAME/LAST-KNOWN SOURCE/SYNCED columns mirroring 14-06 status renderer; manifest read failure degrades to empty Vec to avoid double-reporting (library_issues already surfaces corrupted-manifest errors); JSON shape stable (no skip_serializing_if). 4 new tests + 1 existing literal updated; 31/31 doctor tests pass.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-06 (status unowned section): pure formatter format_unowned_section returns Option<String> (None=empty/omit, Some=heading+table) so rendering is unit-testable without stdout capture; manifest read failure in gather() degrades to empty Unowned set (already surfaced via library_count.error); JSON shape stable with explicit empty array for empty unowned set (no skip_serializing_if).
 
 ### v0.10 design context (consume during planning)
 
@@ -110,6 +111,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-07T13:23:55.895Z
-Stopped at: Completed 14-07-doctor-unowned-section-PLAN.md
+Last session: 2026-05-07T13:28:56.846Z
+Stopped at: Completed 14-06-status-unowned-section-PLAN.md
 Resume file: None
