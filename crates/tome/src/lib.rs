@@ -528,8 +528,9 @@ pub fn run(cli: Cli) -> Result<()> {
             // D-A1). Currently a placeholder; the call below still passes
             // is_fork=false. 14-04 changes reassign::plan's signature to
             // accept force.
+            // 14-04 will replace this `false` with `force` once Task 2 lands.
             let _ = force;
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false)?;
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false, false)?;
             reassign::render_plan(&plan);
 
             let target_dir_path = config
@@ -554,18 +555,25 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
                 let lockfile_data = lockfile::generate(&manifest, &skills);
                 lockfile::save(&lockfile_data, paths.config_dir())?;
+                let from_label = match &plan.from_directory {
+                    Some(d) => style(d.as_str().to_string()).cyan().to_string(),
+                    None => style("Unowned").yellow().to_string(),
+                };
                 println!(
                     "{} '{}' from '{}' to '{}'",
                     style("Reassigned").green(),
                     style(&skill).cyan(),
-                    style(&plan.from_directory).cyan(),
+                    from_label,
                     style(&to).cyan(),
                 );
             }
         }
         Command::Fork { skill, to, force } => {
             let mut manifest = manifest::load(paths.config_dir())?;
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true)?;
+            // Task 2 wires `force` here too (Fork shares the reassign::plan
+            // path; passing `false` for Task 1 keeps Fork's pre-Phase-14
+            // behaviour intact).
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true, false)?;
             reassign::render_plan(&plan);
 
             if !force {
