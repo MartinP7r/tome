@@ -199,7 +199,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
-| 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete   | 2026-05-07 |
+| 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
