@@ -745,10 +745,11 @@ impl MarketplaceAdapter for ClaudeMarketplaceAdapter {
         // ever leaves the cache None transiently. The other two cache-read
         // sites (current_version, list_installed) already use this pattern.
         let list = cache.as_deref().unwrap_or(&[]);
-        let errored = list
-            .iter()
-            .find(|p| p.id == plugin_id)
-            .is_some_and(|e| e.errors.iter().any(|s| s.contains("not found in marketplace")));
+        let errored = list.iter().find(|p| p.id == plugin_id).is_some_and(|e| {
+            e.errors
+                .iter()
+                .any(|s| s.contains("not found in marketplace"))
+        });
         // Conservative default: entry exists with no marketplace error, OR
         // plugin isn't in the snapshot at all (not yet installed), OR the
         // cache is empty — report `available = true`. The "vanished" signal
