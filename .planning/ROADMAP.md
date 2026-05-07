@@ -66,7 +66,7 @@
 - [x] **Phase 11: Library-canonical core** — Managed skills become real directory copies; source removal preserves library content; first-sync migration converts symlink libraries (LIB-01..05) (completed 2026-05-03)
 - [x] **Phase 12: Marketplace adapter** — `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` + `GitAdapter`; aggregated install/update failure surfacing (ADP-01..04) (completed 2026-05-05)
 - [x] **Phase 13: Lockfile-authoritative sync** — `tome sync` reconciles installed plugins to lockfile state; Match/Drift/Vanished classification; auto-install consent; edit-in-library detection (RECON-01..05) — **alpha cut** (completed 2026-05-05)
-- [ ] **Phase 14: Unowned-library lifecycle** — `tome reassign` accepts Unowned input (per D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01); `tome remove skill <name>` deletes an Unowned skill (per D-API-2, supersedes `tome forget`); `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03)
+- [x] **Phase 14: Unowned-library lifecycle** — `tome reassign` accepts Unowned input (per D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01); `tome remove skill <name>` deletes an Unowned skill (per D-API-2, supersedes `tome forget`); `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03) (completed 2026-05-07)
 - [ ] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut**
 - [ ] **Phase 16: Cleanup-message UX + docs** — Three-bucket cleanup partition with actionable hints; migration prompt summary table; architecture, changelog, cross-machine docs (UX-01..02, DOC-01..03) — **rc cut**
 - [ ] **Phase 17: Migration polish + UAT + release** — In-flight PR landing; issue triage; Linux UAT; real-library migration smoke-test; cargo-dist v0.10.0 release (REL-01..05) — **v0.10 final**
@@ -199,7 +199,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
-| 14. Unowned-library lifecycle | v0.10 | 7/8 | In Progress|  |
+| 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete   | 2026-05-07 |
 | 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 14-05-remove-skill-PLAN.md
-last_updated: "2026-05-07T13:50:18.884Z"
+stopped_at: Completed 14-08-docs-and-integration-tests-PLAN.md
+last_updated: "2026-05-07T14:04:09.455Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 7
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 22
-  completed_plans: 21
+  completed_plans: 22
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 14 (unowned-library-lifecycle) — EXECUTING
-Plan: 7 of 8
+Plan: 8 of 8
 Status: Ready to execute
 Last activity: 2026-05-07
 
@@ -75,6 +75,7 @@ Historical decisions are archived in:
 - [Phase 14-unowned-library-lifecycle]: Plan 14-06 (status unowned section): pure formatter format_unowned_section returns Option<String> (None=empty/omit, Some=heading+table) so rendering is unit-testable without stdout capture; manifest read failure in gather() degrades to empty Unowned set (already surfaced via library_count.error); JSON shape stable with explicit empty array for empty unowned set (no skip_serializing_if).
 - [Phase 14-unowned-library-lifecycle]: Plan 14-04: reassign::plan accepts Unowned input (D-API-1 stub deleted); D-A1 content-hash collision check (refuses different-content unless --force) + D-A2 target-only role rejection (refuses !is_discovery destinations); execute() clears previous_source on re-anchor (D-C1 closure). Fork's --force now also bypasses D-A1 (single shared semantic). Test fixture local-target switched from role=target to role=synced.
 - [Phase 14-unowned-library-lifecycle]: Plan 14-05 (UNOWN-02): RemoveSkillFailureKind kept as separate enum from FailureKind (different failure modes); manifest mutation runs last in in-memory mutation sequence so retry still finds entry on panic; success banner enumerates only steps that actually cleaned something to reduce noise; partial-failure path retains in-memory state and skips all save() calls (I2/I3 retention parity with dir-flavour).
+- [Phase 14-unowned-library-lifecycle]: Plan 14-08: D-API-1/-2 vocabulary merge documented across REQUIREMENTS.md/ROADMAP.md/PROJECT.md/CHANGELOG.md with strikethrough+supersession traceability; Phase14Fixture pattern lifts manifest pre-population for Unowned-state tests; 10 phase14_ integration tests anchor UNOWN-01..03 success criteria to the real binary via assert_cmd; 845 tests green
 
 ### v0.10 design context (consume during planning)
 
@@ -113,6 +114,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-07T13:50:18.881Z
-Stopped at: Completed 14-05-remove-skill-PLAN.md
+Last session: 2026-05-07T14:04:09.452Z
+Stopped at: Completed 14-08-docs-and-integration-tests-PLAN.md
 Resume file: None
