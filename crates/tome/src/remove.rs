@@ -169,9 +169,6 @@ pub(crate) enum RemoveSkillFailureKind {
 
 impl RemoveSkillFailureKind {
     /// All variants, in the order preferred for user-facing grouped output.
-    // dead_code allow: consumed by lib.rs::run RemoveKind::Skill arm in Task 3
-    // (this plan, plan 14-05). Drop the attr when that wiring lands.
-    #[allow(dead_code)]
     pub(crate) const ALL: [RemoveSkillFailureKind; 4] = [
         RemoveSkillFailureKind::LibraryDir,
         RemoveSkillFailureKind::DistributionSymlink,
@@ -180,9 +177,6 @@ impl RemoveSkillFailureKind {
     ];
 
     /// Human-readable label used in the grouped failure summary.
-    // dead_code allow: consumed by lib.rs::run RemoveKind::Skill arm in Task 3
-    // (this plan, plan 14-05). Drop the attr when that wiring lands.
-    #[allow(dead_code)]
     pub(crate) fn label(self) -> &'static str {
         match self {
             RemoveSkillFailureKind::LibraryDir => "Library directory",
@@ -215,10 +209,6 @@ const _: () = {
 
 /// A single partial-cleanup failure aggregated from `skill_execute`.
 /// Mirror of `RemoveFailure` for the `skill` flavour.
-//
-// dead_code allow: consumed by `skill_execute` (Task 2) and the
-// lib.rs::run RemoveKind::Skill arm (Task 3) in this plan.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RemoveSkillFailure {
     pub path: PathBuf,
@@ -232,8 +222,6 @@ impl RemoveSkillFailure {
     /// The path MUST be absolute — downstream rendering uses
     /// `paths::collapse_home(&f.path)` which expects an absolute path.
     /// Debug-only via `debug_assert!` to keep release builds zero-cost.
-    // dead_code allow: consumed in Task 2 of this plan.
-    #[allow(dead_code)]
     pub(crate) fn new(kind: RemoveSkillFailureKind, path: PathBuf, error: std::io::Error) -> Self {
         debug_assert!(
             path.is_absolute(),
@@ -245,10 +233,6 @@ impl RemoveSkillFailure {
 }
 
 /// What `tome remove skill <name>` will do (per D-B1).
-//
-// dead_code allow: consumed by `skill_plan`/`skill_render_plan`/`skill_execute`
-// (Task 2) in this plan.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RemoveSkillPlan {
     /// Skill name being deleted.
@@ -523,10 +507,6 @@ pub(crate) fn execute(
 // with compile-time exhaustiveness pinning (above).
 
 /// Result of `skill_execute`.
-//
-// dead_code allow: production consumer is the lib.rs::run RemoveKind::Skill
-// arm wired in Task 3 of this plan. Drop the attr when that wiring lands.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub(crate) struct RemoveSkillResult {
     pub library_removed: bool,
@@ -543,8 +523,6 @@ pub(crate) struct RemoveSkillResult {
 }
 
 /// Build a plan for `tome remove skill <name>`. Refuses Owned skills (D-B2).
-// dead_code allow: production consumer wired in Task 3 of this plan.
-#[allow(dead_code)]
 pub(crate) fn skill_plan(
     name: &str,
     config: &Config,
@@ -633,8 +611,6 @@ pub(crate) fn skill_plan(
 }
 
 /// Render the skill-removal plan to stdout.
-// dead_code allow: production consumer wired in Task 3 of this plan.
-#[allow(dead_code)]
 pub(crate) fn skill_render_plan(plan: &RemoveSkillPlan) {
     println!(
         "Forget skill plan for '{}':",
@@ -689,8 +665,6 @@ pub(crate) fn skill_render_plan(plan: &RemoveSkillPlan) {
 ///
 /// `dry_run = true` skips all filesystem and in-memory mutation but still
 /// reports would-be counters in the result.
-// dead_code allow: production consumer wired in Task 3 of this plan.
-#[allow(dead_code)]
 pub(crate) fn skill_execute(
     plan: &RemoveSkillPlan,
     manifest: &mut Manifest,

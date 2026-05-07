@@ -516,10 +516,136 @@ pub fn run(cli: Cli) -> Result<()> {
                 }
             }
             cli::RemoveKind::Skill { name, yes } => {
-                // Stub for Phase 14 plan 14-05 to replace. Discards args
-                // intentionally — the real flow lands in remove::skill_*.
-                let _ = (name, yes);
-                anyhow::bail!("tome remove skill is not yet implemented — see Phase 14 plan 14-05");
+                // Load all the pieces skill_plan needs to compute the cleanup
+                // scope (D-B1): manifest entry, lockfile entry, and machine
+                // prefs memberships.
+                let manifest = manifest::load(paths.config_dir())?;
+                let lockfile = lockfile::load(paths.config_dir())?;
+                let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+                let machine_prefs = machine::load(&machine_path)?;
+
+                let plan = remove::skill_plan(
+                    &name,
+                    &config,
+                    &paths,
+                    &manifest,
+                    lockfile.as_ref(),
+                    &machine_prefs,
+                )?;
+                remove::skill_render_plan(&plan);
+
+                if cli.dry_run {
+                    println!("\n{}", style("Dry run — no changes made.").yellow());
+                    return Ok(());
+                }
+
+                // D-B3: confirmation default-no, --yes / -y bypasses. Mirrors
+                // the existing `tome remove dir` confirmation default.
+                if !yes {
+                    if !cli.no_input && std::io::stdin().is_terminal() {
+                        let confirmed = dialoguer::Confirm::new()
+                            .with_prompt(format!(
+                                "Are you sure you want to forget skill '{}'?",
+                                name
+                            ))
+                            .default(false)
+                            .interact()?;
+                        if !confirmed {
+                            println!("Aborted.");
+                            return Ok(());
+                        }
+                    } else {
+                        anyhow::bail!(
+                            "tome remove skill requires confirmation — use --yes in non-interactive mode"
+                        );
+                    }
+                }
+
+                let mut manifest = manifest;
+                let mut lockfile = lockfile;
+                let mut machine_prefs = machine_prefs;
+                let result = remove::skill_execute(
+                    &plan,
+                    &mut manifest,
+                    &mut lockfile,
+                    &mut machine_prefs,
+                    false,
+                )?;
+
+                // SAFE-01 grouped partial-failure summary BEFORE any save call.
+                // skill_execute deliberately leaves manifest/lockfile/machine_prefs
+                // unchanged on partial failure (matches the dir-flavour I2/I3
+                // retention semantic), so returning here without saving keeps
+                // disk state consistent with in-memory state for retry.
+                if !result.failures.is_empty() {
+                    let k = result.failures.len();
+                    eprintln!(
+                        "{} {} operations failed during remove of skill '{}' — \
+                         in-memory state retained so you can retry after addressing these. \
+                         Run {} after resolving:",
+                        style("⚠").yellow(),
+                        k,
+                        name,
+                        style("`tome doctor`").bold(),
+                    );
+                    for kind in remove::RemoveSkillFailureKind::ALL {
+                        let group: Vec<&remove::RemoveSkillFailure> =
+                            result.failures.iter().filter(|f| f.kind == kind).collect();
+                        if group.is_empty() {
+                            continue;
+                        }
+                        eprintln!("  {} ({}):", kind.label(), group.len());
+                        for f in group {
+                            eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+                        }
+                    }
+                    return Err(anyhow::anyhow!(
+                        "tome remove skill completed with {k} failures"
+                    ));
+                }
+
+                // D-B1 atomic-save chain: manifest + lockfile + machine.toml
+                // (each uses temp+rename internally).
+                manifest::save(&manifest, paths.config_dir())?;
+                if let Some(lf) = &lockfile {
+                    lockfile::save(lf, paths.config_dir())?;
+                }
+                machine::save(&machine_prefs, &machine_path)?;
+
+                // Success banner. Reports each step that actually cleaned
+                // something so the user sees the full scope of the operation
+                // (library, symlinks, lockfile, machine.toml). Counters that
+                // were no-ops (e.g. skill had no lockfile entry) are omitted.
+                let mut parts: Vec<String> = Vec::new();
+                if result.library_removed {
+                    parts.push("library".to_string());
+                }
+                if result.symlinks_removed > 0 {
+                    parts.push(format!("{} symlinks", result.symlinks_removed));
+                }
+                if result.lockfile_entry_removed {
+                    parts.push("lockfile entry".to_string());
+                }
+                if result.machine_disabled_removed {
+                    parts.push("machine.toml disabled".to_string());
+                }
+                if result.per_directory_cleanups > 0 {
+                    parts.push(format!(
+                        "{} per-directory entries",
+                        result.per_directory_cleanups
+                    ));
+                }
+                let summary = if parts.is_empty() {
+                    "manifest entry only (nothing else to clean)".to_string()
+                } else {
+                    parts.join(", ")
+                };
+                println!(
+                    "\n{} Forgot skill '{}' — cleaned: {}.",
+                    style("✓").green(),
+                    name,
+                    summary,
+                );
             }
         },
         Command::Reassign { skill, to, force } => {
