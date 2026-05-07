@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 14-04-reassign-unowned-input-PLAN.md
-last_updated: "2026-05-07T13:31:05.004Z"
+stopped_at: Completed 14-05-remove-skill-PLAN.md
+last_updated: "2026-05-07T13:50:18.884Z"
 last_activity: 2026-05-07
 progress:
   total_phases: 7
   completed_phases: 3
   total_plans: 22
-  completed_plans: 20
+  completed_plans: 21
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 14 (unowned-library-lifecycle) — EXECUTING
-Plan: 6 of 8
+Plan: 7 of 8
 Status: Ready to execute
 Last activity: 2026-05-07
 
@@ -74,6 +74,7 @@ Historical decisions are archived in:
 - [Phase 14-unowned-library-lifecycle]: Plan 14-07 (doctor unowned section): DoctorReport.unowned_skills field added in parallel to library_issues/directory_issues/config_issues; total_issues() body unchanged (D-D3 contract pinned by test); render_unowned_skills helper uses tabled NAME/LAST-KNOWN SOURCE/SYNCED columns mirroring 14-06 status renderer; manifest read failure degrades to empty Vec to avoid double-reporting (library_issues already surfaces corrupted-manifest errors); JSON shape stable (no skip_serializing_if). 4 new tests + 1 existing literal updated; 31/31 doctor tests pass.
 - [Phase 14-unowned-library-lifecycle]: Plan 14-06 (status unowned section): pure formatter format_unowned_section returns Option<String> (None=empty/omit, Some=heading+table) so rendering is unit-testable without stdout capture; manifest read failure in gather() degrades to empty Unowned set (already surfaced via library_count.error); JSON shape stable with explicit empty array for empty unowned set (no skip_serializing_if).
 - [Phase 14-unowned-library-lifecycle]: Plan 14-04: reassign::plan accepts Unowned input (D-API-1 stub deleted); D-A1 content-hash collision check (refuses different-content unless --force) + D-A2 target-only role rejection (refuses !is_discovery destinations); execute() clears previous_source on re-anchor (D-C1 closure). Fork's --force now also bypasses D-A1 (single shared semantic). Test fixture local-target switched from role=target to role=synced.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-05 (UNOWN-02): RemoveSkillFailureKind kept as separate enum from FailureKind (different failure modes); manifest mutation runs last in in-memory mutation sequence so retry still finds entry on panic; success banner enumerates only steps that actually cleaned something to reduce noise; partial-failure path retains in-memory state and skips all save() calls (I2/I3 retention parity with dir-flavour).
 
 ### v0.10 design context (consume during planning)
 
@@ -112,6 +113,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-07T13:31:05.000Z
-Stopped at: Completed 14-04-reassign-unowned-input-PLAN.md
+Last session: 2026-05-07T13:50:18.881Z
+Stopped at: Completed 14-05-remove-skill-PLAN.md
 Resume file: None
