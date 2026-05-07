@@ -47,6 +47,7 @@ pub(crate) mod relocate;
 pub(crate) mod remove;
 pub(crate) mod skill;
 pub(crate) mod status;
+pub(crate) mod summary;
 pub(crate) mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
