@@ -497,12 +497,30 @@ fn apply_drift_and_missing(
         match adapter.update(&c.registry_id) {
             Ok(()) => {
                 if let Some(entry) = working_lockfile.skills.get_mut(c.name.as_str()) {
-                    if let Ok(new_hash) =
-                        manifest::hash_directory(&library_dir.join(c.name.as_str()))
-                    {
-                        entry.content_hash = new_hash;
+                    // #513: surface readback errors instead of swallowing.
+                    // Previously `if let Ok(...)` silently kept the stale
+                    // pre-update hash on re-hash failure, producing a fake-
+                    // drift loop on every subsequent sync (Phase 13 D-01
+                    // makes content_hash mismatch the drift trigger).
+                    match manifest::hash_directory(&library_dir.join(c.name.as_str())) {
+                        Ok(h) => entry.content_hash = h,
+                        Err(e) => eprintln!(
+                            "warning: post-update hash_directory({}) failed: {e:#} — \
+                             leaving lockfile content_hash unchanged",
+                            c.name.as_str()
+                        ),
                     }
-                    entry.version = adapter.current_version(&c.registry_id).ok().flatten();
+                    // #513: previously `.ok().flatten()` collapsed both
+                    // Err(_) and Ok(None) into None, silently nulling the
+                    // lockfile version after a successful apply.
+                    match adapter.current_version(&c.registry_id) {
+                        Ok(v) => entry.version = v,
+                        Err(e) => eprintln!(
+                            "warning: post-update current_version({}) failed: {e:#} — \
+                             leaving lockfile version field unchanged",
+                            c.registry_id
+                        ),
+                    }
                 }
             }
             Err(e) => {
@@ -523,12 +541,19 @@ fn apply_drift_and_missing(
         match adapter.install(&c.registry_id) {
             Ok(()) => {
                 if let Some(entry) = working_lockfile.skills.get_mut(c.name.as_str()) {
-                    if let Ok(new_hash) =
-                        manifest::hash_directory(&library_dir.join(c.name.as_str()))
-                    {
-                        entry.content_hash = new_hash;
+                    // #513: do NOT recompute content_hash here — for
+                    // MissingFromMachine, the library copy doesn't exist
+                    // yet (discover/consolidate run AFTER reconcile in
+                    // lib.rs::sync). The post-distribute lockfile regen
+                    // records the correct hash once consolidation has run.
+                    match adapter.current_version(&c.registry_id) {
+                        Ok(v) => entry.version = v,
+                        Err(e) => eprintln!(
+                            "warning: post-install current_version({}) failed: {e:#} — \
+                             leaving lockfile version field unchanged",
+                            c.registry_id
+                        ),
                     }
-                    entry.version = adapter.current_version(&c.registry_id).ok().flatten();
                 }
             }
             Err(e) => {
