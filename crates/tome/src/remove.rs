@@ -358,7 +358,11 @@ pub(crate) fn execute(
     if !dry_run && failures.is_empty() {
         for skill_name in &plan.skills {
             if let Some(entry) = manifest.skills_get_mut(skill_name) {
-                entry.source_name = None;
+                // Per D-C1 (Phase 14, transition site 2): capture
+                // previous_source before flipping to Unowned so the user can
+                // see the original owner name in `tome status` after this
+                // directory is gone from config.
+                entry.previous_source = entry.source_name.take();
                 library_entries_transitioned_to_unowned += 1;
             }
         }
@@ -627,6 +631,23 @@ mod tests {
                 .directories
                 .contains_key(&DirectoryName::new("test-source").unwrap()),
             "config entry removed on full success"
+        );
+    }
+
+    #[test]
+    fn execute_records_previous_source_on_unowned_transition() {
+        let (_tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        let result = execute(&p, &mut config, &mut manifest, false).unwrap();
+        assert_eq!(result.library_entries_transitioned_to_unowned, 1);
+
+        let entry = manifest.get("my-skill").unwrap();
+        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.previous_source,
+            Some(DirectoryName::new("test-source").unwrap()),
+            "previous_source must record the original owner per D-C1"
         );
     }
 

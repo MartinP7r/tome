@@ -979,7 +979,10 @@ fn apply_edit_decisions(
             reconcile::EditDecision::Fork => {
                 if let Some(entry) = manifest.skills_get_mut(edit.name.as_str()) {
                     entry.managed = false;
-                    entry.source_name = None;
+                    // Per D-C1 (Phase 14, transition site 3): capture
+                    // previous_source before clearing source_name. Closes the
+                    // Phase 13 D-13 lossy fork-in-place gap.
+                    entry.previous_source = entry.source_name.take();
                     mutated = true;
                 }
             }
@@ -1934,6 +1937,56 @@ mod tests {
         assert!(
             target.path().join("disabled-skill").is_symlink(),
             "dry-run should not actually remove"
+        );
+    }
+
+    // -- apply_edit_decisions tests (Phase 14 / D-C1 transition site 3) --
+
+    #[test]
+    fn apply_edit_decisions_fork_records_previous_source() {
+        // Build a minimal manifest with one Owned managed skill and exercise
+        // apply_edit_decisions with EditDecision::Fork — verify the manifest
+        // entry transitions to Unowned (managed=false, source_name=None) AND
+        // captures previous_source per D-C1 / Phase 13 D-13 closure.
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library).unwrap();
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+
+        let mut manifest = manifest::Manifest::default();
+        manifest.insert(
+            discover::SkillName::new("plug").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/plug"),
+                config::DirectoryName::new("claude-plugins").unwrap(),
+                validation::test_hash("h"),
+                true, // managed
+            ),
+        );
+        manifest::save(&manifest, paths.config_dir()).unwrap();
+
+        // Build a ReconcileReport with one Edited entry and Fork decision.
+        let report = reconcile::ReconcileReport {
+            edited: vec![reconcile::Edited {
+                name: discover::SkillName::new("plug").unwrap(),
+                old_source: config::DirectoryName::new("claude-plugins").unwrap(),
+                old_version: Some("1.0.0".to_string()),
+            }],
+            edit_decisions: vec![reconcile::EditDecision::Fork],
+            ..Default::default()
+        };
+
+        apply_edit_decisions(&report, &paths, false).unwrap();
+
+        let reloaded = manifest::load(paths.config_dir()).unwrap();
+        let entry = reloaded.get("plug").unwrap();
+        assert_eq!(entry.source_name, None, "fork-in-place clears source_name");
+        assert!(!entry.managed, "fork-in-place clears managed");
+        assert_eq!(
+            entry.previous_source,
+            Some(config::DirectoryName::new("claude-plugins").unwrap()),
+            "fork-in-place must record previous_source per D-C1 / Phase 13 D-13 closure"
         );
     }
 

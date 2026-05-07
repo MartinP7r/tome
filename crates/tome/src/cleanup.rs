@@ -112,9 +112,14 @@ pub fn cleanup_library(
             );
         }
         if !dry_run {
+            // Per D-C1 (Phase 14): capture previous_source before clearing
+            // source_name so tome status / tome doctor can render a clean
+            // directory name in the Unowned section instead of falling back
+            // to source_path. The .take() pattern atomically moves the old
+            // value into previous_source and leaves source_name = None.
             // skills_get_mut is provided by Plan 11-01 in manifest.rs.
             if let Some(entry) = manifest.skills_get_mut(name.as_str()) {
-                entry.source_name = None;
+                entry.previous_source = entry.source_name.take();
             }
         }
         result.transitioned_to_unowned += 1;
@@ -704,6 +709,45 @@ mod tests {
         );
         assert!(manifest.contains_key("orphan"));
         assert!(manifest.get("orphan").unwrap().source_name.is_none());
+    }
+
+    #[test]
+    fn cleanup_case1_records_previous_source() {
+        let library = TempDir::new().unwrap();
+        let skill_dir = library.path().join("orphan");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/removed/orphan"),
+                crate::config::DirectoryName::new("removed-source").unwrap(),
+                crate::validation::test_hash("h"),
+                false,
+            ),
+        );
+
+        let config = empty_config();
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            &config,
+            false,
+            false,
+            true,
+        )
+        .unwrap();
+        assert_eq!(result.transitioned_to_unowned, 1);
+        let entry = manifest.get("orphan").unwrap();
+        assert_eq!(entry.source_name, None, "source_name cleared");
+        assert_eq!(
+            entry.previous_source,
+            Some(crate::config::DirectoryName::new("removed-source").unwrap()),
+            "previous_source must record the original owner per D-C1"
+        );
     }
 
     #[test]
