@@ -524,13 +524,7 @@ pub fn run(cli: Cli) -> Result<()> {
         },
         Command::Reassign { skill, to, force } => {
             let mut manifest = manifest::load(paths.config_dir())?;
-            // force flag is consumed by reassign::plan in 14-04 (Phase 14
-            // D-A1). Currently a placeholder; the call below still passes
-            // is_fork=false. 14-04 changes reassign::plan's signature to
-            // accept force.
-            // 14-04 will replace this `false` with `force` once Task 2 lands.
-            let _ = force;
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false, false)?;
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false, force)?;
             reassign::render_plan(&plan);
 
             let target_dir_path = config
@@ -570,10 +564,12 @@ pub fn run(cli: Cli) -> Result<()> {
         }
         Command::Fork { skill, to, force } => {
             let mut manifest = manifest::load(paths.config_dir())?;
-            // Task 2 wires `force` here too (Fork shares the reassign::plan
-            // path; passing `false` for Task 1 keeps Fork's pre-Phase-14
-            // behaviour intact).
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true, false)?;
+            // Phase 14 D-A1: Fork shares the reassign::plan path, so Fork's
+            // existing --force flag (skip-confirmation) now also bypasses
+            // the D-A1 different-content collision refusal. The user's
+            // mental model — "--force on fork bypasses safety checks" —
+            // still holds; the surface is just slightly bigger.
+            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true, force)?;
             reassign::render_plan(&plan);
 
             if !force {

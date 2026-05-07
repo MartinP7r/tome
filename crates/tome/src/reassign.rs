@@ -42,6 +42,11 @@ pub(crate) struct ReassignPlan {
     pub is_fork: bool,
     /// Bypass D-A1 different-content collision refusal. Same-content
     /// collisions always take the Relink path regardless.
+    ///
+    /// Stored for introspection (e.g. `p.force` in unit tests) — production
+    /// callers consume the flag inside `plan()` itself when deciding whether
+    /// to bail on a different-content collision.
+    #[allow(dead_code)]
     pub force: bool,
 }
 
@@ -221,7 +226,15 @@ pub(crate) fn execute(
 
     // Update manifest: set source_name = Some(to_directory), clear
     // previous_source (D-C1 closure: the skill is owned again). Works for
-    // both Owned→Owned (today) and Unowned→Owned (D-API-1) starting states.
+    // both Owned→Owned (today, via `update_source_name`) and
+    // Unowned→Owned (D-API-1, via `skills_get_mut`) starting states.
+    //
+    // We try `update_source_name` first — it's the public API for the
+    // common Owned→Owned case. If the entry is Unowned (returns false),
+    // we fall through to `skills_get_mut` to set `source_name` directly.
+    // Either path then uses `skills_get_mut` once more to clear
+    // `previous_source` per D-C1.
+    let _ = manifest.update_source_name(plan.skill_name.as_str(), &plan.to_directory);
     let entry = manifest
         .skills_get_mut(plan.skill_name.as_str())
         .ok_or_else(|| {
@@ -531,8 +544,7 @@ mod tests {
             false,
         );
         let err = result
-            .err()
-            .expect("must reject target-only role per D-A2")
+            .expect_err("must reject target-only role per D-A2")
             .to_string();
         assert!(
             err.contains("target-only"),
@@ -578,8 +590,7 @@ mod tests {
             false,
             false,
         )
-        .err()
-        .expect("must refuse different-content collision per D-A1")
+        .expect_err("must refuse different-content collision per D-A1")
         .to_string();
         assert!(err.contains("with different content"), "got: {err}");
         assert!(err.contains("Use --force"), "got: {err}");

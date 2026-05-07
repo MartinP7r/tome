@@ -4305,7 +4305,11 @@ fn reassign_test_env(tmp: &TempDir) {
     std::fs::create_dir_all(&library_dir).unwrap();
 
     let config_content = format!(
-        "library_dir = \"{}\"\n\n[directories.local-source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.local-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+        // local-target uses `synced` role rather than `target` — Phase 14
+        // D-A2 refuses reassign into target-only directories (a target-only
+        // dir doesn't get rediscovered on next sync). `synced` participates
+        // in both discovery and distribution, so reassign succeeds.
+        "library_dir = \"{}\"\n\n[directories.local-source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.local-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"synced\"\n",
         library_dir.display(),
         source_dir.display(),
         target_dir.display()
