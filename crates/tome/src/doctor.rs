@@ -51,9 +51,18 @@ pub struct DoctorReport {
     pub library_issues: Vec<DiagnosticIssue>,
     pub directory_issues: Vec<DirectoryDiagnostic>,
     pub config_issues: Vec<DiagnosticIssue>,
+    /// Unowned skills (UNOWN-03 / D-D3). INFORMATIONAL section — these
+    /// entries do NOT contribute to `total_issues` and do NOT affect
+    /// `tome doctor` exit code. They surface in text rendering as a
+    /// parallel "Unowned skills" section after the issue checks.
+    pub unowned_skills: Vec<crate::summary::SkillSummary>,
 }
 
 impl DoctorReport {
+    /// Sum of actionable diagnostic issues. Per D-D3, `unowned_skills`
+    /// is INTENTIONALLY excluded — Unowned is an informational state
+    /// (the user removed a directory), not a malfunction. `tome doctor`
+    /// exit code is unaffected by the Unowned set.
     pub fn total_issues(&self) -> usize {
         self.library_issues.len()
             + self
@@ -77,6 +86,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
             library_issues: Vec::new(),
             directory_issues: Vec::new(),
             config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
         });
     }
 
@@ -94,11 +104,25 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
 
     let config_issues = check_config(config)?;
 
+    // UNOWN-03 / D-D3: collect Unowned skills from the manifest.
+    // Manifest read errors degrade gracefully to an empty Vec — the
+    // separate library_issues section reports the underlying read
+    // failure if there is one (see `check_library`).
+    let unowned_skills = match manifest::load(paths.config_dir()) {
+        Ok(m) => m
+            .iter()
+            .filter(|(_, e)| e.source_name.is_none())
+            .map(|(n, e)| crate::summary::SkillSummary::from_entry(n, e))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
     Ok(DoctorReport {
         configured: true,
         library_issues,
         directory_issues,
         config_issues,
+        unowned_skills,
     })
 }
 
@@ -142,6 +166,11 @@ pub fn diagnose(
 
     println!("{}", style("Checking config...").bold());
     render_issues(&report.config_issues, "config");
+
+    // UNOWN-03 / D-D3: parallel informational section. Does NOT affect
+    // `total_issues` or `tome doctor` exit code. Section omits cleanly
+    // when the Unowned set is empty.
+    render_unowned_skills(&report.unowned_skills);
 
     let total = report.total_issues();
 
@@ -427,6 +456,48 @@ fn render_issues_for_directory(name: &str, issues: &[DiagnosticIssue], override_
             println!("  {} {}: {}", marker, display_name, issue.message);
         }
     }
+}
+
+/// Render the Unowned skills section (UNOWN-03 / D-D3 / D-D1).
+///
+/// INFORMATIONAL — this section is parallel to library/directory/config
+/// issue sections. It does NOT contribute to `DoctorReport::total_issues`
+/// and does NOT affect `tome doctor` exit code. Mirrors the column
+/// layout used by `tome status` (D-D1: NAME / LAST-KNOWN SOURCE / SYNCED).
+/// Section omits cleanly when the Unowned set is empty.
+fn render_unowned_skills(unowned: &[crate::summary::SkillSummary]) {
+    use tabled::settings::{Modify, Style, object::Rows};
+
+    if unowned.is_empty() {
+        return;
+    }
+
+    println!();
+    println!("{} ({}):", style("Unowned skills").bold(), unowned.len());
+    let mut rows: Vec<[String; 3]> = Vec::with_capacity(unowned.len() + 1);
+    rows.push([
+        "NAME".to_string(),
+        "LAST-KNOWN SOURCE".to_string(),
+        "SYNCED".to_string(),
+    ]);
+    for s in unowned {
+        // D-D1: render previous_source when present (D-C1), fall back to
+        // source_path_display (D-C2) for pre-Phase-14 Unowned entries.
+        let last_known = s
+            .previous_source
+            .clone()
+            .unwrap_or_else(|| s.source_path_display.clone());
+        rows.push([s.name.clone(), last_known, s.synced_at.clone()]);
+    }
+    let table = tabled::Table::from_iter(rows)
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                style(s).bold().to_string()
+            })),
+        )
+        .to_string();
+    println!("{table}");
 }
 
 // -- Check functions (return structured data) --
@@ -1315,6 +1386,7 @@ mod tests {
                 severity: IssueSeverity::Warning,
                 message: "cfg".to_string(),
             }],
+            unowned_skills: Vec::new(),
         };
         // 1 (lib) + 1 (a) + 2 (b) + 1 (cfg) = 5
         assert_eq!(report.total_issues(), 5);
@@ -1348,5 +1420,112 @@ mod tests {
         let after = manifest::load(lib.path()).unwrap();
         assert!(after.contains_key("healthy-skill"));
         assert!(skill_dir.exists());
+    }
+
+    // -- UNOWN-03 / D-D3: unowned_skills section --
+
+    /// Build a tome_home directory with a manifest containing the given
+    /// (name, source_name) pairs. `source_name = None` produces an
+    /// Unowned entry with `previous_source = Some("removed")`.
+    fn write_manifest_with(entries: Vec<(&str, Option<&str>)>) -> TempDir {
+        let tome_home = TempDir::new().unwrap();
+        let library = tome_home.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let mut m = manifest::Manifest::default();
+        for (name, source_opt) in entries {
+            std::fs::create_dir_all(library.join(name)).unwrap();
+            let entry = match source_opt {
+                Some(src) => manifest::SkillEntry::new(
+                    PathBuf::from(format!("/tmp/src/{name}")),
+                    DirectoryName::new(src).unwrap(),
+                    crate::validation::test_hash(name),
+                    false,
+                ),
+                None => manifest::SkillEntry::new_unowned(
+                    PathBuf::from(format!("/tmp/old/{name}")),
+                    crate::validation::test_hash(name),
+                    false,
+                    Some(DirectoryName::new("removed").unwrap()),
+                ),
+            };
+            m.insert(crate::discover::SkillName::new(name).unwrap(), entry);
+        }
+        manifest::save(&m, tome_home.path()).unwrap();
+        tome_home
+    }
+
+    #[test]
+    fn check_populates_unowned_skills() {
+        let tome_home = write_manifest_with(vec![("kept", Some("active")), ("orphan", None)]);
+        let library = tome_home.path().join("library");
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+
+        let report = check(&config, &paths).unwrap();
+        assert_eq!(report.unowned_skills.len(), 1);
+        assert_eq!(report.unowned_skills[0].name, "orphan");
+        assert_eq!(
+            report.unowned_skills[0].previous_source,
+            Some("removed".to_string()),
+            "previous_source must be surfaced via SkillSummary projection"
+        );
+    }
+
+    #[test]
+    fn unowned_skills_do_not_contribute_to_total_issues() {
+        let tome_home = write_manifest_with(vec![("orphan-1", None), ("orphan-2", None)]);
+        let library = tome_home.path().join("library");
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+
+        let report = check(&config, &paths).unwrap();
+        assert_eq!(report.unowned_skills.len(), 2, "fixture sanity");
+        assert_eq!(
+            report.total_issues(),
+            0,
+            "unowned skills must NOT contribute to total_issues per D-D3"
+        );
+    }
+
+    #[test]
+    fn check_empty_unowned_skills_when_all_owned() {
+        let tome_home = write_manifest_with(vec![("kept", Some("active"))]);
+        let library = tome_home.path().join("library");
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+
+        let report = check(&config, &paths).unwrap();
+        assert!(
+            report.unowned_skills.is_empty(),
+            "no Unowned entries in manifest → empty unowned_skills"
+        );
+    }
+
+    #[test]
+    fn json_doctor_always_includes_unowned_skills_field() {
+        // Stable JSON shape: the key must be present even when the
+        // Unowned set is empty (no skip_serializing_if). Programmatic
+        // consumers can rely on the field existing.
+        let report = DoctorReport {
+            configured: false,
+            library_issues: Vec::new(),
+            directory_issues: Vec::new(),
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(
+            json.contains("\"unowned_skills\""),
+            "JSON must include 'unowned_skills' key for stable shape: {json}"
+        );
     }
 }
