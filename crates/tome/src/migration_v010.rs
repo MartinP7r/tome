@@ -203,14 +203,14 @@ pub(crate) fn render_plan(plan: &MigrationPlan) {
         return;
     }
 
-    let convertable = plan.entries.iter().filter(|e| e.source_reachable).count();
-    let broken = plan.entries.len() - convertable;
+    let convertible = plan.entries.iter().filter(|e| e.source_reachable).count();
+    let broken = plan.entries.len() - convertible;
 
     println!(
         "  Will convert {} symlink{} → real directory cop{}.",
-        style(convertable).bold(),
-        if convertable == 1 { "" } else { "s" },
-        if convertable == 1 { "y" } else { "ies" }
+        style(convertible).bold(),
+        if convertible == 1 { "" } else { "s" },
+        if convertible == 1 { "y" } else { "ies" }
     );
     if broken > 0 {
         println!(
@@ -424,7 +424,7 @@ fn render_result(result: &MigrationResult) {
 ///
 /// Per D-05, returns Ok(MigrationResult) regardless of partial failure;
 /// the caller in `lib.rs` interprets `is_partial_or_failed()` and exits
-/// with code 1 on partial. Hard errors (unparseable manifest, etc.)
+/// with code 1 on partial. Hard errors (unparsable manifest, etc.)
 /// surface as Err.
 pub(crate) fn run_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<MigrationResult> {
     if dry_run {
