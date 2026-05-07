@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Phase 14 context gathered
-last_updated: "2026-05-07T06:11:47.529Z"
-last_activity: 2026-05-05
+stopped_at: Completed 14-02-skill-summary-type-PLAN.md
+last_updated: "2026-05-07T12:49:56.134Z"
+last_activity: 2026-05-07
 progress:
   total_phases: 7
   completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
+  total_plans: 22
+  completed_plans: 15
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 13 — lockfile-authoritative-sync (executing)
+**Current focus:** Phase 14 — unowned-library-lifecycle
 
 ## Current Position
 
-Phase: 14
-Plan: Not started
+Phase: 14 (unowned-library-lifecycle) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-05-05
+Last activity: 2026-05-07
 
 **v0.10 phase shape (Phases 11–17):**
 
@@ -68,6 +68,7 @@ Historical decisions are archived in:
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-03 (reconcile module): pub fn reconcile_lockfile + ReconcileClass (4 variants) + ReconcileReport + 7 internal helpers + 25 unit tests in crates/tome/src/reconcile.rs (1620 LOC). Implements RECON-01..05 + Pitfalls 2/4/5 + OQ-3/4. D-22 partial-failure invariant verified by partial-failure test. Plan 13-04 wires the consumer (replaces install.rs reconcile_managed_plugins call site).
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-04 (call-site wiring + install.rs deletion): lib.rs::sync invokes reconcile::reconcile_lockfile through ClaudeMarketplaceAdapter (D-11/D-18); legacy install.rs (312 LOC) deleted; D-13 fork in-place flip applied at the manifest call site via apply_edit_decisions; sync exits non-zero via anyhow::bail when reconcile install_failures non-empty (RESEARCH OQ-6); revert decision parked behind a warning (D-16 safety guarantee preserved, dedicated revert path is a Phase 14 follow-up). RECON-01..05 fully wired.
 - [Phase 13]: Plan 13-05 (CLI sync reconcile integration tests): 10 end-to-end integration tests in tests/cli_sync_reconcile.rs covering RECON-01..05 non-interactive flow paths via assert_cmd; D-20 verbatim error contract is now CI-asserted; dev-dep self-reference (tome = { path = ".", features = ["test-support"] }) keeps marketplace::testing reachable for future binary-level mock injection. Two plan-spec bugs auto-fixed (Rule 1): role naming (distribution → target/managed) + missing library_dir in fixtures.
+- [Phase 14]: SkillSummary lives in dedicated summary.rs; previous_source is Option<String> (display projection); JSON shape stable with explicit null for None
 
 ### v0.10 design context (consume during planning)
 
@@ -106,6 +107,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-07T06:11:47.519Z
-Stopped at: Phase 14 context gathered
-Resume file: .planning/phases/14-unowned-library-lifecycle/14-CONTEXT.md
+Last session: 2026-05-07T12:49:56.129Z
+Stopped at: Completed 14-02-skill-summary-type-PLAN.md
+Resume file: None
