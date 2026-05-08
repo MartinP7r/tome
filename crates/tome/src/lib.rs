@@ -1687,8 +1687,13 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         // Also clean up symlinks for disabled skills (global + per-directory).
         // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
         // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
-        let (n, excluded) =
-            cleanup_disabled_from_target(skills_dir, paths.library_dir(), name, &machine_prefs, dry_run)?;
+        let (n, excluded) = cleanup_disabled_from_target(
+            skills_dir,
+            paths.library_dir(),
+            name,
+            &machine_prefs,
+            dry_run,
+        )?;
         removed_from_targets += n;
         excluded_skills.extend(excluded);
     }
@@ -2456,7 +2461,11 @@ mod tests {
                 .unwrap();
         assert_eq!(removed, 1);
         assert!(!target.path().join("excluded-here").exists());
-        assert_eq!(excluded.len(), 1, "per-dir disable should produce one Bucket C entry");
+        assert_eq!(
+            excluded.len(),
+            1,
+            "per-dir disable should produce one Bucket C entry"
+        );
         assert_eq!(excluded[0].name.as_str(), "excluded-here");
         assert_eq!(
             excluded[0].directory.as_ref().map(|d| d.as_str()),
@@ -2491,7 +2500,11 @@ mod tests {
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
         assert_eq!(removed, 1);
-        assert_eq!(excluded.len(), 1, "double-disable should still produce one entry");
+        assert_eq!(
+            excluded.len(),
+            1,
+            "double-disable should still produce one entry"
+        );
         assert!(
             excluded[0].directory.is_none(),
             "global takes precedence — directory should be None"
