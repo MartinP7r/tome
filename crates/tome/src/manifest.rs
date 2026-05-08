@@ -73,6 +73,12 @@ impl Manifest {
     /// `false` if missing or already Unowned. Preserves `content_hash`,
     /// `synced_at`, and other fields. Does NOT transition Unowned → Owned —
     /// callers wanting that semantic should re-insert with `SkillEntry::new`.
+    ///
+    /// `dead_code` allow: the only production caller (`reassign::execute`)
+    /// migrated to a snapshot-based approach in HARD-19 (closes #430), but
+    /// the method is preserved as a public API surface for hand-edits and
+    /// is exercised by unit tests + the HARD-19 drift-test.
+    #[allow(dead_code)]
     pub fn update_source_name(&mut self, skill_name: &str, new_source: &DirectoryName) -> bool {
         if let Some(entry) = self.skills.get_mut(skill_name)
             && entry.source_name.is_some()

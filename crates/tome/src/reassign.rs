@@ -12,8 +12,9 @@ use console::style;
 
 use crate::config::{Config, DirectoryName};
 use crate::discover::SkillName;
-use crate::manifest::Manifest;
+use crate::manifest::{Manifest, SkillEntry};
 use crate::paths::TomePaths;
+use crate::validation::ContentHash;
 
 /// What needs to happen to reassign a skill.
 #[derive(Debug)]
@@ -22,6 +23,48 @@ pub(crate) enum ReassignAction {
     Relink,
     /// Skill not in target dir — copy from library, then update manifest.
     CopyAndRelink,
+}
+
+/// Filesystem and manifest state captured by `plan()` so that `execute()`
+/// never has to re-read the same data — eliminating the plan/execute drift
+/// risk per HARD-19 (closes #430).
+///
+/// All fields are observations made during `plan()`. Callers must NOT
+/// mutate this struct after construction; production callers treat it as
+/// an immutable witness.
+///
+/// Why "snapshot at plan, consume at execute": between the two phases a
+/// concurrent `tome` process or hand-edit could mutate the manifest or
+/// library. Reading once means execute() acts on a consistent view, even
+/// if the live state has drifted.
+///
+/// Field-level `dead_code` allows: `target_existed_at_plan`,
+/// `source_hash_at_plan`, and `target_hash_at_plan` are forensic
+/// observations captured for testability and future consumers (e.g.
+/// `tome doctor` could surface them). `execute()` only consumes
+/// `manifest_entry_at_plan` today; the other three are pinned by unit
+/// tests. Once a production consumer arrives the attrs come off.
+#[derive(Debug, Clone)]
+pub(crate) struct PreReassignState {
+    /// Manifest entry as observed at plan time. `None` only if the skill
+    /// is missing from the manifest — but `plan()` already bails in that
+    /// case, so production callers always see `Some`.
+    pub manifest_entry_at_plan: Option<SkillEntry>,
+    /// Whether `<target_dir>/<skill>/SKILL.md` existed at plan time.
+    /// Drives the Relink-vs-CopyAndRelink decision and the D-A1 collision
+    /// check.
+    #[allow(dead_code)]
+    pub target_existed_at_plan: bool,
+    /// Library-side content hash at plan time. Used for the D-A1 same-vs-
+    /// different content compare. Always `Some` when the library copy
+    /// exists (production path); `None` only on the bail path.
+    #[allow(dead_code)]
+    pub source_hash_at_plan: Option<ContentHash>,
+    /// Target-side content hash at plan time. `Some` when
+    /// `target_existed_at_plan` is true; `None` otherwise. The pair
+    /// (`source_hash`, `target_hash`) drives D-A1.
+    #[allow(dead_code)]
+    pub target_hash_at_plan: Option<ContentHash>,
 }
 
 /// Plan for reassigning or forking a skill.
@@ -48,6 +91,10 @@ pub(crate) struct ReassignPlan {
     /// to bail on a different-content collision.
     #[allow(dead_code)]
     pub force: bool,
+    /// Snapshot of the manifest + library + target state at plan time.
+    /// `execute()` consumes this rather than re-reading, closing the
+    /// plan/execute drift risk per HARD-19.
+    pub pre_state: PreReassignState,
 }
 
 /// Build a plan describing what the reassign/fork will do.
@@ -97,7 +144,13 @@ pub(crate) fn plan(
 
     let library_skill_path = paths.library_dir().join(skill_name);
 
-    let action = if target_skill_md.exists() {
+    // HARD-19: build the snapshot WHILE we make decisions. Each filesystem /
+    // manifest read flows into `pre_state` so `execute()` never re-reads.
+    let target_existed_at_plan = target_skill_md.exists();
+    let mut source_hash_at_plan: Option<ContentHash> = None;
+    let mut target_hash_at_plan: Option<ContentHash> = None;
+
+    let action = if target_existed_at_plan {
         // D-A1 (Phase 14): content-hash collision check. If the target
         // dir's <skill>/ already exists, hash both sides; same content =
         // Relink (manifest-only flip), different content = refuse unless
@@ -126,6 +179,8 @@ pub(crate) fn plan(
                 library_skill_path.display(),
             );
         };
+        target_hash_at_plan = Some(target_hash.clone());
+        source_hash_at_plan = Some(library_hash.clone());
 
         if target_hash == library_hash {
             ReassignAction::Relink
@@ -140,7 +195,29 @@ pub(crate) fn plan(
             );
         }
     } else {
+        // Library hash is still useful for the snapshot even on the
+        // CopyAndRelink path: it pins the content the eventual copy will
+        // be made from. If the library copy vanished after the manifest
+        // entry was inserted (corruption / hand-edit), bail before we
+        // commit to a plan we can't execute.
+        if library_skill_path.is_dir() {
+            source_hash_at_plan = Some(
+                crate::manifest::hash_directory(&library_skill_path).with_context(|| {
+                    format!(
+                        "failed to hash library skill {}",
+                        library_skill_path.display()
+                    )
+                })?,
+            );
+        }
         ReassignAction::CopyAndRelink
+    };
+
+    let pre_state = PreReassignState {
+        manifest_entry_at_plan: Some(entry.clone()),
+        target_existed_at_plan,
+        source_hash_at_plan,
+        target_hash_at_plan,
     };
 
     Ok(ReassignPlan {
@@ -151,6 +228,7 @@ pub(crate) fn plan(
         library_skill_path,
         is_fork,
         force,
+        pre_state,
     })
 }
 
@@ -186,6 +264,11 @@ pub(crate) fn render_plan(plan: &ReassignPlan) {
 }
 
 /// Execute the reassign/fork plan.
+///
+/// Per HARD-19 (closes #430): consume `plan.pre_state` rather than
+/// re-reading the manifest or library. The only writes here are the
+/// directory copy (for the CopyAndRelink action) and the manifest mutation;
+/// neither performs a fresh read that could disagree with `plan()`.
 pub(crate) fn execute(
     plan: &ReassignPlan,
     manifest: &mut Manifest,
@@ -217,34 +300,50 @@ pub(crate) fn execute(
         return Ok(());
     }
 
-    // Copy files if needed
+    // Copy files if needed.
     if matches!(plan.action, ReassignAction::CopyAndRelink) {
         let dest = target_dir_path.join(plan.skill_name.as_str());
         copy_dir_recursive(&plan.library_skill_path, &dest)
             .with_context(|| format!("failed to copy skill to {}", dest.display()))?;
     }
 
-    // Update manifest: set source_name = Some(to_directory), clear
-    // previous_source (D-C1 closure: the skill is owned again). Works for
-    // both Owned→Owned (today, via `update_source_name`) and
-    // Unowned→Owned (D-API-1, via `skills_get_mut`) starting states.
-    //
-    // We try `update_source_name` first — it's the public API for the
-    // common Owned→Owned case. If the entry is Unowned (returns false),
-    // we fall through to `skills_get_mut` to set `source_name` directly.
-    // Either path then uses `skills_get_mut` once more to clear
-    // `previous_source` per D-C1.
-    let _ = manifest.update_source_name(plan.skill_name.as_str(), &plan.to_directory);
-    let entry = manifest
-        .skills_get_mut(plan.skill_name.as_str())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "skill '{}' disappeared from manifest during reassignment",
-                plan.skill_name.as_str()
-            )
-        })?;
-    entry.source_name = Some(plan.to_directory.clone());
-    entry.previous_source = None;
+    // HARD-19: insert the planned post-state straight from the snapshot.
+    // The previous flow re-read the manifest entry via `update_source_name`
+    // (which checks the live `source_name`) and then mutated it. If the
+    // live manifest had drifted between plan() and execute(), the
+    // re-anchor would be applied on top of stale state. By starting from
+    // `plan.pre_state.manifest_entry_at_plan` (cloned at plan time) we
+    // set `source_name` and `previous_source` deterministically — every
+    // observation execute() needs comes from `plan.pre_state.<field>`,
+    // never from the live manifest or a fresh filesystem stat.
+    let mut planned_entry = plan.pre_state.manifest_entry_at_plan.clone().ok_or_else(|| {
+        anyhow::anyhow!(
+            "BUG: plan().pre_state.manifest_entry_at_plan was None for skill '{}'; \
+             plan() should bail before producing such a snapshot",
+            plan.skill_name.as_str()
+        )
+    })?;
+
+    // Defensive invariant: when `plan.pre_state.target_existed_at_plan` is
+    // true, the snapshot must also carry both content hashes — that pair is
+    // what plan() used for the D-A1 same-vs-different compare. A mismatch
+    // would mean the snapshot is internally inconsistent and execute must
+    // not silently proceed (the only expected mismatch path is the
+    // CopyAndRelink-with-no-target case, where target_hash is legitimately
+    // None and the assertion is skipped).
+    debug_assert!(
+        !plan.pre_state.target_existed_at_plan
+            || (plan.pre_state.source_hash_at_plan.is_some()
+                && plan.pre_state.target_hash_at_plan.is_some()),
+        "snapshot invariant violated: target_existed_at_plan implies both hashes"
+    );
+
+    // D-C1 closure: re-anchoring an Unowned skill clears previous_source;
+    // re-anchoring an Owned skill leaves no breadcrumb because the skill is
+    // owned again. Either way, previous_source becomes None.
+    planned_entry.source_name = Some(plan.to_directory.clone());
+    planned_entry.previous_source = None;
+    manifest.insert(plan.skill_name.clone(), planned_entry);
 
     Ok(())
 }
@@ -668,6 +767,175 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(p.action, ReassignAction::Relink));
+    }
+
+    // ---- HARD-19 read-once snapshot (closes #430) ---------------------
+    // The drift risk: between `plan()` and `execute()`, the manifest entry
+    // or library directory could be mutated by another tome process or by
+    // a hand-edit. `plan()` already inspects the manifest and computes
+    // content hashes — capturing that state in a `PreReassignState`
+    // snapshot means `execute()` consumes the snapshot rather than
+    // re-reading and silently drifting.
+
+    #[test]
+    fn pre_state_captured_at_plan_time() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        let config = make_config_with_dir(&tmp, "target-dir");
+
+        // Library has a real skill so plan() hashes it.
+        write_skill_in_dir(paths.library_dir(), "test-skill", "library content");
+
+        let mut manifest = Manifest::default();
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                DirectoryName::new("old-dir").unwrap(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let p = plan(
+            "test-skill",
+            "target-dir",
+            &config,
+            &paths,
+            &manifest,
+            false,
+            false,
+        )
+        .unwrap();
+
+        // Snapshot must capture the manifest entry observed at plan time.
+        let snap = &p.pre_state;
+        let entry = snap
+            .manifest_entry_at_plan
+            .as_ref()
+            .expect("plan() must capture the manifest entry");
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("old-dir").unwrap()),
+            "snapshot must mirror the manifest at plan time"
+        );
+
+        // Target dir does NOT have the skill yet (CopyAndRelink path), so
+        // pre_state.target_existed_at_plan must be false and target_hash None.
+        assert!(
+            !snap.target_existed_at_plan,
+            "target dir is empty at plan time"
+        );
+        assert!(snap.target_hash_at_plan.is_none());
+    }
+
+    #[test]
+    fn pre_state_captures_target_hash_when_target_skill_exists() {
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        let config = make_config_with_dir(&tmp, "target-dir");
+
+        // Both library and target have the same content (D-A1 Relink path).
+        write_skill_in_dir(paths.library_dir(), "test-skill", "same content");
+        let target_dir = tmp.path().join("target-dir");
+        write_skill_in_dir(&target_dir, "test-skill", "same content");
+
+        let mut manifest = Manifest::default();
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                DirectoryName::new("old-dir").unwrap(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let p = plan(
+            "test-skill",
+            "target-dir",
+            &config,
+            &paths,
+            &manifest,
+            false,
+            false,
+        )
+        .unwrap();
+        let snap = &p.pre_state;
+        assert!(
+            snap.target_existed_at_plan,
+            "target skill exists at plan time — must be captured"
+        );
+        let target_hash = snap
+            .target_hash_at_plan
+            .as_ref()
+            .expect("target hash must be captured when target exists");
+        let library_hash = snap
+            .source_hash_at_plan
+            .as_ref()
+            .expect("library hash must be captured");
+        assert_eq!(
+            target_hash, library_hash,
+            "Relink path → snapshot hashes must agree (D-A1)"
+        );
+    }
+
+    #[test]
+    fn execute_consumes_pre_state_not_live() {
+        // The drift contract: a manifest mutation between plan() and
+        // execute() must NOT change execute's behavior. execute()
+        // operates on the snapshot.
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        let config = make_config_with_dir(&tmp, "target-dir");
+
+        write_skill_in_dir(paths.library_dir(), "test-skill", "library content");
+
+        let mut manifest = Manifest::default();
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                DirectoryName::new("old-dir").unwrap(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let p = plan(
+            "test-skill",
+            "target-dir",
+            &config,
+            &paths,
+            &manifest,
+            false,
+            false,
+        )
+        .unwrap();
+
+        // Mutate the live manifest between plan() and execute(): change
+        // source_name to a totally different directory. execute() must
+        // still re-anchor the entry to `to_directory` (the planned target),
+        // not to the mutated value, because the snapshot pinned the
+        // pre-execute observation.
+        manifest.update_source_name("test-skill", &DirectoryName::new("other-dir").unwrap());
+
+        let target_path = tmp.path().join("target-dir");
+        execute(&p, &mut manifest, &target_path, false).unwrap();
+
+        // Final state must reflect the planned re-anchor — drift is closed.
+        let entry = manifest.get("test-skill").unwrap();
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("target-dir").unwrap()),
+            "execute must re-anchor to planned target, ignoring live mutations"
+        );
     }
 
     #[test]

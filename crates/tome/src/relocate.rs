@@ -375,6 +375,27 @@ fn is_cross_filesystem(src: &Path, dst: &Path) -> bool {
     }
 }
 
+/// Format the recovery hint shown when the post-copy `remove_dir_all` of
+/// the original library fails on the cross-fs path. HARD-18 (closes #416):
+/// the user is left with both the old (untouched) and new (just-copied)
+/// library directories on disk and needs guidance on which to keep and
+/// what to do next. Pure formatter for testability — see relocate::tests
+/// `cross_fs_recovery_hint_*`.
+///
+/// Follows the Phase 7 D-10 Conflict / Why / Suggestion template (same
+/// shape as `Config::validate()` errors and `migration_v010::Conflict`
+/// blocks) so users see a consistent voice across destructive-flow safety
+/// guards.
+fn cross_fs_recovery_hint(old_library: &Path, new_library: &Path) -> String {
+    format!(
+        "Conflict: relocate could not delete the original library after a cross-filesystem copy.\n\
+         Why: the new copy at {new} was created and verified, but removing the original at {old} failed (the copy itself succeeded — your data is safe in two places).\n\
+         Suggestion: verify the new library with `tome status` and `tome doctor`. Once you are satisfied, manually clean up the original with `rm -rf {old}` (or restore from {old} if you would rather keep the original location).",
+        old = old_library.display(),
+        new = new_library.display(),
+    )
+}
+
 /// Move the library across filesystems: copy preserving symlinks, verify, then delete old.
 fn move_cross_filesystem(plan: &RelocatePlan) -> Result<()> {
     // Copy
@@ -425,13 +446,25 @@ fn move_cross_filesystem(plan: &RelocatePlan) -> Result<()> {
         }
     }
 
-    // All verified -- delete old directory
-    std::fs::remove_dir_all(&plan.old_library_dir).with_context(|| {
-        format!(
-            "failed to remove old library directory {} after successful copy",
-            plan.old_library_dir.display()
-        )
-    })?;
+    // All verified -- delete old directory.
+    //
+    // HARD-18 (closes #416): on failure here we have an orphan copy at
+    // `old_library_dir` AND a verified copy at `new_library_dir`. Surface a
+    // Conflict / Why / Suggestion block to stderr so the user knows the
+    // copy succeeded, the original was preserved, and exactly what to do
+    // next. We still return the underlying error so the CLI exits non-zero.
+    if let Err(e) = std::fs::remove_dir_all(&plan.old_library_dir) {
+        eprintln!(
+            "{}",
+            cross_fs_recovery_hint(&plan.old_library_dir, &plan.new_library_dir)
+        );
+        return Err(e).with_context(|| {
+            format!(
+                "failed to remove old library directory {} after successful copy",
+                plan.old_library_dir.display()
+            )
+        });
+    }
 
     Ok(())
 }
@@ -971,6 +1004,115 @@ mod tests {
         assert!(
             result.is_none(),
             "Err arm must return None — pre-existing SAFE-03 regression guard"
+        );
+    }
+
+    // ---- HARD-18 cross-fs cleanup recovery hint (closes #416) -----------
+    // The cross-fs branch of `relocate::execute` keeps the original library
+    // intact while copying to the new location. If the post-copy
+    // `remove_dir_all` then fails, the user is left with an orphan copy and
+    // no obvious next step. HARD-18 surfaces a Phase 7 D-10 Conflict / Why
+    // / Suggestion block naming the orphan path so the user can clean up.
+    //
+    // The hint is implemented as a pure formatter so it can be unit-tested
+    // without needing to engineer a real EXDEV failure (real cross-fs
+    // setups in CI are flaky and usually require root). Same factoring as
+    // `warn_if_unreadable_symlink` above.
+
+    #[test]
+    fn cross_fs_recovery_hint_includes_three_label_block() {
+        let old = Path::new("/tmp/old-lib");
+        let new = Path::new("/Volumes/External/new-lib");
+        let hint = cross_fs_recovery_hint(old, new);
+        assert!(
+            hint.contains("Conflict:"),
+            "hint must label the conflict — Phase 7 D-10 template:\n{hint}"
+        );
+        assert!(
+            hint.contains("Why:"),
+            "hint must explain the why — Phase 7 D-10 template:\n{hint}"
+        );
+        assert!(
+            hint.contains("Suggestion:"),
+            "hint must offer a suggestion — Phase 7 D-10 template:\n{hint}"
+        );
+    }
+
+    #[test]
+    fn cross_fs_recovery_hint_names_orphan_path_and_destination() {
+        let old = Path::new("/tmp/old-lib");
+        let new = Path::new("/Volumes/External/new-lib");
+        let hint = cross_fs_recovery_hint(old, new);
+        // The user needs both paths to act on the hint.
+        assert!(
+            hint.contains("/tmp/old-lib"),
+            "hint must name the orphan source path so the user can rm -rf it:\n{hint}"
+        );
+        assert!(
+            hint.contains("/Volumes/External/new-lib"),
+            "hint must name the new library so the user can verify before deleting:\n{hint}"
+        );
+    }
+
+    #[test]
+    fn cross_fs_recovery_hint_label_order_matches_d10_template() {
+        let old = Path::new("/a");
+        let new = Path::new("/b");
+        let hint = cross_fs_recovery_hint(old, new);
+        let conflict = hint.find("Conflict:").expect("missing Conflict label");
+        let why = hint.find("Why:").expect("missing Why label");
+        let suggestion = hint.find("Suggestion:").expect("missing Suggestion label");
+        assert!(
+            conflict < why && why < suggestion,
+            "Phase 7 D-10 template requires Conflict → Why → Suggestion order, got: {hint}",
+        );
+    }
+
+    /// Regression-pin for HARD-18: the recovery hint is emitted only from
+    /// the cross-fs branch (`move_cross_filesystem`). The same-fs branch
+    /// uses `fs::rename` and physically cannot leave an orphan copy. A
+    /// structural test grep-pins the contract: only one call site, and it
+    /// lives next to the cross-fs `remove_dir_all`.
+    ///
+    /// Source-byte regression test follows the same pattern as v0.9
+    /// TEST-04 (regen_warnings deferred until after success banner).
+    #[test]
+    fn cross_fs_recovery_hint_is_invoked_only_from_cross_fs_branch() {
+        let src = include_str!("relocate.rs");
+        // Exclude the test module itself + the function definition so we
+        // count only production call sites.
+        let prod = src
+            .split_once("#[cfg(test)]")
+            .map(|(prod, _tests)| prod)
+            .expect("relocate.rs must contain a #[cfg(test)] block");
+        let prod_no_def = prod
+            .split_once("fn cross_fs_recovery_hint(")
+            .map(|(before, _after)| before)
+            .expect("cross_fs_recovery_hint definition must exist in production code");
+        let production_call_sites: usize = prod_no_def.matches("cross_fs_recovery_hint(").count();
+        assert_eq!(
+            production_call_sites, 0,
+            "production callers BEFORE the definition: pinned at 0 — calls must come AFTER the definition.",
+        );
+        let after_def = prod
+            .split_once("fn cross_fs_recovery_hint(")
+            .map(|(_before, after)| after)
+            .expect("split should not fail");
+        let post_def_call_sites: usize = after_def.matches("cross_fs_recovery_hint(").count();
+        assert_eq!(
+            post_def_call_sites, 1,
+            "expected exactly 1 production call to cross_fs_recovery_hint (in move_cross_filesystem), got {post_def_call_sites}; same-fs path must not invoke the hint.",
+        );
+        // And the call must live inside `move_cross_filesystem`, immediately
+        // before the `with_context` wrapping the orphan `remove_dir_all`.
+        let move_xfs = after_def
+            .split_once("fn move_cross_filesystem")
+            .map(|(_before, after)| after)
+            .expect("move_cross_filesystem must exist after the helper");
+        assert!(
+            move_xfs.contains("cross_fs_recovery_hint("),
+            "cross_fs_recovery_hint must be called from inside move_cross_filesystem; \
+             this regression-pins HARD-18's scope (same-fs branch never emits the hint).",
         );
     }
 
