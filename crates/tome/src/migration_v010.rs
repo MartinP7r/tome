@@ -530,6 +530,39 @@ fn copy_dir_recursive_resolving(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Confirm-or-abort gate before destructive migration (UX-02 D-UX02-1/-2).
+///
+/// Three-arm behaviour matrix:
+/// - `yes=true`               → `Ok(true)` — skip prompt, proceed
+///   (CI-friendly; mirrors Phase 14 D-B3 `tome remove skill --yes`).
+/// - `yes=false, no_input=true`  → `Err(_)` — refuses to silently mutate
+///   under `--no-input`. Phase 7 D-10 Conflict/Why/Suggestion shape.
+/// - `yes=false, no_input=false` → `dialoguer::Confirm::default(false)`;
+///   pressing anything other than `y` aborts cleanly (no mutation).
+///
+/// The interactive arm is intentionally not unit-tested here (dialoguer
+/// requires a TTY); the abort-leaves-library-untouched invariant is
+/// covered by the `cli_migrate_library` integration tests landing in
+/// Task 3.
+#[allow(dead_code)] // wired into `cmd_migrate_library` in Plan 16-02 Task 3
+pub(crate) fn prompt_confirmation(yes: bool, no_input: bool) -> Result<bool> {
+    if yes {
+        return Ok(true);
+    }
+    if no_input {
+        anyhow::bail!(
+            "tome migrate-library is destructive (converts symlinks to real copies).\n  \
+             Why: --no-input mode skips the confirmation prompt; --yes is required to confirm.\n  \
+             Suggestion: re-run with `--yes` to proceed, or remove `--no-input` for the interactive prompt."
+        );
+    }
+    let confirmed = dialoguer::Confirm::new()
+        .with_prompt("Proceed with migration?")
+        .default(false)
+        .interact_opt()?;
+    Ok(confirmed.unwrap_or(false))
+}
+
 /// Render the SAFE-01 grouped failure summary + final ✓/⚠ banner.
 pub(crate) fn render_result(result: &MigrationResult) {
     println!();
@@ -1005,6 +1038,41 @@ mod tests {
                 "table missing required column header `{header}`, got: {out}"
             );
         }
+    }
+
+    // -- UX-02 / Plan 16-02 Task 2 — prompt_confirmation --
+
+    #[test]
+    fn prompt_confirmation_returns_true_when_yes_flag_set() {
+        // yes=true short-circuits before any dialoguer interaction.
+        let r = prompt_confirmation(true, false).unwrap();
+        assert!(r, "yes=true must return Ok(true) without prompting");
+    }
+
+    #[test]
+    fn prompt_confirmation_returns_true_when_yes_and_no_input_set() {
+        // yes=true wins over no_input=true (CI-friendly path).
+        let r = prompt_confirmation(true, true).unwrap();
+        assert!(r);
+    }
+
+    #[test]
+    fn prompt_confirmation_bails_when_no_input_without_yes() {
+        // Phase 7 D-10 Conflict/Why/Suggestion bail.
+        let err = prompt_confirmation(false, true).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("destructive"),
+            "bail message must mention 'destructive', got: {msg}"
+        );
+        assert!(
+            msg.contains("--yes"),
+            "bail message must mention '--yes', got: {msg}"
+        );
+        assert!(
+            msg.contains("--no-input"),
+            "bail message must mention '--no-input', got: {msg}"
+        );
     }
 
     #[test]

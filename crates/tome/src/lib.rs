@@ -414,7 +414,11 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Fork { skill, to, force } => {
             cmd_fork(skill, to, force, &config, &paths, cli.dry_run, cli.no_input)
         }
-        Command::MigrateLibrary { dry_run } => cmd_migrate_library(&paths, dry_run || cli.dry_run),
+        Command::MigrateLibrary { dry_run, yes } => {
+            // `yes` is wired through to `cmd_migrate_library` in Plan 16-02 Task 3.
+            let _ = yes;
+            cmd_migrate_library(&paths, dry_run || cli.dry_run)
+        }
         Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
         Command::Relocate { new_path } => cmd_relocate(
             new_path,
