@@ -86,7 +86,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 
 ### Documentation (DOC)
 
-- [ ] **DOC-01**: `docs/src/architecture.md` updated for library-canonical model — managed-as-copy, lockfile-authoritative reconciliation, marketplace adapter trait, unowned lifecycle.
+- [x] **DOC-01**: `docs/src/architecture.md` updated for library-canonical model — managed-as-copy, lockfile-authoritative reconciliation, marketplace adapter trait, unowned lifecycle.
 - [ ] **DOC-02**: `CHANGELOG.md` v0.10 release notes explicitly call out the behavior change (plugin updates no longer auto-propagate via symlink — `tome sync` required) and the migration step (first-sync conversion of symlink library to real copies).
 - [ ] **DOC-03**: New page `docs/src/cross-machine-sync.md` documents the dotfiles workflow: library committed to git, `tome.lock` authoritative, `machine.toml::auto_install_plugins` consent, expected behavior on new-machine bootstrap.
 
