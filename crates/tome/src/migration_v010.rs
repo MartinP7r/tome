@@ -29,8 +29,51 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use console::style;
 
-use crate::manifest::{self, Manifest};
-use crate::paths::{TomePaths, collapse_home};
+use crate::manifest::Manifest;
+use crate::paths::collapse_home;
+
+// -- Byte-size helpers (D-UX02-3 / D-UX02-4) --
+
+/// Walk `source` and sum `metadata().len()` for every regular file.
+///
+/// Uses `WalkDir::follow_links(false)` per D-UX02-4 to avoid double-counting
+/// nested symlinked subdirectories. Errors during walk or metadata are
+/// silently treated as zero contribution — this is a UX size estimate, not a
+/// correctness-critical measurement. Saturating arithmetic guards against
+/// pathological accumulation overflow on enormous libraries.
+fn walk_byte_size(source: &Path) -> u64 {
+    let mut total: u64 = 0;
+    for entry in walkdir::WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .flatten()
+    {
+        if entry.file_type().is_file()
+            && let Ok(meta) = entry.metadata()
+        {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
+/// Render a byte count in the largest sensible binary unit (B / KB / MB /
+/// GB / TB). Inline helper rather than the `humansize` crate per CONTEXT.md
+/// `<decisions>` "Claude's Discretion" — minimises dep growth for ~10 LOC.
+fn humanize_bytes(bytes: u64) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut value = bytes as f64;
+    let mut unit_idx = 0;
+    while value >= 1024.0 && unit_idx < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_idx += 1;
+    }
+    if unit_idx == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{:.1} {}", value, UNITS[unit_idx])
+    }
+}
 
 // -- Failure aggregation (SAFE-01 pattern from Phase 8 / remove.rs::FailureKind) --
 
@@ -110,6 +153,13 @@ pub(crate) struct MigrationEntry {
     pub raw_link_target: PathBuf,
     /// Whether the resolved target exists on disk (false = broken symlink).
     pub source_reachable: bool,
+    /// Sum of `metadata().len()` for every regular file under the resolved
+    /// source. `Some(bytes)` when `source_reachable`; `None` when broken.
+    /// Walks with `follow_links(false)` per D-UX02-4 to avoid double-counting
+    /// nested symlinked subdirs. Populated by `plan()`; consumed by
+    /// `render_plan_to` for the disk-estimate summary line + per-skill SIZE
+    /// column.
+    pub byte_size: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -189,11 +239,24 @@ pub(crate) fn plan(library_dir: &Path, manifest: &Manifest) -> Result<MigrationP
         // false means either the target is gone OR isn't a directory.
         let source_reachable = library_path.is_dir();
 
+        // D-UX02-4: walk the resolved source to estimate disk impact for the
+        // confirmation prompt summary. Walking `library_path` (a symlink in
+        // v0.9 shape) follows through to the real source content; we want
+        // `follow_links(false)` on the *walk* so nested symlinked subdirs
+        // aren't double-counted, but the top-level symlink IS resolved by
+        // `WalkDir::new()` itself so the walk still reaches real content.
+        let byte_size = if source_reachable {
+            Some(walk_byte_size(&library_path))
+        } else {
+            None
+        };
+
         entries.push(MigrationEntry {
             skill_name: skill_name.as_str().to_string(),
             library_path,
             raw_link_target: raw_target,
             source_reachable,
+            byte_size,
         });
     }
 
@@ -216,52 +279,123 @@ pub(crate) fn detect_v09_shape(library_dir: &Path, manifest: &Manifest) -> bool 
     false
 }
 
+/// Stdout-printing thin wrapper around `render_plan_to`. Existing call-sites
+/// in `cmd_migrate_library` invoke this; tests use `render_plan_to` to
+/// capture output for assertion.
 pub(crate) fn render_plan(plan: &MigrationPlan) {
-    println!("{}", style("v0.9 → v0.10 library migration plan").bold());
-    println!();
+    let mut buf = Vec::new();
+    let _ = render_plan_to(plan, &mut buf);
+    if let Ok(s) = std::str::from_utf8(&buf) {
+        print!("{s}");
+    }
+}
+
+/// Render the migration plan into `w`. Per UX-02 D-UX02-3 the output is:
+///
+/// 1. Bold "v0.9 → v0.10 library migration plan" header.
+/// 2. Bold inline summary line:
+///    `Will convert N symlinks → real directories (~X.Y MB additional disk).`
+/// 3. Optional broken-symlink warning line.
+/// 4. `tabled::Style::rounded()` four-column table:
+///    `SKILL | SOURCE | SIZE | STATUS`.
+/// 5. Closing note about non-reversibility.
+///
+/// Empty-plan path emits the existing already-in-v0.10-shape message.
+pub(crate) fn render_plan_to(
+    plan: &MigrationPlan,
+    w: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    writeln!(w, "{}", style("v0.9 → v0.10 library migration plan").bold())?;
+    writeln!(w)?;
     if plan.entries.is_empty() {
-        println!(
+        writeln!(
+            w,
             "  {} no v0.9-shape entries detected — library is already in v0.10 shape.",
             style("✓").green()
-        );
-        return;
+        )?;
+        return Ok(());
     }
 
     let convertible = plan.entries.iter().filter(|e| e.source_reachable).count();
     let broken = plan.entries.len() - convertible;
+    let total_bytes: u64 = plan
+        .entries
+        .iter()
+        .filter(|e| e.source_reachable)
+        .filter_map(|e| e.byte_size)
+        .sum();
 
-    println!(
-        "  Will convert {} symlink{} → real directory cop{}.",
-        style(convertible).bold(),
-        if convertible == 1 { "" } else { "s" },
-        if convertible == 1 { "y" } else { "ies" }
-    );
+    // D-UX02-3 bold summary line. Locks the wording cited by DOC-02.
+    writeln!(
+        w,
+        "  {}",
+        style(format!(
+            "Will convert {} symlink{} → real director{} (~{} additional disk).",
+            convertible,
+            if convertible == 1 { "" } else { "s" },
+            if convertible == 1 { "y" } else { "ies" },
+            humanize_bytes(total_bytes),
+        ))
+        .bold()
+    )?;
     if broken > 0 {
-        println!(
+        writeln!(
+            w,
             "  {} {} broken symlink{} will be SKIPPED and preserved (manual fix required).",
             style("⚠").yellow(),
             style(broken).bold(),
             if broken == 1 { "" } else { "s" }
-        );
+        )?;
     }
-    println!();
-    for entry in &plan.entries {
-        let marker = if entry.source_reachable {
-            style("✓").green().to_string()
-        } else {
-            style("⚠").yellow().to_string()
-        };
-        println!(
-            "  {} {} → {}",
-            marker,
-            style(&entry.skill_name).cyan(),
-            collapse_home(&entry.raw_link_target)
-        );
+    writeln!(w)?;
+
+    // D-UX02-3 four-column tabled summary; Style::rounded() per WHARD-07.
+    use tabled::{Table, settings::Style};
+    #[derive(tabled::Tabled)]
+    struct Row {
+        #[tabled(rename = "SKILL")]
+        skill: String,
+        #[tabled(rename = "SOURCE")]
+        source: String,
+        #[tabled(rename = "SIZE")]
+        size: String,
+        #[tabled(rename = "STATUS")]
+        status: String,
     }
-    println!();
-    println!("  Note: tome does not snapshot your library before migrating. Commit your");
-    println!("  library directory to git (or back it up some other way) BEFORE proceeding.");
-    println!("  This conversion is one-way — there is no path back to v0.9 shape.");
+    let rows: Vec<Row> = plan
+        .entries
+        .iter()
+        .map(|e| Row {
+            skill: e.skill_name.clone(),
+            source: collapse_home(&e.raw_link_target),
+            size: e
+                .byte_size
+                .map(humanize_bytes)
+                .unwrap_or_else(|| "—".into()),
+            status: if e.source_reachable {
+                "✓".into()
+            } else {
+                "⚠".into()
+            },
+        })
+        .collect();
+    let mut t = Table::new(rows);
+    t.with(Style::rounded());
+    writeln!(w, "{t}")?;
+    writeln!(w)?;
+    writeln!(
+        w,
+        "  Note: tome does not snapshot your library before migrating. Commit your"
+    )?;
+    writeln!(
+        w,
+        "  library directory to git (or back it up some other way) BEFORE proceeding."
+    )?;
+    writeln!(
+        w,
+        "  This conversion is one-way — there is no path back to v0.9 shape."
+    )?;
+    Ok(())
 }
 
 pub(crate) fn execute(plan: &MigrationPlan, dry_run: bool) -> Result<MigrationResult> {
@@ -397,7 +531,7 @@ fn copy_dir_recursive_resolving(src: &Path, dst: &Path) -> Result<()> {
 }
 
 /// Render the SAFE-01 grouped failure summary + final ✓/⚠ banner.
-fn render_result(result: &MigrationResult) {
+pub(crate) fn render_result(result: &MigrationResult) {
     println!();
     let banner = format!(
         "⚠ {} converted · {} skipped (broken source) · {} failed",
@@ -450,7 +584,15 @@ fn render_result(result: &MigrationResult) {
 /// the caller in `lib.rs` interprets `is_partial_or_failed()` and exits
 /// with code 1 on partial. Hard errors (unparsable manifest, etc.)
 /// surface as Err.
-pub(crate) fn run_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<MigrationResult> {
+///
+/// **DEPRECATED in Plan 16-02 Task 3.** Slated for deletion when
+/// `cmd_migrate_library` is rewritten to drive plan / render_plan /
+/// prompt_confirmation / execute / render_result directly. Kept for
+/// build-greenness across the Task 1 / Task 2 / Task 3 commit boundary.
+pub(crate) fn run_migrate_library(
+    paths: &crate::paths::TomePaths,
+    dry_run: bool,
+) -> Result<MigrationResult> {
     if dry_run {
         eprintln!(
             "{}",
@@ -458,7 +600,7 @@ pub(crate) fn run_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<Mi
         );
     }
 
-    let manifest = manifest::load(paths.config_dir())?;
+    let manifest = crate::manifest::load(paths.config_dir())?;
     let plan = plan(paths.library_dir(), &manifest)?;
     render_plan(&plan);
 
@@ -472,7 +614,7 @@ mod tests {
     use super::*;
     use crate::config::DirectoryName;
     use crate::discover::SkillName;
-    use crate::manifest::{Manifest, SkillEntry};
+    use crate::manifest::{self, Manifest, SkillEntry};
     use crate::validation::test_hash;
     use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
@@ -751,4 +893,133 @@ mod tests {
         assert_eq!(MigrationFailureKind::BrokenSource.label(), "Broken source");
         assert_eq!(MigrationFailureKind::IoError.label(), "I/O errors");
     }
+
+    // -- UX-02 / Plan 16-02 Task 1 — byte_size + render_plan_to --
+
+    #[test]
+    fn plan_populates_byte_size_for_reachable_sources() {
+        // D-UX02-4: each reachable entry's byte_size is Some(>= file content sum).
+        let (_tmp, library, source, mut manifest) = setup_fixture();
+
+        let s1 = source.join("p1");
+        std::fs::create_dir_all(&s1).unwrap();
+        // 1024-byte SKILL.md (single file).
+        std::fs::write(s1.join("SKILL.md"), "x".repeat(1024)).unwrap();
+        add_managed_entry(&mut manifest, &library, &s1, "p1");
+
+        let s2 = source.join("p2");
+        std::fs::create_dir_all(&s2).unwrap();
+        // 1024-byte SKILL.md + 2048-byte data.txt = 3072 bytes minimum.
+        std::fs::write(s2.join("SKILL.md"), "y".repeat(1024)).unwrap();
+        std::fs::write(s2.join("data.txt"), "z".repeat(2048)).unwrap();
+        add_managed_entry(&mut manifest, &library, &s2, "p2");
+
+        let p = plan(&library, &manifest).unwrap();
+        let by_name: std::collections::HashMap<&str, &MigrationEntry> = p
+            .entries
+            .iter()
+            .map(|e| (e.skill_name.as_str(), e))
+            .collect();
+
+        let p1 = by_name.get("p1").expect("p1 entry");
+        let p2 = by_name.get("p2").expect("p2 entry");
+        assert!(p1.byte_size.is_some(), "reachable source must have Some byte_size");
+        assert!(
+            p1.byte_size.unwrap() >= 1024,
+            "p1 byte_size must include the 1024-byte SKILL.md, got {:?}",
+            p1.byte_size
+        );
+        assert!(p2.byte_size.is_some());
+        assert!(
+            p2.byte_size.unwrap() >= 3072,
+            "p2 byte_size must include SKILL.md + data.txt = >= 3072, got {:?}",
+            p2.byte_size
+        );
+    }
+
+    #[test]
+    fn plan_byte_size_is_none_for_broken_source() {
+        // D-UX02-4: broken symlinks have byte_size = None (no walk possible).
+        let (_tmp, library, _source, mut manifest) = setup_fixture();
+        unix_fs::symlink("/nonexistent/path", library.join("broken")).unwrap();
+        manifest.insert(
+            SkillName::new("broken").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/nonexistent/path"),
+                DirectoryName::new("plugins").unwrap(),
+                test_hash("broken"),
+                true,
+            ),
+        );
+
+        let p = plan(&library, &manifest).unwrap();
+        assert_eq!(p.entries.len(), 1);
+        assert!(!p.entries[0].source_reachable);
+        assert!(
+            p.entries[0].byte_size.is_none(),
+            "broken sources must have byte_size = None, got {:?}",
+            p.entries[0].byte_size
+        );
+    }
+
+    #[test]
+    fn render_plan_to_writer_emits_summary_line_with_total_size() {
+        // D-UX02-3: writer-output contains the bold "Will convert N symlink"
+        // wording and at least one humanize_bytes unit token.
+        let (_tmp, library, source, mut manifest) = setup_fixture();
+        let src = make_managed_source(&source, "p1", "# p1");
+        add_managed_entry(&mut manifest, &library, &src, "p1");
+
+        let p = plan(&library, &manifest).unwrap();
+        let mut buf = Vec::new();
+        render_plan_to(&p, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+
+        assert!(
+            out.contains("Will convert 1 symlink"),
+            "summary line missing convert wording, got: {out}"
+        );
+        // At least one size unit token must appear (default total may be < 1KB
+        // → "B"; larger sources promote to KB/MB/etc).
+        let has_unit = ["B", "KB", "MB", "GB", "TB"]
+            .iter()
+            .any(|u| out.contains(&format!("{u} additional disk")) || out.contains(&format!(" {u} ")));
+        assert!(has_unit, "summary line missing size unit token, got: {out}");
+    }
+
+    #[test]
+    fn render_plan_table_has_four_column_headers() {
+        // D-UX02-3: tabled table emits all four expected column headers.
+        let (_tmp, library, source, mut manifest) = setup_fixture();
+        let src = make_managed_source(&source, "p1", "# p1");
+        add_managed_entry(&mut manifest, &library, &src, "p1");
+
+        let p = plan(&library, &manifest).unwrap();
+        let mut buf = Vec::new();
+        render_plan_to(&p, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+
+        for header in ["SKILL", "SOURCE", "SIZE", "STATUS"] {
+            assert!(
+                out.contains(header),
+                "table missing required column header `{header}`, got: {out}"
+            );
+        }
+    }
+
+    #[test]
+    fn humanize_bytes_unit_promotion() {
+        assert_eq!(humanize_bytes(0), "0 B");
+        assert_eq!(humanize_bytes(512), "512 B");
+        // 1024 -> 1.0 KB (one decimal); 1536 -> 1.5 KB.
+        assert_eq!(humanize_bytes(1024), "1.0 KB");
+        assert_eq!(humanize_bytes(1536), "1.5 KB");
+        // 1 MB exactly.
+        assert_eq!(humanize_bytes(1024 * 1024), "1.0 MB");
+        // ~30 MB (matches the canonical UX-02 example).
+        let thirty_mb = 30 * 1024 * 1024 + (1024 * 410); // ~30.4 MB
+        let s = humanize_bytes(thirty_mb);
+        assert!(s.starts_with("30.") && s.ends_with(" MB"), "got: {s}");
+    }
+
 }
