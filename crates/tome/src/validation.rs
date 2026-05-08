@@ -205,10 +205,7 @@ mod tests {
         // must be identical for the same input.
         let bad = "foo/bar";
         let new_err = format!("{:#}", SkillName::new(bad).unwrap_err());
-        let try_err = format!(
-            "{:#}",
-            SkillName::try_from(bad.to_string()).unwrap_err()
-        );
+        let try_err = format!("{:#}", SkillName::try_from(bad.to_string()).unwrap_err());
         assert_eq!(new_err, try_err);
     }
 

@@ -295,8 +295,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     no_triage: true, // skip on initial sync after init
                     no_input: cli.no_input,
                     no_install: false,
-                    verbose: cli.verbose,
-                    quiet: cli.quiet,
+                    verbose: cli.log_level().is_verbose(),
+                    quiet: cli.log_level().is_quiet(),
                     machine_path: &machine_path,
                     machine_prefs: &machine_prefs,
                 },
@@ -340,23 +340,26 @@ pub fn run(cli: Cli) -> Result<()> {
             force,
             no_triage,
             no_install,
-        } => cmd_sync(
-            force,
-            no_triage,
-            no_install,
-            &config,
-            &paths,
-            &machine_path,
-            &machine_prefs,
-            cli.dry_run,
-            cli.no_input,
-            cli.verbose,
-            cli.quiet,
-        ),
+        } => {
+            let log = cli.log_level();
+            cmd_sync(
+                force,
+                no_triage,
+                no_install,
+                &config,
+                &paths,
+                &machine_path,
+                &machine_prefs,
+                cli.dry_run,
+                cli.no_input,
+                log.is_verbose(),
+                log.is_quiet(),
+            )
+        }
         Command::Status { json } => cmd_status(&config, &paths, json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
-        Command::Browse => cmd_browse(&config, &paths, cli.quiet),
+        Command::Browse => cmd_browse(&config, &paths, cli.log_level().is_quiet()),
         Command::Remove { kind } => cmd_remove(
             kind,
             config,
@@ -381,7 +384,7 @@ pub fn run(cli: Cli) -> Result<()> {
             cli.dry_run,
         ),
         Command::Completions { shell, print } => cmd_completions(shell, print),
-        Command::List { json } => cmd_list(&config, cli.quiet, json),
+        Command::List { json } => cmd_list(&config, cli.log_level().is_quiet(), json),
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
     }

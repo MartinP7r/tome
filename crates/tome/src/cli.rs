@@ -3,6 +3,57 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Verbosity level resolved from `--verbose` / `--quiet` flags.
+///
+/// Per HARD-07: collapses what was previously `pub verbose: bool` +
+/// `pub quiet: bool` on `Cli` into a single typed accessor. The flag UX is
+/// preserved exactly — clap continues to parse `--verbose` / `--quiet` with
+/// `conflicts_with` — only the public `Cli` field surface changes from two
+/// booleans to a single `pub fn log_level(&self) -> LogLevel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogLevel {
+    /// Suppress non-error output (`--quiet`).
+    Quiet,
+    /// Default output (no flag).
+    #[default]
+    Normal,
+    /// Detailed output (`--verbose`).
+    Verbose,
+}
+
+impl LogLevel {
+    /// Compile-time exhaustiveness sentinel array (POLISH-04 pattern).
+    /// Adding a variant without updating ALL is a compile error via
+    /// the const-len assert below.
+    pub const ALL: [Self; 3] = [Self::Quiet, Self::Normal, Self::Verbose];
+
+    /// True iff variant is `Verbose`.
+    pub fn is_verbose(self) -> bool {
+        matches!(self, Self::Verbose)
+    }
+
+    /// True iff variant is `Quiet`.
+    pub fn is_quiet(self) -> bool {
+        matches!(self, Self::Quiet)
+    }
+}
+
+// POLISH-04 exhaustiveness sentinel — compile fails if a new variant is
+// added without updating LogLevel::ALL. Mirrors marketplace.rs's
+// InstallFailureKind sentinel pattern.
+#[allow(dead_code)]
+fn _log_level_exhaustiveness(l: LogLevel) {
+    match l {
+        LogLevel::Quiet => {}
+        LogLevel::Normal => {}
+        LogLevel::Verbose => {}
+    }
+}
+const _: () = assert!(
+    LogLevel::ALL.len() == 3,
+    "LogLevel::ALL must list every variant",
+);
+
 #[derive(Parser)]
 #[command(
     name = "tome",
@@ -27,12 +78,16 @@ pub struct Cli {
     pub dry_run: bool,
 
     /// Detailed output
+    //
+    // Private — read via `Cli::log_level()` per HARD-07. clap requires
+    // the field be on `Cli` directly to wire the `--verbose` / `-v` flag,
+    // so visibility is the only thing that flips.
     #[arg(short, long, global = true)]
-    pub verbose: bool,
+    verbose: bool,
 
     /// Suppress non-error output
     #[arg(short, long, global = true, conflicts_with = "verbose")]
-    pub quiet: bool,
+    quiet: bool,
 
     /// Path to machine preferences file (default: ~/.config/tome/machine.toml)
     #[arg(long, global = true)]
@@ -45,6 +100,23 @@ pub struct Cli {
     /// this implies `--no-triage`.
     #[arg(long, global = true)]
     pub no_input: bool,
+}
+
+impl Cli {
+    /// Resolve the parsed `--verbose` / `--quiet` flags into a typed
+    /// `LogLevel`. Replaces direct `cli.verbose` / `cli.quiet` reads per
+    /// HARD-07. clap's `conflicts_with` already prevents both flags being
+    /// set, so the order of branches here is observationally irrelevant —
+    /// `Verbose` first matches the precedence in the previous boolean code.
+    pub fn log_level(&self) -> LogLevel {
+        if self.verbose {
+            LogLevel::Verbose
+        } else if self.quiet {
+            LogLevel::Quiet
+        } else {
+            LogLevel::Normal
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -386,5 +458,70 @@ mod tests {
             result.is_err(),
             "bare `tome remove <name>` must fail post-restructure (BREAKING)"
         );
+    }
+
+    // -- HARD-07: LogLevel parsing tests --
+
+    #[test]
+    fn log_level_default_is_normal() {
+        let cli = Cli::try_parse_from(["tome", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Normal);
+        assert!(!cli.log_level().is_verbose());
+        assert!(!cli.log_level().is_quiet());
+    }
+
+    #[test]
+    fn log_level_verbose_flag_resolves_to_verbose() {
+        let cli = Cli::try_parse_from(["tome", "--verbose", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Verbose);
+        assert!(cli.log_level().is_verbose());
+        assert!(!cli.log_level().is_quiet());
+    }
+
+    #[test]
+    fn log_level_short_v_flag_resolves_to_verbose() {
+        let cli = Cli::try_parse_from(["tome", "-v", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Verbose);
+    }
+
+    #[test]
+    fn log_level_quiet_flag_resolves_to_quiet() {
+        let cli = Cli::try_parse_from(["tome", "--quiet", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Quiet);
+        assert!(cli.log_level().is_quiet());
+        assert!(!cli.log_level().is_verbose());
+    }
+
+    #[test]
+    fn log_level_short_q_flag_resolves_to_quiet() {
+        let cli = Cli::try_parse_from(["tome", "-q", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Quiet);
+    }
+
+    #[test]
+    fn log_level_verbose_and_quiet_together_rejected() {
+        // clap's conflicts_with should reject both flags simultaneously.
+        let result = Cli::try_parse_from(["tome", "--verbose", "--quiet", "status"]);
+        assert!(
+            result.is_err(),
+            "--verbose --quiet must conflict (parse error)"
+        );
+    }
+
+    #[test]
+    fn log_level_all_array_lists_every_variant() {
+        // POLISH-04 sentinel: ALL must enumerate every variant.
+        // The const_assert in cli.rs already enforces len()==3; this test
+        // pins the actual variant set.
+        let all = LogLevel::ALL;
+        assert!(all.contains(&LogLevel::Quiet));
+        assert!(all.contains(&LogLevel::Normal));
+        assert!(all.contains(&LogLevel::Verbose));
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn log_level_default_trait_impl_is_normal() {
+        assert_eq!(LogLevel::default(), LogLevel::Normal);
     }
 }

@@ -533,9 +533,7 @@ fn scan_for_skills(
                 Ok(name) => {
                     let origin = match &mode {
                         ScanMode::Local => SkillOrigin::Local,
-                        ScanMode::ManagedNoProvenance => {
-                            SkillOrigin::Managed { provenance: None }
-                        }
+                        ScanMode::ManagedNoProvenance => SkillOrigin::Managed { provenance: None },
                         ScanMode::ManagedWith(p) => SkillOrigin::Managed {
                             provenance: Some(p.clone()),
                         },
