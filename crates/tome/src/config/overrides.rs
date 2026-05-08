@@ -45,10 +45,54 @@ impl Config {
     ) -> Result<()> {
         for (name, override_) in &prefs.directory_overrides {
             if let Some(dir) = self.directories.get_mut(name.as_str()) {
+                // HARD-10: reject hostile path shapes BEFORE applying
+                // them to the live config. The override is per-machine
+                // user input; coercing or silently passing through a
+                // path that escapes via `..` traversal would let an
+                // imported `machine.toml` redirect tome sync at any
+                // location on the filesystem.
+                reject_hostile_override_path(name.as_str(), &override_.path)?;
                 dir.path = expand_tilde(&override_.path)?;
                 dir.override_applied = true;
             }
             // Unknown override targets: no-op here. PORT-03 (Plan 09-02) handles warnings.
+        }
+
+        // HARD-10: reject hostile `[directory_overrides.<name>]` shapes
+        // that would silently corrupt downstream sync state. Two
+        // overridden directories pointing at the same path would
+        // distribute conflicting symlinks into one target dir, with
+        // arbitrary "last write wins" ordering driven by BTreeMap
+        // iteration. Refuse rather than coerce.
+        let mut seen: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+        for (name, dir) in &self.directories {
+            if !dir.override_applied {
+                continue;
+            }
+            seen.entry(dir.path.clone())
+                .or_default()
+                .push(name.as_str().to_string());
+        }
+        for (path, names) in &seen {
+            if names.len() > 1 {
+                anyhow::bail!(
+                    "override-induced config error from machine.toml\n\
+                     \n\
+                     Conflict: two `[directory_overrides.<name>]` entries point at the same path:\n\
+                       {}\n\
+                     \n\
+                     Affected directories: {}\n\
+                     \n\
+                     Why: distributing two different directories into one shared target path \
+                     would clash on each `tome sync` run; ordering would be driven by \
+                     alphabetical iteration, not user intent.\n\
+                     \n\
+                     hint: edit `machine.toml` and give each `[directory_overrides.<name>]` \
+                     a distinct `path`.",
+                    path.display(),
+                    names.join(", "),
+                );
+            }
         }
         Ok(())
     }
@@ -78,6 +122,75 @@ impl Config {
             }
         }
     }
+}
+
+/// HARD-10: reject hostile `[directory_overrides.<name>]` paths before
+/// they reach `Config`. The override is per-machine user input; coercing
+/// or silently accepting paths that escape via `..`, contain NUL bytes,
+/// or break path-component invariants would let an imported
+/// `machine.toml` redirect `tome sync` at arbitrary filesystem locations.
+///
+/// Rejected shapes:
+/// - empty path
+/// - path containing a NUL byte (interior `\0`)
+/// - any `..` component (parent-traversal, including `../foo` and
+///   `/abs/foo/../bar`)
+fn reject_hostile_override_path(name: &str, path: &Path) -> Result<()> {
+    use std::path::Component;
+
+    let display = path.display().to_string();
+
+    if path.as_os_str().is_empty() {
+        anyhow::bail!(
+            "override-induced config error from machine.toml\n\
+             Conflict: `[directory_overrides.{name}]` has an empty path.\n\
+             Why: an empty override path is not a valid filesystem location.\n\
+             hint: edit `machine.toml` and give `[directory_overrides.{name}]` a real path."
+        );
+    }
+
+    if display.as_bytes().contains(&0) {
+        anyhow::bail!(
+            "override-induced config error from machine.toml\n\
+             Conflict: `[directory_overrides.{name}]` path contains a NUL byte.\n\
+             Why: paths with NUL bytes are invalid on POSIX filesystems and \
+             usually indicate a copy/paste error or hostile input.\n\
+             hint: edit `machine.toml` and give `[directory_overrides.{name}]` a clean path."
+        );
+    }
+
+    for component in path.components() {
+        if matches!(component, Component::ParentDir) {
+            anyhow::bail!(
+                "override-induced config error from machine.toml\n\
+                 Conflict: `[directory_overrides.{name}]` path contains a `..` traversal: {display}\n\
+                 Why: tome refuses overrides that escape the user's intent via parent-directory \
+                 traversal — an absolute path is required for portability and audit-ability.\n\
+                 hint: edit `machine.toml` and rewrite the path as an absolute location \
+                 (e.g. `/Users/you/skills` or `~/skills`)."
+            );
+        }
+    }
+
+    // Symlink-loop detection: if the override target IS a symlink and
+    // canonicalize fails (ELOOP / "Too many levels of symbolic links"),
+    // refuse rather than letting the failure bubble up later as a
+    // confusing warning during discover. We don't run canonicalize on
+    // non-symlinks because legitimate overrides may point at locations
+    // that don't exist yet (validated downstream).
+    let expanded = expand_tilde(path)?;
+    if expanded.is_symlink()
+        && let Err(e) = std::fs::canonicalize(&expanded)
+    {
+        anyhow::bail!(
+            "override-induced config error from machine.toml\n\
+             Conflict: `[directory_overrides.{name}]` path cannot be resolved: {display}\n\
+             Why: the path resolves through a broken or looping symlink chain ({e}).\n\
+             hint: edit `machine.toml` and point `[directory_overrides.{name}]` at a real directory."
+        );
+    }
+
+    Ok(())
 }
 
 /// Wrap a `Config::validate()` error that was caused by `[directory_overrides.*]`
