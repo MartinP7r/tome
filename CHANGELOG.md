@@ -8,24 +8,211 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 The **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation**
-milestone is in progress. Phase 14 (Unowned-library lifecycle) lands the
-user-facing flows for skills whose source has been removed from `tome.toml`.
-Behaviour follows UNOWN-01..03; CLI vocabulary differs from the original
-proposal — see "BREAKING Changes" below for the migration.
+milestone. Makes tome's library a single source of truth — managed AND
+local skills are stored as real-directory copies — with a lockfile-
+authoritative `tome sync` flow that reconciles installed plugins to the
+lockfile state on every machine via marketplace adapters. Closes the
+library-as-dotfiles workflow gap (epic [#459](https://github.com/MartinP7r/tome/issues/459)).
+
+### Migration from v0.9.x
+
+v0.10 changes the library shape (managed skills are now real-directory
+copies, not symlinks into a marketplace cache). Pre-v0.10 libraries must
+run a one-shot conversion command before `tome sync` will operate on them
+— `tome sync` refuses with a Conflict/Why/Suggestion error pointing at the
+new command on a v0.9-shape library:
+
+```bash
+tome migrate-library --dry-run    # preview the conversion plan
+tome migrate-library               # run it (confirmation prompt; default no)
+# for CI / automation:
+tome migrate-library --yes
+```
+
+The dry-run and the live run both render a bold summary line — `Will
+convert N symlink(s) → real director{y|ies} (~X.Y UNIT additional disk).`
+— followed by a `tabled` plan with SKILL / SOURCE / SIZE / STATUS columns
+before any conversion happens. The live run prompts via
+`dialoguer::Confirm` defaulting to no — pressing anything other than `y`
+aborts cleanly with no filesystem mutation. Aborted runs leave the library
+byte-for-byte unchanged. The conversion is one-way — there is no
+`--undo-migrate`. Commit your library directory to git (or back it up some
+other way) before running.
+
+`tome migrate-library --no-input` (without `--yes`) bails with a
+Conflict/Why/Suggestion error pointing at `--yes`; `--dry-run` always
+skips the prompt. Broken managed symlinks (target gone) are SKIPPED and
+preserved in place so you can recover manually; idempotent on re-run.
+
+### BREAKING Changes
+
+- **BREAKING:** Library shape conversion required. v0.9 libraries store
+  managed skills (Claude plugins, git-cloned repos) as symlinks into a
+  package-manager-owned cache. v0.10 stores them as real-directory copies
+  (LIB-01 / LIB-02). Run `tome migrate-library` once to convert; see
+  "Migration from v0.9.x" above. ([#459](https://github.com/MartinP7r/tome/issues/459))
+- **BREAKING:** Plugin updates no longer auto-propagate via symlink. Pre-
+  v0.10, a `claude plugin update foo` would transparently update tome's
+  library copy because tome's library entry was a symlink into the Claude
+  cache. Post-v0.10, the library is a real-directory copy; plugin updates
+  reach tome's distribution only through `tome sync`, which now reconciles
+  installed plugins against `tome.lock` via the new `MarketplaceAdapter`
+  trait. Drift, missing-from-marketplace, and edit-in-library cases all
+  surface interactively (RECON-01..05).
+- **BREAKING:** `tome remove <name>` is now `tome remove dir <name>` (Phase
+  14 D-API-2). Bare `tome remove <name>` no longer parses. The new sibling
+  `tome remove skill <name>` deletes an Unowned skill from the library
+  (manifest entry, library directory, distribution symlinks, lockfile
+  entry, and `machine.toml` memberships all cleaned). Project policy
+  `Backward compat: None` makes this acceptable; users running shell
+  aliases or scripts must update them.
 
 ### Added
 
-- `tome reassign <skill> --to <dir>` accepts Unowned skills (re-anchors per UNOWN-01 / D-API-1). Replaces the proposed `tome adopt` command — same mechanical work as Owned→Owned reassign, single verb regardless of starting state.
-- `tome remove skill <name>` deletes an Unowned skill: manifest entry, library directory, distribution symlinks, lockfile entry, and `machine.toml` memberships (`disabled` set + per-directory `enabled`/`disabled` lists) all cleaned (UNOWN-02 / D-API-2 / D-B1). Replaces the proposed `tome forget` command. Confirmation prompt defaults to no; `--yes` / `-y` skips. Owned skills are refused with a hint to `tome remove dir` first (D-B2).
-- `tome reassign --force` flag bypasses the new D-A1 different-content collision check (refuses to overwrite a target with different content unless explicit). Same flag also covers the Fork path's existing collision check.
-- `tome reassign` rejects target-only directory roles (D-A2): a target-only dir cannot receive reassigned skills since nothing rediscovers them on next sync.
-- `tome status` and `tome doctor` show an `Unowned skills (N):` section with `NAME` / `LAST-KNOWN SOURCE` / `SYNCED` columns; JSON output includes a new `unowned` (`StatusReport`) / `unowned_skills` (`DoctorReport`) array of `SkillSummary` entries. Per D-D3, the unowned set is informational and does not contribute to `tome doctor` exit code (UNOWN-03).
-- `SkillEntry.previous_source` and `LockEntry.previous_source` schema fields capture the last directory that owned a skill before transition to Unowned (D-C1). Closes the Phase 13 D-13 lossy fork-in-place gap; new transitions get clean provenance, pre-Phase-14 entries fall back to `source_path` rendering per D-C2 (no backfill).
+- `tome migrate-library` one-shot CLI command for v0.9 → v0.10 library
+  conversion. Idempotent on re-run. `--dry-run` previews; `--yes` / `-y`
+  skips the confirmation prompt; `--no-input` without `--yes` bails with
+  a Conflict/Why/Suggestion error pointing at `--yes`. Detection: a
+  library entry qualifies for migration ONLY when it is a symlink AND
+  `manifest[name].managed == true` AND the manifest contains the entry —
+  tome never touches user-created symlinks. Broken-source symlinks are
+  preserved per Phase 11 D-04. (LIB-05)
+- `tome sync` cleanup output partitions stale-candidate skills into three
+  named buckets with per-skill actionable hints, all rendered to stderr:
+  **removed-from-config** (source dir removed from `tome.toml` — manifest
+  transitions to Unowned, library content preserved per LIB-04),
+  **missing-from-disk** (source dir still configured but file vanished —
+  library copy removed), and **now-in-exclude-list** (skill added to
+  `machine.toml::disabled` or a per-directory disable list — distribution
+  symlinks removed, library copy preserved). The original "no longer
+  configured" wording — the trigger phrase for the v0.10 milestone
+  discussion — is gone. (UX-01)
+- `MarketplaceAdapter` trait isolates marketplace-specific install /
+  update / availability logic. Two production adapters:
+  `ClaudeMarketplaceAdapter` (subprocess to `claude plugin install / update
+  / list --json`, with a `RefCell<Option<Vec<InstalledPlugin>>>` cache that
+  auto-invalidates on `Ok` install / update calls) and `GitAdapter` (thin
+  shim over `git.rs`). Adapter `install` / `update` failures aggregate
+  into `Vec<InstallFailure>` and surface as a grouped `⚠ N install
+  operations failed` summary (mirrors v0.8 SAFE-01 `RemoveFailure`
+  pattern). (ADP-01..04)
+- `tome.lock`-authoritative `tome sync`. Reconciles every managed skill
+  against the lockfile and classifies as Match / Drift / Vanished
+  (`reconcile.rs::ReconcileClass`). Per-class summary on every sync
+  (`✓ N match · ⚠ N drift · ⚠ N vanished`). On Drift, applies installs /
+  updates via the marketplace adapter (subject to consent) and verifies
+  the resulting `content_hash` against the lockfile. Edit-in-library
+  detection prompts fork / revert / skip (default fork interactively,
+  default skip with warning under `--no-input`). Drift basis is
+  `content_hash`, not version (Phase 11 D-08). (RECON-01..05)
+- `auto_install_plugins` per-machine consent flow. First sync with non-
+  empty drift prompts `Auto-install missing plugins on every sync?
+  [Y/n/never]`; choice persists in `machine.toml::auto_install_plugins`.
+  Global flag `--no-install` overrides the persisted choice for the
+  current invocation (mirrors Cargo's `--frozen` / `--locked`). (RECON-02)
+- **(from Phase 14)** `tome reassign <skill> --to <dir>` accepts Unowned
+  skills (re-anchors per UNOWN-01 / D-API-1). Replaces the proposed
+  `tome adopt` command — same mechanical work as Owned→Owned reassign,
+  single verb regardless of starting state.
+- **(from Phase 14)** `tome remove skill <name>` deletes an Unowned skill:
+  manifest entry, library directory, distribution symlinks, lockfile
+  entry, and `machine.toml` memberships (`disabled` set + per-directory
+  `enabled` / `disabled` lists) all cleaned (UNOWN-02 / D-API-2 / D-B1).
+  Replaces the proposed `tome forget` command. Confirmation prompt
+  defaults to no; `--yes` / `-y` skips. Owned skills are refused with a
+  hint to `tome remove dir` first (D-B2).
+- **(from Phase 14)** `tome reassign --force` flag bypasses the new D-A1
+  different-content collision check. Same flag also covers the Fork
+  path's existing collision check.
+- **(from Phase 14)** `tome reassign` rejects target-only directory roles
+  (D-A2): a target-only dir cannot receive reassigned skills since
+  nothing rediscovers them on next sync.
+- **(from Phase 14)** `tome status` and `tome doctor` show an `Unowned
+  skills (N):` section with NAME / LAST-KNOWN SOURCE / SYNCED columns;
+  JSON output gains `unowned` (`StatusReport`) / `unowned_skills`
+  (`DoctorReport`) arrays of `SkillSummary` entries. Per Phase 14 D-D3,
+  the unowned set is informational and does not contribute to
+  `tome doctor` exit code (UNOWN-03).
+- `SkillEntry.previous_source` and `LockEntry.previous_source` schema
+  fields capture the last directory that owned a skill before transition
+  to Unowned (Phase 14 D-C1). Closes the Phase 13 D-13 lossy fork-in-
+  place gap.
 
 ### Changed
 
-- **BREAKING:** `tome remove <name>` is now `tome remove dir <name>` (D-API-2). The new `tome remove skill <name>` subcommand handles unowned-skill deletion. Bare `tome remove <name>` no longer parses. Project policy `Backward compat: None` makes this acceptable; users running shell aliases or scripts must update them.
-- The literal stub error in `reassign.rs` pointing at "Phase 14 / `tome adopt`" is deleted; Unowned input is now accepted directly.
+- **CLI hardening cluster (22 issues closed):** Refactors — `skill::parse`
+  returns `anyhow::Result` ([#485](https://github.com/MartinP7r/tome/issues/485));
+  `lib.rs::run` decomposed into per-subcommand `cmd_<name>` helpers
+  ([#486](https://github.com/MartinP7r/tome/issues/486)); `config.rs`
+  split into `config/{mod,types,overrides,validate}.rs`
+  ([#487](https://github.com/MartinP7r/tome/issues/487));
+  `process::exit(1)` in lint flow replaced with downcastable `LintFailed`
+  error ([#488](https://github.com/MartinP7r/tome/issues/488));
+  `scan_for_skills` adopts `ScanMode` enum
+  ([#491](https://github.com/MartinP7r/tome/issues/491));
+  `Lockfile.{skills,version}` tightened to `pub(crate)`
+  ([#492](https://github.com/MartinP7r/tome/issues/492));
+  `(verbose, quiet)` flags collapsed into `LogLevel` enum
+  ([#493](https://github.com/MartinP7r/tome/issues/493)). Safety —
+  atomic-save preservation regression test
+  ([#494](https://github.com/MartinP7r/tome/issues/494));
+  `distribute` refuses to clobber pre-existing symlinks pointing outside
+  the library ([#495](https://github.com/MartinP7r/tome/issues/495));
+  hostile-input tests for `[directory_overrides]`
+  ([#496](https://github.com/MartinP7r/tome/issues/496));
+  `tome remove <git-dir>` end-to-end integration tests
+  ([#497](https://github.com/MartinP7r/tome/issues/497)). Coverage —
+  `browse/ui.rs` ratatui `TestBackend` + `insta` snapshots
+  ([#498](https://github.com/MartinP7r/tome/issues/498));
+  `tests/cli.rs` (5580 LOC) split into per-domain `cli_*.rs` files
+  ([#499](https://github.com/MartinP7r/tome/issues/499));
+  `backup::tests::push_and_pull_roundtrip` flake fix
+  ([#500](https://github.com/MartinP7r/tome/issues/500)). Polish —
+  `wizard.rs` diagnostic prints to `eprintln!`
+  ([#501](https://github.com/MartinP7r/tome/issues/501));
+  `relocate.rs::provenance_from_link_result` renamed to
+  `warn_if_unreadable_symlink` ([#502](https://github.com/MartinP7r/tome/issues/502));
+  `TryFrom<String>` for `SkillName` / `DirectoryName`
+  ([#503](https://github.com/MartinP7r/tome/issues/503)). Older bugs —
+  `tome relocate` cross-fs cleanup recovery hint
+  ([#416](https://github.com/MartinP7r/tome/issues/416));
+  `tome reassign` plan/execute reads filesystem state once
+  ([#430](https://github.com/MartinP7r/tome/issues/430));
+  manifest epoch-0 timestamp warning
+  ([#433](https://github.com/MartinP7r/tome/issues/433));
+  browse UI Disable/Enable wired
+  ([#447](https://github.com/MartinP7r/tome/issues/447));
+  `Config::save_checked` preserves tilde-shaped paths instead of
+  expanding to absolute ([#457](https://github.com/MartinP7r/tome/issues/457)).
+  All 22 HARD requirements landed as a single bundle in Phase 15.
+- `Manifest.managed: bool` semantics shift from "stored as symlink" to
+  "update channel" (managed = upstream sync feeds updates into the
+  library; local = library is canonical). Field name kept; documentation
+  updated. (LIB-02)
+- The literal stub error in `reassign.rs` pointing at "Phase 14 /
+  `tome adopt`" is deleted; Unowned input is now accepted directly.
+
+### Internal
+
+- Source removal preserves library content (LIB-04). Cleanup phase no
+  longer auto-deletes orphaned skills; manifest entries transition to
+  Unowned (`source_name: None`). The configured-source-removed case is
+  surfaced via the new "removed-from-config" cleanup bucket (UX-01).
+- `migration_v010` module (transitional) detects v0.9-shape libraries via
+  manifest-anchored heuristic and converts them to v0.10 shape. Slated
+  for removal in v0.11+ once all known users have migrated.
+
+### Docs
+
+- `docs/src/architecture.md` rewritten for v0.10: managed-as-copy
+  consolidation, lockfile-authoritative reconciliation, marketplace
+  adapter trait, Unowned lifecycle. Old "library is a consolidated cache"
+  framing removed. (DOC-01)
+- New page `docs/src/cross-machine-sync.md` documents the dotfiles
+  workflow end-to-end (committing the library to git, `tome.lock`
+  semantics on Machine B, `auto_install_plugins` consent flow, missing-
+  `claude` behaviour, migrating a v0.9 library on Machine B). Linked
+  from `docs/src/SUMMARY.md` and `tome sync --help`. (DOC-03)
 
 ## [0.9.0] - 2026-04-29
 
