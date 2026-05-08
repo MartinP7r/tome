@@ -167,9 +167,9 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | HARD-20 | Phase 15 | #433 | Validated |
 | HARD-21 | Phase 15 | #447 | Validated |
 | HARD-22 | Phase 15 | #457 | Validated |
-| UX-01 | Phase 16 | — | Pending |
-| UX-02 | Phase 16 | — | Pending |
-| DOC-01 | Phase 16 | — | Pending |
+| UX-01 | Phase 16 | — | Validated |
+| UX-02 | Phase 16 | — | Validated |
+| DOC-01 | Phase 16 | — | Validated |
 | DOC-02 | Phase 16 | — | Validated |
 | DOC-03 | Phase 16 | — | Validated |
 | REL-01 | Phase 17 | — | Pending |
