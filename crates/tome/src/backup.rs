@@ -298,15 +298,29 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Configure a freshly-initialised test git repo so commits are
+    /// deterministic on developer machines that have global gpg-signing
+    /// turned on.
+    ///
+    /// HARD-14 (closes #500): without local `commit.gpgsign=false` and
+    /// `tag.gpgsign=false`, the user's `~/.gitconfig` may force commits to
+    /// require a key, producing intermittent "agent refused operation"
+    /// failures in `backup::tests::push_and_pull_roundtrip` and friends.
+    /// We also pin a local `user.email` / `user.name` so tests don't
+    /// inherit identity from the global config (and don't fail on machines
+    /// that have no global identity at all — fresh CI workers).
     fn setup_git_config(dir: &Path) {
-        let _ = std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(dir)
-            .output();
-        let _ = std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(dir)
-            .output();
+        for args in [
+            ["config", "--local", "commit.gpgsign", "false"].as_slice(),
+            ["config", "--local", "tag.gpgsign", "false"].as_slice(),
+            ["config", "--local", "user.email", "test@test.com"].as_slice(),
+            ["config", "--local", "user.name", "Test"].as_slice(),
+        ] {
+            let _ = std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output();
+        }
     }
 
     fn init_test_repo(dir: &Path) {

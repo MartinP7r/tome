@@ -5,16 +5,20 @@ use tome::config::{Config, DirectoryName, DirectoryRole, DirectoryType};
 mod common;
 use common::*;
 
-/// Split stdout on the wizard's `Generated config:` marker (wizard.rs:324)
-/// and parse the trailing block as a `tome::config::Config`.
+/// Parse the wizard's dry-run TOML body from stdout. The wizard's chrome
+/// (banner, dividers, "Generated config:" header) emits to stderr per
+/// HARD-15; only the TOML body itself stays on stdout so a user can pipe
+/// `tome init --dry-run > tome.toml`.
 ///
 /// The `--dry-run` branch of the wizard runs `expand_tildes()` before emitting,
 /// so the returned Config has absolute paths — tilde-relative comparisons do
 /// NOT work; test callers must compare against expanded (TempDir-prefixed) paths.
 fn parse_generated_config(stdout: &str) -> Config {
-    let (_preamble, body) = stdout
-        .split_once("Generated config:\n")
-        .unwrap_or_else(|| panic!("missing `Generated config:` marker in stdout:\n{stdout}"));
+    let body = stdout.trim();
+    assert!(
+        !body.is_empty(),
+        "dry-run stdout was empty — wizard never emitted the TOML body",
+    );
     toml::from_str::<Config>(body)
         .unwrap_or_else(|e| panic!("generated TOML did not parse: {e}\n---\n{body}"))
 }
@@ -35,10 +39,9 @@ fn assert_config_roundtrips(config: &Config) {
 #[test]
 fn init_with_no_input_and_dry_run_succeeds() {
     // Headless smoke: `tome init --no-input --dry-run` must run the wizard to
-    // completion without any TTY and print the `Generated config:` marker.
-    // HOME is isolated to a TempDir so auto-discovery is deterministic
-    // (empty HOME → no known directories). Richer assertions on the emitted
-    // TOML live in `init_dry_run_no_input_empty_home` and
+    // completion without any TTY and print the `Generated config:` chrome on
+    // stderr (HARD-15) plus the TOML body itself on stdout. Richer assertions
+    // on the emitted TOML live in `init_dry_run_no_input_empty_home` and
     // `init_dry_run_no_input_seeded_home`.
     let tmp = TempDir::new().unwrap();
     tome()
@@ -53,7 +56,9 @@ fn init_with_no_input_and_dry_run_succeeds() {
         ])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Generated config:"));
+        .stderr(predicate::str::contains("Generated config:"))
+        // The dry-run TOML body stays on stdout so it is pipe-safe.
+        .stdout(predicate::str::contains("library_dir"));
 }
 
 #[test]
@@ -307,14 +312,15 @@ fn init_prints_resolved_tome_home_with_default_source() {
         "tome init failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stdout.contains("resolved tome_home:"),
-        "stdout missing resolved tome_home line:\n{stdout}"
+        stderr.contains("resolved tome_home:"),
+        "stderr missing resolved tome_home line:\n{stderr}"
     );
     assert!(
-        stdout.contains("(from default)"),
-        "stdout missing '(from default)' source label:\n{stdout}"
+        stderr.contains("(from default)"),
+        "stderr missing '(from default)' source label:\n{stderr}"
     );
 }
 
@@ -330,19 +336,19 @@ fn init_prints_resolved_tome_home_with_env_source() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "stderr: {stderr}"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
     assert!(
-        stdout.contains("(from TOME_HOME env)"),
-        "stdout missing '(from TOME_HOME env)' label:\n{stdout}"
+        stderr.contains("(from TOME_HOME env)"),
+        "stderr missing '(from TOME_HOME env)' label:\n{stderr}"
     );
     assert!(
-        stdout.contains(tome_home.display().to_string().as_str()),
-        "stdout missing TOME_HOME path:\n{stdout}"
+        stderr.contains(tome_home.display().to_string().as_str()),
+        "stderr missing TOME_HOME path:\n{stderr}"
     );
 }
 
@@ -364,15 +370,15 @@ fn init_prints_resolved_tome_home_with_flag_source() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        "stderr: {stderr}"
     );
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
     assert!(
-        stdout.contains("(from --tome-home flag)"),
-        "stdout missing '--tome-home flag' label:\n{stdout}"
+        stderr.contains("(from --tome-home flag)"),
+        "stderr missing '--tome-home flag' label:\n{stderr}"
     );
 }
 
@@ -388,21 +394,19 @@ fn init_resolved_tome_home_line_precedes_step_prompts() {
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
-    assert!(
-        output.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    assert!(output.status.success(), "stderr: {stderr}");
+    // HARD-15: wizard chrome (the resolved tome_home line and the Step 1
+    // header) both emit on stderr.
 
-    let resolved_idx = stdout
+    let resolved_idx = stderr
         .find("resolved tome_home:")
         .expect("missing info line");
-    let step1_idx = stdout.find("Step 1").expect("missing Step 1 prompt header");
+    let step1_idx = stderr.find("Step 1").expect("missing Step 1 prompt header");
     assert!(
         resolved_idx < step1_idx,
         "resolved tome_home line must come BEFORE Step 1.\n\
-         resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstdout:\n{stdout}"
+         resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstderr:\n{stderr}"
     );
 }
 
@@ -429,15 +433,14 @@ fn init_legacy_detected_no_input_leaves_file() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    // Warning appears on stdout (the `println!` in handle_legacy_cleanup).
+    // HARD-15: warning AND skip note both emit on stderr (handle_legacy_cleanup
+    // is wizard chrome).
     assert!(
-        stdout.contains("Legacy pre-v0.6 config detected"),
-        "stdout missing legacy warning:\n{stdout}"
+        stderr.contains("Legacy pre-v0.6 config detected"),
+        "stderr missing legacy warning:\n{stderr}"
     );
-    // Skip note appears on stderr.
     assert!(
         stderr.contains("skipped legacy cleanup"),
         "stderr missing skipped-cleanup note:\n{stderr}"
@@ -470,11 +473,11 @@ fn init_legacy_with_only_tome_home_not_flagged() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: legacy warning and skip-note are both stderr-emitted.
     assert!(
-        !stdout.contains("Legacy pre-v0.6 config detected"),
-        "v0.6+-only XDG file should NOT trigger legacy warning. stdout:\n{stdout}"
+        !stderr.contains("Legacy pre-v0.6 config detected"),
+        "v0.6+-only XDG file should NOT trigger legacy warning. stderr:\n{stderr}"
     );
     assert!(
         !stderr.contains("skipped legacy cleanup"),
@@ -500,10 +503,11 @@ fn init_greenfield_no_legacy_warning() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: legacy warning is stderr-emitted.
     assert!(
-        !stdout.contains("Legacy pre-v0.6 config detected"),
-        "greenfield run should NOT show legacy warning. stdout:\n{stdout}"
+        !stderr.contains("Legacy pre-v0.6 config detected"),
+        "greenfield run should NOT show legacy warning. stderr:\n{stderr}"
     );
 }
 
@@ -525,15 +529,16 @@ fn init_greenfield_no_input_skips_step_0_prompt() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: Step header and resolved tome_home line both emit on stderr.
     assert!(
-        !stdout.contains("Step 0:"),
-        "--no-input must skip Step 0 prompt, but stdout contains it:\n{stdout}"
+        !stderr.contains("Step 0:"),
+        "--no-input must skip Step 0 prompt, but stderr contains it:\n{stderr}"
     );
     // WUX-04 info line still prints (informational, not a prompt)
     assert!(
-        stdout.contains("resolved tome_home:"),
-        "resolved tome_home line must still appear in --no-input mode:\n{stdout}"
+        stderr.contains("resolved tome_home:"),
+        "resolved tome_home line must still appear in --no-input mode:\n{stderr}"
     );
 }
 
@@ -584,14 +589,15 @@ fn init_with_flag_source_skips_step_0() {
         .unwrap();
     assert!(output.status.success());
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: Step header and tome_home label both emit on stderr.
     assert!(
-        !stdout.contains("Step 0:"),
-        "--tome-home flag (CliTomeHome source) must skip Step 0:\n{stdout}"
+        !stderr.contains("Step 0:"),
+        "--tome-home flag (CliTomeHome source) must skip Step 0:\n{stderr}"
     );
     assert!(
-        stdout.contains("(from --tome-home flag)"),
-        "source label should confirm flag branch:\n{stdout}"
+        stderr.contains("(from --tome-home flag)"),
+        "source label should confirm flag branch:\n{stderr}"
     );
 }
 
@@ -656,10 +662,11 @@ fn init_brownfield_no_input_keeps_existing() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: brownfield summary is wizard chrome and emits on stderr.
     assert!(
-        stdout.contains("Existing config detected"),
-        "stdout missing brownfield summary:\n{stdout}"
+        stderr.contains("Existing config detected"),
+        "stderr missing brownfield summary:\n{stderr}"
     );
 
     // File must be byte-identical
@@ -701,10 +708,11 @@ fn init_brownfield_invalid_config_no_input_cancels() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: invalid-config marker is wizard chrome on stderr.
     assert!(
-        stdout.contains("invalid:") || stdout.contains("cancelled"),
-        "stdout should indicate invalid config or cancellation:\n{stdout}"
+        stderr.contains("invalid:") || stderr.contains("cancelled"),
+        "stderr should indicate invalid config or cancellation:\n{stderr}"
     );
 
     let after = std::fs::read_to_string(&config_path).unwrap();
@@ -742,15 +750,15 @@ fn init_brownfield_with_legacy_runs_both_cleanups() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    // Both cleanup paths ran and printed their headers
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // HARD-15: both cleanup chrome lines emit on stderr.
     assert!(
-        stdout.contains("Legacy pre-v0.6 config detected"),
-        "stdout missing legacy warning:\n{stdout}"
+        stderr.contains("Legacy pre-v0.6 config detected"),
+        "stderr missing legacy warning:\n{stderr}"
     );
     assert!(
-        stdout.contains("Existing config detected"),
-        "stdout missing brownfield summary:\n{stdout}"
+        stderr.contains("Existing config detected"),
+        "stderr missing brownfield summary:\n{stderr}"
     );
 
     // Both files unchanged under --no-input

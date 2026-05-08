@@ -204,12 +204,16 @@ pub fn run(cli: Cli) -> Result<()> {
         // to be populated (e.g. a stray `TOME_HOME=/wrong/path` in their
         // shell rc). Printed in both interactive and --no-input modes.
         //
+        // HARD-15: this is wizard chrome (informational, around an
+        // interactive flow), so it goes to stderr alongside wizard.rs's
+        // banner. Stdout stays reserved for the dry-run TOML body.
+        //
         // `tome_home_source` is intentionally bound here; later plans in
         // this phase will consume it to gate greenfield prompts (WUX-01).
         let (tome_home, tome_home_source) =
             config::resolve_tome_home_with_source(cli.tome_home.as_deref(), cli.config.as_deref())?;
-        println!();
-        println!(
+        eprintln!();
+        eprintln!(
             "resolved tome_home: {} (from {})",
             style(tome_home.display()).cyan(),
             tome_home_source.label()

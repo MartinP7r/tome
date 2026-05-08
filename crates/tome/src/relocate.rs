@@ -90,12 +90,12 @@ pub(crate) fn plan(
         // unreadable symlink produces a stderr warning during plan() instead
         // of silently disappearing during execute(). The provenance return
         // value is no longer stored on SkillMoveEntry (TEST-05 / POLISH-05
-        // option a — removed as dead code). We call provenance_from_link_result
+        // option a — removed as dead code). We call warn_if_unreadable_symlink
         // for its stderr side effect only and discard the return value.
         if entry.managed {
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                let _ = provenance_from_link_result(std::fs::read_link(&link_path), &link_path);
+                let _ = warn_if_unreadable_symlink(std::fs::read_link(&link_path), &link_path);
             }
         }
 
@@ -311,24 +311,31 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
 
 // --- Internal helpers ---
 
-/// Translate a `read_link` result into a provenance `Option<PathBuf>`, warning
-/// on Err instead of silently dropping (SAFE-03 / #449).
+/// Emit a stderr warning when a managed symlink cannot be read; otherwise
+/// resolve its target. Renamed from `provenance_from_link_result` per
+/// HARD-16 (closes #502) — the old name described the return value, but the
+/// function's primary contract is the side effect (the warning). The
+/// resolved-path return is retained for testability.
+///
+/// SAFE-03 / #449 traceability: the `Err` arm is the regression guard. When
+/// `read_link` fails on a managed-skill symlink during `relocate::plan()`,
+/// the user sees a stderr `warning:` line instead of the silent "no
+/// provenance" data loss the old code produced.
 ///
 /// **Note (TEST-05 / POLISH-05 option a):** the return value is no longer
 /// consumed by `relocate::plan()` — the dead provenance field was removed
-/// from `SkillMoveEntry`. The function is retained because its primary
-/// purpose is the stderr WARNING on the Err arm; the `Option<PathBuf>` return
-/// shape is kept for testability (the SAFE-03 unit test asserts `None` on the
-/// Err path). Future consumers (e.g. a debug tool that needs provenance) can
-/// use the return value; current callers `let _ = ...` it.
+/// from `SkillMoveEntry`. The `Option<PathBuf>` return shape is kept for
+/// testability (the SAFE-03 unit test asserts `None` on the Err path).
+/// Future consumers (e.g. a debug tool that needs provenance) can use the
+/// return value; current callers `let _ = ...` it.
 ///
-/// This is factored out so the Err arm is directly unit-testable with a
+/// This is factored out so the `Err` arm is directly unit-testable with a
 /// synthetic `io::Error` — on Unix, engineering a real `read_link` failure
-/// after a successful `is_symlink()` check is racy because both calls share the
-/// same parent-directory search-permission gate. Same rationale as the
-/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves a
-/// stderr line, not silent "no provenance" data loss.
-fn provenance_from_link_result(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
+/// after a successful `is_symlink()` check is racy because both calls share
+/// the same parent-directory search-permission gate. Same rationale as the
+/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves
+/// a stderr line, not silent "no provenance" data loss.
+fn warn_if_unreadable_symlink(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
     match raw {
         Ok(raw_target) => Some(resolve_symlink_target(link_path, &raw_target)),
         Err(e) => {
@@ -859,13 +866,13 @@ mod tests {
     /// Regression test for SAFE-03 (#449) covering the `is_symlink()`-false
     /// branch: when the library-dir parent has no search permission,
     /// `is_symlink()` returns false (Rust treats metadata errors as "not a
-    /// symlink") and `plan()` skips the `provenance_from_link_result` call
+    /// symlink") and `plan()` skips the `warn_if_unreadable_symlink` call
     /// entirely via the outer `if link_path.is_symlink()` guard — upholding
     /// the contract that `plan()` does not propagate the error or silently
     /// claim "no provenance".
     ///
     /// The new `read_link` Err arm added by SAFE-03 is covered separately by
-    /// `provenance_from_link_result_warns_and_returns_none_on_err` below. That
+    /// `warn_if_unreadable_symlink_warns_and_returns_none_on_err` below. That
     /// unit test uses a synthetic `io::Error` because engineering a real
     /// `read_link` failure AFTER a successful `is_symlink()` check is racy on
     /// Unix — both syscalls share the same parent-search permission gate.
@@ -936,7 +943,7 @@ mod tests {
             "corrupt-skill manifest entry is managed"
         );
         // Note: the SAFE-03 stderr-warning contract on read_link failure is
-        // verified by the standalone `provenance_from_link_result_warns_and_returns_none_on_err`
+        // verified by the standalone `warn_if_unreadable_symlink_warns_and_returns_none_on_err`
         // unit test below. A previous integration-style assertion on the
         // dead provenance field was removed alongside the field itself
         // (TEST-05 / POLISH-05 option a — dead code removal).
@@ -944,7 +951,7 @@ mod tests {
 
     /// Unit test covering the SAFE-03 (#449) `Err` arm of `read_link` directly.
     ///
-    /// Passes a synthetic `io::Error` to `provenance_from_link_result` to verify
+    /// Passes a synthetic `io::Error` to `warn_if_unreadable_symlink` to verify
     /// the warn+None behavior without engineering a real `read_link` failure
     /// (which is racy on Unix — see `managed_symlink_unreadable_records_no_provenance`
     /// for the contract-level test via the `is_symlink()`-false branch).
@@ -955,11 +962,11 @@ mod tests {
     /// format string itself is pinned by the integration-style contract with
     /// PR #448's git-HEAD-sha warning.
     #[test]
-    fn provenance_from_link_result_warns_and_returns_none_on_err() {
+    fn warn_if_unreadable_symlink_warns_and_returns_none_on_err() {
         let synthetic_err = std::io::Error::other("synthetic io failure for SAFE-03");
         let fake_link = Path::new("/nonexistent/library/skill");
 
-        let result = provenance_from_link_result(Err(synthetic_err), fake_link);
+        let result = warn_if_unreadable_symlink(Err(synthetic_err), fake_link);
 
         assert!(
             result.is_none(),
@@ -970,7 +977,7 @@ mod tests {
     /// Unit test covering the SAFE-03 `Ok` arm: when `read_link` succeeds, the
     /// resolver is applied and the result is `Some(resolved_target)`.
     #[test]
-    fn provenance_from_link_result_returns_resolved_target_on_ok() {
+    fn warn_if_unreadable_symlink_returns_resolved_target_on_ok() {
         let tmp = TempDir::new().unwrap();
         let link_path = tmp.path().join("link");
         let target = tmp.path().join("target");
@@ -980,7 +987,7 @@ mod tests {
         // Simulate a successful read_link returning a raw relative target; the
         // helper should apply `resolve_symlink_target` to canonicalize it.
         let raw_target = std::fs::read_link(&link_path).unwrap();
-        let result = provenance_from_link_result(Ok(raw_target), &link_path);
+        let result = warn_if_unreadable_symlink(Ok(raw_target), &link_path);
 
         let resolved = result.expect("Ok arm must return Some(resolved_target)");
         assert_eq!(
