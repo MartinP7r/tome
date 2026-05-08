@@ -75,6 +75,12 @@ pub use paths::TomePaths;
 /// directly via the crate path.
 pub use manifest::hash_directory;
 
+/// HARD-04: surface lint-failure and migrate-failure typed errors so the
+/// thin `main.rs` binary can downcast and map them to exit code 1 without
+/// the library calling `process::exit` itself.
+pub use lint::LintFailed;
+pub use migration_v010::MigrationPartialOrFailed;
+
 /// Summary of a complete sync operation.
 pub struct SyncReport {
     pub consolidate: ConsolidateResult,
@@ -506,8 +512,13 @@ pub(crate) fn cmd_lint(
         cli::LintFormat::Text => lint::render_text(&report),
         cli::LintFormat::Json => lint::render_json(&report),
     }
+    // HARD-04: bubble up a downcastable error rather than `process::exit(1)`
+    // so embedding callers can decide how to translate the failure.
+    // `main.rs` downcasts and maps to exit code 1.
     if report.has_errors() {
-        std::process::exit(1);
+        anyhow::bail!(lint::LintFailed {
+            violations: report.error_count(),
+        });
     }
     Ok(())
 }
@@ -930,8 +941,13 @@ pub(crate) fn cmd_fork(
 /// Per D-05: any skip or failure means non-zero exit.
 pub(crate) fn cmd_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<()> {
     let result = migration_v010::run_migrate_library(paths, dry_run)?;
+    // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
+    // `main.rs` downcasts `MigrationPartialOrFailed` and exits with code 1.
     if result.is_partial_or_failed() {
-        std::process::exit(1);
+        anyhow::bail!(migration_v010::MigrationPartialOrFailed {
+            skipped_broken_source: result.skipped_broken_source,
+            failed: result.failed,
+        });
     }
     Ok(())
 }

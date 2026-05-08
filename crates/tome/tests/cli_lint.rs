@@ -96,3 +96,35 @@ fn lint_single_skill_path_with_errors() {
         .failure()
         .stdout(predicate::str::contains("no frontmatter"));
 }
+
+/// HARD-04: lint failure must exit with code 1 via the LintFailed downcast
+/// in main.rs (not via process::exit inside lib.rs). Pins the binary-level
+/// exit-code contract end-to-end.
+#[test]
+fn lint_failure_exit_code_via_lint_failed_downcast() {
+    let tmp = TempDir::new().unwrap();
+    let skill = tmp.path().join("bad-skill");
+    std::fs::create_dir_all(&skill).unwrap();
+    // Frontmatter present but name mismatch -> emits a Severity::Error
+    // through the new LintFailed bubble-up path.
+    std::fs::write(
+        skill.join("SKILL.md"),
+        "---\nname: definitely-not-bad-skill\ndescription: x\n---\n# x",
+    )
+    .unwrap();
+
+    let assert = tome()
+        .env("TOME_HOME", tmp.path())
+        .args(["lint", &skill.to_string_lossy()])
+        .assert()
+        .failure()
+        .code(1);
+
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // main.rs renders LintFailed via Display -> "lint failed: N violation(s)".
+    assert!(
+        stderr.contains("lint failed:") && stderr.contains("violation(s)"),
+        "stderr should carry the LintFailed Display output, got: {stderr}"
+    );
+}

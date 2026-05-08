@@ -20,6 +20,18 @@ fn main() -> ExitCode {
     match tome::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
+            // HARD-04: typed exit-code mapping. Both branches currently emit
+            // ExitCode::FAILURE (1), but the downcast lets future Phase 16/17
+            // work differentiate exit codes per error class without churning
+            // every site.
+            if let Some(lint_failed) = e.downcast_ref::<tome::LintFailed>() {
+                eprintln!("error: {lint_failed}");
+                return ExitCode::FAILURE;
+            }
+            if let Some(migration_failed) = e.downcast_ref::<tome::MigrationPartialOrFailed>() {
+                eprintln!("error: {migration_failed}");
+                return ExitCode::FAILURE;
+            }
             eprintln!("error: {e:#}");
             ExitCode::FAILURE
         }
