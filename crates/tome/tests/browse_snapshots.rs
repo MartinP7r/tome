@@ -35,9 +35,11 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 
-use tome::browse::app::{App, SkillRow};
+use tome::browse::app::{App, DetailAction, SkillRow};
 use tome::browse::theme::Theme;
 use tome::browse::ui;
+use tome::config::DirectoryName;
+use tome::machine::MachinePrefs;
 
 /// Canonical terminal size for every snapshot. See module-level rationale.
 const W: u16 = 120;
@@ -48,9 +50,7 @@ fn render_to_string(app: &App) -> String {
     let mut terminal = Terminal::new(backend).expect("Terminal::new");
     // ratatui 0.30: `terminal.draw(...)` returns a CompletedFrame whose
     // `.buffer` we re-borrow via `terminal.backend().buffer()` below.
-    terminal
-        .draw(|frame| ui::render(frame, app))
-        .expect("draw");
+    terminal.draw(|frame| ui::render(frame, app)).expect("draw");
     buf_to_string(terminal.backend().buffer())
 }
 
@@ -85,6 +85,7 @@ fn skill_row(name: &str, source: &str, path: &str, managed: bool, synced_at: &st
         path: path.to_string(),
         managed,
         synced_at: synced_at.to_string(),
+        source_directory: None,
     }
 }
 
@@ -255,6 +256,40 @@ fn snapshot_theme_light_skill_list() {
     // Light-theme skill-list. Selected-row background uses
     // Color::Indexed(254) instead of DarkGray.
     let app = App::for_snapshot(five_skill_fixture(), Theme::light(), None);
+    let out = render_to_string(&app);
+    insta::assert_snapshot!(out);
+}
+
+#[test]
+fn snapshot_detail_pane_after_disable_toggle() {
+    // HARD-21 D-BROWSE-3 step 4: post-toggle snapshot. After pressing
+    // Disable in detail mode, the action label flips to "Enable on this
+    // machine" and the status bar surfaces "Disabled foo on this machine".
+    // This snapshot locks both visual signals.
+    //
+    // Fixture: a single skill row anchored to directory "bar" (no per-dir
+    // blocklist/allowlist set), so the toggle scope falls to Global.
+    let mut row = skill_row(
+        "foo",
+        "bar",
+        "~/.tome/library/foo",
+        false,
+        "2026-05-08T00:00:00Z",
+    );
+    row.source_directory = Some(DirectoryName::new("bar").unwrap());
+
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let machine_path = tmp.path().join("machine.toml");
+    let app = App::for_snapshot(vec![row], Theme::dark(), None);
+    let mut app = app.with_machine_prefs(MachinePrefs::default(), machine_path);
+    // Enter detail mode (materializes the action list with `Disable`
+    // in slot 2 since machine_prefs has nothing disabled yet). Then
+    // route through `execute_action_for_snapshot` to mirror the
+    // production keyflow: apply_toggle + refresh_detail_actions both
+    // fire, so the rendered slot 2 flips from Disable → Enable and
+    // the status bar carries the Success body.
+    app.enter_detail_mode_for_snapshot();
+    app.execute_action_for_snapshot(DetailAction::Disable);
     let out = render_to_string(&app);
     insta::assert_snapshot!(out);
 }

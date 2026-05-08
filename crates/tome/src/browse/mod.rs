@@ -21,16 +21,28 @@ pub mod ui;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod ui;
 
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event};
 
 use crate::discover::DiscoveredSkill;
+use crate::machine::MachinePrefs;
 use app::{App, SkillRow};
 
 /// Launch the interactive skill browser.
-pub fn browse(skills: Vec<DiscoveredSkill>, manifest: &crate::manifest::Manifest) -> Result<()> {
+///
+/// `machine_prefs` + `machine_path` are threaded through to enable HARD-21
+/// Disable/Enable wiring. After every toggle in Detail mode, the App
+/// mutates `machine_prefs` in-memory and rewrites `machine_path` via the
+/// existing atomic temp+rename pattern (D-BROWSE-3 step 2).
+pub fn browse(
+    skills: Vec<DiscoveredSkill>,
+    manifest: &crate::manifest::Manifest,
+    machine_prefs: MachinePrefs,
+    machine_path: PathBuf,
+) -> Result<()> {
     let rows: Vec<SkillRow> = skills
         .into_iter()
         .map(|s| {
@@ -46,11 +58,12 @@ pub fn browse(skills: Vec<DiscoveredSkill>, manifest: &crate::manifest::Manifest
                 path: s.path.display().to_string(),
                 managed,
                 synced_at,
+                source_directory: Some(s.source_name),
             }
         })
         .collect();
 
-    let mut app = App::new(rows);
+    let mut app = App::new(rows).with_machine_prefs(machine_prefs, machine_path);
     let mut terminal = ratatui::init();
 
     let result = run_loop(&mut terminal, &mut app);

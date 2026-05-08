@@ -286,7 +286,15 @@ fn render_detail(frame: &mut Frame, app: &App, theme: &Theme) {
     ]);
     frame.render_widget(metadata, left_chunks[1]);
 
-    // Actions list
+    // Actions list. HARD-21 D-BROWSE-2: `DetailAction::label` is
+    // context-sensitive — it needs the selected `SkillRow` plus the
+    // active `MachinePrefs` to compute the verb-plus-scope text. When
+    // either is unavailable (no row selected; legacy callers without
+    // wired prefs) we fall back to a static label per action.
+    let selected_row = app
+        .filtered_indices
+        .get(app.selected)
+        .map(|&i| &app.rows[i]);
     let items: Vec<ListItem> = app
         .detail_actions
         .iter()
@@ -300,7 +308,11 @@ fn render_detail(frame: &mut Frame, app: &App, theme: &Theme) {
                 Style::default()
             };
             let prefix = if i == app.detail_selected { "> " } else { "  " };
-            ListItem::new(format!("{}{}", prefix, action.label())).style(style)
+            let label = match (selected_row, app.machine_prefs.as_ref()) {
+                (Some(row), Some(prefs)) => action.label(row, prefs),
+                _ => action.fallback_label().to_string(),
+            };
+            ListItem::new(format!("{prefix}{label}")).style(style)
         })
         .collect();
 

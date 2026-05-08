@@ -66,6 +66,33 @@ pub struct DirectoryPrefs {
     pub(crate) enabled: Option<BTreeSet<SkillName>>,
 }
 
+impl DirectoryPrefs {
+    /// Read-only view of the blocklist for HARD-21 D-BROWSE-1 scope
+    /// resolution. Stays `pub(crate)` because the underlying field is
+    /// per-machine implementation detail; the v1.0 GUI Tauri IPC will
+    /// surface a different read-shape.
+    pub(crate) fn disabled_set(&self) -> &BTreeSet<SkillName> {
+        &self.disabled
+    }
+
+    /// Read-only view of the allowlist for HARD-21 D-BROWSE-1 scope
+    /// resolution. Returns `None` when no allowlist is configured (the
+    /// directory falls through to blocklist-or-global semantics).
+    pub(crate) fn enabled_set(&self) -> Option<&BTreeSet<SkillName>> {
+        self.enabled.as_ref()
+    }
+}
+
+/// Read-only accessor for `MachinePrefs::directory[<name>]` so the
+/// `browse` module (HARD-21 D-BROWSE-1) can query scope without
+/// widening the underlying field's visibility past `pub(crate)`.
+pub(crate) fn directory_prefs<'a>(
+    prefs: &'a MachinePrefs,
+    name: &DirectoryName,
+) -> Option<&'a DirectoryPrefs> {
+    prefs.directory.get(name)
+}
+
 /// Per-machine preferences — disabled skills and directories for this machine.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MachinePrefs {
@@ -129,6 +156,57 @@ impl MachinePrefs {
             }
         }
         Ok(())
+    }
+
+    /// Mutate or insert the per-directory `disabled` blocklist for `dir`.
+    ///
+    /// Used by `browse::App::apply_toggle` (HARD-21 D-BROWSE-1, scope =
+    /// `PerDirBlocklist`). Returns true if the set changed (insert on
+    /// `Disable`, remove on `Enable`). Honors MACH-04 by construction:
+    /// only the `disabled` field is touched; `enabled` is never set here.
+    pub(crate) fn toggle_per_dir_blocklist(
+        &mut self,
+        dir: &DirectoryName,
+        skill: SkillName,
+        disable: bool,
+    ) -> bool {
+        let entry = self.directory.entry(dir.clone()).or_default();
+        if disable {
+            entry.disabled.insert(skill)
+        } else {
+            entry.disabled.remove(skill.as_str())
+        }
+    }
+
+    /// Mutate the per-directory `enabled` allowlist for `dir` with
+    /// inverted polarity: `Disable` REMOVES the skill from the allowlist
+    /// (membership = "include"), `Enable` INSERTS it.
+    ///
+    /// Used by `browse::App::apply_toggle` (HARD-21 D-BROWSE-1, scope =
+    /// `PerDirAllowlist`). Honors MACH-04 by construction.
+    pub(crate) fn toggle_per_dir_allowlist(
+        &mut self,
+        dir: &DirectoryName,
+        skill: SkillName,
+        disable: bool,
+    ) -> bool {
+        let entry = self.directory.entry(dir.clone()).or_default();
+        let allowlist = entry.enabled.get_or_insert_with(BTreeSet::new);
+        if disable {
+            allowlist.remove(skill.as_str())
+        } else {
+            allowlist.insert(skill)
+        }
+    }
+
+    /// Mutate the global `disabled` blocklist. `disable=true` adds,
+    /// `disable=false` removes.
+    pub(crate) fn toggle_global_disabled(&mut self, skill: SkillName, disable: bool) -> bool {
+        if disable {
+            self.disabled.insert(skill)
+        } else {
+            self.disabled.remove(skill.as_str())
+        }
     }
 
     /// Check if a skill should be distributed to a specific directory.

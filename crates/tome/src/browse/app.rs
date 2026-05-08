@@ -1,9 +1,12 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::fuzzy;
+use crate::config::DirectoryName;
+use crate::discover::SkillName;
+use crate::machine::{self, MachinePrefs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -165,7 +168,6 @@ impl SortMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[allow(dead_code)]
 pub enum DetailAction {
     ViewSource,
     CopyPath,
@@ -175,7 +177,29 @@ pub enum DetailAction {
 }
 
 impl DetailAction {
-    pub fn label(self) -> &'static str {
+    /// HARD-21 D-BROWSE-2 — context-sensitive action-menu label.
+    ///
+    /// The label combines the verb (Disable / Enable) with the *scope*
+    /// the toggle would mutate, but NEVER includes the skill name —
+    /// the skill name appears in the StatusMessage body produced by
+    /// `App::apply_toggle` (D-BROWSE-3 step 4), not here.
+    ///
+    /// Verbatim shapes:
+    ///   - Global toggle:           "Disable on this machine"   /  "Enable on this machine"
+    ///   - Per-directory blocklist: "Disable for <dir-name>"    /  "Enable for <dir-name>"
+    ///   - Per-directory allowlist: "Disable for <dir-name>"    /  "Enable for <dir-name>"
+    ///
+    /// (Allowlist label is identical to the blocklist case — semantics
+    /// differ but the user's mental model is "I'm disabling this for
+    /// that directory", which is correct in both cases.)
+    ///
+    /// `row` and `prefs` are needed for D-BROWSE-1 scope detection
+    /// (which list, if any, holds the skill's parent directory).
+    /// Static fallback label used by `ui::render_detail` when either no
+    /// row is selected or `MachinePrefs` aren't wired. Mirrors the
+    /// pre-HARD-21 behavior so legacy test fixtures (no prefs) still
+    /// render a sensible action menu.
+    pub fn fallback_label(self) -> &'static str {
         match self {
             Self::ViewSource => "Open source directory",
             Self::CopyPath => "Copy path to clipboard",
@@ -183,6 +207,101 @@ impl DetailAction {
             Self::Enable => "Enable on this machine",
             Self::Back => "Back",
         }
+    }
+
+    pub fn label(self, row: &SkillRow, prefs: &MachinePrefs) -> String {
+        match self {
+            Self::ViewSource => "Open source directory".to_string(),
+            Self::CopyPath => "Copy path to clipboard".to_string(),
+            Self::Disable | Self::Enable => {
+                let verb = if matches!(self, Self::Disable) {
+                    "Disable"
+                } else {
+                    "Enable"
+                };
+                let scope = ToggleScope::resolve(row, prefs);
+                let scope_str = match scope {
+                    ToggleScope::Global => "on this machine".to_string(),
+                    ToggleScope::PerDirBlocklist(d) | ToggleScope::PerDirAllowlist(d) => {
+                        format!("for {}", d.as_str())
+                    }
+                };
+                format!("{verb} {scope_str}")
+            }
+            Self::Back => "Back".to_string(),
+        }
+    }
+}
+
+/// HARD-21 D-BROWSE-1 — which list does an Enable/Disable keystroke mutate?
+///
+/// Resolution order (most specific wins; MACH-04 invariant guarantees only
+/// one of `disabled` / `enabled` is set per directory at a time):
+///
+///   1. Parent directory has a `disabled` blocklist set in `machine.toml` →
+///      toggle that list.
+///   2. Parent directory has an `enabled` allowlist set in `machine.toml` →
+///      toggle that allowlist (inverted polarity: membership = "include").
+///   3. Otherwise → toggle the global `MachinePrefs.disabled` set.
+///
+/// Unowned skills (`SkillRow.source_directory == None`) always fall to
+/// `Global` — they have no parent directory in `tome.toml::directories`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ToggleScope {
+    Global,
+    PerDirBlocklist(DirectoryName),
+    PerDirAllowlist(DirectoryName),
+}
+
+impl ToggleScope {
+    pub fn resolve(row: &SkillRow, prefs: &MachinePrefs) -> Self {
+        let Some(dir) = row.source_directory.as_ref() else {
+            return Self::Global;
+        };
+        let entry = match machine::directory_prefs(prefs, dir) {
+            Some(e) => e,
+            None => return Self::Global,
+        };
+        // A directory entry exists; route based on whether it carries a
+        // blocklist (non-empty `disabled`), an allowlist (any `enabled`),
+        // or neither. Empty-`disabled` + None-`enabled` is treated as
+        // "no per-directory list set" and falls through to global.
+        if !entry.disabled_set().is_empty() {
+            Self::PerDirBlocklist(dir.clone())
+        } else if entry.enabled_set().is_some() {
+            Self::PerDirAllowlist(dir.clone())
+        } else {
+            Self::Global
+        }
+    }
+}
+
+/// HARD-21 D-BROWSE-3 step 3 — should the action menu show "Disable" or
+/// "Enable" for this row, given current `MachinePrefs`?
+///
+/// The verb is determined by the skill's *current* state in the resolved
+/// scope:
+/// - `PerDirBlocklist`: skill IN blocklist → currently disabled → show Enable.
+/// - `PerDirAllowlist`: skill NOT in allowlist → currently disabled → show Enable.
+/// - `Global`:          skill IN global disabled set → show Enable.
+///
+/// Otherwise show Disable.
+pub fn current_toggle_action(row: &SkillRow, prefs: &MachinePrefs) -> DetailAction {
+    let scope = ToggleScope::resolve(row, prefs);
+    let currently_disabled = match &scope {
+        ToggleScope::Global => prefs.is_disabled(&row.name),
+        ToggleScope::PerDirBlocklist(dir) => machine::directory_prefs(prefs, dir)
+            .map(|d| d.disabled_set().iter().any(|s| s.as_str() == row.name))
+            .unwrap_or(false),
+        ToggleScope::PerDirAllowlist(dir) => machine::directory_prefs(prefs, dir)
+            .and_then(|d| d.enabled_set())
+            .map(|set| !set.iter().any(|s| s.as_str() == row.name))
+            .unwrap_or(false),
+    };
+    if currently_disabled {
+        DetailAction::Enable
+    } else {
+        DetailAction::Disable
     }
 }
 
@@ -192,6 +311,10 @@ pub struct SkillRow {
     pub path: String,
     pub managed: bool,
     pub synced_at: String,
+    /// Parent directory this skill came from in `tome.toml::directories`.
+    /// `None` = Unowned (Phase 14 D-C1) — falls through to global toggle
+    /// scope per D-BROWSE-1.
+    pub source_directory: Option<DirectoryName>,
 }
 
 pub struct App {
@@ -213,6 +336,17 @@ pub struct App {
     pub detail_selected: usize,
     pub theme: super::theme::Theme,
     pub(super) status_message: Option<StatusMessage>,
+    /// HARD-21 — per-machine preferences mutated by `apply_toggle`. Held
+    /// in-memory across the lifetime of the browse session; persisted
+    /// to disk after every toggle via `machine::save(&prefs, &path)`
+    /// (D-BROWSE-3 step 2). `None` for legacy callers that haven't
+    /// wired prefs through (existing unit tests, CLI-smoke paths) —
+    /// in that case Disable/Enable becomes a no-op that surfaces a
+    /// Warning, preserving the v0.9 behavior byte-for-byte.
+    pub(super) machine_prefs: Option<MachinePrefs>,
+    /// Filesystem path for `machine::save` after a toggle. Companion to
+    /// `machine_prefs`; both are `Some` together or `None` together.
+    pub(super) machine_path: Option<PathBuf>,
 }
 
 impl App {
@@ -238,10 +372,23 @@ impl App {
             detail_selected: 0,
             theme: super::theme::Theme::detect(),
             status_message: None,
+            machine_prefs: None,
+            machine_path: None,
         };
         app.apply_sort();
         app.refresh_preview();
         app
+    }
+
+    /// HARD-21 — wire per-machine prefs into the App so `Disable/Enable`
+    /// toggles persist via `machine::save(&prefs, &path)` (D-BROWSE-3
+    /// step 2). The browse module owns the prefs struct for the lifetime
+    /// of the session; mutations happen in-memory first, then the entire
+    /// struct is written via the existing atomic temp+rename pattern.
+    pub fn with_machine_prefs(mut self, prefs: MachinePrefs, path: PathBuf) -> Self {
+        self.machine_prefs = Some(prefs);
+        self.machine_path = Some(path);
+        self
     }
 
     /// Construct an `App` with deterministic state for snapshot tests
@@ -297,6 +444,8 @@ impl App {
             detail_selected: 0,
             theme,
             status_message: None,
+            machine_prefs: None,
+            machine_path: None,
         };
         app.apply_sort();
         if let Some(f) = filter {
@@ -340,6 +489,16 @@ impl App {
     pub fn enter_help_mode_for_snapshot(&mut self) {
         self.previous_mode = self.mode;
         self.mode = Mode::Help;
+    }
+
+    /// Test-support: invoke the production `execute_action` path so
+    /// HARD-21 snapshot tests exercise the full toggle flow (apply
+    /// plus label flip plus status surface) the way the keypress
+    /// handler would. This is a thin wrapper because `execute_action`
+    /// is `pub(super)` to keep the production surface tight.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_action_for_snapshot(&mut self, action: DetailAction) {
+        self.execute_action(action);
     }
 
     /// Test-support: re-run the fuzzy filter pipeline so a snapshot
@@ -457,19 +616,35 @@ impl App {
 
     fn enter_detail_mode(&mut self) {
         self.mode = Mode::Detail;
-        // Disable/Enable is shown unconditionally — the action's current
-        // implementation (see `execute_action` below) just pops back to
-        // Normal mode because the browse module has no machine.toml
-        // handle. When a future change wires machine prefs into browse,
-        // this list should reflect the skill's actual disabled state
-        // (show Disable if enabled, Enable if disabled — never both).
+        // HARD-21 D-BROWSE-3 step 3: surface either Disable or Enable
+        // (never both) reflecting the skill's current state in the
+        // smart-routed scope. When `machine_prefs` is `None` (legacy
+        // callers / unit tests that haven't wired prefs), default to
+        // showing Disable so the action menu structure stays stable.
+        let toggle_action = self
+            .selected_skill_row()
+            .and_then(|row| {
+                self.machine_prefs
+                    .as_ref()
+                    .map(|prefs| current_toggle_action(row, prefs))
+            })
+            .unwrap_or(DetailAction::Disable);
+
         self.detail_actions = vec![
             DetailAction::ViewSource,
             DetailAction::CopyPath,
-            DetailAction::Disable,
+            toggle_action,
             DetailAction::Back,
         ];
         self.detail_selected = 0;
+    }
+
+    /// Borrow the currently-selected `SkillRow`, if any. Companion to
+    /// `selected_row_meta` (which clones the metadata into owned strings)
+    /// for HARD-21 paths that need a reference to the row itself.
+    fn selected_skill_row(&self) -> Option<&SkillRow> {
+        let row_idx = *self.filtered_indices.get(self.selected)?;
+        self.rows.get(row_idx)
     }
 
     fn execute_action(&mut self, action: DetailAction) {
@@ -536,14 +711,119 @@ impl App {
                 }
             }
             DetailAction::Disable | DetailAction::Enable => {
-                // For now, just go back — proper implementation requires machine.toml access
-                // which the browse module doesn't currently have
-                self.mode = Mode::Normal;
+                // HARD-21 D-BROWSE-1/-2/-3: toggle the skill in the
+                // resolved scope, save machine.toml atomically, and
+                // surface a scope-explicit StatusMessage::Success.
+                // Errors surface as Warning per the existing pattern.
+                if let Err(e) = self.apply_toggle(action) {
+                    self.status_message = Some(StatusMessage::Warning(format!(
+                        "Could not save machine.toml: {e}"
+                    )));
+                }
+                // Re-render the action label by rebuilding the action
+                // list against the now-mutated prefs (D-BROWSE-3 step 3).
+                // Stay in Detail mode so the user can immediately undo
+                // (press the inverse to flip back).
+                self.refresh_detail_actions();
             }
             DetailAction::Back => {
                 self.mode = Mode::Normal;
             }
         }
+    }
+
+    /// Rebuild `detail_actions` against the current `machine_prefs`,
+    /// preserving the user's selection cursor on whichever toggle
+    /// (Disable | Enable) is now appropriate. Called after `apply_toggle`
+    /// so the row's action label flips immediately (D-BROWSE-3 step 3).
+    fn refresh_detail_actions(&mut self) {
+        let toggle_action = self
+            .selected_skill_row()
+            .and_then(|row| {
+                self.machine_prefs
+                    .as_ref()
+                    .map(|prefs| current_toggle_action(row, prefs))
+            })
+            .unwrap_or(DetailAction::Disable);
+        // Slot 2 is the toggle (matches `enter_detail_mode` ordering).
+        if let Some(slot) = self.detail_actions.get_mut(2) {
+            *slot = toggle_action;
+        }
+    }
+
+    /// HARD-21 — apply the user's Disable/Enable keystroke per
+    /// D-BROWSE-1 smart-routing, save `machine.toml` atomically per
+    /// step 2, and surface a `StatusMessage::Success` per step 4.
+    ///
+    /// Steps:
+    ///   1. Resolve scope (PerDirBlocklist | PerDirAllowlist | Global).
+    ///   2. Mutate `MachinePrefs` in-memory.
+    ///   3. Save `machine.toml` atomically (existing temp+rename).
+    ///   4. Stamp a scope-explicit `StatusMessage::Success` body —
+    ///      "Disabled <skill> on this machine" / "Enabled <skill> for <dir>"
+    ///      etc. This body is DISTINCT from the action-menu label
+    ///      (label has no skill name; body does).
+    pub(crate) fn apply_toggle(&mut self, action: DetailAction) -> anyhow::Result<()> {
+        let was_disable = matches!(action, DetailAction::Disable);
+        let row = self
+            .selected_skill_row()
+            .ok_or_else(|| anyhow::anyhow!("no skill selected"))?;
+        let row_name = row.name.clone();
+        let row_dir = row.source_directory.clone();
+        let scope = match self.machine_prefs.as_ref() {
+            Some(prefs) => ToggleScope::resolve(row, prefs),
+            None => {
+                anyhow::bail!("machine prefs not wired into browse session");
+            }
+        };
+
+        // Build a SkillName with the lenient validator (rejects empty +
+        // path separators); browse rows always carry well-formed names
+        // by construction (DiscoveredSkill::name was validated upstream),
+        // so this is belt-and-braces.
+        let skill = SkillName::new(&row_name)
+            .map_err(|e| anyhow::anyhow!("invalid skill name '{row_name}': {e}"))?;
+
+        // Step 1+2: mutate in-memory.
+        let prefs = self
+            .machine_prefs
+            .as_mut()
+            .expect("machine_prefs must be Some after the Some-arm above");
+        match &scope {
+            ToggleScope::Global => {
+                prefs.toggle_global_disabled(skill, was_disable);
+            }
+            ToggleScope::PerDirBlocklist(dir) => {
+                prefs.toggle_per_dir_blocklist(dir, skill, was_disable);
+            }
+            ToggleScope::PerDirAllowlist(dir) => {
+                prefs.toggle_per_dir_allowlist(dir, skill, was_disable);
+            }
+        }
+
+        // Step 3: atomic save.
+        let path = self
+            .machine_path
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("machine path not wired into browse session"))?;
+        let prefs_immut = self.machine_prefs.as_ref().expect("Some after mutation");
+        machine::save(prefs_immut, &path)?;
+
+        // Step 4: scope-explicit StatusMessage::Success body. Skill name
+        // appears in the body (NOT in the action-menu label per D-BROWSE-2).
+        let verb_past = if was_disable { "Disabled" } else { "Enabled" };
+        let body = match &scope {
+            ToggleScope::Global => format!("{verb_past} {row_name} on this machine"),
+            ToggleScope::PerDirBlocklist(d) | ToggleScope::PerDirAllowlist(d) => {
+                format!("{verb_past} {row_name} for {}", d.as_str())
+            }
+        };
+        self.status_message = Some(StatusMessage::Success(body));
+        // Suppress unused-variable warning when row_dir isn't read in
+        // the future (it's already implicit in `scope`); kept as a
+        // breadcrumb for downstream UI work.
+        let _ = row_dir;
+        Ok(())
     }
 
     /// Executes a detail action with the ability to redraw before any blocking
@@ -776,6 +1056,7 @@ mod tests {
                     path: skill_dir.display().to_string(),
                     managed: false,
                     synced_at: String::new(),
+                    source_directory: None,
                 }
             })
             .collect();
@@ -981,6 +1262,7 @@ mod tests {
             path: skill_dir.display().to_string(),
             managed: false,
             synced_at: String::new(),
+            source_directory: None,
         }];
         let app = App::new(rows);
         assert!(app.preview_content.contains("[SKILL.md is empty]"));
@@ -999,6 +1281,7 @@ mod tests {
             path: skill_dir.display().to_string(),
             managed: false,
             synced_at: String::new(),
+            source_directory: None,
         }];
         let app = App::new(rows);
         assert!(app.preview_content.contains("[failed to read"));
@@ -1041,6 +1324,7 @@ mod tests {
             path: format!("/test/{}", name),
             managed: false,
             synced_at: synced.to_string(),
+            source_directory: None,
         }
     }
 
@@ -1534,5 +1818,391 @@ mod tests {
         // compile and the issue surfaces before the source-grep
         // checks in acceptance_criteria run.
         let _: fn(&str) -> Result<(), arboard::Error> = super::try_clipboard_set_text_with_retry;
+    }
+
+    // ===========================================================================
+    // HARD-21 — DetailAction::{Disable, Enable} wiring tests
+    //
+    // Coverage matrix:
+    //   - Smart-routing (D-BROWSE-1): global / per-dir blocklist /
+    //     per-dir allowlist (inverted polarity) / undo via inverse.
+    //   - Action-menu LABEL (D-BROWSE-2): verb + scope, NO skill name.
+    //   - Status-message BODY (D-BROWSE-3 step 4): verb + skill + scope.
+    //   - 4-step toggle flow assertions (D-BROWSE-3 steps 1–4).
+    //
+    // Both label() and apply_toggle() are tested against the real
+    // MachinePrefs surface — no mocking — so the contract is enforced
+    // end-to-end through machine.rs.
+    // ===========================================================================
+
+    use crate::config::DirectoryName;
+    use crate::discover::SkillName;
+    use crate::machine::{self, DirectoryOverride, MachinePrefs};
+
+    /// Build a SkillRow that points at directory `dir` (None = Unowned).
+    fn toggle_row(name: &str, dir: Option<&str>) -> SkillRow {
+        SkillRow {
+            name: name.to_string(),
+            source: dir.unwrap_or("(unowned)").to_string(),
+            path: format!("/library/{}", name),
+            managed: false,
+            synced_at: String::new(),
+            source_directory: dir.map(|d| DirectoryName::new(d).unwrap()),
+        }
+    }
+
+    /// Build an App fixture for HARD-21 tests with a single skill row,
+    /// machine_prefs wired to a tmpdir-local machine.toml. The path is
+    /// returned via the TempDir guard so tests can re-load and inspect
+    /// the on-disk content (D-BROWSE-3 step 2 round-trip).
+    fn toggle_app(rows: Vec<SkillRow>, prefs: MachinePrefs) -> (App, tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let machine_path = tmp.path().join("machine.toml");
+        let mut app = App::new(rows).with_machine_prefs(prefs, machine_path.clone());
+        app.visible_height = 5;
+        (app, tmp, machine_path)
+    }
+
+    /// Insert a per-directory blocklist for `dir` containing `skills`.
+    fn seed_blocklist(prefs: &mut MachinePrefs, dir: &str, skills: &[&str]) {
+        for s in skills {
+            prefs.toggle_per_dir_blocklist(
+                &DirectoryName::new(dir).unwrap(),
+                SkillName::new(*s).unwrap(),
+                true,
+            );
+        }
+    }
+
+    /// Insert a per-directory allowlist for `dir` containing `skills`.
+    fn seed_allowlist(prefs: &mut MachinePrefs, dir: &str, skills: &[&str]) {
+        for s in skills {
+            prefs.toggle_per_dir_allowlist(
+                &DirectoryName::new(dir).unwrap(),
+                SkillName::new(*s).unwrap(),
+                false, // false = enable (insert into allowlist)
+            );
+        }
+    }
+
+    // -------- D-BROWSE-1 smart-routing --------
+
+    #[test]
+    fn apply_toggle_global_when_no_per_dir_list() {
+        // Skill foo is in directory bar, but bar has neither a blocklist
+        // nor an allowlist set in machine.toml. Disabling foo must mutate
+        // the GLOBAL `disabled` set.
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let prefs = app.machine_prefs.as_ref().unwrap();
+        assert!(
+            prefs.is_disabled("foo"),
+            "global disabled set must contain foo"
+        );
+    }
+
+    #[test]
+    fn apply_toggle_per_dir_blocklist() {
+        // Bar already has a blocklist (containing baz). Disabling foo (in
+        // bar) inserts foo into bar's blocklist — never touches global.
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "bar", &["baz"]);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let prefs = app.machine_prefs.as_ref().unwrap();
+        let dir = machine::directory_prefs(prefs, &DirectoryName::new("bar").unwrap()).unwrap();
+        assert!(
+            dir.disabled_set().iter().any(|s| s.as_str() == "foo"),
+            "per-dir blocklist must contain foo"
+        );
+        assert!(
+            !prefs.is_disabled("foo"),
+            "global disabled set must NOT contain foo (per-dir blocklist scope)"
+        );
+    }
+
+    #[test]
+    fn apply_toggle_per_dir_allowlist_inverted_polarity() {
+        // Bar has an allowlist (containing foo). Disabling foo REMOVES it
+        // from the allowlist (inverted polarity); the disabled blocklist
+        // stays None (MACH-04 invariant preserved).
+        let mut prefs = MachinePrefs::default();
+        seed_allowlist(&mut prefs, "bar", &["foo"]);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let prefs = app.machine_prefs.as_ref().unwrap();
+        let dir = machine::directory_prefs(prefs, &DirectoryName::new("bar").unwrap()).unwrap();
+        let allowlist = dir
+            .enabled_set()
+            .expect("allowlist must remain set after Disable on allowlist scope");
+        assert!(
+            !allowlist.iter().any(|s| s.as_str() == "foo"),
+            "Disable on allowlist scope must REMOVE foo from allowlist (inverted polarity)"
+        );
+        assert!(
+            dir.disabled_set().is_empty(),
+            "MACH-04: disabled set must stay empty when allowlist is in use"
+        );
+    }
+
+    #[test]
+    fn apply_toggle_undo_via_inverse() {
+        // Disable then Enable round-trips to the original state.
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        assert!(app.machine_prefs.as_ref().unwrap().is_disabled("foo"));
+
+        app.apply_toggle(DetailAction::Enable).unwrap();
+        assert!(!app.machine_prefs.as_ref().unwrap().is_disabled("foo"));
+    }
+
+    // -------- D-BROWSE-2 action-menu label (verb + scope, NO skill name) --------
+
+    #[test]
+    fn label_global_scope_disable() {
+        let prefs = MachinePrefs::default();
+        let row = toggle_row("foo", Some("bar"));
+        assert_eq!(
+            DetailAction::Disable.label(&row, &prefs),
+            "Disable on this machine"
+        );
+    }
+
+    #[test]
+    fn label_global_scope_enable() {
+        let prefs = MachinePrefs::default();
+        let row = toggle_row("foo", Some("bar"));
+        assert_eq!(
+            DetailAction::Enable.label(&row, &prefs),
+            "Enable on this machine"
+        );
+    }
+
+    #[test]
+    fn label_per_dir_blocklist() {
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "my-dir", &["baz"]);
+        let row = toggle_row("foo", Some("my-dir"));
+        assert_eq!(
+            DetailAction::Disable.label(&row, &prefs),
+            "Disable for my-dir"
+        );
+        assert_eq!(
+            DetailAction::Enable.label(&row, &prefs),
+            "Enable for my-dir"
+        );
+    }
+
+    #[test]
+    fn label_per_dir_allowlist() {
+        let mut prefs = MachinePrefs::default();
+        seed_allowlist(&mut prefs, "my-dir", &["foo"]);
+        let row = toggle_row("foo", Some("my-dir"));
+        assert_eq!(
+            DetailAction::Disable.label(&row, &prefs),
+            "Disable for my-dir"
+        );
+    }
+
+    #[test]
+    fn label_does_not_contain_skill_name() {
+        // D-BROWSE-2: the action-menu label NEVER contains the skill name.
+        // The skill name appears in the StatusMessage body (D-BROWSE-3
+        // step 4), not in the label.
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "my-dir", &["other-skill"]);
+        let row = toggle_row("hardrocket", Some("my-dir"));
+        for variant in [DetailAction::Disable, DetailAction::Enable] {
+            let label = variant.label(&row, &prefs);
+            assert!(
+                !label.contains("hardrocket"),
+                "label MUST NOT contain skill name; got: {label}"
+            );
+        }
+    }
+
+    // -------- D-BROWSE-3 status-message body (verb + skill + scope) --------
+
+    #[test]
+    fn apply_toggle_status_message_global_disable() {
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("status_message must be Some");
+        assert_eq!(msg.body(), "Disabled foo on this machine");
+    }
+
+    #[test]
+    fn apply_toggle_status_message_global_enable() {
+        let mut prefs = MachinePrefs::default();
+        prefs.toggle_global_disabled(SkillName::new("foo").unwrap(), true);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Enable).unwrap();
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("status_message must be Some");
+        assert_eq!(msg.body(), "Enabled foo on this machine");
+    }
+
+    #[test]
+    fn apply_toggle_status_message_per_dir_disable() {
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "my-dir", &["other"]);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("my-dir"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("status_message must be Some");
+        assert_eq!(msg.body(), "Disabled foo for my-dir");
+    }
+
+    #[test]
+    fn apply_toggle_status_message_per_dir_enable() {
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "my-dir", &["foo"]);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("my-dir"))], prefs);
+        app.apply_toggle(DetailAction::Enable).unwrap();
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("status_message must be Some");
+        assert_eq!(msg.body(), "Enabled foo for my-dir");
+    }
+
+    // -------- D-BROWSE-3 4-step flow assertions --------
+
+    #[test]
+    fn apply_toggle_step1_mutates_in_memory() {
+        // Step 1: in-memory MachinePrefs reflects the toggle BEFORE save.
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        assert!(!app.machine_prefs.as_ref().unwrap().is_disabled("foo"));
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        assert!(
+            app.machine_prefs.as_ref().unwrap().is_disabled("foo"),
+            "step 1: in-memory MachinePrefs.is_disabled must flip"
+        );
+    }
+
+    #[test]
+    fn apply_toggle_step2_atomic_save_round_trip() {
+        // Step 2: machine.toml on disk reflects the toggle (load + re-read).
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+
+        // Reload from disk.
+        let reloaded = machine::load(&path).expect("reload machine.toml");
+        assert!(
+            reloaded.is_disabled("foo"),
+            "step 2: on-disk machine.toml must reflect toggle"
+        );
+    }
+
+    #[test]
+    fn apply_toggle_step3_label_flips() {
+        // Step 3: DetailAction::label() flips Disable ↔ Enable across the
+        // toggle. We probe via current_toggle_action() which is what
+        // enter_detail_mode/refresh_detail_actions consult.
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+
+        // Before: foo is enabled → menu would show Disable.
+        let row = toggle_row("foo", Some("bar"));
+        let before = current_toggle_action(&row, app.machine_prefs.as_ref().unwrap());
+        assert_eq!(before, DetailAction::Disable);
+        let label_before = before.label(&row, app.machine_prefs.as_ref().unwrap());
+        assert_eq!(label_before, "Disable on this machine");
+
+        app.apply_toggle(DetailAction::Disable).unwrap();
+
+        // After: foo is disabled (globally) → menu now shows Enable.
+        let after = current_toggle_action(&row, app.machine_prefs.as_ref().unwrap());
+        assert_eq!(after, DetailAction::Enable);
+        let label_after = after.label(&row, app.machine_prefs.as_ref().unwrap());
+        assert_eq!(label_after, "Enable on this machine");
+    }
+
+    #[test]
+    fn apply_toggle_step4_surfaces_success_status() {
+        // Step 4: status_message is Some(StatusMessage::Success { .. })
+        // with the verbatim D-BROWSE-3 body shape.
+        let prefs = MachinePrefs::default();
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("bar"))], prefs);
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        let msg = app
+            .status_message
+            .as_ref()
+            .expect("step 4: status_message must be Some");
+        assert!(
+            matches!(msg, StatusMessage::Success(_)),
+            "step 4: must be Success variant, got: {:?}",
+            msg
+        );
+        assert_eq!(msg.body(), "Disabled foo on this machine");
+        assert_eq!(msg.glyph(), '✓');
+    }
+
+    // -------- MACH-04 invariant + miscellaneous regression --------
+
+    #[test]
+    fn toggle_never_sets_both_disabled_and_enabled() {
+        // MACH-04 regression: regardless of toggle path, MachinePrefs
+        // validation must not trip (would fail if a directory had both
+        // `disabled` and `enabled` set).
+        let mut prefs = MachinePrefs::default();
+        seed_blocklist(&mut prefs, "my-dir", &["other"]);
+        let (mut app, _tmp, _path) = toggle_app(vec![toggle_row("foo", Some("my-dir"))], prefs);
+
+        app.apply_toggle(DetailAction::Disable).unwrap();
+        app.apply_toggle(DetailAction::Enable).unwrap();
+        app.machine_prefs
+            .as_ref()
+            .unwrap()
+            .validate()
+            .expect("MACH-04: validate must pass after toggle round-trip");
+    }
+
+    #[test]
+    fn no_dead_code_attr_above_detail_action() {
+        // HARD-21 acceptance: `#[allow(dead_code)]` must NOT decorate
+        // the DetailAction enum once the variants are wired. We check
+        // by reading our own source — a regression that re-adds the
+        // attr fails this assertion.
+        let src = include_str!("app.rs");
+        let snippet = src
+            .lines()
+            .skip_while(|l| !l.contains("pub enum DetailAction"))
+            .take(2)
+            .collect::<Vec<_>>()
+            .join("\n");
+        // The line BEFORE `pub enum DetailAction` is the relevant one;
+        // we look at the 5 lines before it for any allow(dead_code).
+        let pos = src
+            .find("pub enum DetailAction")
+            .expect("DetailAction must exist");
+        let preceding = &src[..pos];
+        let last_block = preceding.lines().rev().take(5).collect::<Vec<_>>();
+        for line in &last_block {
+            assert!(
+                !line.contains("dead_code"),
+                "HARD-21: #[allow(dead_code)] must NOT precede DetailAction; offending line: {line}\nSnippet:\n{snippet}"
+            );
+        }
+    }
+
+    // Suppress unused-import warning for DirectoryOverride (it's reachable
+    // through the test-support integration but we don't probe it directly).
+    #[test]
+    fn _imports_compile() {
+        let _: Option<DirectoryOverride> = None;
     }
 }

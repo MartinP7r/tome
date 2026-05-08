@@ -46,6 +46,13 @@ pub(crate) mod git;
 pub(crate) mod library;
 pub(crate) mod lint;
 pub(crate) mod lockfile;
+// `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
+// v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
+// test (under `test-support`) needs to construct `MachinePrefs` to
+// drive the post-toggle snapshot — same gating as `browse`.
+#[cfg(any(test, feature = "test-support"))]
+pub mod machine;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod machine;
 pub(crate) mod manifest;
 pub mod marketplace;
@@ -375,7 +382,20 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Status { json } => cmd_status(&config, &paths, json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
-        Command::Browse => cmd_browse(&config, &paths, cli.log_level().is_quiet()),
+        Command::Browse => {
+            // HARD-21: thread per-machine prefs into browse so the
+            // Detail-mode Disable/Enable toggle can persist via
+            // machine.toml atomic save (D-BROWSE-3 step 2).
+            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+            let machine_prefs = machine::load(&machine_path)?;
+            cmd_browse(
+                &config,
+                &paths,
+                cli.log_level().is_quiet(),
+                machine_prefs,
+                machine_path,
+            )
+        }
         Command::Remove { kind } => cmd_remove(
             kind,
             config,
@@ -534,7 +554,13 @@ pub(crate) fn cmd_lint(
 }
 
 /// `tome browse` — interactive TUI browser for the discovered skills.
-pub(crate) fn cmd_browse(config: &Config, paths: &TomePaths, quiet: bool) -> Result<()> {
+pub(crate) fn cmd_browse(
+    config: &Config,
+    paths: &TomePaths,
+    quiet: bool,
+    machine_prefs: machine::MachinePrefs,
+    machine_path: std::path::PathBuf,
+) -> Result<()> {
     let mut warnings = Vec::new();
     let skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
     if !quiet {
@@ -547,7 +573,7 @@ pub(crate) fn cmd_browse(config: &Config, paths: &TomePaths, quiet: bool) -> Res
         return Ok(());
     }
     let manifest = manifest::load(paths.config_dir())?;
-    browse::browse(skills, &manifest)?;
+    browse::browse(skills, &manifest, machine_prefs, machine_path)?;
     Ok(())
 }
 

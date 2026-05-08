@@ -118,6 +118,7 @@ mod tests {
                 path: "~/.claude/plugins/pdf-extract".into(),
                 managed: false,
                 synced_at: String::new(),
+                source_directory: None,
             },
             SkillRow {
                 name: "git-commit".into(),
@@ -125,6 +126,7 @@ mod tests {
                 path: "~/.claude/skills/git-commit".into(),
                 managed: false,
                 synced_at: String::new(),
+                source_directory: None,
             },
             SkillRow {
                 name: "rust-clippy".into(),
@@ -132,6 +134,7 @@ mod tests {
                 path: "~/.agents/skills/rust-clippy".into(),
                 managed: false,
                 synced_at: String::new(),
+                source_directory: None,
             },
         ]
     }
@@ -174,6 +177,7 @@ mod tests {
             path: "/test".into(),
             managed: false,
             synced_at: String::new(),
+            source_directory: None,
         }];
         let results = filter_rows_with_indices("abc", &rows);
         assert_eq!(results.len(), 1);
