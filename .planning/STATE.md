@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 15-01-cli-decomposition-PLAN.md
-last_updated: "2026-05-08T05:25:21.774Z"
+stopped_at: Completed 15-02-config-module-PLAN.md
+last_updated: "2026-05-08T05:49:48.126Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 15 (cli-hardening) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-05-08
 
@@ -77,6 +77,8 @@ Historical decisions are archived in:
 - [Phase 14-unowned-library-lifecycle]: Plan 14-05 (UNOWN-02): RemoveSkillFailureKind kept as separate enum from FailureKind (different failure modes); manifest mutation runs last in in-memory mutation sequence so retry still finds entry on panic; success banner enumerates only steps that actually cleaned something to reduce noise; partial-failure path retains in-memory state and skips all save() calls (I2/I3 retention parity with dir-flavour).
 - [Phase 14-unowned-library-lifecycle]: Plan 14-08: D-API-1/-2 vocabulary merge documented across REQUIREMENTS.md/ROADMAP.md/PROJECT.md/CHANGELOG.md with strikethrough+supersession traceability; Phase14Fixture pattern lifts manifest pre-population for Unowned-state tests; 10 phase14_ integration tests anchor UNOWN-01..03 success criteria to the real binary via assert_cmd; 845 tests green
 - [Phase 15-cli-hardening]: Plan 15-01: cmd_<name> helpers inlined in lib.rs (per CONTEXT.md Claude's Discretion); commands/ module deferred unless lib.rs grows further. Test split: 16 per-domain cli_*.rs files mirroring cmd_<name> structure; tests/common/mod.rs idiom with module-level #[allow(dead_code)]. Snapshot rename cli__*.snap -> cli_<domain>__*.snap to match insta per-test-crate convention.
+- [Phase 15-cli-hardening]: Plan 15-02: config.rs (3122 LOC) split into config/{mod,types,overrides,validate}.rs with Config::save_checked locked to mod.rs (S3 lock for Plan 15-04 grep target); tilde helpers (expand_tilde, unexpand_tilde) live in paths.rs per CONTEXT.md Claude's Discretion; mod.rs re-exports expand_tilde so byte-identical public API preserved
+- [Phase 15-cli-hardening]: Plan 15-02: paths::unexpand_tilde added (inverse of expand_tilde via shared dirs::home_dir()); Config::save_checked rewrites under-$HOME paths to ~/-shape on serialise (D-TILDE-1); MachinePrefs::save left untouched per D-TILDE-2 fence (3 verbatim regression tests pin contract); PORT-02 invariant preserved by construction (save_checked operates on \&self, never re-runs apply_machine_overrides)
 
 ### v0.10 design context (consume during planning)
 
@@ -115,6 +117,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-08T05:25:13.559Z
-Stopped at: Completed 15-01-cli-decomposition-PLAN.md
+Last session: 2026-05-08T05:49:36.774Z
+Stopped at: Completed 15-02-config-module-PLAN.md
 Resume file: None

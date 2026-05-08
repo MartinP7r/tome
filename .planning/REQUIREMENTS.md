@@ -63,7 +63,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 
 - [ ] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
 - [x] **HARD-02**: `lib.rs::run()` decomposed into per-subcommand `cmd_<name>(...)` helpers. Closes [#486](https://github.com/MartinP7r/tome/issues/486).
-- [ ] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
+- [x] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
 - [ ] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
 - [ ] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
 - [ ] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
@@ -82,7 +82,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 - [ ] **HARD-19**: `tome reassign` plan/execute reads filesystem state once (eliminate drift risk between plan and execute). Closes [#430](https://github.com/MartinP7r/tome/issues/430).
 - [ ] **HARD-20**: Manifest epoch-0 timestamp fallback fixed — surfaces as warning rather than silent garbage data in future diffs. Closes [#433](https://github.com/MartinP7r/tome/issues/433).
 - [ ] **HARD-21**: Browse UI Disable/Enable actions wired up (currently stubbed with `#[allow(dead_code)]`). Closes [#447](https://github.com/MartinP7r/tome/issues/447).
-- [ ] **HARD-22**: `Config::save_checked` preserves tilde-shaped paths instead of writing expanded absolute paths (breaks dotfiles sync). Closes [#457](https://github.com/MartinP7r/tome/issues/457).
+- [x] **HARD-22**: `Config::save_checked` preserves tilde-shaped paths instead of writing expanded absolute paths (breaks dotfiles sync). Closes [#457](https://github.com/MartinP7r/tome/issues/457).
 
 ### Documentation (DOC)
 
