@@ -316,13 +316,17 @@ pub(crate) fn execute(
     // set `source_name` and `previous_source` deterministically — every
     // observation execute() needs comes from `plan.pre_state.<field>`,
     // never from the live manifest or a fresh filesystem stat.
-    let mut planned_entry = plan.pre_state.manifest_entry_at_plan.clone().ok_or_else(|| {
-        anyhow::anyhow!(
-            "BUG: plan().pre_state.manifest_entry_at_plan was None for skill '{}'; \
+    let mut planned_entry = plan
+        .pre_state
+        .manifest_entry_at_plan
+        .clone()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "BUG: plan().pre_state.manifest_entry_at_plan was None for skill '{}'; \
              plan() should bail before producing such a snapshot",
-            plan.skill_name.as_str()
-        )
-    })?;
+                plan.skill_name.as_str()
+            )
+        })?;
 
     // Defensive invariant: when `plan.pre_state.target_existed_at_plan` is
     // true, the snapshot must also carry both content hashes — that pair is

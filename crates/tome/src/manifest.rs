@@ -190,7 +190,42 @@ impl SkillEntry {
     }
 }
 
+/// The unix-epoch timestamp string. A `synced_at` value of exactly this
+/// almost always means a partial-save artefact or a migration bug — no
+/// production codepath legitimately produces it.
+const EPOCH_ZERO_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+
+/// Pure formatter for HARD-20 (closes #433): if `synced_at` is the unix
+/// epoch, return a warning string naming the affected skill; otherwise
+/// return `None`. The split between detect-and-format (here) and emit
+/// (in `load`) keeps the message unit-testable without stderr capture.
+///
+/// `dead_code` allow: the function is currently consumed only by the
+/// `load` warning path and its own unit tests; preserving it as a
+/// crate-private helper means future callers (e.g. `tome doctor`) can
+/// reuse the exact same message.
+fn epoch_zero_warning(skill_name: &SkillName, synced_at: &str) -> Option<String> {
+    if synced_at == EPOCH_ZERO_TIMESTAMP {
+        Some(format!(
+            "warning: manifest entry for '{skill}' has unix-epoch sync-timestamp \
+             ({EPOCH_ZERO_TIMESTAMP}) — this almost always indicates a partial-save \
+             or migration artefact. Run `tome sync` to refresh the entry, or \
+             `tome doctor` for full diagnosis.",
+            skill = skill_name.as_str(),
+        ))
+    } else {
+        None
+    }
+}
+
 /// Load the manifest from the tome home directory, or return an empty one if missing.
+///
+/// HARD-20 (closes #433): emits a stderr warning for any entry whose
+/// `synced_at` field is the unix epoch (`1970-01-01T00:00:00Z`). The
+/// warning fires once per load, never poisons downstream features (the
+/// entry remains in the loaded manifest), and names the skill so the
+/// user can act. Implementation goes through the pure
+/// `epoch_zero_warning` formatter for testability.
 pub fn load(tome_home: &Path) -> Result<Manifest> {
     let path = tome_home.join(MANIFEST_FILENAME);
     if !path.exists() {
@@ -200,6 +235,11 @@ pub fn load(tome_home: &Path) -> Result<Manifest> {
         .with_context(|| format!("failed to read manifest {}", path.display()))?;
     let manifest: Manifest = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse manifest {}", path.display()))?;
+    for (name, entry) in manifest.iter() {
+        if let Some(warning) = epoch_zero_warning(name, &entry.synced_at) {
+            eprintln!("{warning}");
+        }
+    }
     Ok(manifest)
 }
 
@@ -327,6 +367,96 @@ mod tests {
     use super::*;
     use crate::validation::test_hash;
     use tempfile::TempDir;
+
+    // ---- HARD-20 epoch-0 timestamp warning (closes #433) -------------------
+    // An on-disk manifest entry with `synced_at = "1970-01-01T00:00:00Z"`
+    // almost always means a partial save or a migration artefact: the field
+    // is the unix epoch, which never appears legitimately in production.
+    // Manifest::load surfaces it as a stderr warning (informational, not
+    // fatal) so future diff comparisons or display output don't silently
+    // present garbage data.
+
+    #[test]
+    fn epoch_zero_warning_returns_some_for_unix_epoch() {
+        let name = crate::discover::SkillName::new("ghost-skill").unwrap();
+        let warning = epoch_zero_warning(&name, "1970-01-01T00:00:00Z")
+            .expect("epoch-0 timestamp must produce a warning");
+        // The warning must name the affected skill so the user can act.
+        assert!(
+            warning.contains("ghost-skill"),
+            "warning must name the affected skill, got: {warning}"
+        );
+        // And mention "warning" or "epoch" so the user knows what they're seeing.
+        assert!(
+            warning.to_lowercase().contains("warning") || warning.to_lowercase().contains("epoch"),
+            "warning must self-identify, got: {warning}"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_warning_returns_none_for_normal_timestamp() {
+        let name = crate::discover::SkillName::new("normal-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&name, "2024-06-01T12:34:56Z").is_none(),
+            "non-epoch timestamps must not trigger a warning"
+        );
+        assert!(
+            epoch_zero_warning(&name, "2026-05-08T00:00:00Z").is_none(),
+            "non-epoch timestamps must not trigger a warning"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_warning_is_offered_to_load() {
+        // Round-trip via the public load path: write a manifest with one
+        // epoch-0 entry to disk, load it, assert the entry survives.
+        let tmp = TempDir::new().unwrap();
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"skills":{{"ghost-skill":{{"source_path":"/tmp/x","source_name":"old","content_hash":"{valid_hash}","synced_at":"1970-01-01T00:00:00Z","managed":false}}}}}}"#
+        );
+        std::fs::write(tmp.path().join(".tome-manifest.json"), json).unwrap();
+
+        let manifest = load(tmp.path()).expect("epoch-0 entries must NOT poison load");
+        let entry = manifest
+            .get("ghost-skill")
+            .expect("epoch-0 entries must remain loadable");
+        assert_eq!(
+            entry.synced_at, "1970-01-01T00:00:00Z",
+            "load must preserve the literal timestamp; the warning is informational"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_load_does_not_warn_for_normal_entries() {
+        // Mixed manifest: one epoch-0 entry, one normal entry. The normal
+        // entry must NOT trigger the warning. We check this via the pure
+        // formatter (already covered above) and round-trip the load to
+        // verify both entries are loadable.
+        let tmp = TempDir::new().unwrap();
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"skills":{{
+                "ghost-skill":{{"source_path":"/tmp/x","source_name":"old","content_hash":"{valid_hash}","synced_at":"1970-01-01T00:00:00Z","managed":false}},
+                "fresh-skill":{{"source_path":"/tmp/y","source_name":"new","content_hash":"{valid_hash}","synced_at":"2026-05-08T07:00:00Z","managed":false}}
+            }}}}"#
+        );
+        std::fs::write(tmp.path().join(".tome-manifest.json"), json).unwrap();
+
+        let manifest = load(tmp.path()).expect("mixed manifest must load");
+        assert_eq!(manifest.len(), 2, "both entries must be present");
+        // Pure-formatter assertion mirrors what load() emits at runtime:
+        let normal_name = crate::discover::SkillName::new("fresh-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&normal_name, "2026-05-08T07:00:00Z").is_none(),
+            "normal entry must not trigger warning"
+        );
+        let ghost_name = crate::discover::SkillName::new("ghost-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&ghost_name, "1970-01-01T00:00:00Z").is_some(),
+            "epoch-0 entry must trigger warning"
+        );
+    }
 
     #[test]
     fn hash_directory_deterministic() {

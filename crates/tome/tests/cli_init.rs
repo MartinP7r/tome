@@ -337,10 +337,7 @@ fn init_prints_resolved_tome_home_with_env_source() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "stderr: {stderr}"
-    );
+    assert!(output.status.success(), "stderr: {stderr}");
     // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
     assert!(
         stderr.contains("(from TOME_HOME env)"),
@@ -371,10 +368,7 @@ fn init_prints_resolved_tome_home_with_flag_source() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "stderr: {stderr}"
-    );
+    assert!(output.status.success(), "stderr: {stderr}");
     // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
     assert!(
         stderr.contains("(from --tome-home flag)"),

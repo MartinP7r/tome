@@ -3,6 +3,18 @@ use predicates::prelude::*;
 mod common;
 use common::*;
 
+/// HARD-14 (closes #500): the `tome backup init` / `snapshot` paths run
+/// real `git commit` subprocesses. On developer machines with global
+/// `commit.gpgsign=true`, those commits inherit the signing requirement
+/// and fail the integration tests when the gpg agent refuses (or the
+/// test process can't authenticate). Pointing the subprocess at empty
+/// fallback git config files isolates it from the user's global config.
+fn isolate_git_config(cmd: &mut assert_cmd::Command, tmp: &std::path::Path) {
+    cmd.env("GIT_CONFIG_GLOBAL", tmp.join(".gitconfig-empty"))
+        .env("GIT_CONFIG_SYSTEM", tmp.join(".gitconfig-empty-system"))
+        .env_remove("GIT_CONFIG_NOSYSTEM");
+}
+
 #[test]
 fn backup_init_and_snapshot() {
     let env = TestEnvBuilder::new()
@@ -11,39 +23,42 @@ fn backup_init_and_snapshot() {
         .build();
 
     // Sync first to populate the library
-    tome()
-        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args(["--config", &env.config_path.to_string_lossy(), "sync"])
         .assert()
         .success();
 
     // Init backup (commits existing library content)
-    tome()
-        .args([
-            "--config",
-            &env.config_path.to_string_lossy(),
-            "backup",
-            "init",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Initialized backup repo"));
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args([
+        "--config",
+        &env.config_path.to_string_lossy(),
+        "backup",
+        "init",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("Initialized backup repo"));
 
     // Add a new file to the library so there's something to snapshot
     std::fs::write(env.library_dir.join("extra.txt"), "new content").unwrap();
 
     // Snapshot
-    tome()
-        .args([
-            "--config",
-            &env.config_path.to_string_lossy(),
-            "backup",
-            "snapshot",
-            "-m",
-            "test snapshot",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Snapshot created"));
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args([
+        "--config",
+        &env.config_path.to_string_lossy(),
+        "backup",
+        "snapshot",
+        "-m",
+        "test snapshot",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("Snapshot created"));
 }
 
 #[test]
@@ -54,46 +69,50 @@ fn backup_list_shows_history() {
         .build();
 
     // Sync to populate library
-    tome()
-        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args(["--config", &env.config_path.to_string_lossy(), "sync"])
         .assert()
         .success();
 
     // Init backup
-    tome()
-        .args([
-            "--config",
-            &env.config_path.to_string_lossy(),
-            "backup",
-            "init",
-        ])
-        .assert()
-        .success();
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args([
+        "--config",
+        &env.config_path.to_string_lossy(),
+        "backup",
+        "init",
+    ])
+    .assert()
+    .success();
 
     // Add a file and create a snapshot
     std::fs::write(env.library_dir.join("extra.txt"), "new content").unwrap();
-    tome()
-        .args([
-            "--config",
-            &env.config_path.to_string_lossy(),
-            "backup",
-            "snapshot",
-            "-m",
-            "first snapshot",
-        ])
-        .assert()
-        .success();
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args([
+        "--config",
+        &env.config_path.to_string_lossy(),
+        "backup",
+        "snapshot",
+        "-m",
+        "first snapshot",
+    ])
+    .assert()
+    .success();
 
     // List should show both the initial backup and the snapshot
-    tome()
-        .args([
-            "--config",
-            &env.config_path.to_string_lossy(),
-            "backup",
-            "list",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("first snapshot"))
-        .stdout(predicate::str::contains("Initial tome backup"));
+    let mut cmd = tome();
+    isolate_git_config(&mut cmd, env.tome_home());
+    cmd.args([
+        "--config",
+        &env.config_path.to_string_lossy(),
+        "backup",
+        "list",
+    ])
+    .assert()
+    .success()
+    .stdout(predicate::str::contains("first snapshot"))
+    .stdout(predicate::str::contains("Initial tome backup"));
 }
