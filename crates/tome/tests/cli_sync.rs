@@ -1716,3 +1716,79 @@ fn lifecycle_multi_target_distribution() {
         "target-b should work after re-enabling"
     );
 }
+
+// ---------------------------------------------------------------------------
+// HARD-09 / D-DIST-1: foreign-symlink protection — end-to-end via `tome sync`.
+// Stage two synthetic tome installs sharing one distribution dir, run sync
+// from install A, and assert that B's pre-existing symlink is NOT clobbered
+// without --force, and IS clobbered with --force.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "shared-skill");
+
+    // The "other" tome library — a separate library directory whose
+    // symlinks we will plant in our target dir before `tome sync` runs.
+    let other_library = tmp.path().join("other-library");
+    let other_skill = other_library.join("shared-skill");
+    std::fs::create_dir_all(&other_skill).unwrap();
+    std::fs::write(other_skill.join("SKILL.md"), "---\nname: shared-skill\n---\n# x").unwrap();
+
+    let target = tmp.path().join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    // Pre-stage a foreign symlink target/shared-skill -> other_library/shared-skill.
+    std::os::unix::fs::symlink(&other_skill, target.join("shared-skill")).unwrap();
+
+    let config_path = write_config_with_target(
+        tmp.path(),
+        &format!(
+            "[directories.local]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            skills_dir.display()
+        ),
+        &target,
+    );
+
+    // Default sync: foreign symlink is warn-and-skipped, NOT clobbered.
+    let assert = tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+    let output = assert.get_output();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("is a foreign symlink"),
+        "stderr must surface the D-DIST-1 foreign-symlink warning, got: {stderr}"
+    );
+    assert!(
+        stderr.contains("Pass --force to overwrite"),
+        "warning must mention --force as the opt-in, got: {stderr}"
+    );
+    // Foreign link unchanged on disk.
+    let actual = std::fs::read_link(target.join("shared-skill")).unwrap();
+    assert_eq!(
+        actual, other_skill,
+        "default sync must leave the foreign symlink intact"
+    );
+
+    // --force re-runs and clobbers the foreign link.
+    tome()
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "sync",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+    let actual = std::fs::read_link(target.join("shared-skill")).unwrap();
+    assert!(
+        actual.starts_with(tmp.path().join("library")),
+        "force sync must redirect the link into our library, got {}",
+        actual.display()
+    );
+}

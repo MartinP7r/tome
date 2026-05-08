@@ -23,11 +23,89 @@ pub enum IssueSeverity {
     Warning,
 }
 
+/// Categorical classification for a [`DiagnosticIssue`].
+///
+/// Most existing diagnostic checks emit a free-form `message` string with
+/// a [`IssueSeverity`]; this typed kind sits alongside that field for
+/// issues whose call sites need to discriminate on the issue *category*
+/// (e.g. doctor JSON output, future repair routines).
+///
+/// HARD-09 / D-DIST-2 introduces the first variant:
+/// [`DiagnosticIssueKind::ForeignSymlink`].
+///
+/// Future variants must extend [`DiagnosticIssueKind::ALL`] and the
+/// compile-time exhaustiveness sentinel below (POLISH-04 pattern).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum DiagnosticIssueKind {
+    /// A distribution-directory entry is a symlink whose target lives
+    /// outside the active `library_dir` — typically left behind by a
+    /// different tome install or a hand-edited dotfiles workflow.
+    /// Renders as [`IssueSeverity::Warning`] and contributes to
+    /// [`DoctorReport::total_issues`].
+    ForeignSymlink,
+}
+
+impl DiagnosticIssueKind {
+    /// Compile-time-validated enumeration of every variant. Mirrors
+    /// `crate::remove::FailureKind::ALL` and
+    /// `crate::marketplace::InstallFailureKind::ALL`.
+    pub const ALL: [DiagnosticIssueKind; 1] = [DiagnosticIssueKind::ForeignSymlink];
+}
+
+/// Compile-time drift guard for [`DiagnosticIssueKind::ALL`] (POLISH-04).
+/// If a future variant is added without updating `ALL`, this match fails to
+/// compile (`non-exhaustive patterns`) and the const-len assert fails
+/// `cargo check`. Either failure forces the maintainer to update the array.
+#[allow(dead_code)]
+const fn _diagnostic_issue_kind_exhaustiveness_sentinel(kind: DiagnosticIssueKind) {
+    match kind {
+        // If this fails: DiagnosticIssueKind::ALL is missing or has extra
+        // variants. Update the array and this match arm together.
+        DiagnosticIssueKind::ForeignSymlink => {}
+    }
+}
+const _: () = {
+    assert!(DiagnosticIssueKind::ALL.len() == 1);
+};
+
 /// A single diagnostic issue found during a health check.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiagnosticIssue {
     pub severity: IssueSeverity,
     pub message: String,
+    /// Optional typed classification. Existing diagnostic emit sites
+    /// leave this `None` (the free-form `message` carries the detail);
+    /// HARD-09 D-DIST-2 ForeignSymlink is the first emitter to set it.
+    /// Serialised JSON shape: omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<DiagnosticIssueKind>,
+}
+
+impl DiagnosticIssue {
+    /// Build a free-form (untyped) diagnostic issue. The `kind` field
+    /// stays `None`. Used by every legacy emit site that surfaces a
+    /// detail through the human-readable message string only.
+    pub(crate) fn untyped(severity: IssueSeverity, message: impl Into<String>) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: None,
+        }
+    }
+
+    /// Build a typed diagnostic issue. Currently the only caller is
+    /// the HARD-09 / D-DIST-2 ForeignSymlink check.
+    pub(crate) fn typed(
+        severity: IssueSeverity,
+        kind: DiagnosticIssueKind,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: Some(kind),
+        }
+    }
 }
 
 /// Per-directory diagnostic entry. Aggregates issues for one configured
@@ -508,20 +586,20 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
 
     if !library_dir.is_dir() {
-        issues.push(DiagnosticIssue {
-            severity: IssueSeverity::Warning,
-            message: "library directory does not exist".to_string(),
-        });
+        issues.push(DiagnosticIssue::untyped(
+            IssueSeverity::Warning,
+            "library directory does not exist",
+        ));
         return Ok(issues);
     }
 
     let m = match manifest::load(config_dir) {
         Ok(m) => m,
         Err(e) => {
-            issues.push(DiagnosticIssue {
-                severity: IssueSeverity::Error,
-                message: format!("manifest is corrupted or unreadable: {}", e),
-            });
+            issues.push(DiagnosticIssue::untyped(
+                IssueSeverity::Error,
+                format!("manifest is corrupted or unreadable: {}", e),
+            ));
             return Ok(issues);
         }
     };
@@ -533,18 +611,18 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             let entry = m.get(name.as_str());
             let is_managed = entry.is_some_and(|e| e.managed);
             if is_managed && entry_path.is_symlink() {
-                issues.push(DiagnosticIssue {
-                    severity: IssueSeverity::Error,
-                    message: format!(
+                issues.push(DiagnosticIssue::untyped(
+                    IssueSeverity::Error,
+                    format!(
                         "managed skill '{}' has a broken symlink (source may have been uninstalled)",
                         name
                     ),
-                });
+                ));
             } else {
-                issues.push(DiagnosticIssue {
-                    severity: IssueSeverity::Error,
-                    message: format!("manifest entry '{}' has no directory on disk", name),
-                });
+                issues.push(DiagnosticIssue::untyped(
+                    IssueSeverity::Error,
+                    format!("manifest entry '{}' has no directory on disk", name),
+                ));
             }
         }
     }
@@ -560,10 +638,10 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         let name = entry.file_name().to_string_lossy().to_string();
 
         if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
-            issues.push(DiagnosticIssue {
-                severity: IssueSeverity::Warning,
-                message: format!("orphan directory: {} (not in manifest)", path.display()),
-            });
+            issues.push(DiagnosticIssue::untyped(
+                IssueSeverity::Warning,
+                format!("orphan directory: {} (not in manifest)", path.display()),
+            ));
         }
 
         // Check for broken symlinks — managed skill whose source was deleted, or orphan from a previous layout
@@ -572,14 +650,14 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             if !is_managed {
                 let raw_target = std::fs::read_link(&path)
                     .with_context(|| format!("failed to read symlink {}", path.display()))?;
-                issues.push(DiagnosticIssue {
-                    severity: IssueSeverity::Error,
-                    message: format!(
+                issues.push(DiagnosticIssue::untyped(
+                    IssueSeverity::Error,
+                    format!(
                         "broken legacy symlink: {} -> {}",
                         path.display(),
                         raw_target.display()
                     ),
-                });
+                ));
             }
         }
     }
@@ -593,13 +671,13 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     {
         let tracked = tracked_managed_symlinks(library_dir, &m);
         if !tracked.is_empty() {
-            issues.push(DiagnosticIssue {
-                severity: IssueSeverity::Warning,
-                message: format!(
+            issues.push(DiagnosticIssue::untyped(
+                IssueSeverity::Warning,
+                format!(
                     "{} managed symlink(s) tracked in git (machine-specific, should be gitignored)",
                     tracked.len()
                 ),
-            });
+            ));
         }
     }
 
@@ -659,10 +737,10 @@ fn check_distribution_dir(
     let mut issues = Vec::new();
 
     if !skills_dir.is_dir() {
-        issues.push(DiagnosticIssue {
-            severity: IssueSeverity::Warning,
-            message: format!("directory path does not exist ({})", skills_dir.display()),
-        });
+        issues.push(DiagnosticIssue::untyped(
+            IssueSeverity::Warning,
+            format!("directory path does not exist ({})", skills_dir.display()),
+        ));
         return Ok(issues);
     }
 
@@ -692,10 +770,28 @@ fn check_distribution_dir(
             let points_into_library =
                 target.starts_with(library_dir) || target.starts_with(&canonical_library);
             if points_into_library && !target.exists() {
-                issues.push(DiagnosticIssue {
-                    severity: IssueSeverity::Error,
-                    message: format!("stale symlink {}", path.display()),
-                });
+                issues.push(DiagnosticIssue::untyped(
+                    IssueSeverity::Error,
+                    format!("stale symlink {}", path.display()),
+                ));
+            }
+            // HARD-09 / D-DIST-2: surface foreign symlinks so they show
+            // up in `tome doctor` even when the user hasn't run `sync`
+            // recently. Reuses the canonical-path predicate from
+            // `crate::distribute::is_foreign_symlink` so detection
+            // semantics stay in lockstep across the two emit sites.
+            // Renders as Warning per D-DIST-2; contributes to
+            // `total_issues` via the existing summing logic.
+            if crate::distribute::is_foreign_symlink(&path, library_dir) {
+                issues.push(DiagnosticIssue::typed(
+                    IssueSeverity::Warning,
+                    DiagnosticIssueKind::ForeignSymlink,
+                    format!(
+                        "foreign symlink: {} -> {} (points outside library_dir; tome will skip on sync unless --force)",
+                        path.display(),
+                        raw_target.display(),
+                    ),
+                ));
             }
         }
     }
@@ -708,14 +804,14 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
 
     for (name, dir_config) in &config.directories {
         if !dir_config.path.exists() {
-            issues.push(DiagnosticIssue {
-                severity: IssueSeverity::Warning,
-                message: format!(
+            issues.push(DiagnosticIssue::untyped(
+                IssueSeverity::Warning,
+                format!(
                     "directory '{}' path does not exist: {}",
                     name,
                     dir_config.path.display()
                 ),
-            });
+            ));
         }
     }
 
@@ -1015,15 +1111,29 @@ mod tests {
         assert_eq!(result.len(), 1);
     }
 
+    /// HARD-09 / D-DIST-2 BEHAVIOUR CHANGE: external (foreign) symlinks
+    /// in distribution directories now surface as ForeignSymlink
+    /// Warnings instead of being silently ignored. The pre-HARD-09
+    /// "silent ignore" assertion is replaced with a typed-issue
+    /// assertion so the new contract is pinned.
     #[test]
-    fn check_distribution_dir_ignores_external_symlinks() {
+    fn check_distribution_dir_surfaces_external_symlinks_as_foreign() {
         let lib = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
 
         unix_fs::symlink("/some/other/place", target_dir.path().join("external")).unwrap();
 
         let result = check_distribution_dir("test", target_dir.path(), lib.path()).unwrap();
-        assert!(result.is_empty());
+        let foreign: Vec<_> = result
+            .iter()
+            .filter(|i| i.kind == Some(DiagnosticIssueKind::ForeignSymlink))
+            .collect();
+        assert_eq!(
+            foreign.len(),
+            1,
+            "external symlink must surface as one ForeignSymlink Warning, got: {result:?}"
+        );
+        assert_eq!(foreign[0].severity, IssueSeverity::Warning);
     }
 
     // -- check_config --
@@ -1354,38 +1464,23 @@ mod tests {
     fn total_issues_unchanged_by_directory_diagnostic_shape() {
         let report = DoctorReport {
             configured: true,
-            library_issues: vec![DiagnosticIssue {
-                severity: IssueSeverity::Warning,
-                message: "lib".to_string(),
-            }],
+            library_issues: vec![DiagnosticIssue::untyped(IssueSeverity::Warning, "lib")],
             directory_issues: vec![
                 DirectoryDiagnostic {
                     name: "a".to_string(),
-                    issues: vec![DiagnosticIssue {
-                        severity: IssueSeverity::Error,
-                        message: "x".to_string(),
-                    }],
+                    issues: vec![DiagnosticIssue::untyped(IssueSeverity::Error, "x")],
                     override_applied: true,
                 },
                 DirectoryDiagnostic {
                     name: "b".to_string(),
                     issues: vec![
-                        DiagnosticIssue {
-                            severity: IssueSeverity::Error,
-                            message: "y".to_string(),
-                        },
-                        DiagnosticIssue {
-                            severity: IssueSeverity::Warning,
-                            message: "z".to_string(),
-                        },
+                        DiagnosticIssue::untyped(IssueSeverity::Error, "y"),
+                        DiagnosticIssue::untyped(IssueSeverity::Warning, "z"),
                     ],
                     override_applied: false,
                 },
             ],
-            config_issues: vec![DiagnosticIssue {
-                severity: IssueSeverity::Warning,
-                message: "cfg".to_string(),
-            }],
+            config_issues: vec![DiagnosticIssue::untyped(IssueSeverity::Warning, "cfg")],
             unowned_skills: Vec::new(),
         };
         // 1 (lib) + 1 (a) + 2 (b) + 1 (cfg) = 5
@@ -1526,6 +1621,109 @@ mod tests {
         assert!(
             json.contains("\"unowned_skills\""),
             "JSON must include 'unowned_skills' key for stable shape: {json}"
+        );
+    }
+
+    // -- HARD-09 / D-DIST-2: DiagnosticIssueKind::ForeignSymlink --
+
+    #[test]
+    fn diagnostic_issue_kind_all_contains_foreign_symlink() {
+        // POLISH-04 ALL-array contract: ForeignSymlink is enumerated
+        // exactly once.
+        assert_eq!(DiagnosticIssueKind::ALL.len(), 1);
+        assert!(DiagnosticIssueKind::ALL.contains(&DiagnosticIssueKind::ForeignSymlink));
+    }
+
+    #[test]
+    fn foreign_symlink_renders_as_warning_severity() {
+        // D-DIST-2: the ForeignSymlink variant always emits as Warning
+        // (NOT Error) — the user has a healthy alternative tome install
+        // sharing the directory; this is informational, not a fault.
+        let issue = DiagnosticIssue::typed(
+            IssueSeverity::Warning,
+            DiagnosticIssueKind::ForeignSymlink,
+            "foreign symlink: ~/.claude/skills/foo -> /other/library/foo",
+        );
+        assert_eq!(issue.severity, IssueSeverity::Warning);
+        assert_eq!(issue.kind, Some(DiagnosticIssueKind::ForeignSymlink));
+    }
+
+    #[test]
+    fn foreign_symlink_contributes_to_total_issues() {
+        // D-DIST-2: ForeignSymlink contributes to total_issues via the
+        // existing summing logic (no separate accounting). One per
+        // affected directory entry.
+        let report = DoctorReport {
+            configured: true,
+            library_issues: Vec::new(),
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "claude".to_string(),
+                issues: vec![DiagnosticIssue::typed(
+                    IssueSeverity::Warning,
+                    DiagnosticIssueKind::ForeignSymlink,
+                    "foreign symlink",
+                )],
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        assert_eq!(report.total_issues(), 1);
+    }
+
+    #[test]
+    fn foreign_symlink_serialises_kind_in_json() {
+        // JSON shape: typed `kind` field appears for ForeignSymlink
+        // emissions; absent for legacy untyped issues.
+        let typed = DiagnosticIssue::typed(
+            IssueSeverity::Warning,
+            DiagnosticIssueKind::ForeignSymlink,
+            "msg",
+        );
+        let json = serde_json::to_string(&typed).unwrap();
+        assert!(
+            json.contains("\"kind\":\"ForeignSymlink\""),
+            "typed issue must serialise kind: {json}"
+        );
+
+        let untyped = DiagnosticIssue::untyped(IssueSeverity::Warning, "msg");
+        let json = serde_json::to_string(&untyped).unwrap();
+        assert!(
+            !json.contains("kind"),
+            "untyped issue must omit kind via skip_serializing_if: {json}"
+        );
+    }
+
+    #[test]
+    fn check_distribution_dir_surfaces_foreign_symlink() {
+        // End-to-end: stage a foreign symlink under a distribution dir,
+        // run check_distribution_dir, assert one ForeignSymlink issue.
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let dist = tmp.path().join("dist");
+        std::fs::create_dir_all(&dist).unwrap();
+        let other_library = tmp.path().join("other-library");
+        std::fs::create_dir_all(&other_library).unwrap();
+        let foreign_target = other_library.join("foo");
+        std::fs::create_dir_all(&foreign_target).unwrap();
+        std::os::unix::fs::symlink(&foreign_target, dist.join("foo")).unwrap();
+
+        let issues = super::check_distribution_dir("test", &dist, &library).unwrap();
+        let foreign: Vec<_> = issues
+            .iter()
+            .filter(|i| i.kind == Some(DiagnosticIssueKind::ForeignSymlink))
+            .collect();
+        assert_eq!(
+            foreign.len(),
+            1,
+            "expected one ForeignSymlink diagnostic, got: {issues:?}"
+        );
+        assert_eq!(foreign[0].severity, IssueSeverity::Warning);
+        assert!(
+            foreign[0].message.contains("foreign symlink"),
+            "message must use the 'foreign symlink' wording: {}",
+            foreign[0].message
         );
     }
 }
