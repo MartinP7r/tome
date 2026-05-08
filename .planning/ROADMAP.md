@@ -68,7 +68,7 @@
 - [x] **Phase 13: Lockfile-authoritative sync** — `tome sync` reconciles installed plugins to lockfile state; Match/Drift/Vanished classification; auto-install consent; edit-in-library detection (RECON-01..05) — **alpha cut** (completed 2026-05-05)
 - [x] **Phase 14: Unowned-library lifecycle** — `tome reassign` accepts Unowned input (per D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01); `tome remove skill <name>` deletes an Unowned skill (per D-API-2, supersedes `tome forget`); `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03) (completed 2026-05-07)
 - [x] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut** (completed 2026-05-08)
-- [ ] **Phase 16: Cleanup-message UX + docs** — Three-bucket cleanup partition with actionable hints; migration prompt summary table; architecture, changelog, cross-machine docs (UX-01..02, DOC-01..03) — **rc cut**
+- [x] **Phase 16: Cleanup-message UX + docs** — Three-bucket cleanup partition with actionable hints; migration prompt summary table; architecture, changelog, cross-machine docs (UX-01..02, DOC-01..03) — **rc cut** (completed 2026-05-08)
 - [ ] **Phase 17: Migration polish + UAT + release** — In-flight PR landing; issue triage; Linux UAT; real-library migration smoke-test; cargo-dist v0.10.0 release (REL-01..05) — **v0.10 final**
 
 ## Phase Details
@@ -175,7 +175,7 @@
 - [x] 16-02-migrate-confirm-summary-PLAN.md — `migration_v010.rs` + `cli.rs` + `lib.rs::cmd_migrate_library` confirm gate + `tabled` summary table + `byte_size` walk + `--yes` flag (UX-02)
 - [x] 16-03-architecture-doc-PLAN.md — `docs/src/architecture.md` rewrites + 4 new sections (Library-canonical model, Lockfile-authoritative reconciliation, Marketplace adapter trait, Unowned lifecycle) (DOC-01)
 - [x] 16-04-changelog-PLAN.md — `CHANGELOG.md` v0.10 release notes draft with three breaking-change call-outs + migration step paragraph (DOC-02)
-- [ ] 16-05-cross-machine-doc-PLAN.md — new `docs/src/cross-machine-sync.md` (Machine A/B walkthroughs + reference sections) + `SUMMARY.md` TOC entry + `Command::Sync long_about` reference (DOC-03)
+- [x] 16-05-cross-machine-doc-PLAN.md — new `docs/src/cross-machine-sync.md` (Machine A/B walkthroughs + reference sections) + `SUMMARY.md` TOC entry + `Command::Sync long_about` reference (DOC-03)
 
 ### Phase 17: Migration polish + UAT + release
 **Goal**: Ship v0.10. In-flight PRs landed, issue tracker cleaned up, real-library migration smoke-tested, cargo-dist release published.
@@ -212,5 +212,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
 | 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
-| 16. Cleanup-message UX + docs (rc) | v0.10 | 4/5 | In Progress|  |
+| 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete   | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
