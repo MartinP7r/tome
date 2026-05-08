@@ -1055,11 +1055,8 @@ mod tests {
 
         // Restore permissions before any assertion to keep TempDir cleanup
         // working even on assertion panic.
-        std::fs::set_permissions(
-            tmp.path(),
-            std::fs::Permissions::from_mode(original_mode),
-        )
-        .unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(original_mode))
+            .unwrap();
 
         assert!(
             result.is_err(),

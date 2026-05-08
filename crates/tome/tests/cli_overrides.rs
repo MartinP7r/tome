@@ -15,10 +15,7 @@ use common::*;
 /// containing the hostile `[directory_overrides.<name>]` block. Returns
 /// (tome_home_path, config_path, machine_path) so the test can assert on
 /// downstream filesystem state (library_dir, distribution dirs, etc.).
-fn hostile_override_env(
-    tmp: &TempDir,
-    machine_toml_body: &str,
-) -> (PathBuf, PathBuf, PathBuf) {
+fn hostile_override_env(tmp: &TempDir, machine_toml_body: &str) -> (PathBuf, PathBuf, PathBuf) {
     let library_dir = tmp.path().join("library");
     std::fs::create_dir_all(&library_dir).unwrap();
 
@@ -53,10 +50,8 @@ fn hostile_override_env(
 #[test]
 fn cli_overrides_hostile_dotdot_traversal_rejected() {
     let tmp = TempDir::new().unwrap();
-    let (tome_home, config, machine) = hostile_override_env(
-        &tmp,
-        "[directory_overrides.foo]\npath = \"../../../etc\"\n",
-    );
+    let (tome_home, config, machine) =
+        hostile_override_env(&tmp, "[directory_overrides.foo]\npath = \"../../../etc\"\n");
 
     let assert = tome()
         .args([
@@ -120,10 +115,7 @@ fn cli_overrides_hostile_symlink_loop_rejected() {
 
     let (tome_home, config, machine) = hostile_override_env(
         &tmp,
-        &format!(
-            "[directory_overrides.foo]\npath = \"{}\"\n",
-            a.display()
-        ),
+        &format!("[directory_overrides.foo]\npath = \"{}\"\n", a.display()),
     );
 
     let assert = tome()

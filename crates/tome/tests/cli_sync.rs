@@ -1735,7 +1735,11 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
     let other_library = tmp.path().join("other-library");
     let other_skill = other_library.join("shared-skill");
     std::fs::create_dir_all(&other_skill).unwrap();
-    std::fs::write(other_skill.join("SKILL.md"), "---\nname: shared-skill\n---\n# x").unwrap();
+    std::fs::write(
+        other_skill.join("SKILL.md"),
+        "---\nname: shared-skill\n---\n# x",
+    )
+    .unwrap();
 
     let target = tmp.path().join("target");
     std::fs::create_dir_all(&target).unwrap();
@@ -1776,12 +1780,7 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
 
     // --force re-runs and clobbers the foreign link.
     tome()
-        .args([
-            "--config",
-            config_path.to_str().unwrap(),
-            "sync",
-            "--force",
-        ])
+        .args(["--config", config_path.to_str().unwrap(), "sync", "--force"])
         .env("NO_COLOR", "1")
         .assert()
         .success();

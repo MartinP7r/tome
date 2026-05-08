@@ -948,3 +948,313 @@ fn phase14_remove_skill_no_input_without_yes_bails() {
         "manifest entry must be preserved when bail occurred: {manifest}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// HARD-11: end-to-end coverage for `tome remove dir <name>` across the two
+// directory types whose cleanup is non-trivial.
+//
+// Both tests:
+//   1. Drive the binary via assert_cmd::Command::cargo_bin (post-Phase-14
+//      D-API-2 `tome remove dir <name>` shape).
+//   2. Verify the directory is gone from `tome.toml`.
+//   3. Verify type-specific side effects (git cache cleanup, claude-
+//      plugins state).
+//   4. Verify the LIB-04 / Phase 11 D-10 invariant: skills sourced from
+//      the removed directory transition to Unowned (`source_name = None`)
+//      with `previous_source` capturing the prior owner; the library
+//      directory itself is preserved.
+// ---------------------------------------------------------------------------
+
+#[cfg(unix)]
+#[test]
+fn tome_remove_dir_cleans_git_cache() {
+    let tmp = TempDir::new().unwrap();
+
+    // Build a real local git repo to act as the upstream. Using a
+    // `file://` URL keeps the test offline.
+    let upstream_dir = tmp.path().join("upstream-test-git.git");
+    std::fs::create_dir_all(&upstream_dir).unwrap();
+    create_skill(&upstream_dir, "git-skill");
+    let git_init = |dir: &std::path::Path, args: &[&str]| {
+        StdCommand::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .unwrap();
+    };
+    git_init(&upstream_dir, &["init", "-b", "main"]);
+    git_init(&upstream_dir, &["config", "user.email", "test@test.com"]);
+    git_init(&upstream_dir, &["config", "user.name", "Test"]);
+    git_init(&upstream_dir, &["add", "-A"]);
+    git_init(&upstream_dir, &["commit", "-m", "seed"]);
+
+    let url = format!("file://{}", upstream_dir.display());
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.test-git]\n\
+             path = \"{}\"\n\
+             type = \"git\"\n\
+             role = \"source\"\n\
+             branch = \"main\"\n",
+            url,
+        ),
+    );
+
+    // Sync to populate library + git cache (~/.tome/repos/<sha>/).
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // Sanity: the git cache directory exists and contains at least one
+    // entry. Use repos_dir convention: <tome_home>/repos/<sha256(url)>/.
+    let repos_dir = tmp.path().join("repos");
+    let repos_entries: Vec<_> = std::fs::read_dir(&repos_dir)
+        .expect("repos_dir must exist after a git-source sync")
+        .filter_map(|e| e.ok())
+        .collect();
+    assert_eq!(
+        repos_entries.len(),
+        1,
+        "expected one git-cache entry post-sync, got: {repos_entries:?}"
+    );
+    let cache_dir = repos_entries[0].path();
+    assert!(cache_dir.is_dir());
+
+    // Sanity: library_dir contains the discovered skill before removal.
+    let library_dir = tmp.path().join("library");
+    assert!(
+        library_dir.join("git-skill").exists(),
+        "library_dir must contain git-skill before remove"
+    );
+
+    // Confirm manifest before remove records the directory as the source.
+    let manifest_before: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest_before["skills"]["git-skill"]["source_name"].as_str(),
+        Some("test-git"),
+        "precondition: manifest must record source_name = test-git pre-remove, got: {manifest_before}"
+    );
+
+    // -- Run: `tome remove dir test-git --force` (non-interactive).
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "dir",
+            "test-git",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // -- Verify: tome.toml no longer has the directory entry.
+    let config_after = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        !config_after.contains("[directories.test-git]"),
+        "config must no longer contain test-git directory: {config_after}"
+    );
+
+    // -- Verify: git cache cleaned.
+    assert!(
+        !cache_dir.exists(),
+        "git cache dir {} must be removed by `tome remove dir`",
+        cache_dir.display()
+    );
+
+    // -- Verify: library content for the skill is PRESERVED (LIB-04).
+    assert!(
+        library_dir.join("git-skill").exists(),
+        "library skill must be preserved as Unowned per LIB-04"
+    );
+
+    // -- Verify: manifest entry transitioned to Unowned (source_name = None,
+    //    previous_source captures the prior owner).
+    let manifest_after: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        manifest_after["skills"]["git-skill"]
+            .get("source_name")
+            .is_none()
+            || manifest_after["skills"]["git-skill"]["source_name"].is_null(),
+        "manifest entry for git-skill must transition to Unowned (source_name omitted/null), got: {manifest_after}"
+    );
+    assert_eq!(
+        manifest_after["skills"]["git-skill"]["previous_source"].as_str(),
+        Some("test-git"),
+        "manifest entry must record previous_source = test-git per Phase 14 D-C1, got: {manifest_after}"
+    );
+}
+
+/// Build a synthetic claude-plugins directory (v2 `installed_plugins.json`
+/// shape with one plugin install dir containing one skill). Returns the
+/// source root the caller registers as `[directories.<name>]
+/// type = "claude-plugins"`.
+fn build_synthetic_claude_plugins(parent: &std::path::Path, plugin: &str, skill: &str) -> PathBuf {
+    let cp_root = parent.join("cp-root");
+    std::fs::create_dir_all(&cp_root).unwrap();
+
+    let install_dir = cp_root.join("installs").join(plugin);
+    let skills_subdir = install_dir.join("skills").join(skill);
+    std::fs::create_dir_all(&skills_subdir).unwrap();
+    std::fs::write(
+        skills_subdir.join("SKILL.md"),
+        format!("---\nname: {skill}\n---\n# {skill}\nA managed skill."),
+    )
+    .unwrap();
+
+    let json = serde_json::json!({
+        "version": 2,
+        "plugins": {
+            "marketplace/foo": [
+                {
+                    "installPath": install_dir.display().to_string(),
+                    "version": "1.0.0",
+                }
+            ]
+        }
+    });
+    std::fs::write(
+        cp_root.join("installed_plugins.json"),
+        serde_json::to_string_pretty(&json).unwrap(),
+    )
+    .unwrap();
+
+    cp_root
+}
+
+#[cfg(unix)]
+#[test]
+fn tome_remove_dir_cleans_claude_plugins() {
+    let tmp = TempDir::new().unwrap();
+
+    // Build a synthetic claude-plugins source dir (v2 installed_plugins.json
+    // shape) with one managed skill `managed-foo` under plugin
+    // `marketplace/foo`. ClaudePlugins discovery picks up the plugin's
+    // `skills/` subdir and consolidates the skill into the library.
+    let cp_root = build_synthetic_claude_plugins(tmp.path(), "managed-foo", "managed-foo");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    remove_test_env(
+        &tmp,
+        &format!(
+            "[directories.test-cp]\n\
+             path = \"{}\"\n\
+             type = \"claude-plugins\"\n\
+             \n\
+             [directories.dist]\n\
+             path = \"{}\"\n\
+             type = \"directory\"\n\
+             role = \"target\"\n",
+            cp_root.display(),
+            target_dir.display(),
+        ),
+    );
+
+    // Sync to populate library + manifest + distribution symlinks.
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "sync",
+            "--no-triage",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    let library_dir = tmp.path().join("library");
+    assert!(
+        library_dir.join("managed-foo").exists(),
+        "library skill must exist post-sync"
+    );
+
+    let dist_link = target_dir.join("managed-foo");
+    assert!(
+        dist_link.is_symlink(),
+        "distribution symlink must exist post-sync: {}",
+        dist_link.display()
+    );
+
+    let manifest_before: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        manifest_before["skills"]["managed-foo"]["source_name"].as_str(),
+        Some("test-cp"),
+        "precondition: manifest must record source_name = test-cp pre-remove, got: {manifest_before}"
+    );
+
+    // -- Run: `tome remove dir test-cp --force` (non-interactive).
+    tome()
+        .args([
+            "--tome-home",
+            tmp.path().to_str().unwrap(),
+            "remove",
+            "dir",
+            "test-cp",
+            "--force",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    // -- Verify: tome.toml no longer has the directory entry.
+    let config_after = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    assert!(
+        !config_after.contains("[directories.test-cp]"),
+        "config must no longer contain test-cp directory: {config_after}"
+    );
+
+    // -- Verify: distribution symlinks pointing at the removed source's library
+    //    entries are removed.
+    assert!(
+        !dist_link.exists() && !dist_link.is_symlink(),
+        "distribution symlink at {} must be removed post-`remove dir`",
+        dist_link.display()
+    );
+
+    // -- Verify: library content is PRESERVED (LIB-04).
+    assert!(
+        library_dir.join("managed-foo").exists(),
+        "library skill must be preserved as Unowned per LIB-04"
+    );
+
+    // -- Verify: manifest transitioned to Unowned + records previous_source.
+    let manifest_after: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
+    )
+    .unwrap();
+    assert!(
+        manifest_after["skills"]["managed-foo"]
+            .get("source_name")
+            .is_none()
+            || manifest_after["skills"]["managed-foo"]["source_name"].is_null(),
+        "manifest must transition managed-foo to Unowned, got: {manifest_after}"
+    );
+    assert_eq!(
+        manifest_after["skills"]["managed-foo"]["previous_source"].as_str(),
+        Some("test-cp"),
+        "manifest must record previous_source = test-cp per Phase 14 D-C1, got: {manifest_after}"
+    );
+}

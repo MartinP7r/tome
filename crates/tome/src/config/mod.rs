@@ -1471,11 +1471,8 @@ skills_dir = "/tmp"
         let result = config_b.save_checked(&path);
 
         // Restore permissions BEFORE the assertion so TempDir cleanup works.
-        std::fs::set_permissions(
-            tmp.path(),
-            std::fs::Permissions::from_mode(original_mode),
-        )
-        .unwrap();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(original_mode))
+            .unwrap();
 
         assert!(
             result.is_err(),
