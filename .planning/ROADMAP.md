@@ -174,7 +174,7 @@
 - [x] 16-01-cleanup-three-bucket-PLAN.md — `cleanup.rs` + `lib.rs::sync` three-bucket partition + per-skill inline hints + stderr discipline (UX-01)
 - [x] 16-02-migrate-confirm-summary-PLAN.md — `migration_v010.rs` + `cli.rs` + `lib.rs::cmd_migrate_library` confirm gate + `tabled` summary table + `byte_size` walk + `--yes` flag (UX-02)
 - [x] 16-03-architecture-doc-PLAN.md — `docs/src/architecture.md` rewrites + 4 new sections (Library-canonical model, Lockfile-authoritative reconciliation, Marketplace adapter trait, Unowned lifecycle) (DOC-01)
-- [ ] 16-04-changelog-PLAN.md — `CHANGELOG.md` v0.10 release notes draft with three breaking-change call-outs + migration step paragraph (DOC-02)
+- [x] 16-04-changelog-PLAN.md — `CHANGELOG.md` v0.10 release notes draft with three breaking-change call-outs + migration step paragraph (DOC-02)
 - [ ] 16-05-cross-machine-doc-PLAN.md — new `docs/src/cross-machine-sync.md` (Machine A/B walkthroughs + reference sections) + `SUMMARY.md` TOC entry + `Command::Sync long_about` reference (DOC-03)
 
 ### Phase 17: Migration polish + UAT + release
@@ -212,5 +212,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
 | 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
-| 16. Cleanup-message UX + docs (rc) | v0.10 | 3/5 | In Progress|  |
+| 16. Cleanup-message UX + docs (rc) | v0.10 | 4/5 | In Progress|  |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |

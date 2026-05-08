@@ -87,7 +87,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 ### Documentation (DOC)
 
 - [x] **DOC-01**: `docs/src/architecture.md` updated for library-canonical model — managed-as-copy, lockfile-authoritative reconciliation, marketplace adapter trait, unowned lifecycle.
-- [ ] **DOC-02**: `CHANGELOG.md` v0.10 release notes explicitly call out the behavior change (plugin updates no longer auto-propagate via symlink — `tome sync` required) and the migration step (first-sync conversion of symlink library to real copies).
+- [x] **DOC-02**: `CHANGELOG.md` v0.10 release notes explicitly call out the behavior change (plugin updates no longer auto-propagate via symlink — `tome sync` required) and the migration step (first-sync conversion of symlink library to real copies).
 - [ ] **DOC-03**: New page `docs/src/cross-machine-sync.md` documents the dotfiles workflow: library committed to git, `tome.lock` authoritative, `machine.toml::auto_install_plugins` consent, expected behavior on new-machine bootstrap.
 
 ### Release (REL)
@@ -170,7 +170,7 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | UX-01 | Phase 16 | — | Pending |
 | UX-02 | Phase 16 | — | Pending |
 | DOC-01 | Phase 16 | — | Pending |
-| DOC-02 | Phase 16 | — | Pending |
+| DOC-02 | Phase 16 | — | Validated |
 | DOC-03 | Phase 16 | — | Pending |
 | REL-01 | Phase 17 | — | Pending |
 | REL-02 | Phase 17 | — | Pending |
