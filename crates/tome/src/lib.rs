@@ -415,9 +415,7 @@ pub fn run(cli: Cli) -> Result<()> {
             cmd_fork(skill, to, force, &config, &paths, cli.dry_run, cli.no_input)
         }
         Command::MigrateLibrary { dry_run, yes } => {
-            // `yes` is wired through to `cmd_migrate_library` in Plan 16-02 Task 3.
-            let _ = yes;
-            cmd_migrate_library(&paths, dry_run || cli.dry_run)
+            cmd_migrate_library(&paths, dry_run || cli.dry_run, yes, cli.no_input)
         }
         Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
         Command::Relocate { new_path } => cmd_relocate(
@@ -982,9 +980,48 @@ pub(crate) fn cmd_fork(
 }
 
 /// `tome migrate-library` — one-shot v0.9 → v0.10 library migration.
+///
 /// Per D-05: any skip or failure means non-zero exit.
-pub(crate) fn cmd_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<()> {
-    let result = migration_v010::run_migrate_library(paths, dry_run)?;
+/// Per UX-02 D-UX02-1/-2: drives plan → render_plan → confirm gate →
+/// execute → render_result. The confirm gate is bypassed under `--dry-run`
+/// (no destructive action runs) or `--yes`; under `--no-input` without
+/// `--yes` it bails with a Conflict/Why/Suggestion error.
+pub(crate) fn cmd_migrate_library(
+    paths: &TomePaths,
+    dry_run: bool,
+    yes: bool,
+    no_input: bool,
+) -> Result<()> {
+    if dry_run {
+        eprintln!(
+            "{}",
+            console::style("[dry-run] No changes will be made")
+                .yellow()
+                .bold()
+        );
+    }
+
+    let manifest = manifest::load(paths.config_dir())?;
+    let plan = migration_v010::plan(paths.library_dir(), &manifest)?;
+    migration_v010::render_plan(&plan);
+
+    // Empty plan — render_plan already printed the already-in-v0.10-shape
+    // message; nothing to confirm or execute.
+    if plan.entries.is_empty() {
+        return Ok(());
+    }
+
+    if !dry_run {
+        // UX-02 confirm-or-abort. `--yes` skips; `--no-input` without
+        // `--yes` returns Err. User answering `n` → Ok(false) → clean exit.
+        if !migration_v010::prompt_confirmation(yes, no_input)? {
+            return Ok(());
+        }
+    }
+
+    let result = migration_v010::execute(&plan, dry_run)?;
+    migration_v010::render_result(&result);
+
     // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
     // `main.rs` downcasts `MigrationPartialOrFailed` and exits with code 1.
     if result.is_partial_or_failed() {

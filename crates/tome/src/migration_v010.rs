@@ -544,7 +544,6 @@ fn copy_dir_recursive_resolving(src: &Path, dst: &Path) -> Result<()> {
 /// requires a TTY); the abort-leaves-library-untouched invariant is
 /// covered by the `cli_migrate_library` integration tests landing in
 /// Task 3.
-#[allow(dead_code)] // wired into `cmd_migrate_library` in Plan 16-02 Task 3
 pub(crate) fn prompt_confirmation(yes: bool, no_input: bool) -> Result<bool> {
     if yes {
         return Ok(true);
@@ -611,36 +610,11 @@ pub(crate) fn render_result(result: &MigrationResult) {
     }
 }
 
-/// Top-level entry: run the full plan/render/execute flow.
-///
-/// Per D-05, returns Ok(MigrationResult) regardless of partial failure;
-/// the caller in `lib.rs` interprets `is_partial_or_failed()` and exits
-/// with code 1 on partial. Hard errors (unparsable manifest, etc.)
-/// surface as Err.
-///
-/// **DEPRECATED in Plan 16-02 Task 3.** Slated for deletion when
-/// `cmd_migrate_library` is rewritten to drive plan / render_plan /
-/// prompt_confirmation / execute / render_result directly. Kept for
-/// build-greenness across the Task 1 / Task 2 / Task 3 commit boundary.
-pub(crate) fn run_migrate_library(
-    paths: &crate::paths::TomePaths,
-    dry_run: bool,
-) -> Result<MigrationResult> {
-    if dry_run {
-        eprintln!(
-            "{}",
-            style("[dry-run] No changes will be made").yellow().bold()
-        );
-    }
-
-    let manifest = crate::manifest::load(paths.config_dir())?;
-    let plan = plan(paths.library_dir(), &manifest)?;
-    render_plan(&plan);
-
-    let result = execute(&plan, dry_run)?;
-    render_result(&result);
-    Ok(result)
-}
+// `run_migrate_library` was deleted in Plan 16-02 Task 3 — `cmd_migrate_library`
+// now drives the plan / render_plan / prompt_confirmation / execute /
+// render_result flow directly so the UX-02 confirm gate slots in between
+// render_plan and execute. There is one canonical entry point for the
+// migration flow; this module exposes its primitives and lib.rs composes them.
 
 #[cfg(test)]
 mod tests {
@@ -956,7 +930,10 @@ mod tests {
 
         let p1 = by_name.get("p1").expect("p1 entry");
         let p2 = by_name.get("p2").expect("p2 entry");
-        assert!(p1.byte_size.is_some(), "reachable source must have Some byte_size");
+        assert!(
+            p1.byte_size.is_some(),
+            "reachable source must have Some byte_size"
+        );
         assert!(
             p1.byte_size.unwrap() >= 1024,
             "p1 byte_size must include the 1024-byte SKILL.md, got {:?}",
@@ -1014,9 +991,9 @@ mod tests {
         );
         // At least one size unit token must appear (default total may be < 1KB
         // → "B"; larger sources promote to KB/MB/etc).
-        let has_unit = ["B", "KB", "MB", "GB", "TB"]
-            .iter()
-            .any(|u| out.contains(&format!("{u} additional disk")) || out.contains(&format!(" {u} ")));
+        let has_unit = ["B", "KB", "MB", "GB", "TB"].iter().any(|u| {
+            out.contains(&format!("{u} additional disk")) || out.contains(&format!(" {u} "))
+        });
         assert!(has_unit, "summary line missing size unit token, got: {out}");
     }
 
@@ -1089,5 +1066,4 @@ mod tests {
         let s = humanize_bytes(thirty_mb);
         assert!(s.starts_with("30.") && s.ends_with(" MB"), "got: {s}");
     }
-
 }
