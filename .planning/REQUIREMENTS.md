@@ -61,13 +61,13 @@ The original trigger of this milestone discussion: the "no longer configured" cl
 
 Bundle of v0.9-review followups + older bug backlog. Each requirement closes one or more existing GitHub issues; full mapping in Traceability.
 
-- [ ] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
+- [x] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
 - [x] **HARD-02**: `lib.rs::run()` decomposed into per-subcommand `cmd_<name>(...)` helpers. Closes [#486](https://github.com/MartinP7r/tome/issues/486).
 - [x] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
 - [ ] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
-- [ ] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
-- [ ] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
-- [ ] **HARD-07**: `(verbose: bool, quiet: bool)` flags replaced with `LogLevel` enum (`Quiet | Normal | Verbose`). Closes [#493](https://github.com/MartinP7r/tome/issues/493).
+- [x] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
+- [x] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
+- [x] **HARD-07**: `(verbose: bool, quiet: bool)` flags replaced with `LogLevel` enum (`Quiet | Normal | Verbose`). Closes [#493](https://github.com/MartinP7r/tome/issues/493).
 - [ ] **HARD-08**: Atomic-save preservation regression test (manifest, lockfile, machine.toml all preserve previous contents on rename failure). Closes [#494](https://github.com/MartinP7r/tome/issues/494).
 - [ ] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
 - [ ] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
@@ -77,7 +77,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 - [ ] **HARD-14**: `backup::tests::push_and_pull_roundtrip` and `diff_shows_changes` flake fix — disable git signing in test repos via local config. Closes [#500](https://github.com/MartinP7r/tome/issues/500).
 - [ ] **HARD-15**: `wizard.rs` diagnostic `println!` calls converted to `eprintln!` for stdout/stderr discipline. Closes [#501](https://github.com/MartinP7r/tome/issues/501).
 - [ ] **HARD-16**: Rename `relocate.rs::provenance_from_link_result` → `warn_if_unreadable_symlink` so the side-effect intent is in the function name. Closes [#502](https://github.com/MartinP7r/tome/issues/502).
-- [ ] **HARD-17**: `impl TryFrom<String> for SkillName` and `DirectoryName` to avoid clones at owned-string construction sites. Closes [#503](https://github.com/MartinP7r/tome/issues/503).
+- [x] **HARD-17**: `impl TryFrom<String> for SkillName` and `DirectoryName` to avoid clones at owned-string construction sites. Closes [#503](https://github.com/MartinP7r/tome/issues/503).
 - [ ] **HARD-18**: `tome relocate` cross-fs cleanup recovery hint when the orphan-copy preservation logic kicks in. Closes [#416](https://github.com/MartinP7r/tome/issues/416).
 - [ ] **HARD-19**: `tome reassign` plan/execute reads filesystem state once (eliminate drift risk between plan and execute). Closes [#430](https://github.com/MartinP7r/tome/issues/430).
 - [ ] **HARD-20**: Manifest epoch-0 timestamp fallback fixed — surfaces as warning rather than silent garbage data in future diffs. Closes [#433](https://github.com/MartinP7r/tome/issues/433).
