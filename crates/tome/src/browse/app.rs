@@ -244,6 +244,129 @@ impl App {
         app
     }
 
+    /// Construct an `App` with deterministic state for snapshot tests
+    /// (HARD-12). Avoids `Theme::detect()`'s `$COLORFGBG` env-var read
+    /// (would make snapshots flake under different terminals) and
+    /// pre-fills a stable preview body so the snapshot doesn't depend
+    /// on filesystem reads.
+    ///
+    /// `filter` simulates an active fuzzy filter (`Some("foo")` would
+    /// route through `refilter()` exactly like the user-typed flow).
+    /// `theme` is injected so tests can explicitly cover both light
+    /// and dark palettes.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn for_snapshot(
+        rows: Vec<SkillRow>,
+        theme: super::theme::Theme,
+        filter: Option<&str>,
+    ) -> Self {
+        let match_indices = vec![Vec::new(); rows.len()];
+        let filtered_indices: Vec<usize> = (0..rows.len()).collect();
+        let preview_content = if rows.is_empty() {
+            "No matching skill.".into()
+        } else {
+            // Stable, filesystem-independent preview body so the snapshot
+            // doesn't depend on whether the rows' `path` directories
+            // contain a real `SKILL.md` on the test runner.
+            format!(
+                "source: {}\npath: {}\n\n# {}\nA test skill body.",
+                rows[0].source, rows[0].path, rows[0].name
+            )
+        };
+        let preview_title = if rows.is_empty() {
+            "Preview".into()
+        } else {
+            format!("Preview: {}", rows[0].name)
+        };
+        let mut app = Self {
+            mode: Mode::Normal,
+            previous_mode: Mode::Normal,
+            should_quit: false,
+            filtered_indices,
+            match_indices,
+            rows,
+            selected: 0,
+            scroll_offset: 0,
+            search_input: String::new(),
+            visible_height: 20,
+            preview_title,
+            preview_content,
+            sort_mode: SortMode::Name,
+            group_by_source: false,
+            detail_actions: Vec::new(),
+            detail_selected: 0,
+            theme,
+            status_message: None,
+        };
+        app.apply_sort();
+        if let Some(f) = filter {
+            app.search_input = f.to_string();
+            // Re-run the fuzzy filter so filtered_indices / match_indices
+            // reflect the filter exactly as if the user had typed it.
+            // refresh_preview() runs in here too; it'll touch the
+            // filesystem looking for SKILL.md, but we re-stamp
+            // preview_content below so the snapshot is filesystem-stable.
+            app.refilter();
+        }
+        // Force a stable preview body regardless of any filesystem
+        // walk that `refilter()` may have triggered. This keeps the
+        // snapshot deterministic across CI runners.
+        if !app.filtered_indices.is_empty() {
+            let row_idx = app.filtered_indices[app.selected];
+            let row = &app.rows[row_idx];
+            app.preview_title = format!("Preview: {}", row.name);
+            app.preview_content = format!(
+                "source: {}\npath: {}\n\n# {}\nA test skill body.",
+                row.source, row.path, row.name
+            );
+        } else {
+            app.preview_title = "Preview".into();
+            app.preview_content = "No matching skill.".into();
+        }
+        app
+    }
+
+    /// Test-support: enter detail mode with the canonical action list
+    /// so snapshot tests can render the detail pane without simulating
+    /// an Enter keypress.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn enter_detail_mode_for_snapshot(&mut self) {
+        self.enter_detail_mode();
+    }
+
+    /// Test-support: enter help mode so snapshot tests can render the
+    /// help overlay without simulating a `?` keypress.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn enter_help_mode_for_snapshot(&mut self) {
+        self.previous_mode = self.mode;
+        self.mode = Mode::Help;
+    }
+
+    /// Test-support: re-run the fuzzy filter pipeline so a snapshot
+    /// fixture that mutates `sort_mode` / `group_by_source` after
+    /// construction picks up the new sort / grouping. Internal
+    /// `refilter()` is private and threads through `refresh_preview()`
+    /// which would touch the filesystem; this wrapper restamps the
+    /// preview body afterwards to keep the snapshot deterministic.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn refilter_for_snapshot(&mut self) {
+        self.refilter();
+        // Re-stamp preview to the same filesystem-independent body as
+        // `for_snapshot` so the post-refilter render stays stable.
+        if !self.filtered_indices.is_empty() {
+            let row_idx = self.filtered_indices[self.selected];
+            let row = &self.rows[row_idx];
+            self.preview_title = format!("Preview: {}", row.name);
+            self.preview_content = format!(
+                "source: {}\npath: {}\n\n# {}\nA test skill body.",
+                row.source, row.path, row.name
+            );
+        } else {
+            self.preview_title = "Preview".into();
+            self.preview_content = "No matching skill.".into();
+        }
+    }
+
     pub(super) fn handle_key(&mut self, key: KeyEvent, redraw: &mut dyn FnMut(&App)) {
         // Any-key-dismisses semantics for status_message: the message stays
         // visible until the user presses any key, then disappears on the next

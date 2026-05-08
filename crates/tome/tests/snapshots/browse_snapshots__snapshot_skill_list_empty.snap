@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+SKILL                          SOURCE                   PATH
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+                                                      │Preview
+                                                      │No matching skill.
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+ 0 skills   j/k ↕  / search  s sort:name  tab group  ? help  ⏎ detail  q quit

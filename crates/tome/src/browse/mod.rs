@@ -1,7 +1,24 @@
+// `app`, `theme`, and `ui` are widened to `pub` under the `test-support`
+// feature so the integration snapshot tests in `tests/browse_snapshots/`
+// (HARD-12) can construct `App` fixtures, pick a `Theme`, and call
+// `ui::render` against a `ratatui::backend::TestBackend`. Production
+// builds keep the old `pub(crate)` visibility byte-for-byte.
+#[cfg(any(test, feature = "test-support"))]
+pub mod app;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod app;
+
 pub(crate) mod fuzzy;
 pub(crate) mod markdown;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod theme;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod theme;
+
+#[cfg(any(test, feature = "test-support"))]
+pub mod ui;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod ui;
 
 use std::time::Duration;

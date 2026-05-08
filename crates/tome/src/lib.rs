@@ -24,6 +24,16 @@
 
 pub(crate) mod add;
 pub(crate) mod backup;
+// `browse` is normally `pub(crate)` so the rest of v1.0's GUI Tauri IPC
+// surface doesn't accidentally bind to it. When the `test-support`
+// feature is enabled (used by integration tests in `tests/browse_snapshots/`
+// per HARD-12) it widens to `pub` so the snapshot harness can construct
+// `App` fixtures and call `ui::render` against a `TestBackend`. Production
+// builds (`cargo build` without features) keep the old `pub(crate)`
+// visibility byte-for-byte.
+#[cfg(any(test, feature = "test-support"))]
+pub mod browse;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod browse;
 pub(crate) mod cleanup;
 pub mod cli;
