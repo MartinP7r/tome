@@ -55,7 +55,7 @@ the verbs are different from the original wording.
 The original trigger of this milestone discussion: the "no longer configured" cleanup message conflates three distinct cases.
 
 - [x] **UX-01**: `tome sync` cleanup phase partitions stale-candidate skills into three buckets — removed-from-config / missing-from-disk-while-source-still-configured / now-in-`exclude`-list — with per-bucket messaging. Each entry shows actionable resolution hints (re-add directory, restore file from backup, remove from exclude list).
-- [ ] **UX-02**: First-sync v0.10 migration prompt (LIB-05) renders a summary table: "62 symlinks → real directories, ~30 MB additional disk". User confirms or aborts before any conversion runs. Aborted migrations leave the library state unchanged.
+- [x] **UX-02**: First-sync v0.10 migration prompt (LIB-05) renders a summary table: "62 symlinks → real directories, ~30 MB additional disk". User confirms or aborts before any conversion runs. Aborted migrations leave the library state unchanged.
 
 ### CLI hardening (HARD)
 

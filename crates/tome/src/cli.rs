@@ -548,7 +548,9 @@ mod tests {
     fn migrate_library_short_y_alias() {
         let cli = Cli::try_parse_from(["tome", "migrate-library", "-y"]).unwrap();
         match cli.command {
-            Command::MigrateLibrary { yes, .. } => assert!(yes, "-y short alias must set yes: true"),
+            Command::MigrateLibrary { yes, .. } => {
+                assert!(yes, "-y short alias must set yes: true")
+            }
             _ => panic!("expected MigrateLibrary"),
         }
     }
@@ -567,8 +569,7 @@ mod tests {
 
     #[test]
     fn migrate_library_dry_run_and_yes_compose() {
-        let cli =
-            Cli::try_parse_from(["tome", "migrate-library", "--dry-run", "--yes"]).unwrap();
+        let cli = Cli::try_parse_from(["tome", "migrate-library", "--dry-run", "--yes"]).unwrap();
         match cli.command {
             Command::MigrateLibrary { dry_run, yes } => {
                 assert!(dry_run);

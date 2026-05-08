@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed Plan 16-01 (UX-01 three-bucket cleanup output)
-last_updated: "2026-05-08T11:01:22.880Z"
+stopped_at: Completed Plan 16-02 (UX-02 migrate-library confirm gate)
+last_updated: "2026-05-08T11:15:08.517Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
   completed_phases: 5
   total_plans: 33
-  completed_plans: 29
+  completed_plans: 30
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 16 (cleanup-message-ux-docs) — EXECUTING
-Plan: 2 of 5
+Plan: 3 of 5
 Status: Ready to execute
 Last activity: 2026-05-08
 
@@ -92,6 +92,7 @@ Historical decisions are archived in:
 - [Phase 15]: Plan 15-05: ToggleScope smart-routing (D-BROWSE-1) most-specific-list-wins (per-dir blocklist > per-dir allowlist > global) mirrors MachinePrefs::is_skill_allowed read-path; MACH-04 invariant preserved by construction (per-list mutators only ever touch one of disabled/enabled per directory)
 - [Phase 15]: Plan 15-06 (closes Phase 15 / v0.10 beta cut): HARD-14 backup gpg-signing flake fix (per-test-fixture local commit.gpgsign=false + cli_backup GIT_CONFIG_GLOBAL isolation); HARD-15 wizard chrome routed to stderr (eprintln!), only the dry-run TOML body stays on stdout; HARD-16 provenance_from_link_result renamed to warn_if_unreadable_symlink (intent-first naming); HARD-18 cross-fs cleanup recovery hint as Phase 7 D-10 Conflict/Why/Suggestion via cross_fs_recovery_hint pure formatter; HARD-19 reassign PreReassignState read-once snapshot (closes plan/execute drift class — execute() consumes manifest_entry_at_plan rather than re-reading); HARD-20 manifest epoch-0 timestamp warning at Manifest::load via epoch_zero_warning pure formatter. 11 new tests (4 cross-fs hint + 3 reassign snapshot + 4 epoch warning); 955 total tests green.
 - [Phase 16-cleanup-message-ux-docs]: Plan 16-01 / UX-01: Three-bucket cleanup output landed. Coordination shape = CleanupResult fields for Buckets A+B + sibling Vec<ExcludedSkill> for Bucket C (chosen over unified CleanupSummary because cross-module ownership). Bucket-distinct phrasing locked (Bucket A 'no longer in any source', Bucket B 'missing from configured source on disk', Bucket C 'now in exclude list'). Forbidden trigger phrase eliminated from cleanup.rs/lib.rs. D-UX01-4 stderr discipline honoured. Per-directory exclusion gap-fix (Rule 2) — cleanup_disabled_from_target now uses is_skill_allowed() so per-dir blocklists/allowlists also tear down stale symlinks.
+- [Phase 16]: Plan 16-02 / UX-02: tome migrate-library confirm gate landed. dialoguer::Confirm::default(false) with --yes/-y bypass (Phase 14 D-B3); --no-input without --yes bails with Phase 7 D-10 Conflict/Why/Suggestion. MigrationEntry.byte_size: Option<u64> populated via walkdir+metadata().len() walk (follow_links(false) per D-UX02-4). render_plan rewritten as thin wrapper around render_plan_to(writer); summary line + tabled::Style::rounded() four-column SKILL/SOURCE/SIZE/STATUS table (D-UX02-3). Inline humanize_bytes helper chosen over humansize crate. run_migrate_library deleted; cmd_migrate_library composes plan/render_plan/prompt_confirmation/execute/render_result directly.
 
 ### v0.10 design context (consume during planning)
 
@@ -130,6 +131,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-08T11:01:22.877Z
-Stopped at: Completed Plan 16-01 (UX-01 three-bucket cleanup output)
+Last session: 2026-05-08T11:15:08.512Z
+Stopped at: Completed Plan 16-02 (UX-02 migrate-library confirm gate)
 Resume file: None
