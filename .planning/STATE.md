@@ -4,7 +4,7 @@ milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: verifying
 stopped_at: Completed 15-06-polish-and-older-bugs-PLAN.md (final plan of Phase 15 / v0.10 beta cut)
-last_updated: "2026-05-08T07:40:10.200Z"
+last_updated: "2026-05-08T07:51:22.624Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
@@ -24,8 +24,8 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 
 ## Current Position
 
-Phase: 15 (cli-hardening) — EXECUTING
-Plan: 6 of 6
+Phase: 16
+Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-05-08
 
