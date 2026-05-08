@@ -139,6 +139,44 @@ impl SkillOrigin {
     }
 }
 
+/// How a skill scan should attach (or not attach) provenance metadata to
+/// discovered skills.
+///
+/// Replaces the legacy `Option<Option<SkillProvenance>>` argument shape per
+/// HARD-05. The three variants encode three semantic cases the double-Option
+/// previously expressed:
+///
+/// - `Local` — old `None` — skills are `SkillOrigin::Local`.
+/// - `ManagedNoProvenance` — old `Some(None)` — skills are
+///   `SkillOrigin::Managed { provenance: None }`. Used by Claude Plugins v1
+///   format and by managed-role flat directories that have no plugin metadata.
+/// - `ManagedWith(p)` — old `Some(Some(p))` — skills are
+///   `SkillOrigin::Managed { provenance: Some(p) }`. Used by Claude Plugins
+///   v2 format where each install record carries `version`/`gitCommitSha`.
+#[derive(Debug, Clone)]
+pub(crate) enum ScanMode {
+    /// Skills are `Local` — no provenance attached.
+    Local,
+    /// Skills are `Managed` but no plugin metadata is available.
+    ManagedNoProvenance,
+    /// Skills are `Managed` with the supplied provenance metadata.
+    ManagedWith(SkillProvenance),
+}
+
+// POLISH-04 exhaustiveness sentinel — adding a new ScanMode variant without
+// updating every translation site is now a compile error. `SkillProvenance`
+// isn't const-constructible, so we use a match-based sentinel rather than an
+// `ALL` array (mirrors POLISH-04 in marketplace.rs::InstallFailureKind for
+// the const-constructible case).
+#[allow(dead_code)]
+fn _scan_mode_exhaustiveness(m: &ScanMode) {
+    match m {
+        ScanMode::Local => {}
+        ScanMode::ManagedNoProvenance => {}
+        ScanMode::ManagedWith(_) => {}
+    }
+}
+
 /// A discovered skill with its metadata.
 #[derive(Debug, Clone)]
 pub struct DiscoveredSkill {
@@ -399,8 +437,11 @@ fn scan_install_records(
                         git_commit_sha,
                     }
                 });
-                let mut found =
-                    scan_for_skills(&skills_dir, source_name, Some(provenance), warnings)?;
+                let mode = match provenance {
+                    Some(p) => ScanMode::ManagedWith(p),
+                    None => ScanMode::ManagedNoProvenance,
+                };
+                let mut found = scan_for_skills(&skills_dir, source_name, mode, warnings)?;
                 skills.append(&mut found);
             }
         }
@@ -433,19 +474,22 @@ fn discover_flat_directory(
         return Ok(Vec::new());
     }
 
-    let managed_provenance = if is_managed { Some(None) } else { None };
-    scan_for_skills(dir_path, dir_name, managed_provenance, warnings)
+    let mode = if is_managed {
+        ScanMode::ManagedNoProvenance
+    } else {
+        ScanMode::Local
+    };
+    scan_for_skills(dir_path, dir_name, mode, warnings)
 }
 
 /// Scan a directory for skill subdirectories containing SKILL.md.
 ///
-/// When `managed_provenance` is `Some`, skills are marked as `Managed` with the
-/// given provenance (which itself may be `None` for v1 plugins). When
-/// `managed_provenance` is `None`, skills are marked as `Local`.
+/// `mode` encodes whether discovered skills are `Local` or `Managed` (with or
+/// without provenance metadata). See [`ScanMode`] for the per-variant semantic.
 fn scan_for_skills(
     dir: &Path,
     source_name: &DirectoryName,
-    managed_provenance: Option<Option<SkillProvenance>>,
+    mode: ScanMode,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
     let mut skills = Vec::new();
@@ -487,11 +531,14 @@ fn scan_for_skills(
         {
             match SkillName::new(name_str) {
                 Ok(name) => {
-                    let origin = match &managed_provenance {
-                        Some(prov) => SkillOrigin::Managed {
-                            provenance: prov.clone(),
+                    let origin = match &mode {
+                        ScanMode::Local => SkillOrigin::Local,
+                        ScanMode::ManagedNoProvenance => {
+                            SkillOrigin::Managed { provenance: None }
+                        }
+                        ScanMode::ManagedWith(p) => SkillOrigin::Managed {
+                            provenance: Some(p.clone()),
                         },
-                        None => SkillOrigin::Local,
                     };
                     // Parse frontmatter if SKILL.md exists and is readable
                     let frontmatter = match std::fs::read_to_string(skill_dir.join("SKILL.md")) {
@@ -1042,5 +1089,76 @@ mod tests {
             !skills[0].origin.is_managed(),
             "Source-role directory should produce Local origin"
         );
+    }
+
+    // -- HARD-05: ScanMode regression tests --
+    //
+    // ScanMode replaces Option<Option<SkillProvenance>> at scan_for_skills.
+    // The three variants encode the three semantic cases the double-Option
+    // expressed. These tests pin one origin shape per variant so a future
+    // refactor that drops a variant or swaps a translation site fails loudly.
+
+    #[test]
+    fn scan_mode_local_yields_local_origin() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "skill-x");
+
+        let skills = scan_for_skills(
+            tmp.path(),
+            &DirectoryName::new("dir").unwrap(),
+            ScanMode::Local,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(skills.len(), 1);
+        assert!(matches!(skills[0].origin, SkillOrigin::Local));
+    }
+
+    #[test]
+    fn scan_mode_managed_no_provenance_yields_managed_with_none() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "skill-y");
+
+        let skills = scan_for_skills(
+            tmp.path(),
+            &DirectoryName::new("dir").unwrap(),
+            ScanMode::ManagedNoProvenance,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(skills.len(), 1);
+        match &skills[0].origin {
+            SkillOrigin::Managed { provenance } => assert!(provenance.is_none()),
+            other => panic!("expected Managed{{provenance:None}}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scan_mode_managed_with_yields_managed_with_some() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "skill-z");
+
+        let prov = SkillProvenance {
+            registry_id: "test@reg".to_string(),
+            version: Some("1.0.0".to_string()),
+            git_commit_sha: None,
+        };
+        let skills = scan_for_skills(
+            tmp.path(),
+            &DirectoryName::new("dir").unwrap(),
+            ScanMode::ManagedWith(prov.clone()),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(skills.len(), 1);
+        match &skills[0].origin {
+            SkillOrigin::Managed {
+                provenance: Some(p),
+            } => {
+                assert_eq!(p.registry_id, prov.registry_id);
+                assert_eq!(p.version, prov.version);
+            }
+            other => panic!("expected Managed{{provenance:Some}}, got {other:?}"),
+        }
     }
 }

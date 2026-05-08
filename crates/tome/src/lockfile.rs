@@ -22,9 +22,28 @@ pub(crate) const LOCKFILE_NAME: &str = "tome.lock";
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Lockfile {
     /// Schema version (currently 1).
-    pub version: u32,
+    pub(crate) version: u32,
     /// One entry per skill, keyed by skill name.
-    pub skills: BTreeMap<SkillName, LockEntry>,
+    pub(crate) skills: BTreeMap<SkillName, LockEntry>,
+}
+
+impl Lockfile {
+    /// Lockfile schema version.
+    ///
+    /// Mirrors the accessor surface of `Manifest::skills()` for consistency
+    /// across the two file-backed registries. Per HARD-06, the underlying
+    /// fields are `pub(crate)` so external crates (including the v1.0 GUI
+    /// Tauri IPC) interact with `Lockfile` only via these methods.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Per-skill entries indexed by skill name (alphabetical).
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn skills(&self) -> &BTreeMap<SkillName, LockEntry> {
+        &self.skills
+    }
 }
 
 /// A single skill entry in the lockfile.
@@ -934,5 +953,53 @@ mod tests {
         let json = format!(r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#);
         let entry: LockEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(entry.previous_source, None);
+    }
+
+    // -- HARD-06: Lockfile accessor parity tests --
+    //
+    // Lockfile.version and Lockfile.skills are pub(crate); external callers
+    // (and the v1.0 GUI Tauri IPC) must use Lockfile::version() and
+    // Lockfile::skills() accessors. These tests pin parity between accessor
+    // output and the underlying field shape.
+
+    #[test]
+    fn lockfile_version_accessor_returns_field() {
+        let lf = Lockfile {
+            version: 1,
+            skills: BTreeMap::new(),
+        };
+        assert_eq!(lf.version(), 1);
+    }
+
+    #[test]
+    fn lockfile_skills_accessor_returns_full_map() {
+        let mut skills = BTreeMap::new();
+        skills.insert(
+            SkillName::new("alpha").unwrap(),
+            LockEntry {
+                source_name: Some(DirectoryName::new("src").unwrap()),
+                previous_source: None,
+                content_hash: test_hash("a"),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        skills.insert(
+            SkillName::new("bravo").unwrap(),
+            LockEntry {
+                source_name: Some(DirectoryName::new("src").unwrap()),
+                previous_source: None,
+                content_hash: test_hash("b"),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let lf = Lockfile { version: 1, skills };
+        let via_accessor = lf.skills();
+        assert_eq!(via_accessor.len(), 2);
+        assert!(via_accessor.contains_key(&SkillName::new("alpha").unwrap()));
+        assert!(via_accessor.contains_key(&SkillName::new("bravo").unwrap()));
     }
 }
