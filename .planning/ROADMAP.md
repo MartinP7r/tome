@@ -171,7 +171,7 @@
   4. `CHANGELOG.md` v0.10 release notes call out the two behavior changes explicitly: (a) plugin updates no longer auto-propagate via symlink — `tome sync` required to reach Claude Code skills, (b) first-sync converts symlink library to real copies (one-time prompt). Migration step documented at the top of the v0.10 section.
   5. New page `docs/src/cross-machine-sync.md` exists and documents the full library-as-dotfiles workflow: committing the library to git, `tome.lock` semantics on Machine B, `auto_install_plugins` consent flow, expected new-machine bootstrap behavior. Linked from `docs/src/SUMMARY.md` and from the `tome sync --help` long description.
 **Plans**: 5 plans (Wave 1: 16-01 + 16-02 — code; Wave 2: 16-03, 16-04, 16-05 — docs)
-- [ ] 16-01-cleanup-three-bucket-PLAN.md — `cleanup.rs` + `lib.rs::sync` three-bucket partition + per-skill inline hints + stderr discipline (UX-01)
+- [x] 16-01-cleanup-three-bucket-PLAN.md — `cleanup.rs` + `lib.rs::sync` three-bucket partition + per-skill inline hints + stderr discipline (UX-01)
 - [ ] 16-02-migrate-confirm-summary-PLAN.md — `migration_v010.rs` + `cli.rs` + `lib.rs::cmd_migrate_library` confirm gate + `tabled` summary table + `byte_size` walk + `--yes` flag (UX-02)
 - [ ] 16-03-architecture-doc-PLAN.md — `docs/src/architecture.md` rewrites + 4 new sections (Library-canonical model, Lockfile-authoritative reconciliation, Marketplace adapter trait, Unowned lifecycle) (DOC-01)
 - [ ] 16-04-changelog-PLAN.md — `CHANGELOG.md` v0.10 release notes draft with three breaking-change call-outs + migration step paragraph (DOC-02)
@@ -212,5 +212,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
 | 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
-| 16. Cleanup-message UX + docs (rc) | v0.10 | 0/5 | Not started | - |
+| 16. Cleanup-message UX + docs (rc) | v0.10 | 1/5 | In Progress|  |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
