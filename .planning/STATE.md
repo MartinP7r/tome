@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 15-04-safety-guards-and-integration-tests-PLAN.md
-last_updated: "2026-05-08T06:45:10.858Z"
+stopped_at: Completed 15-05-browse-ui-PLAN.md
+last_updated: "2026-05-08T07:07:54.335Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 28
-  completed_plans: 26
+  completed_plans: 27
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 15 (cli-hardening) — EXECUTING
-Plan: 5 of 6
+Plan: 6 of 6
 Status: Ready to execute
 Last activity: 2026-05-08
 
@@ -87,6 +87,9 @@ Historical decisions are archived in:
 - [Phase 15-cli-hardening]: Config::save and Config::save_checked promoted to atomic temp+rename via shared atomic_write_toml helper: pre-this-plan they used direct fs::write (not atomic); the plan called this out as fix-first scenario
 - [Phase 15-cli-hardening]: Foreign-symlink detection uses 2x2 canonicalize+lexical prefix matrix instead of canonicalize-only: handles macOS symlinks-in-the-middle (/var → /private/var) and missing-leaf staleness without false-foreign-positives
 - [Phase 15-cli-hardening]: Hostile-input rejection added in apply_machine_overrides (close to source) using PORT-04 wrapper convention (mention machine.toml). Covers .. traversal, NUL bytes, broken/looping symlinks, and duplicate target paths
+- [Phase 15]: Plan 15-05: ratatui TestBackend + insta snapshots cover 13 canonical browse scenes (status dashboard, skill list default/empty/filtered/grouped, detail managed/local/unowned, help overlay, light theme, post-toggle); browse + machine modules widened to pub under feature 'test-support' (production stays pub(crate))
+- [Phase 15]: Plan 15-05: HARD-21 D-BROWSE-2 vs D-BROWSE-3 enforced as TWO DISTINCT STRINGS — action-menu LABEL has NO skill name (verb + scope only); StatusMessage BODY DOES include skill name (verb + skill + scope). DetailAction::label takes (&row, &prefs) and returns String; fallback_label() covers prefs-less paths
+- [Phase 15]: Plan 15-05: ToggleScope smart-routing (D-BROWSE-1) most-specific-list-wins (per-dir blocklist > per-dir allowlist > global) mirrors MachinePrefs::is_skill_allowed read-path; MACH-04 invariant preserved by construction (per-list mutators only ever touch one of disabled/enabled per directory)
 
 ### v0.10 design context (consume during planning)
 
@@ -125,6 +128,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-08T06:44:55.687Z
-Stopped at: Completed 15-04-safety-guards-and-integration-tests-PLAN.md
+Last session: 2026-05-08T07:07:54.332Z
+Stopped at: Completed 15-05-browse-ui-PLAN.md
 Resume file: None

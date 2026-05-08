@@ -72,7 +72,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 - [x] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
 - [x] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
 - [x] **HARD-11**: `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests. Closes [#497](https://github.com/MartinP7r/tome/issues/497).
-- [ ] **HARD-12**: `browse/ui.rs` rendering tests via ratatui `TestBackend` + `insta` snapshots (status dashboard, skill list, detail pane, help overlay). Closes [#498](https://github.com/MartinP7r/tome/issues/498).
+- [x] **HARD-12**: `browse/ui.rs` rendering tests via ratatui `TestBackend` + `insta` snapshots (status dashboard, skill list, detail pane, help overlay). Closes [#498](https://github.com/MartinP7r/tome/issues/498).
 - [x] **HARD-13**: `tests/cli.rs` (5580 LOC) split into per-domain integration test files (`cli_sync.rs`, `cli_doctor.rs`, etc.) with shared `common/` helpers. Closes [#499](https://github.com/MartinP7r/tome/issues/499).
 - [ ] **HARD-14**: `backup::tests::push_and_pull_roundtrip` and `diff_shows_changes` flake fix — disable git signing in test repos via local config. Closes [#500](https://github.com/MartinP7r/tome/issues/500).
 - [ ] **HARD-15**: `wizard.rs` diagnostic `println!` calls converted to `eprintln!` for stdout/stderr discipline. Closes [#501](https://github.com/MartinP7r/tome/issues/501).
@@ -81,7 +81,7 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 - [ ] **HARD-18**: `tome relocate` cross-fs cleanup recovery hint when the orphan-copy preservation logic kicks in. Closes [#416](https://github.com/MartinP7r/tome/issues/416).
 - [ ] **HARD-19**: `tome reassign` plan/execute reads filesystem state once (eliminate drift risk between plan and execute). Closes [#430](https://github.com/MartinP7r/tome/issues/430).
 - [ ] **HARD-20**: Manifest epoch-0 timestamp fallback fixed — surfaces as warning rather than silent garbage data in future diffs. Closes [#433](https://github.com/MartinP7r/tome/issues/433).
-- [ ] **HARD-21**: Browse UI Disable/Enable actions wired up (currently stubbed with `#[allow(dead_code)]`). Closes [#447](https://github.com/MartinP7r/tome/issues/447).
+- [x] **HARD-21**: Browse UI Disable/Enable actions wired up (currently stubbed with `#[allow(dead_code)]`). Closes [#447](https://github.com/MartinP7r/tome/issues/447).
 - [x] **HARD-22**: `Config::save_checked` preserves tilde-shaped paths instead of writing expanded absolute paths (breaks dotfiles sync). Closes [#457](https://github.com/MartinP7r/tome/issues/457).
 
 ### Documentation (DOC)
