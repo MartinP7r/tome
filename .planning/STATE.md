@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
-stopped_at: Completed 15-03-type-system-tightening-PLAN.md
-last_updated: "2026-05-08T06:13:41.568Z"
+stopped_at: Completed 15-04-safety-guards-and-integration-tests-PLAN.md
+last_updated: "2026-05-08T06:45:10.858Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
   completed_phases: 4
   total_plans: 28
-  completed_plans: 25
+  completed_plans: 26
 ---
 
 # Project State
@@ -25,7 +25,7 @@ See: .planning/PROJECT.md (updated 2026-05-02)
 ## Current Position
 
 Phase: 15 (cli-hardening) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-05-08
 
@@ -82,6 +82,11 @@ Historical decisions are archived in:
 - [Phase 15-cli-hardening]: Plan 15-03: ScanMode variant names use call-site semantics (Local / ManagedNoProvenance / ManagedWith) rather than the plan's recommended encoding-shape names (Bare / Provenanced / ProvenancedNullable). Per plan author guidance — variant names should reflect what the inner Some(None) actually means, not its old encoding.
 - [Phase 15-cli-hardening]: Plan 15-03: HARD-06 scope kept to Lockfile top-level fields only (version, skills); LockEntry pub fields preserved per plan <interfaces> example. Internal get_mut sites in reconcile.rs preserved as direct pub(crate) field access — adding pub fn skills_mut would leak a mutable map handle externally, defeating the v1.0 GUI Tauri IPC goal.
 - [Phase 15-cli-hardening]: Plan 15-03: HARD-07 LogLevel inlined in cli.rs per CONTEXT.md Claude's Discretion (it's a CLI-facing enum, not worth a separate log.rs module). Internal helpers continue to take 'verbose: bool' / 'quiet: bool' parameters — the plan only mandates removing the public boolean surface, so the dispatcher converts at the boundary, keeping the refactor contained to cli.rs + ~5 dispatch lines in lib.rs.
+- [Phase 15-cli-hardening]: Bundle the cmd_migrate_library site with HARD-04: literal acceptance criteria require lib.rs to have NO process::exit(1); both lint and migrate-library now bubble typed errors through anyhow and main.rs downcasts
+- [Phase 15-cli-hardening]: DiagnosticIssue kept as struct with optional kind field instead of converted to enum: backward-compat JSON shape preserved; POLISH-04 ALL-array applies at the kind level (DiagnosticIssueKind::ForeignSymlink)
+- [Phase 15-cli-hardening]: Config::save and Config::save_checked promoted to atomic temp+rename via shared atomic_write_toml helper: pre-this-plan they used direct fs::write (not atomic); the plan called this out as fix-first scenario
+- [Phase 15-cli-hardening]: Foreign-symlink detection uses 2x2 canonicalize+lexical prefix matrix instead of canonicalize-only: handles macOS symlinks-in-the-middle (/var → /private/var) and missing-leaf staleness without false-foreign-positives
+- [Phase 15-cli-hardening]: Hostile-input rejection added in apply_machine_overrides (close to source) using PORT-04 wrapper convention (mention machine.toml). Covers .. traversal, NUL bytes, broken/looping symlinks, and duplicate target paths
 
 ### v0.10 design context (consume during planning)
 
@@ -120,6 +125,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-08T06:13:41.565Z
-Stopped at: Completed 15-03-type-system-tightening-PLAN.md
+Last session: 2026-05-08T06:44:55.687Z
+Stopped at: Completed 15-04-safety-guards-and-integration-tests-PLAN.md
 Resume file: None

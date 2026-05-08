@@ -64,14 +64,14 @@ Bundle of v0.9-review followups + older bug backlog. Each requirement closes one
 - [x] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
 - [x] **HARD-02**: `lib.rs::run()` decomposed into per-subcommand `cmd_<name>(...)` helpers. Closes [#486](https://github.com/MartinP7r/tome/issues/486).
 - [x] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
-- [ ] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
+- [x] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
 - [x] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
 - [x] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
 - [x] **HARD-07**: `(verbose: bool, quiet: bool)` flags replaced with `LogLevel` enum (`Quiet | Normal | Verbose`). Closes [#493](https://github.com/MartinP7r/tome/issues/493).
-- [ ] **HARD-08**: Atomic-save preservation regression test (manifest, lockfile, machine.toml all preserve previous contents on rename failure). Closes [#494](https://github.com/MartinP7r/tome/issues/494).
-- [ ] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
-- [ ] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
-- [ ] **HARD-11**: `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests. Closes [#497](https://github.com/MartinP7r/tome/issues/497).
+- [x] **HARD-08**: Atomic-save preservation regression test (manifest, lockfile, machine.toml all preserve previous contents on rename failure). Closes [#494](https://github.com/MartinP7r/tome/issues/494).
+- [x] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
+- [x] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
+- [x] **HARD-11**: `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests. Closes [#497](https://github.com/MartinP7r/tome/issues/497).
 - [ ] **HARD-12**: `browse/ui.rs` rendering tests via ratatui `TestBackend` + `insta` snapshots (status dashboard, skill list, detail pane, help overlay). Closes [#498](https://github.com/MartinP7r/tome/issues/498).
 - [x] **HARD-13**: `tests/cli.rs` (5580 LOC) split into per-domain integration test files (`cli_sync.rs`, `cli_doctor.rs`, etc.) with shared `common/` helpers. Closes [#499](https://github.com/MartinP7r/tome/issues/499).
 - [ ] **HARD-14**: `backup::tests::push_and_pull_roundtrip` and `diff_shows_changes` flake fix — disable git signing in test repos via local config. Closes [#500](https://github.com/MartinP7r/tome/issues/500).

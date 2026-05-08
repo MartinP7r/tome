@@ -156,7 +156,7 @@
 - [x] 15-01-cli-decomposition-PLAN.md — lib.rs::run() decomposition into cmd_<name> helpers + tests/cli.rs split into per-domain files (HARD-02, HARD-13)
 - [x] 15-02-config-module-PLAN.md — config.rs split into config/{mod,types,overrides,validate}.rs + paths::unexpand_tilde + tilde-preserving Config::save_checked (HARD-03, HARD-22)
 - [x] 15-03-type-system-tightening-PLAN.md — skill::parse anyhow + ScanMode enum + Lockfile pub(crate) + LogLevel enum + TryFrom<String> for SkillName/DirectoryName (HARD-01, HARD-05, HARD-06, HARD-07, HARD-17)
-- [ ] 15-04-safety-guards-and-integration-tests-PLAN.md — LintFailed error + atomic-save regression + distribute foreign-symlink refuse + directory_overrides hostile-input tests + tome remove dir e2e tests (HARD-04, HARD-08, HARD-09, HARD-10, HARD-11)
+- [x] 15-04-safety-guards-and-integration-tests-PLAN.md — LintFailed error + atomic-save regression + distribute foreign-symlink refuse + directory_overrides hostile-input tests + tome remove dir e2e tests (HARD-04, HARD-08, HARD-09, HARD-10, HARD-11)
 - [ ] 15-05-browse-ui-PLAN.md — ratatui TestBackend + insta snapshots + DetailAction Disable/Enable wiring per D-BROWSE-1/-2/-3 (HARD-12, HARD-21)
 - [ ] 15-06-polish-and-older-bugs-PLAN.md — backup test flake fix + wizard eprintln! + relocate rename + cross-fs hint + reassign read-once + manifest epoch-0 warning (HARD-14, HARD-15, HARD-16, HARD-18, HARD-19, HARD-20)
 
@@ -206,6 +206,6 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
 | 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
-| 15. CLI hardening (beta) | v0.10 | 3/6 | In Progress|  |
+| 15. CLI hardening (beta) | v0.10 | 4/6 | In Progress|  |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
