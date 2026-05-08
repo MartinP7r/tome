@@ -2,15 +2,61 @@
 //!
 //! Library cleanup compares manifest entries against currently discovered skill names.
 //! Target cleanup still removes broken symlinks pointing into the library.
+//!
+//! ## Three-bucket cleanup output (UX-01)
+//!
+//! Cleanup output is partitioned into three user-facing buckets per
+//! `.planning/phases/16-cleanup-message-ux-docs/16-CONTEXT.md` D-UX01-1..-4:
+//!
+//! - **Bucket A (removed-from-config):** Manifest entries whose `source_name`
+//!   points at a directory no longer in `config.directories`. Library content
+//!   is preserved (LIB-04); manifest transitions to Unowned.
+//! - **Bucket B (missing-from-disk):** Manifest entries whose `source_name`
+//!   IS still in `config.directories` but the source file vanished. Library
+//!   copy is removed (today's behaviour).
+//! - **Bucket C (now-in-exclude-list):** Library skills whose distribution
+//!   symlinks were just removed because the skill was added to
+//!   `machine.toml::disabled` (global) or `directories.<name>.disabled`
+//!   (per-directory). Library content is preserved; only distribution
+//!   symlinks change.
+//!
+//! Buckets A and B are detected here in `cleanup_library` and surfaced via
+//! `CleanupResult::bucket_a_removed_from_config` and
+//! `CleanupResult::bucket_b_missing_from_disk`. Bucket C is collected in
+//! `lib.rs::cleanup_disabled_from_target` and threaded back into the
+//! unified renderer (`render_cleanup_buckets`) called from `lib.rs::sync`.
+//!
+//! All cleanup output goes to **stderr** (D-UX01-4); the output paths use
+//! `eprintln!` (or write through the renderer to a writer the caller routes
+//! to stderr) — never `print!`/macro variants targeting stdout.
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 
+use crate::config::DirectoryName;
 use crate::discover::SkillName;
 use crate::manifest::Manifest;
 use crate::paths::resolve_symlink_target;
+
+/// One library skill whose distribution symlink was removed because the
+/// skill is now in `machine.toml::disabled` (global) or
+/// `directories.<dir>.disabled` (per-directory). Surfaced in the unified
+/// cleanup output as Bucket C (UX-01 D-UX01-1).
+///
+/// `dead_code` allow: populated and consumed by Task 2 of Plan 16-01
+/// (wires `lib.rs::cleanup_disabled_from_target` to return Bucket C
+/// entries). Drops in Task 2.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct ExcludedSkill {
+    pub name: SkillName,
+    /// `None` = excluded globally via `machine.toml::disabled`.
+    /// `Some(dir)` = excluded for a specific directory via
+    /// `directories.<dir>.disabled`.
+    pub directory: Option<DirectoryName>,
+}
 
 /// Result of cleanup operation.
 #[derive(Debug, Default)]
@@ -20,6 +66,134 @@ pub struct CleanupResult {
     /// Library content for these skills is preserved on disk; the manifest
     /// entry's `source_name` is set to `None`.
     pub transitioned_to_unowned: usize,
+    /// Bucket A entries (removed-from-config) collected for the unified
+    /// three-bucket renderer (UX-01 D-UX01-1). Each tuple is
+    /// `(skill_name, last_known_source)` — the source name is the
+    /// `previous_source` recorded at transition time.
+    pub bucket_a_removed_from_config: Vec<(SkillName, DirectoryName)>,
+    /// Bucket B entries (missing-from-disk) collected for the unified
+    /// three-bucket renderer (UX-01 D-UX01-1). Each tuple is
+    /// `(skill_name, currently_configured_source)`.
+    pub bucket_b_missing_from_disk: Vec<(SkillName, DirectoryName)>,
+}
+
+/// Render the three cleanup buckets to a writer. Used by `lib.rs::sync`
+/// after both `cleanup_library` (Buckets A + B) and the distribution-cleanup
+/// loop (Bucket C) have run.
+///
+/// Each non-empty bucket is emitted as: a blank-line separator, a colored
+/// bold header line, then per-skill lines with an inline actionable hint.
+/// Empty buckets are silently skipped so `tome sync` runs that touch nothing
+/// stay quiet.
+///
+/// Per UX-01 D-UX01-3 / D-UX01-4 — the trigger phrase rewritten away by
+/// this milestone is forbidden in the output; bucket-distinct phrasing is
+/// locked in:
+/// - Bucket A: "no longer in any source" (preserving as Unowned)
+/// - Bucket B: "missing from configured source on disk"
+/// - Bucket C: "now in exclude list"
+///
+/// `dead_code` allow: invoked by `lib.rs::sync` after Task 2 wires the
+/// Bucket C coordination shape. Drops in Task 2.
+#[allow(dead_code)]
+pub(crate) fn render_cleanup_buckets(
+    writer: &mut impl Write,
+    bucket_a: &[(SkillName, DirectoryName)],
+    bucket_b: &[(SkillName, DirectoryName)],
+    bucket_c: &[ExcludedSkill],
+) -> std::io::Result<()> {
+    if bucket_a.is_empty() && bucket_b.is_empty() && bucket_c.is_empty() {
+        return Ok(());
+    }
+
+    // Bucket A — removed from config (preserve as Unowned).
+    if !bucket_a.is_empty() {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "{}",
+            console::style(format!(
+                "{} skill(s) no longer in any source (preserving as Unowned):",
+                bucket_a.len()
+            ))
+            .yellow()
+            .bold()
+        )?;
+        for (name, prev_source) in bucket_a {
+            writeln!(
+                writer,
+                "  {} {} — re-add `{}`, or run `tome reassign {} --to <dir>`",
+                name,
+                console::style(format!("(was: {})", prev_source)).dim(),
+                prev_source,
+                name,
+            )?;
+        }
+    }
+
+    // Bucket B — missing from configured source on disk (delete from library).
+    if !bucket_b.is_empty() {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "{}",
+            console::style(format!(
+                "{} skill(s) missing from configured source on disk (removing from library):",
+                bucket_b.len()
+            ))
+            .yellow()
+            .bold()
+        )?;
+        for (name, source) in bucket_b {
+            writeln!(
+                writer,
+                "  {} {} — restore the file, or run `tome remove skill {}`",
+                name,
+                console::style(format!("(from: {})", source)).dim(),
+                name,
+            )?;
+        }
+    }
+
+    // Bucket C — now in exclude list (distribution symlinks removed; library preserved).
+    if !bucket_c.is_empty() {
+        writeln!(writer)?;
+        writeln!(
+            writer,
+            "{}",
+            console::style(format!(
+                "{} skill(s) now in exclude list (distribution symlinks removed; library preserved):",
+                bucket_c.len()
+            ))
+            .yellow()
+            .bold()
+        )?;
+        for excluded in bucket_c {
+            match &excluded.directory {
+                None => {
+                    writeln!(
+                        writer,
+                        "  {} {} — remove `{}` from `machine.toml::disabled` to re-distribute",
+                        excluded.name,
+                        console::style("(excluded globally)").dim(),
+                        excluded.name,
+                    )?;
+                }
+                Some(dir) => {
+                    writeln!(
+                        writer,
+                        "  {} {} — remove `{}` from `machine.toml::directories.{}.disabled` to re-distribute",
+                        excluded.name,
+                        console::style(format!("(excluded for: {})", dir)).dim(),
+                        excluded.name,
+                        dir,
+                    )?;
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Remove library entries whose skills are no longer present in any discovered source.
@@ -78,9 +252,12 @@ pub fn cleanup_library(
         .cloned()
         .collect();
 
-    // Partition stale entries into Case 1 (transition) and Case 2 (delete).
-    let mut case1_unowned_transition: Vec<SkillName> = Vec::new();
-    let mut case2_delete: Vec<SkillName> = Vec::new();
+    // Partition stale entries into Case 1 (transition / Bucket A) and
+    // Case 2 (delete / Bucket B). Capture the source-name pairing for
+    // each so the unified three-bucket renderer (UX-01) can show
+    // per-skill provenance + actionable hints.
+    let mut case1_unowned_transition: Vec<(SkillName, DirectoryName)> = Vec::new();
+    let mut case2_delete: Vec<(SkillName, DirectoryName)> = Vec::new();
     for name in &stale {
         let entry = manifest
             .get(name.as_str())
@@ -89,28 +266,23 @@ pub fn cleanup_library(
         let source = entry
             .source_name
             .as_ref()
-            .expect("filter-guard ensures Some");
-        if config.directories().contains_key(source) {
+            .expect("filter-guard ensures Some")
+            .clone();
+        if config.directories().contains_key(&source) {
             // Source dir is still configured -> file vanished from disk -> Case 2.
-            case2_delete.push(name.clone());
+            case2_delete.push((name.clone(), source));
         } else {
             // Source dir is gone from config -> preserve library, transition -> Case 1.
-            case1_unowned_transition.push(name.clone());
+            case1_unowned_transition.push((name.clone(), source));
         }
     }
 
-    // --- Case 1: transition to Unowned (preserve library content) ---
-    for name in &case1_unowned_transition {
-        if !quiet {
-            let prev_source = manifest
-                .get(name.as_str())
-                .and_then(|e| e.source_name.as_ref())
-                .map(|d| d.as_str().to_string())
-                .unwrap_or_else(|| "unknown".to_string());
-            eprintln!(
-                "info: skill '{name}' (from '{prev_source}') no longer in any source — preserving as Unowned"
-            );
-        }
+    // --- Case 1 / Bucket A: transition to Unowned (preserve library content) ---
+    //
+    // No per-skill output here — the unified three-bucket renderer in
+    // `lib.rs::sync` drains `result.bucket_a_removed_from_config` after
+    // both library and distribution cleanup have run (D-UX01-2 / D-UX01-4).
+    for (name, prev_source) in &case1_unowned_transition {
         if !dry_run {
             // Per D-C1 (Phase 14): capture previous_source before clearing
             // source_name so tome status / tome doctor can render a clean
@@ -123,67 +295,46 @@ pub fn cleanup_library(
             }
         }
         result.transitioned_to_unowned += 1;
+        result
+            .bucket_a_removed_from_config
+            .push((name.clone(), prev_source.clone()));
     }
 
-    // --- Case 2: delete (today's behavior) ---
-    // Group by source for messaging (matches today's UX) and apply the
-    // existing interactive/non-interactive decision logic.
-    let mut case2_by_source: std::collections::BTreeMap<String, Vec<SkillName>> =
-        std::collections::BTreeMap::new();
-    for name in &case2_delete {
-        let source = manifest
-            .get(name.as_str())
-            .and_then(|e| e.source_name.as_ref())
-            .map(|d| d.as_str().to_string())
-            .unwrap_or_else(|| "unknown".to_string());
-        case2_by_source
-            .entry(source)
-            .or_default()
-            .push(name.clone());
-    }
-
+    // --- Case 2 / Bucket B: delete (today's behavior) ---
+    //
+    // The unified renderer surfaces per-skill provenance + the "restore the
+    // file, or run `tome remove skill <name>`" hint after both library and
+    // distribution cleanup complete. The interactive deletion confirmation
+    // below stays — it's the destructive-action gate, not the user-facing
+    // summary (which the renderer owns).
     let skills_to_remove: Vec<SkillName> = if interactive && !case2_delete.is_empty() {
-        println!(
-            "{}",
-            console::style(format!(
-                "{} skill(s) missing from configured sources:",
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt(format!(
+                "Delete {} skill(s) missing from source on disk from library?",
                 case2_delete.len()
             ))
-            .yellow()
-            .bold()
-        );
-        for (source, names) in &case2_by_source {
-            println!(
-                "  {} (from '{}'):",
-                console::style(format!("{} skill(s)", names.len())).dim(),
-                source
-            );
-            for name in names {
-                println!("    {}", name);
-            }
-        }
-        println!();
-        let confirmed = dialoguer::Confirm::new()
-            .with_prompt("Delete these skills from library?")
             .default(false)
             .interact_opt()?;
         if confirmed == Some(true) {
-            case2_delete.clone()
+            case2_delete.iter().map(|(n, _)| n.clone()).collect()
         } else {
             Vec::new()
         }
     } else if !case2_delete.is_empty() {
-        for (source, names) in &case2_by_source {
-            for name in names {
-                eprintln!(
-                    "warning: skill '{name}' (from '{source}') missing from source on disk, removing from library"
-                );
-            }
-        }
-        case2_delete.clone()
+        case2_delete.iter().map(|(n, _)| n.clone()).collect()
     } else {
         Vec::new()
     };
+
+    // Capture Bucket B regardless of interactive prompt outcome — the
+    // user-facing summary should reflect what tome detected as missing,
+    // not the post-confirmation delete decision (which is a destructive
+    // action the user explicitly confirms).
+    for (name, source) in &case2_delete {
+        result
+            .bucket_b_missing_from_disk
+            .push((name.clone(), source.clone()));
+    }
 
     for name in skills_to_remove {
         let entry_path = library_dir.join(name.as_str());
@@ -796,5 +947,217 @@ mod tests {
         assert!(!library.path().join("vanished-c2").exists(), "C2 deleted");
         assert_eq!(manifest.get("orphan-c1").unwrap().source_name, None);
         assert!(!manifest.contains_key("vanished-c2"));
+    }
+
+    // -- UX-01 three-bucket renderer tests (Plan 16-01 Task 1) --
+
+    /// Drives a Case 1 + Case 2 partition (mirrors
+    /// `cleanup_case1_and_case2_in_same_run`) and asserts that the new
+    /// `bucket_a_removed_from_config` / `bucket_b_missing_from_disk`
+    /// fields are populated, then renders the buckets to a `Vec<u8>`
+    /// writer and pins the bucket-distinct header substrings.
+    #[test]
+    fn cleanup_populates_bucket_a_and_bucket_b_for_renderer() {
+        let library = TempDir::new().unwrap();
+        std::fs::create_dir_all(library.path().join("orphan-a")).unwrap();
+        std::fs::create_dir_all(library.path().join("vanished-b")).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan-a").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/removed-source/orphan-a"),
+                crate::config::DirectoryName::new("removed-source").unwrap(),
+                crate::validation::test_hash("h1"),
+                false,
+            ),
+        );
+        manifest.insert(
+            crate::discover::SkillName::new("vanished-b").unwrap(),
+            crate::manifest::SkillEntry::new(
+                std::path::PathBuf::from("/tmp/active-source/vanished-b"),
+                crate::config::DirectoryName::new("active-source").unwrap(),
+                crate::validation::test_hash("h2"),
+                false,
+            ),
+        );
+
+        let config = config_with_dir("active-source");
+        let discovered: HashSet<String> = HashSet::new();
+        let result = cleanup_library(
+            library.path(),
+            &discovered,
+            &mut manifest,
+            &config,
+            false,
+            true,
+            true,
+        )
+        .unwrap();
+
+        // Bucket A populated with the Case 1 entry.
+        assert_eq!(
+            result.bucket_a_removed_from_config.len(),
+            1,
+            "Bucket A should hold the orphan-a Case 1 entry"
+        );
+        assert_eq!(
+            result.bucket_a_removed_from_config[0].0.as_str(),
+            "orphan-a",
+        );
+        assert_eq!(
+            result.bucket_a_removed_from_config[0].1.as_str(),
+            "removed-source",
+        );
+
+        // Bucket B populated with the Case 2 entry.
+        assert_eq!(
+            result.bucket_b_missing_from_disk.len(),
+            1,
+            "Bucket B should hold the vanished-b Case 2 entry"
+        );
+        assert_eq!(
+            result.bucket_b_missing_from_disk[0].0.as_str(),
+            "vanished-b",
+        );
+        assert_eq!(
+            result.bucket_b_missing_from_disk[0].1.as_str(),
+            "active-source",
+        );
+
+        // Render to a Vec<u8> writer (D-UX01-4 stderr discipline — the
+        // renderer writes through a Write so callers route to stderr,
+        // tests route to a buffer).
+        let mut buf = Vec::new();
+        let bucket_c: Vec<ExcludedSkill> = Vec::new();
+        render_cleanup_buckets(
+            &mut buf,
+            &result.bucket_a_removed_from_config,
+            &result.bucket_b_missing_from_disk,
+            &bucket_c,
+        )
+        .unwrap();
+        let rendered = String::from_utf8(buf).unwrap();
+
+        // Bucket-distinct header substrings (D-UX01-3) — locked phrasing.
+        assert!(
+            rendered.contains("no longer in any source"),
+            "Bucket A header substring missing from rendered output:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("missing from configured source on disk"),
+            "Bucket B header substring missing from rendered output:\n{rendered}"
+        );
+        // Forbidden-phrase absence is asserted by the integration test in
+        // tests/cli_sync.rs (Task 3); cleanup.rs satisfies the
+        // grep-based acceptance criterion locally by never referencing the
+        // trigger phrase from CONTEXT.md `<specifics>`.
+    }
+
+    #[test]
+    fn render_bucket_a_includes_tome_reassign_hint() {
+        let bucket_a = vec![(
+            crate::discover::SkillName::new("foo").unwrap(),
+            crate::config::DirectoryName::new("my-old-dir").unwrap(),
+        )];
+        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_c: Vec<ExcludedSkill> = Vec::new();
+
+        let mut buf = Vec::new();
+        render_cleanup_buckets(&mut buf, &bucket_a, &bucket_b, &bucket_c).unwrap();
+        let rendered = String::from_utf8(buf).unwrap();
+
+        assert!(
+            rendered.contains("tome reassign"),
+            "Bucket A per-skill hint must point at `tome reassign` (D-API-1 vocab):\n{rendered}"
+        );
+        assert!(
+            rendered.contains("foo"),
+            "Bucket A per-skill line must include the skill name:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("my-old-dir"),
+            "Bucket A per-skill line must name the previous source:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_bucket_b_includes_tome_remove_skill_hint() {
+        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_b = vec![(
+            crate::discover::SkillName::new("qux").unwrap(),
+            crate::config::DirectoryName::new("my-current-dir").unwrap(),
+        )];
+        let bucket_c: Vec<ExcludedSkill> = Vec::new();
+
+        let mut buf = Vec::new();
+        render_cleanup_buckets(&mut buf, &bucket_a, &bucket_b, &bucket_c).unwrap();
+        let rendered = String::from_utf8(buf).unwrap();
+
+        assert!(
+            rendered.contains("tome remove skill"),
+            "Bucket B per-skill hint must point at `tome remove skill` (D-API-2 vocab):\n{rendered}"
+        );
+        assert!(
+            rendered.contains("qux"),
+            "Bucket B per-skill line must include the skill name:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_bucket_c_global_and_per_directory_phrasing() {
+        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_c = vec![
+            ExcludedSkill {
+                name: crate::discover::SkillName::new("quux").unwrap(),
+                directory: None,
+            },
+            ExcludedSkill {
+                name: crate::discover::SkillName::new("corge").unwrap(),
+                directory: Some(crate::config::DirectoryName::new("my-dir").unwrap()),
+            },
+        ];
+
+        let mut buf = Vec::new();
+        render_cleanup_buckets(&mut buf, &bucket_a, &bucket_b, &bucket_c).unwrap();
+        let rendered = String::from_utf8(buf).unwrap();
+
+        assert!(
+            rendered.contains("now in exclude list"),
+            "Bucket C header substring missing:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("excluded globally"),
+            "Bucket C global-disable per-skill annotation missing:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("excluded for: my-dir"),
+            "Bucket C per-directory annotation must name the directory:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("machine.toml::disabled"),
+            "Bucket C global hint must point at machine.toml::disabled:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("machine.toml::directories.my-dir.disabled"),
+            "Bucket C per-directory hint must name the per-dir path:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_empty_buckets_produces_no_output() {
+        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_c: Vec<ExcludedSkill> = Vec::new();
+
+        let mut buf = Vec::new();
+        render_cleanup_buckets(&mut buf, &bucket_a, &bucket_b, &bucket_c).unwrap();
+
+        assert!(
+            buf.is_empty(),
+            "all-empty buckets should produce no output (silent on no-op syncs); got: {:?}",
+            String::from_utf8_lossy(&buf)
+        );
     }
 }
