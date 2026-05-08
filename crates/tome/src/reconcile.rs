@@ -292,7 +292,7 @@ fn classify_lockfile(
         installed.iter().map(|p| p.id.as_str()).collect();
 
     let mut out = Vec::new();
-    for (name, entry) in &lockfile.skills {
+    for (name, entry) in lockfile.skills() {
         // Pitfall 4: skip entries with registry_id None (local skills in lockfile).
         let Some(registry_id) = entry.registry_id.as_ref() else {
             continue;
@@ -354,7 +354,7 @@ fn detect_edited(
         let Some(source_name) = entry.source_name.as_ref() else {
             continue;
         };
-        let Some(lock_entry) = lockfile.skills.get(name.as_str()) else {
+        let Some(lock_entry) = lockfile.skills().get(name.as_str()) else {
             continue;
         };
 
