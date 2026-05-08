@@ -84,6 +84,9 @@ fully self-contained.
 - **Cross-machine portability** — `~/.tome/` can be committed to dotfiles
   and cloned onto a fresh machine. Pair with `tome.lock` for exact-version
   reproducibility (see [Lockfile-authoritative reconciliation](#lockfile-authoritative-reconciliation) below).
+  See [Cross-machine sync](cross-machine-sync.md) for the end-to-end
+  walkthrough (Machine A source-of-truth → Machine B fresh-machine
+  bootstrap).
 - **Source removal preserves content** — removing a `[directories.*]` entry
   from `tome.toml` (or running `tome remove dir <name>`) no longer erases
   the skills it provided. Their manifest entries transition to Unowned

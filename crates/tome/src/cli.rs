@@ -157,6 +157,12 @@ pub enum Command {
 
     /// Discover, consolidate, and distribute skills
     #[command(
+        long_about = "Discover, consolidate, and distribute skills.\n\n\
+                      For the cross-machine library-as-dotfiles workflow — committing \
+                      ~/.tome/ to dotfiles, bootstrapping a fresh machine, and the \
+                      auto_install_plugins consent flow — see docs/src/cross-machine-sync.md \
+                      (or the rendered mdbook page at the same path if you have the docs \
+                      built locally).",
         after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input\n  tome sync --no-install"
     )]
     Sync {
