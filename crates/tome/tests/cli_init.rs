@@ -230,6 +230,27 @@ fn init_no_input_writes_config_and_reloads() {
         config_path.display(),
     );
 
+    // HARD-22 / D-TILDE-1 (Plan 15-02): `save_checked` now preserves `~/...`
+    // shape on disk so a checked-in `tome.toml` is portable across machines.
+    // The wizard's headless default is `~/.tome/skills`; on-disk it stays
+    // `~/.tome/skills`. We assert the on-disk shape directly here, then
+    // load + validate + check exclude/directories below.
+    let on_disk = std::fs::read_to_string(&config_path).unwrap_or_else(|e| {
+        panic!(
+            "failed to read written config at {}: {e}",
+            config_path.display()
+        )
+    });
+    assert!(
+        on_disk.contains("library_dir = \"~/.tome/skills\""),
+        "expected ~-shape preserved in saved file (D-TILDE-1), got:\n{on_disk}",
+    );
+
+    // Load reparses the on-disk file. `Config::load` calls `expand_tildes()`,
+    // which uses `dirs::home_dir()` of the *test process* (NOT the subprocess
+    // we ran with a fresh HOME env). On macOS/Linux that resolves to the real
+    // user's home, so the loaded library_dir reflects the test process's HOME.
+    // Skip the absolute-path check; assert structure invariants instead.
     let loaded = Config::load(&config_path).unwrap_or_else(|e| {
         panic!(
             "Config::load on wizard-written file failed: {e:#}\nfile:\n{}",
@@ -248,14 +269,19 @@ fn init_no_input_writes_config_and_reloads() {
         loaded.directories().keys().collect::<Vec<_>>(),
     );
 
-    // save_checked expands ~ before writing (so the on-disk TOML holds absolute
-    // paths that don't rely on the caller's HOME). The wizard's headless
-    // default is `~/.tome/skills`, which expands to <HOME>/.tome/skills where
-    // <HOME> is the TempDir we set via the HOME env var above.
-    assert_eq!(
-        loaded.library_dir(),
-        tmp.path().join(".tome/skills").as_path(),
-        "library_dir should be the expanded default (<HOME>/.tome/skills)",
+    // After load, library_dir is tilde-expanded against the test-process HOME
+    // (dirs::home_dir() does not honor a child process's $HOME). The loaded
+    // path must end with `.tome/skills` and be absolute.
+    let loaded_lib = loaded.library_dir();
+    assert!(
+        loaded_lib.is_absolute(),
+        "library_dir should be expanded to an absolute path on load, got: {}",
+        loaded_lib.display(),
+    );
+    assert!(
+        loaded_lib.ends_with(".tome/skills"),
+        "library_dir should end with .tome/skills, got: {}",
+        loaded_lib.display(),
     );
 
     assert!(loaded.exclude().is_empty(), "expected empty exclude set");

@@ -258,6 +258,100 @@ mod tests {
         assert!(parsed.is_disabled("unwanted-skill"));
     }
 
+    // === HARD-22 / D-TILDE-2: machine.toml override paths preserved verbatim ===
+    //
+    // Plan 15-02 explicitly fences `paths::unexpand_tilde` to `Config::save_checked`
+    // only — `MachinePrefs::save` MUST NOT rewrite path fields. Per-machine
+    // preferences are by definition machine-local; rewriting `/Volumes/External/...`
+    // to `~/...` here would be wrong (Volumes paths don't live under $HOME on
+    // any sane setup).
+    //
+    // Verified by save+load round-trips that compare the on-disk path bytes
+    // against the input bytes for three representative cases.
+
+    #[test]
+    fn save_preserves_override_path_outside_home_verbatim() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Pick an absolute path that on every machine is OUTSIDE $HOME.
+        let original = "/Volumes/External/skills";
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: PathBuf::from(original),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original}\"")),
+            "machine.toml MUST preserve override path verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("~/"),
+            "machine.toml MUST NOT contain ~/ rewrites (D-TILDE-2), got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_preserves_override_tilde_path_verbatim() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // User-supplied tilde path: must survive byte-for-byte.
+        let original = "~/skills";
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: PathBuf::from(original),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original}\"")),
+            "machine.toml MUST preserve user-supplied tilde verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_preserves_override_absolute_under_home_verbatim() {
+        // Even an absolute path under $HOME must NOT be rewritten in machine.toml
+        // — D-TILDE-2 fences the unexpand pass to Config::save_checked only.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let home = dirs::home_dir().expect("home dir required for this test");
+        let original = home.join("dotfiles/external");
+        let original_str = original.to_str().unwrap();
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: original.clone(),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original_str}\"")),
+            "machine.toml MUST preserve absolute under-$HOME path verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("path = \"~/"),
+            "machine.toml MUST NOT rewrite under-$HOME paths to ~/ (D-TILDE-2 — fenced to tome.toml only), got:\n{on_disk}"
+        );
+    }
+
     #[test]
     fn load_malformed_toml_returns_error() {
         let tmp = tempfile::TempDir::new().unwrap();

@@ -25,6 +25,50 @@ pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
     }
 }
 
+/// Inverse of [`expand_tilde`]: rewrites a path under `$HOME` to `~/...` shape.
+///
+/// Paths outside `$HOME` are returned unchanged. Idempotent on already-tilde
+/// paths. Used by `Config::save_checked` to keep `tome.toml` cross-machine
+/// portable (HARD-22 / D-TILDE-1):
+///
+/// ```text
+/// ~/skills              -> ~/skills            (preserved — already tilde)
+/// /Users/martin/skills  -> ~/skills            (rewritten — auto-portable)
+/// /var/lib/skills       -> /var/lib/skills     (kept absolute — outside $HOME)
+/// ```
+///
+/// Round-trip identity holds with `expand_tilde`: for every input `p`,
+/// `unexpand_tilde(expand_tilde(p)?) == p` (when `p` was already a portable
+/// representation). Both functions resolve `$HOME` via `dirs::home_dir()`,
+/// so the round trip is consistent.
+///
+/// If `dirs::home_dir()` cannot determine `$HOME`, the function falls back
+/// to returning the path unchanged — match `expand_tilde`'s philosophy of
+/// best-effort behavior on environments without a usable home directory.
+pub fn unexpand_tilde(p: &Path) -> PathBuf {
+    // 1. Already-tilde input: return unchanged. Strip-prefix accepts both
+    //    "~" and "~/..." shapes, so this also covers the bare-tilde case.
+    if p.starts_with("~") {
+        return p.to_path_buf();
+    }
+    // 2. Resolve $HOME via the same mechanism expand_tilde uses. Without a
+    //    home dir we cannot rewrite — return the path unchanged.
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return p.to_path_buf(),
+    };
+    // 3. p == home → bare "~"
+    // 4. p under home → "~/<rest>"
+    // 5. otherwise → unchanged
+    if p == home {
+        PathBuf::from("~")
+    } else if let Ok(rest) = p.strip_prefix(&home) {
+        PathBuf::from("~").join(rest)
+    } else {
+        p.to_path_buf()
+    }
+}
+
 /// Resolved filesystem paths for a tome instance.
 ///
 /// Groups `tome_home` (root of managed content), `library_dir` (skill storage),
@@ -185,6 +229,100 @@ mod tests {
     use super::*;
     use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
+
+    // === HARD-22 / D-TILDE-1: unexpand_tilde tests ===
+    //
+    // unexpand_tilde is the inverse of expand_tilde: paths under $HOME are
+    // rewritten to `~/...` shape. Round-trip identity holds with expand_tilde
+    // (using the same $HOME resolution strategy). Idempotent on already-tilde
+    // input. Paths outside $HOME pass through unchanged.
+
+    #[test]
+    fn unexpand_tilde_idempotent_on_tilde() {
+        // Already-tilde input: returned unchanged.
+        assert_eq!(
+            unexpand_tilde(Path::new("~/skills")),
+            PathBuf::from("~/skills")
+        );
+        assert_eq!(unexpand_tilde(Path::new("~")), PathBuf::from("~"));
+        assert_eq!(
+            unexpand_tilde(Path::new("~/foo/bar/baz")),
+            PathBuf::from("~/foo/bar/baz")
+        );
+    }
+
+    #[test]
+    fn unexpand_tilde_rewrites_home_subpath() {
+        // For a path under $HOME: rewrite to `~/...`.
+        // We compute the expected output relative to dirs::home_dir() so the
+        // test is portable across machines (different $HOME values).
+        let home = dirs::home_dir().expect("home dir required for this test");
+        let absolute = home.join("skills");
+        assert_eq!(unexpand_tilde(&absolute), PathBuf::from("~/skills"));
+
+        let nested = home.join("dotfiles/tome/skills");
+        assert_eq!(
+            unexpand_tilde(&nested),
+            PathBuf::from("~/dotfiles/tome/skills")
+        );
+    }
+
+    #[test]
+    fn unexpand_tilde_exact_home_maps_to_bare_tilde() {
+        let home = dirs::home_dir().expect("home dir required for this test");
+        assert_eq!(unexpand_tilde(&home), PathBuf::from("~"));
+    }
+
+    #[test]
+    fn unexpand_tilde_preserves_outside_home() {
+        // Path outside $HOME: returned unchanged.
+        assert_eq!(
+            unexpand_tilde(Path::new("/var/lib/skills")),
+            PathBuf::from("/var/lib/skills")
+        );
+        assert_eq!(
+            unexpand_tilde(Path::new("/etc/tome")),
+            PathBuf::from("/etc/tome")
+        );
+    }
+
+    #[test]
+    fn unexpand_tilde_empty_path_unchanged() {
+        // Empty path: returned unchanged (defensive — matches expand_tilde's behavior
+        // for empty input via strip_prefix returning Err and falling through).
+        assert_eq!(unexpand_tilde(Path::new("")), PathBuf::from(""));
+    }
+
+    #[test]
+    fn unexpand_tilde_round_trip_identity() {
+        // For every input that has a meaningful expansion: applying unexpand_tilde
+        // after expand_tilde should yield the original `~/`-shape input.
+        for input in &["~/skills", "~/foo/bar", "~/dotfiles/tome", "~"] {
+            let expanded = expand_tilde(Path::new(input)).expect("expand should not fail");
+            let round_tripped = unexpand_tilde(&expanded);
+            assert_eq!(
+                round_tripped,
+                PathBuf::from(*input),
+                "round-trip failed for {input}: expanded={}, round_tripped={}",
+                expanded.display(),
+                round_tripped.display(),
+            );
+        }
+    }
+
+    #[test]
+    fn unexpand_tilde_round_trip_outside_home() {
+        // Outside-$HOME paths: expand → unexpand is also identity.
+        for input in &["/var/lib/skills", "/etc/tome", "/opt/skills"] {
+            let expanded = expand_tilde(Path::new(input)).expect("expand should not fail");
+            let round_tripped = unexpand_tilde(&expanded);
+            assert_eq!(
+                round_tripped,
+                PathBuf::from(*input),
+                "round-trip failed for outside-home path {input}",
+            );
+        }
+    }
 
     #[test]
     fn resolve_absolute_target_unchanged() {

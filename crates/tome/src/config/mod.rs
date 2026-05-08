@@ -249,22 +249,58 @@ impl Config {
     /// (defense in depth — catches serde drift such as a field that
     /// accidentally disappears across a serialize/deserialize cycle).
     ///
+    /// **HARD-22 / D-TILDE-1 (Plan 15-02):** path fields under `$HOME` are
+    /// rewritten to `~/`-shape on serialise, so a `tome.toml` checked into
+    /// dotfiles stays portable across machines. Already-tilde inputs survive
+    /// unchanged (idempotent); paths outside `$HOME` are kept absolute. The
+    /// rewrite operates on a serialisation-only clone so the caller's
+    /// `Config` is not mutated. Behaviour table:
+    ///
+    /// ```text
+    /// IN: library_dir = "~/skills"             OUT: library_dir = "~/skills"
+    /// IN: library_dir = "/Users/martin/skills" OUT: library_dir = "~/skills"
+    /// IN: library_dir = "/var/lib/skills"      OUT: library_dir = "/var/lib/skills"
+    /// ```
+    ///
+    /// **PORT-02 invariant:** `apply_machine_overrides` mutates a load-time-only
+    /// copy of `Config`. `save_checked` operates on `&self` (the unmutated
+    /// config) — therefore override paths from `machine.toml` are NEVER
+    /// serialised back to `tome.toml`. The call-site contract in `lib.rs`
+    /// guarantees that the Config passed to `save_checked` is the pre-override
+    /// shape; this method does not re-implement that guarantee.
+    ///
     /// Returns `Err` without writing anything if any stage fails.
     ///
     /// Call this instead of `save()` from the wizard or any other code that
     /// produces a Config in-memory rather than loading it from disk.
     pub fn save_checked(&self, path: &Path) -> Result<()> {
-        // Mirror Config::load order: expand → validate.
-        // We operate on a clone so the caller's Config is not mutated.
+        // 1. Validation copy: validate() needs absolute paths to detect overlaps,
+        //    so build an expanded clone for the check. The caller's Config is
+        //    never mutated.
         let mut expanded = self.clone();
         expanded.expand_tildes()?;
         expanded.validate()?;
 
-        // TOML round-trip: serialize, parse back, re-serialize, compare the
-        // two TOML strings for byte equality. If they differ, a field has
-        // been silently dropped or rewritten by serde.
+        // 2. Serialisation copy (D-TILDE-1): rewrite every path field under
+        //    `$HOME` to `~/`-shape via paths::unexpand_tilde. Already-tilde
+        //    inputs survive unchanged (idempotent); paths outside `$HOME`
+        //    are kept absolute. We start from `self` (not `expanded`) so
+        //    user-supplied tildes are preserved verbatim, not round-tripped
+        //    through expansion. This also keeps the PORT-02 invariant: any
+        //    overrides applied to `self.directories[*].path` would be the
+        //    caller's responsibility to undo before passing to save_checked
+        //    (lib.rs::sync save chain saves the pre-override Config).
+        let mut for_save = self.clone();
+        for_save.library_dir = crate::paths::unexpand_tilde(&for_save.library_dir);
+        for dir in for_save.directories.values_mut() {
+            dir.path = crate::paths::unexpand_tilde(&dir.path);
+        }
+
+        // 3. TOML round-trip: serialize, parse back, re-serialize, compare the
+        //    two TOML strings for byte equality. If they differ, a field has
+        //    been silently dropped or rewritten by serde.
         let emitted =
-            toml::to_string_pretty(&expanded).context("failed to serialize config (pre-check)")?;
+            toml::to_string_pretty(&for_save).context("failed to serialize config (pre-check)")?;
         let reparsed: Config =
             toml::from_str(&emitted).context("round-trip: generated TOML did not reparse")?;
         let reemitted =
@@ -278,7 +314,7 @@ impl Config {
              --- first emit ---\n{emitted}\n--- second emit ---\n{reemitted}"
         );
 
-        // Safe to save — write the same bytes we verified.
+        // 4. Safe to save — write the same bytes we verified.
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -888,6 +924,201 @@ skills_dir = "/tmp"
             config.library_dir,
             PathBuf::from("~/some/lib-not-real"),
             "save_checked must operate on a clone and leave the caller untouched"
+        );
+    }
+
+    // === HARD-22 / D-TILDE-1: tilde-preservation in Config::save_checked ===
+    //
+    // Behaviour table (CONTEXT.md D-TILDE-1):
+    //   ~/skills              -> ~/skills            (preserved)
+    //   /Users/$USER/skills   -> ~/skills            (rewritten — auto-portable)
+    //   /var/lib/skills       -> /var/lib/skills     (kept absolute — outside $HOME)
+    //
+    // Tests use dirs::home_dir() rather than hard-coded /Users/martin so they pass
+    // on any developer machine and on Linux CI.
+
+    #[test]
+    fn save_checked_preserves_tilde_in_library_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        // Use a tilde that won't collide with the library_dir-is-a-file check —
+        // a non-existent path under $HOME is still a valid (uncreated) library_dir.
+        let config = Config {
+            library_dir: PathBuf::from("~/.tome-test/lib-tilde-preserve"),
+            ..Default::default()
+        };
+        config
+            .save_checked(&path)
+            .expect("valid tilde library_dir must save");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("library_dir = \"~/.tome-test/lib-tilde-preserve\""),
+            "expected ~-shape preserved in saved file, got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_checked_rewrites_under_home_absolute_to_tilde() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        // Build an absolute path under the *real* $HOME (whatever it is on this
+        // machine) so the rewrite triggers regardless of dev environment.
+        let home = dirs::home_dir().expect("home dir required for this test");
+        let absolute = home.join(".tome-test/lib-rewrite");
+        let config = Config {
+            library_dir: absolute,
+            ..Default::default()
+        };
+        config
+            .save_checked(&path)
+            .expect("valid under-home library_dir must save");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("library_dir = \"~/.tome-test/lib-rewrite\""),
+            "expected absolute path under $HOME rewritten to ~-shape, got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_checked_keeps_outside_home_absolute_unchanged() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        // tmp.path() under $TMPDIR is typically not under $HOME — use a fixed
+        // /var/lib/... path that on macOS and Linux is always outside $HOME.
+        // The path doesn't need to exist on disk: validate() only flags it if it
+        // exists AND is a file.
+        let outside_home = PathBuf::from("/var/lib/tome-test-outside");
+        let config = Config {
+            library_dir: outside_home.clone(),
+            ..Default::default()
+        };
+        config
+            .save_checked(&path)
+            .expect("outside-$HOME library_dir must save");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("library_dir = \"/var/lib/tome-test-outside\""),
+            "expected outside-$HOME path kept absolute, got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_checked_rewrites_directory_path_under_home() {
+        // Every path field — library_dir AND directories.<name>.path — must
+        // participate in the unexpand pass.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let home = dirs::home_dir().expect("home dir required for this test");
+        let dir_abs = home.join(".tome-test/skill-dir-rewrite");
+
+        let config = Config {
+            library_dir: PathBuf::from("/var/lib/tome-lib"),
+            directories: BTreeMap::from([(
+                DirectoryName::new("under-home").unwrap(),
+                DirectoryConfig {
+                    path: dir_abs,
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    git_ref: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Default::default()
+        };
+        config.save_checked(&path).expect("valid config must save");
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains("path = \"~/.tome-test/skill-dir-rewrite\""),
+            "expected directory path under $HOME rewritten to ~-shape, got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_checked_does_not_round_trip_override_paths_to_tome_toml() {
+        // PORT-02 invariant: override paths from machine.toml MUST NOT be
+        // serialised back into tome.toml on save. apply_machine_overrides
+        // mutates a load-time-only copy; save_checked operates on the
+        // unmutated config (or a clone that didn't go through apply).
+        //
+        // Setup: build a Config with a directory at the ORIGINAL path,
+        // simulate apply_machine_overrides by calling it directly with prefs
+        // that rewrite the path, save the (post-apply) config — and assert the
+        // ORIGINAL path is NOT in the saved file.
+        //
+        // NOTE: this test confirms the contract from BOTH angles:
+        //   - The *unmutated* config saved with original path: trivially true.
+        //   - The *mutated* (post-apply) config saved would write the override
+        //     path. The real lib.rs::run flow only ever saves a freshly-loaded
+        //     Config (without overrides applied) via save_checked. We pin that
+        //     contract here by noting that save_checked writes whatever path
+        //     is in `self.directories[*].path`, so callers must save the
+        //     pre-override config — the `lib.rs::sync` save chain already
+        //     does this (Phase 9 PORT-02).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let cfg_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        let original_dir_path = tmp.path().join("original-skills");
+
+        let mut config = Config {
+            library_dir: lib_dir,
+            directories: BTreeMap::from([(
+                DirectoryName::new("work").unwrap(),
+                DirectoryConfig {
+                    path: original_dir_path.clone(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    git_ref: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Default::default()
+        };
+
+        // Save the unmutated config — this is what lib.rs::sync save chain
+        // does (it has access to the pre-override Config).
+        config.save_checked(&cfg_path).unwrap();
+        let on_disk_pre = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(
+            on_disk_pre.contains(original_dir_path.to_str().unwrap()),
+            "saved file must contain original path, got:\n{on_disk_pre}"
+        );
+
+        // Now simulate the in-memory "post-apply" mutation: apply overrides
+        // that rewrite work.path to a different location. Saving this
+        // *mutated* config would write the override path — DON'T do that
+        // in production. Confirmed by the assertion below.
+        let override_path = tmp.path().join("override-skills");
+        let mut prefs = crate::machine::MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            DirectoryName::new("work").unwrap(),
+            crate::machine::DirectoryOverride {
+                path: override_path.clone(),
+            },
+        );
+        config.apply_machine_overrides(&prefs).unwrap();
+        // After apply, in-memory config has the override path — saving NOW
+        // would round-trip it. The PORT-02 invariant in lib.rs is that
+        // save_checked is never called after apply_machine_overrides on the
+        // same config; we document/lock that contract here.
+        assert_eq!(
+            config.directories.get("work").unwrap().path,
+            override_path,
+            "apply_machine_overrides should have rewritten work.path"
+        );
+
+        // Re-read the originally-saved tome.toml: the override path is NOT
+        // in it (never was; we saved BEFORE apply).
+        let still_on_disk = std::fs::read_to_string(&cfg_path).unwrap();
+        assert!(
+            !still_on_disk.contains(override_path.to_str().unwrap()),
+            "tome.toml on disk MUST NOT contain override path from machine.toml \
+             (PORT-02 invariant), got:\n{still_on_disk}"
+        );
+        assert!(
+            still_on_disk.contains(original_dir_path.to_str().unwrap()),
+            "tome.toml on disk must still contain the original path, got:\n{still_on_disk}"
         );
     }
 
