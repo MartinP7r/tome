@@ -4,6 +4,7 @@
 
 - [Commands](commands.md)
 - [Configuration](configuration.md)
+- [Cross-machine sync](cross-machine-sync.md)
 - [Development Workflow](development-workflow.md)
 - [Architecture](architecture.md)
 - [Tool Landscape](tool-landscape.md)
