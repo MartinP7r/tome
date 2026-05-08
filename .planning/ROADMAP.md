@@ -67,7 +67,7 @@
 - [x] **Phase 12: Marketplace adapter** — `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` + `GitAdapter`; aggregated install/update failure surfacing (ADP-01..04) (completed 2026-05-05)
 - [x] **Phase 13: Lockfile-authoritative sync** — `tome sync` reconciles installed plugins to lockfile state; Match/Drift/Vanished classification; auto-install consent; edit-in-library detection (RECON-01..05) — **alpha cut** (completed 2026-05-05)
 - [x] **Phase 14: Unowned-library lifecycle** — `tome reassign` accepts Unowned input (per D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01); `tome remove skill <name>` deletes an Unowned skill (per D-API-2, supersedes `tome forget`); `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03) (completed 2026-05-07)
-- [ ] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut**
+- [x] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut** (completed 2026-05-08)
 - [ ] **Phase 16: Cleanup-message UX + docs** — Three-bucket cleanup partition with actionable hints; migration prompt summary table; architecture, changelog, cross-machine docs (UX-01..02, DOC-01..03) — **rc cut**
 - [ ] **Phase 17: Migration polish + UAT + release** — In-flight PR landing; issue triage; Linux UAT; real-library migration smoke-test; cargo-dist v0.10.0 release (REL-01..05) — **v0.10 final**
 
@@ -158,7 +158,7 @@
 - [x] 15-03-type-system-tightening-PLAN.md — skill::parse anyhow + ScanMode enum + Lockfile pub(crate) + LogLevel enum + TryFrom<String> for SkillName/DirectoryName (HARD-01, HARD-05, HARD-06, HARD-07, HARD-17)
 - [x] 15-04-safety-guards-and-integration-tests-PLAN.md — LintFailed error + atomic-save regression + distribute foreign-symlink refuse + directory_overrides hostile-input tests + tome remove dir e2e tests (HARD-04, HARD-08, HARD-09, HARD-10, HARD-11)
 - [x] 15-05-browse-ui-PLAN.md — ratatui TestBackend + insta snapshots + DetailAction Disable/Enable wiring per D-BROWSE-1/-2/-3 (HARD-12, HARD-21)
-- [ ] 15-06-polish-and-older-bugs-PLAN.md — backup test flake fix + wizard eprintln! + relocate rename + cross-fs hint + reassign read-once + manifest epoch-0 warning (HARD-14, HARD-15, HARD-16, HARD-18, HARD-19, HARD-20)
+- [x] 15-06-polish-and-older-bugs-PLAN.md — backup test flake fix + wizard eprintln! + relocate rename + cross-fs hint + reassign read-once + manifest epoch-0 warning (HARD-14, HARD-15, HARD-16, HARD-18, HARD-19, HARD-20)
 
 ### Phase 16: Cleanup-message UX + docs
 **Goal**: Rewrite the cleanup message that originally triggered this milestone discussion into three actionable buckets. Document the library-canonical model + cross-machine workflow + behavior change in user-facing docs.
@@ -206,6 +206,6 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
 | 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
-| 15. CLI hardening (beta) | v0.10 | 5/6 | In Progress|  |
+| 15. CLI hardening (beta) | v0.10 | 6/6 | Complete   | 2026-05-08 |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |
