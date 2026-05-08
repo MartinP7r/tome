@@ -4,12 +4,12 @@ milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: executing
 stopped_at: Phase 15 context gathered
-last_updated: "2026-05-08T00:24:48.139Z"
-last_activity: 2026-05-07
+last_updated: "2026-05-08T05:00:24.112Z"
+last_activity: 2026-05-08 -- Phase 15 execution started
 progress:
   total_phases: 7
   completed_phases: 4
-  total_plans: 22
+  total_plans: 28
   completed_plans: 22
 ---
 
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 14 — unowned-library-lifecycle
+**Current focus:** Phase 15 — cli-hardening
 
 ## Current Position
 
-Phase: 15
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-07
+Phase: 15 (cli-hardening) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 15
+Last activity: 2026-05-08 -- Phase 15 execution started
 
 **v0.10 phase shape (Phases 11–17):**
 
