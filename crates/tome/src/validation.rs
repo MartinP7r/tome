@@ -164,4 +164,78 @@ mod tests {
         assert_eq!(h.as_str().len(), 64);
         assert!(h.as_str().chars().all(|c| c.is_ascii_hexdigit()));
     }
+
+    // -- HARD-17: TryFrom<String> regression tests --
+    //
+    // Both SkillName::TryFrom<String> (in discover.rs) and
+    // DirectoryName::TryFrom<String> (in config/types.rs) delegate to ::new
+    // which calls validate_identifier. These tests pin the behavioural parity
+    // contract — any future refactor that splits the two paths apart must
+    // either keep error messages identical or update these tests.
+
+    use crate::config::DirectoryName;
+    use crate::discover::SkillName;
+
+    #[test]
+    fn skill_name_try_from_accepts_valid() {
+        let n = SkillName::try_from("my-skill".to_string()).unwrap();
+        assert_eq!(n.as_str(), "my-skill");
+    }
+
+    #[test]
+    fn skill_name_try_from_rejects_empty() {
+        assert!(SkillName::try_from(String::new()).is_err());
+    }
+
+    #[test]
+    fn skill_name_try_from_rejects_path_separator() {
+        assert!(SkillName::try_from("path/with/slash".to_string()).is_err());
+        assert!(SkillName::try_from("path\\with\\back".to_string()).is_err());
+    }
+
+    #[test]
+    fn skill_name_try_from_rejects_dots() {
+        assert!(SkillName::try_from(".".to_string()).is_err());
+        assert!(SkillName::try_from("..".to_string()).is_err());
+    }
+
+    #[test]
+    fn skill_name_try_from_matches_new_error_message() {
+        // try_from reuses validate_identifier via ::new, so failure messages
+        // must be identical for the same input.
+        let bad = "foo/bar";
+        let new_err = format!("{:#}", SkillName::new(bad).unwrap_err());
+        let try_err = format!(
+            "{:#}",
+            SkillName::try_from(bad.to_string()).unwrap_err()
+        );
+        assert_eq!(new_err, try_err);
+    }
+
+    #[test]
+    fn directory_name_try_from_accepts_valid() {
+        let n = DirectoryName::try_from("my-dir".to_string()).unwrap();
+        assert_eq!(n.as_str(), "my-dir");
+    }
+
+    #[test]
+    fn directory_name_try_from_rejects_empty() {
+        assert!(DirectoryName::try_from(String::new()).is_err());
+    }
+
+    #[test]
+    fn directory_name_try_from_rejects_path_separator() {
+        assert!(DirectoryName::try_from("a/b".to_string()).is_err());
+    }
+
+    #[test]
+    fn directory_name_try_from_matches_new_error_message() {
+        let bad = "foo/bar";
+        let new_err = format!("{:#}", DirectoryName::new(bad).unwrap_err());
+        let try_err = format!(
+            "{:#}",
+            DirectoryName::try_from(bad.to_string()).unwrap_err()
+        );
+        assert_eq!(new_err, try_err);
+    }
 }

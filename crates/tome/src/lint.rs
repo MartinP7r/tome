@@ -74,7 +74,7 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         Err(e) => {
             issues.push(LintIssue {
                 severity: Severity::Error,
-                message: e,
+                message: format!("{e:#}"),
             });
             return issues;
         }
