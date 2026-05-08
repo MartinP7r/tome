@@ -825,4 +825,61 @@ bogus = "y"
             "expected parse failure for unknown auto_install_plugins value, got: {result:?}"
         );
     }
+
+    /// HARD-08: rename failure during atomic save must leave the previous
+    /// `machine.toml` content untouched. machine.toml carries per-machine
+    /// disable/override state — corrupting it would silently desync user
+    /// preferences across the next sync.
+    ///
+    /// Mechanism: chmod 0o500 on the parent directory so fs::rename
+    /// returns EACCES. Verify the on-disk bytes are byte-identical to
+    /// the pre-fail state.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Step 1: write A via the canonical happy path.
+        let mut prefs_a = MachinePrefs::default();
+        prefs_a.disable(SkillName::new("alpha").unwrap());
+        save(&prefs_a, &path).unwrap();
+        let bytes_a = std::fs::read(&path).unwrap();
+
+        // Step 2: lock the parent dir.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Step 3: attempt to save B; must fail.
+        let mut prefs_b = MachinePrefs::default();
+        prefs_b.disable(SkillName::new("beta").unwrap());
+        prefs_b.disable(SkillName::new("gamma").unwrap());
+        let result = save(&prefs_b, &path);
+
+        // Restore permissions BEFORE asserting so TempDir cleanup works.
+        std::fs::set_permissions(
+            tmp.path(),
+            std::fs::Permissions::from_mode(original_mode),
+        )
+        .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when the parent directory is not writable"
+        );
+
+        // Step 4: re-read the file. It must still match A.
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: machine.toml content was \
+             corrupted by a failed save"
+        );
+        let reloaded = load(&path).unwrap();
+        assert!(reloaded.is_disabled("alpha"));
+        assert!(!reloaded.is_disabled("beta"));
+        assert!(!reloaded.is_disabled("gamma"));
+    }
 }

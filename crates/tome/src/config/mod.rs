@@ -82,14 +82,13 @@ impl Config {
     }
 
     /// Save config to file, creating parent directories as needed.
+    ///
+    /// HARD-08: atomic write via temp+rename. Mirrors `Manifest::save`,
+    /// `Lockfile::save`, and `MachinePrefs::save`. A failure at the
+    /// rename step leaves the previous on-disk content intact.
     pub fn save(&self, path: &Path) -> Result<()> {
         let content = toml::to_string_pretty(self).context("failed to serialize config")?;
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        std::fs::write(path, &content)
-            .with_context(|| format!("failed to write {}", path.display()))
+        atomic_write_toml(path, &content)
     }
 
     /// Read-only accessors for the `pub(crate)` fields.
@@ -314,14 +313,41 @@ impl Config {
              --- first emit ---\n{emitted}\n--- second emit ---\n{reemitted}"
         );
 
-        // 4. Safe to save — write the same bytes we verified.
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        std::fs::write(path, &emitted)
-            .with_context(|| format!("failed to write {}", path.display()))
+        // 4. Safe to save — write the same bytes we verified, atomically.
+        // HARD-08: temp+rename so a crash mid-rename preserves the prior
+        // on-disk tome.toml (the regression test pins this contract).
+        atomic_write_toml(path, &emitted)
     }
+}
+
+/// HARD-08: atomic-write helper used by both `Config::save` and
+/// `Config::save_checked`. Mirrors the pattern in `manifest::save`,
+/// `lockfile::save`, and `machine::save`: write to a sibling
+/// `.toml.tmp` file, then rename. A failure at the rename step
+/// leaves the previous file content intact.
+fn atomic_write_toml(path: &Path, content: &str) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let tmp_path = path.with_extension("toml.tmp");
+    std::fs::write(&tmp_path, content)
+        .with_context(|| format!("failed to write temp file {}", tmp_path.display()))?;
+    if let Err(e) = std::fs::rename(&tmp_path, path) {
+        // Best-effort cleanup so a stale `.toml.tmp` doesn't accumulate
+        // after a failed save (e.g. read-only target). Ignore the cleanup
+        // result on purpose: the rename error is the real failure to
+        // surface; masking it with a cleanup error would hide the cause.
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| {
+            format!(
+                "failed to rename {} -> {}",
+                tmp_path.display(),
+                path.display()
+            )
+        });
+    }
+    Ok(())
 }
 
 // =============================================================================
@@ -1397,5 +1423,75 @@ skills_dir = "/tmp"
                 "temp file should be removed after successful rename"
             );
         });
+    }
+
+    /// HARD-08: rename failure during atomic save_checked must leave the
+    /// previous on-disk tome.toml content untouched.
+    ///
+    /// Mechanism: chmod 0o500 on the parent dir → fs::rename returns
+    /// EACCES → save_checked returns Err → original file is unchanged.
+    #[cfg(unix)]
+    #[test]
+    fn save_checked_preserves_previous_on_rename_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib_dir = tmp.path().join("library-a");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let path = tmp.path().join("tome.toml");
+
+        // Step 1: write Config A through the canonical save_checked path.
+        let config_a = Config {
+            library_dir: lib_dir.clone(),
+            directories: BTreeMap::new(),
+            exclude: Default::default(),
+            backup: Default::default(),
+        };
+        config_a.save_checked(&path).unwrap();
+        let bytes_a = std::fs::read(&path).unwrap();
+        assert!(
+            !bytes_a.is_empty(),
+            "precondition: save_checked must produce non-empty content"
+        );
+
+        // Step 2: lock the parent dir so rename will EACCES.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Step 3: attempt to save Config B (different library_dir). Must fail.
+        let lib_dir_b = tmp.path().join("library-b");
+        // (Don't actually create lib_dir_b on disk — validate() doesn't
+        // require existence, only that it's not a regular file.)
+        let config_b = Config {
+            library_dir: lib_dir_b,
+            directories: BTreeMap::new(),
+            exclude: Default::default(),
+            backup: Default::default(),
+        };
+        let result = config_b.save_checked(&path);
+
+        // Restore permissions BEFORE the assertion so TempDir cleanup works.
+        std::fs::set_permissions(
+            tmp.path(),
+            std::fs::Permissions::from_mode(original_mode),
+        )
+        .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save_checked() must fail when the parent dir is not writable"
+        );
+
+        // Step 4: re-read the file. It must still be Config A's bytes.
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: tome.toml content was \
+             corrupted by a failed save_checked"
+        );
+
+        // Re-load and confirm the surviving config is A, not B.
+        let reloaded = Config::load(&path).unwrap();
+        assert_eq!(reloaded.library_dir, lib_dir);
     }
 }

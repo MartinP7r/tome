@@ -664,4 +664,113 @@ mod tests {
         let mut manifest = Manifest::default();
         assert!(manifest.skills_get_mut("nonexistent").is_none());
     }
+
+    /// HARD-08: if the rename step of the atomic save fails, the previous
+    /// on-disk manifest content must remain untouched.
+    ///
+    /// Mechanism: write a known content A via the happy path, then chmod
+    /// the parent directory to 0o500 (read+exec, no write). Calling
+    /// `save()` with content B fails at the rename step (EACCES); the
+    /// original file must still parse to content A.
+    ///
+    /// Cross-platform: chmod-on-parent-dir is portable across macOS and
+    /// Linux. Permissions are restored before the test exits so TempDir
+    /// drop can clean up.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+
+        // Step 1: write content A via the canonical save path.
+        let mut manifest_a = Manifest::default();
+        manifest_a.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/alpha"),
+                DirectoryName::new("src-a").unwrap(),
+                test_hash("a"),
+                false,
+            ),
+        );
+        save(&manifest_a, tmp.path()).unwrap();
+        let path_a = tmp.path().join(MANIFEST_FILENAME);
+        let bytes_a = std::fs::read(&path_a).unwrap();
+
+        // Step 2: chmod parent to read+exec only — rename will EACCES.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Step 3: attempt to save a DIFFERENT content B; it must fail.
+        let mut manifest_b = Manifest::default();
+        manifest_b.insert(
+            crate::discover::SkillName::new("beta").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/beta"),
+                DirectoryName::new("src-b").unwrap(),
+                test_hash("b"),
+                false,
+            ),
+        );
+        let result = save(&manifest_b, tmp.path());
+
+        // Restore permissions BEFORE asserting so TempDir cleanup works
+        // even if the assertion panics.
+        std::fs::set_permissions(
+            tmp.path(),
+            std::fs::Permissions::from_mode(original_mode),
+        )
+        .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when rename target is unwritable"
+        );
+
+        // Step 4: re-read the manifest. It must STILL be content A.
+        let bytes_after = std::fs::read(&path_a).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: original manifest content was \
+             corrupted by a failed save"
+        );
+        let reloaded = load(tmp.path()).unwrap();
+        assert!(
+            reloaded.get("alpha").is_some(),
+            "post-fail manifest must still hold the previous (alpha) entry"
+        );
+        assert!(
+            reloaded.get("beta").is_none(),
+            "post-fail manifest must NOT hold the new (beta) entry"
+        );
+    }
+
+    /// HARD-08 round-trip pin: previous_source survives a full save -> load
+    /// round-trip when the entry is Owned (Some) — companion to the existing
+    /// Unowned-state round-trip test above. Ensures Phase 14 D-C1 schema is
+    /// stable across save() failures and successes alike.
+    #[test]
+    fn previous_source_round_trip_through_save_load_owned_keeps_owned() {
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        // Owned entry with NO previous_source (the common case).
+        manifest.insert(
+            crate::discover::SkillName::new("kept").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/kept"),
+                DirectoryName::new("active-source").unwrap(),
+                test_hash("k"),
+                false,
+            ),
+        );
+        save(&manifest, tmp.path()).unwrap();
+        let loaded = load(tmp.path()).unwrap();
+        let entry = loaded.get("kept").unwrap();
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("active-source").unwrap())
+        );
+        assert_eq!(entry.previous_source, None);
+    }
 }

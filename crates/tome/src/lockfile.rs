@@ -1002,4 +1002,121 @@ mod tests {
         assert!(via_accessor.contains_key(&SkillName::new("alpha").unwrap()));
         assert!(via_accessor.contains_key(&SkillName::new("bravo").unwrap()));
     }
+
+    /// HARD-08: rename failure during atomic save must leave the previous
+    /// `tome.lock` content untouched. Phase 13 D-22 makes the lockfile the
+    /// authoritative cross-machine state — corrupting it on a partial save
+    /// would break reconciliation.
+    ///
+    /// Mechanism: chmod 0o500 on the parent dir → fs::rename returns
+    /// EACCES → save() returns Err → original file content is unchanged.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use crate::manifest::SkillEntry;
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+
+        // Build lockfile A with one entry, save through the canonical
+        // happy path so we know the on-disk shape.
+        let mut manifest_a = Manifest::default();
+        manifest_a.insert(
+            SkillName::new("alpha").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/alpha"),
+                DirectoryName::new("src-a").unwrap(),
+                test_hash("a"),
+                false,
+            ),
+        );
+        let lockfile_a = generate(&manifest_a, &[]);
+        save(&lockfile_a, tmp.path()).unwrap();
+        let lock_path = tmp.path().join(LOCKFILE_NAME);
+        let bytes_a = std::fs::read(&lock_path).unwrap();
+
+        // Lock the parent dir so rename will EACCES.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Build a different lockfile B and try to save it.
+        let mut manifest_b = Manifest::default();
+        manifest_b.insert(
+            SkillName::new("beta").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/beta"),
+                DirectoryName::new("src-b").unwrap(),
+                test_hash("b"),
+                false,
+            ),
+        );
+        let lockfile_b = generate(&manifest_b, &[]);
+        let result = save(&lockfile_b, tmp.path());
+
+        // Restore permissions before any assertion to keep TempDir cleanup
+        // working even on assertion panic.
+        std::fs::set_permissions(
+            tmp.path(),
+            std::fs::Permissions::from_mode(original_mode),
+        )
+        .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when the rename target dir is not writable"
+        );
+
+        let bytes_after = std::fs::read(&lock_path).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: lockfile content corrupted by \
+             a failed save"
+        );
+
+        // Re-load and confirm the surviving entry is the original alpha,
+        // not the would-be-saved beta.
+        let reloaded = load(tmp.path()).unwrap().expect("lockfile must exist");
+        assert!(
+            reloaded
+                .skills
+                .contains_key(&SkillName::new("alpha").unwrap())
+        );
+        assert!(
+            !reloaded
+                .skills
+                .contains_key(&SkillName::new("beta").unwrap())
+        );
+    }
+
+    /// HARD-08 round-trip pin: previous_source survives a save -> load
+    /// cycle when the entry is Owned (companion to the Unowned-state
+    /// `lockentry_round_trip_with_previous_source` above).
+    #[test]
+    fn previous_source_round_trip_through_lockfile_save_load_owned() {
+        use crate::manifest::SkillEntry;
+
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("kept").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/kept"),
+                DirectoryName::new("active").unwrap(),
+                test_hash("k"),
+                false,
+            ),
+        );
+        let lf = generate(&manifest, &[]);
+        save(&lf, tmp.path()).unwrap();
+
+        let reloaded = load(tmp.path()).unwrap().expect("lockfile must exist");
+        let entry = &reloaded.skills[&SkillName::new("kept").unwrap()];
+        // Owned entries serialise without previous_source — the field is
+        // None in memory and the JSON omits it via skip_serializing_if.
+        assert_eq!(entry.previous_source, None);
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("active").unwrap())
+        );
+    }
 }
