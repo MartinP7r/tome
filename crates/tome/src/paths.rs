@@ -6,7 +6,24 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+
+/// Expand `~` prefix to the user's home directory.
+///
+/// Lives here (not in `config`) because it's a cross-cutting filesystem
+/// utility — `paths.rs` is the canonical home for path manipulation helpers.
+/// `config::expand_tilde` is a re-export of this function so existing
+/// `crate::config::expand_tilde` call sites continue to compile unchanged
+/// (Plan 15-02 / HARD-03).
+pub fn expand_tilde(path: &Path) -> Result<PathBuf> {
+    if let Ok(stripped) = path.strip_prefix("~") {
+        Ok(dirs::home_dir()
+            .context("could not determine home directory")?
+            .join(stripped))
+    } else {
+        Ok(path.to_path_buf())
+    }
+}
 
 /// Resolved filesystem paths for a tome instance.
 ///
