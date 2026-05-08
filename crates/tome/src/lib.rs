@@ -1680,12 +1680,32 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // 6. Cleanup stale symlinks from distribution directories
     let mut removed_from_targets = 0usize;
-    for (_name, dir_config) in config.distribution_dirs() {
+    let mut excluded_skills: Vec<cleanup::ExcludedSkill> = Vec::new();
+    for (name, dir_config) in config.distribution_dirs() {
         let skills_dir = &dir_config.path;
         removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
-        // Also clean up symlinks for disabled skills
-        removed_from_targets +=
-            cleanup_disabled_from_target(skills_dir, paths.library_dir(), &machine_prefs, dry_run)?;
+        // Also clean up symlinks for disabled skills (global + per-directory).
+        // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
+        // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
+        let (n, excluded) =
+            cleanup_disabled_from_target(skills_dir, paths.library_dir(), name, &machine_prefs, dry_run)?;
+        removed_from_targets += n;
+        excluded_skills.extend(excluded);
+    }
+
+    // 6b. Render the unified three-bucket cleanup output (UX-01 D-UX01-2 /
+    // D-UX01-4 stderr discipline). Empty buckets produce no output, so
+    // syncs that touched nothing stay quiet.
+    if !quiet {
+        let mut stderr = std::io::stderr().lock();
+        // Best-effort: failure to write to stderr is non-fatal for sync
+        // (matches existing eprintln! semantics that ignore I/O errors).
+        let _ = cleanup::render_cleanup_buckets(
+            &mut stderr,
+            &cleanup_result.bucket_a_removed_from_config,
+            &cleanup_result.bucket_b_missing_from_disk,
+            &excluded_skills,
+        );
     }
 
     // 7. Save manifest, gitignore, and lockfile
@@ -1762,7 +1782,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     Ok(())
 }
 
-/// Remove symlinks from a target directory that point to disabled skills.
+/// Remove symlinks from a target directory that point to disabled skills,
+/// surfacing each removal as a `cleanup::ExcludedSkill` so `lib.rs::sync`
+/// can render them through the unified three-bucket cleanup output (UX-01
+/// Bucket C — D-UX01-1, D-UX01-2).
 ///
 /// Unlike `cleanup::cleanup_target` (which only removes *broken* symlinks),
 /// this removes symlinks even if their target still exists on disk — because
@@ -1770,14 +1793,34 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 ///
 /// Only removes symlinks that point into the library directory, matching the
 /// origin check in `cleanup::cleanup_target`.
+///
+/// Detects two exclusion shapes:
+/// - **Global** — skill is in `machine_prefs.disabled`. Reported as
+///   `ExcludedSkill { directory: None }`.
+/// - **Per-directory** — skill is in `directories.<dir>.disabled`
+///   (blocklist) or absent from `directories.<dir>.enabled` (allowlist).
+///   Reported as `ExcludedSkill { directory: Some(<dir>) }`.
+///
+/// Global takes precedence in reporting when a skill is both globally and
+/// per-directory disabled (mirrors `MachinePrefs::is_skill_allowed`
+/// resolution-order precedence: global is the broadest fallback, and the
+/// user-actionable hint is "remove from machine.toml::disabled").
+///
+/// Returns `(removed_count, excluded_skills)` so the caller can:
+/// 1. Account for the symlinks removed (used in `removed_from_targets`).
+/// 2. Drain `excluded_skills` into `cleanup::render_cleanup_buckets`
+///    Bucket C for the unified user-facing summary.
 fn cleanup_disabled_from_target(
     target_dir: &Path,
     library_dir: &Path,
+    dir_name: &config::DirectoryName,
     machine_prefs: &machine::MachinePrefs,
     dry_run: bool,
-) -> Result<usize> {
+) -> Result<(usize, Vec<cleanup::ExcludedSkill>)> {
+    let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
+
     if !target_dir.is_dir() {
-        return Ok(0);
+        return Ok((0, excluded));
     }
 
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
@@ -1797,28 +1840,57 @@ fn cleanup_disabled_from_target(
         let entry =
             entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
         let path = entry.path();
-        if path.is_symlink() {
-            let name = entry.file_name();
-            if machine_prefs.is_disabled(&name.to_string_lossy()) {
-                // Only remove if symlink points into the tome library
-                let raw_target = std::fs::read_link(&path)
-                    .with_context(|| format!("failed to read symlink {}", path.display()))?;
-                let target = paths::resolve_symlink_target(&path, &raw_target);
-                let points_into_library =
-                    target.starts_with(library_dir) || target.starts_with(&canonical_library);
-                if points_into_library {
-                    if !dry_run {
-                        std::fs::remove_file(&path).with_context(|| {
-                            format!("failed to remove disabled symlink {}", path.display())
-                        })?;
-                    }
-                    removed += 1;
-                }
+        if !path.is_symlink() {
+            continue;
+        }
+
+        let name_owned = entry.file_name().to_string_lossy().into_owned();
+        let is_global = machine_prefs.is_disabled(&name_owned);
+        let is_allowed = machine_prefs.is_skill_allowed(&name_owned, dir_name.as_str());
+
+        // `is_skill_allowed` returns false for both global AND per-directory
+        // exclusion. We split the cases for reporting — global takes
+        // precedence in the bucket-C surface even though the underlying
+        // removal logic is the same.
+        if is_global || !is_allowed {
+            // Only remove if symlink points into the tome library.
+            let raw_target = std::fs::read_link(&path)
+                .with_context(|| format!("failed to read symlink {}", path.display()))?;
+            let target = paths::resolve_symlink_target(&path, &raw_target);
+            let points_into_library =
+                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+            if !points_into_library {
+                continue;
             }
+
+            if !dry_run {
+                std::fs::remove_file(&path).with_context(|| {
+                    format!("failed to remove disabled symlink {}", path.display())
+                })?;
+            }
+            removed += 1;
+
+            // Convert the file-system entry name into a validated SkillName
+            // for the bucket-C carrier. Skills with invalid names on disk
+            // are silently skipped from reporting (the symlink is still
+            // removed, but Bucket C expects a typed name; an invalid name
+            // shouldn't have produced a distribution symlink anyway).
+            let Ok(skill_name) = crate::discover::SkillName::new(name_owned.as_str()) else {
+                continue;
+            };
+            let directory = if is_global {
+                None
+            } else {
+                Some(dir_name.clone())
+            };
+            excluded.push(cleanup::ExcludedSkill {
+                name: skill_name,
+                directory,
+            });
         }
     }
 
-    Ok(removed)
+    Ok((removed, excluded))
 }
 
 fn render_sync_report(report: &SyncReport) {
@@ -2240,6 +2312,10 @@ mod tests {
 
     // -- cleanup_disabled_from_target tests --
 
+    fn test_dir_name() -> config::DirectoryName {
+        config::DirectoryName::new("test-dir").unwrap()
+    }
+
     #[test]
     fn cleanup_disabled_removes_library_symlink() {
         let library = TempDir::new().unwrap();
@@ -2253,10 +2329,18 @@ mod tests {
         let mut prefs = machine::MachinePrefs::default();
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
-        let removed =
-            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        let dir_name = test_dir_name();
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
+                .unwrap();
         assert_eq!(removed, 1);
         assert!(!target.path().join("disabled-skill").exists());
+        assert_eq!(excluded.len(), 1, "Bucket C should record the removal");
+        assert_eq!(excluded[0].name.as_str(), "disabled-skill");
+        assert!(
+            excluded[0].directory.is_none(),
+            "global disable should report `directory: None`"
+        );
     }
 
     #[test]
@@ -2273,13 +2357,19 @@ mod tests {
         let mut prefs = machine::MachinePrefs::default();
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
-        let removed =
-            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        let dir_name = test_dir_name();
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
+                .unwrap();
         assert_eq!(
             removed, 0,
             "should not remove symlink pointing outside library"
         );
         assert!(target.path().join("disabled-skill").is_symlink());
+        assert!(
+            excluded.is_empty(),
+            "external symlink should not produce a Bucket C entry"
+        );
     }
 
     #[test]
@@ -2293,23 +2383,29 @@ mod tests {
         let mut prefs = machine::MachinePrefs::default();
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
-        let removed =
-            cleanup_disabled_from_target(target.path(), library.path(), &prefs, false).unwrap();
+        let dir_name = test_dir_name();
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
+                .unwrap();
         assert_eq!(removed, 0);
         assert!(target.path().join("disabled-skill").is_dir());
+        assert!(excluded.is_empty());
     }
 
     #[test]
     fn cleanup_disabled_nonexistent_dir_returns_zero() {
         let prefs = machine::MachinePrefs::default();
-        let removed = cleanup_disabled_from_target(
+        let dir_name = test_dir_name();
+        let (removed, excluded) = cleanup_disabled_from_target(
             std::path::Path::new("/nonexistent/target"),
             std::path::Path::new("/nonexistent/library"),
+            &dir_name,
             &prefs,
             false,
         )
         .unwrap();
         assert_eq!(removed, 0);
+        assert!(excluded.is_empty());
     }
 
     #[test]
@@ -2324,12 +2420,81 @@ mod tests {
         let mut prefs = machine::MachinePrefs::default();
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
-        let removed =
-            cleanup_disabled_from_target(target.path(), library.path(), &prefs, true).unwrap();
+        let dir_name = test_dir_name();
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, true)
+                .unwrap();
         assert_eq!(removed, 1, "should count the would-be removal");
         assert!(
             target.path().join("disabled-skill").is_symlink(),
             "dry-run should not actually remove"
+        );
+        assert_eq!(
+            excluded.len(),
+            1,
+            "dry-run should still report would-be Bucket C entry"
+        );
+    }
+
+    /// Per-directory disable via `directories.<dir>.disabled` blocklist —
+    /// Bucket C entry must name the directory it was excluded for.
+    #[test]
+    fn cleanup_disabled_per_directory_blocklist_reports_directory() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        let skill_dir = library.path().join("excluded-here");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("excluded-here")).unwrap();
+
+        let dir_name = test_dir_name();
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.toggle_per_dir_blocklist(&dir_name, SkillName::new("excluded-here").unwrap(), true);
+
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
+                .unwrap();
+        assert_eq!(removed, 1);
+        assert!(!target.path().join("excluded-here").exists());
+        assert_eq!(excluded.len(), 1, "per-dir disable should produce one Bucket C entry");
+        assert_eq!(excluded[0].name.as_str(), "excluded-here");
+        assert_eq!(
+            excluded[0].directory.as_ref().map(|d| d.as_str()),
+            Some("test-dir"),
+            "per-dir blocklist should report `directory: Some(<dir>)`"
+        );
+    }
+
+    /// When a skill is BOTH globally and per-directory disabled, the
+    /// Bucket C entry is reported as global (broader scope = more
+    /// actionable user hint pointing at machine.toml::disabled).
+    #[test]
+    fn cleanup_disabled_global_takes_precedence_over_per_dir() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        let skill_dir = library.path().join("disabled-everywhere");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("disabled-everywhere")).unwrap();
+
+        let dir_name = test_dir_name();
+        let mut prefs = machine::MachinePrefs::default();
+        // Both global AND per-dir blocklist contain the skill.
+        prefs.disable(SkillName::new("disabled-everywhere").unwrap());
+        prefs.toggle_per_dir_blocklist(
+            &dir_name,
+            SkillName::new("disabled-everywhere").unwrap(),
+            true,
+        );
+
+        let (removed, excluded) =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
+                .unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(excluded.len(), 1, "double-disable should still produce one entry");
+        assert!(
+            excluded[0].directory.is_none(),
+            "global takes precedence — directory should be None"
         );
     }
 

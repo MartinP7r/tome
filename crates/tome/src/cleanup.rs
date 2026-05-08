@@ -44,11 +44,6 @@ use crate::paths::resolve_symlink_target;
 /// skill is now in `machine.toml::disabled` (global) or
 /// `directories.<dir>.disabled` (per-directory). Surfaced in the unified
 /// cleanup output as Bucket C (UX-01 D-UX01-1).
-///
-/// `dead_code` allow: populated and consumed by Task 2 of Plan 16-01
-/// (wires `lib.rs::cleanup_disabled_from_target` to return Bucket C
-/// entries). Drops in Task 2.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct ExcludedSkill {
     pub name: SkillName,
@@ -92,10 +87,6 @@ pub struct CleanupResult {
 /// - Bucket A: "no longer in any source" (preserving as Unowned)
 /// - Bucket B: "missing from configured source on disk"
 /// - Bucket C: "now in exclude list"
-///
-/// `dead_code` allow: invoked by `lib.rs::sync` after Task 2 wires the
-/// Bucket C coordination shape. Drops in Task 2.
-#[allow(dead_code)]
 pub(crate) fn render_cleanup_buckets(
     writer: &mut impl Write,
     bucket_a: &[(SkillName, DirectoryName)],
