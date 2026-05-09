@@ -292,7 +292,7 @@ fn classify_lockfile(
         installed.iter().map(|p| p.id.as_str()).collect();
 
     let mut out = Vec::new();
-    for (name, entry) in &lockfile.skills {
+    for (name, entry) in lockfile.skills() {
         // Pitfall 4: skip entries with registry_id None (local skills in lockfile).
         let Some(registry_id) = entry.registry_id.as_ref() else {
             continue;
@@ -354,7 +354,7 @@ fn detect_edited(
         let Some(source_name) = entry.source_name.as_ref() else {
             continue;
         };
-        let Some(lock_entry) = lockfile.skills.get(name.as_str()) else {
+        let Some(lock_entry) = lockfile.skills().get(name.as_str()) else {
             continue;
         };
 
@@ -771,6 +771,7 @@ mod tests {
     ) -> LockEntry {
         LockEntry {
             source_name: Some(DirectoryName::new(source).unwrap()),
+            previous_source: None,
             content_hash: hash,
             registry_id: registry_id.map(|s| s.to_string()),
             version: version.map(|s| s.to_string()),
@@ -950,6 +951,7 @@ mod tests {
         let mock = empty_mock("mp");
         let entry = LockEntry {
             source_name: None, // Unowned
+            previous_source: None,
             content_hash: placeholder_hash(),
             registry_id: Some("orphan@mp".to_string()),
             version: Some("1.0.0".to_string()),
@@ -1041,7 +1043,7 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.insert(
             SkillName::new("orphan").unwrap(),
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), stale_hash.clone(), true),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), stale_hash.clone(), true, None),
         );
 
         let lockfile = lockfile_with(vec![(

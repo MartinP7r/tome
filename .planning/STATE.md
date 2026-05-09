@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: executing
-stopped_at: "Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)"
-last_updated: "2026-05-05T21:47:05.315Z"
-last_activity: 2026-05-05
+status: verifying
+stopped_at: Completed 15-06-polish-and-older-bugs-PLAN.md (final plan of Phase 15 / v0.10 beta cut)
+last_updated: "2026-05-08T07:51:22.624Z"
+last_activity: 2026-05-08
 progress:
   total_phases: 7
-  completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
+  completed_phases: 5
+  total_plans: 28
+  completed_plans: 28
 ---
 
 # Project State
@@ -20,14 +20,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 13 — lockfile-authoritative-sync (executing)
+**Current focus:** Phase 15 — cli-hardening
 
 ## Current Position
 
-Phase: 14
+Phase: 16
 Plan: Not started
-Status: Ready to execute
-Last activity: 2026-05-05
+Status: Phase complete — ready for verification
+Last activity: 2026-05-08
 
 **v0.10 phase shape (Phases 11–17):**
 
@@ -68,6 +68,29 @@ Historical decisions are archived in:
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-03 (reconcile module): pub fn reconcile_lockfile + ReconcileClass (4 variants) + ReconcileReport + 7 internal helpers + 25 unit tests in crates/tome/src/reconcile.rs (1620 LOC). Implements RECON-01..05 + Pitfalls 2/4/5 + OQ-3/4. D-22 partial-failure invariant verified by partial-failure test. Plan 13-04 wires the consumer (replaces install.rs reconcile_managed_plugins call site).
 - [Phase 13-lockfile-authoritative-sync]: Plan 13-04 (call-site wiring + install.rs deletion): lib.rs::sync invokes reconcile::reconcile_lockfile through ClaudeMarketplaceAdapter (D-11/D-18); legacy install.rs (312 LOC) deleted; D-13 fork in-place flip applied at the manifest call site via apply_edit_decisions; sync exits non-zero via anyhow::bail when reconcile install_failures non-empty (RESEARCH OQ-6); revert decision parked behind a warning (D-16 safety guarantee preserved, dedicated revert path is a Phase 14 follow-up). RECON-01..05 fully wired.
 - [Phase 13]: Plan 13-05 (CLI sync reconcile integration tests): 10 end-to-end integration tests in tests/cli_sync_reconcile.rs covering RECON-01..05 non-interactive flow paths via assert_cmd; D-20 verbatim error contract is now CI-asserted; dev-dep self-reference (tome = { path = ".", features = ["test-support"] }) keeps marketplace::testing reachable for future binary-level mock injection. Two plan-spec bugs auto-fixed (Rule 1): role naming (distribution → target/managed) + missing library_dir in fixtures.
+- [Phase 14]: SkillSummary lives in dedicated summary.rs; previous_source is Option<String> (display projection); JSON shape stable with explicit null for None
+- [Phase 14]: Plan 14-01: Schema lift adds previous_source: Option<DirectoryName> to SkillEntry + LockEntry with serde-default skip_serializing_if; lockfile::generate propagates from manifest. Three Owned->Unowned transition sites (cleanup Case 1, remove::execute dir flavour, apply_edit_decisions Fork branch) capture via .take(). #[allow(dead_code)] retained on SkillEntry::new_unowned (Rule 3 deviation) — production callers land in 14-04/14-05; tracked in phase deferred-items.md.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-03: Command::Remove restructured into nested clap subcommand (RemoveKind::Dir | RemoveKind::Skill) per D-API-2; Command::Reassign gains force: bool per D-A1. lib.rs::run preserves Dir flow byte-for-byte; Skill arm stubs to anyhow::bail awaiting 14-05; force shimmed via let _ = force; awaiting 14-04. All 10 tests/cli.rs sites migrated to remove dir <name>. 5 new clap-parse unit tests including BREAKING-rejection of bare tome remove <name>.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-07 (doctor unowned section): DoctorReport.unowned_skills field added in parallel to library_issues/directory_issues/config_issues; total_issues() body unchanged (D-D3 contract pinned by test); render_unowned_skills helper uses tabled NAME/LAST-KNOWN SOURCE/SYNCED columns mirroring 14-06 status renderer; manifest read failure degrades to empty Vec to avoid double-reporting (library_issues already surfaces corrupted-manifest errors); JSON shape stable (no skip_serializing_if). 4 new tests + 1 existing literal updated; 31/31 doctor tests pass.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-06 (status unowned section): pure formatter format_unowned_section returns Option<String> (None=empty/omit, Some=heading+table) so rendering is unit-testable without stdout capture; manifest read failure in gather() degrades to empty Unowned set (already surfaced via library_count.error); JSON shape stable with explicit empty array for empty unowned set (no skip_serializing_if).
+- [Phase 14-unowned-library-lifecycle]: Plan 14-04: reassign::plan accepts Unowned input (D-API-1 stub deleted); D-A1 content-hash collision check (refuses different-content unless --force) + D-A2 target-only role rejection (refuses !is_discovery destinations); execute() clears previous_source on re-anchor (D-C1 closure). Fork's --force now also bypasses D-A1 (single shared semantic). Test fixture local-target switched from role=target to role=synced.
+- [Phase 14-unowned-library-lifecycle]: Plan 14-05 (UNOWN-02): RemoveSkillFailureKind kept as separate enum from FailureKind (different failure modes); manifest mutation runs last in in-memory mutation sequence so retry still finds entry on panic; success banner enumerates only steps that actually cleaned something to reduce noise; partial-failure path retains in-memory state and skips all save() calls (I2/I3 retention parity with dir-flavour).
+- [Phase 14-unowned-library-lifecycle]: Plan 14-08: D-API-1/-2 vocabulary merge documented across REQUIREMENTS.md/ROADMAP.md/PROJECT.md/CHANGELOG.md with strikethrough+supersession traceability; Phase14Fixture pattern lifts manifest pre-population for Unowned-state tests; 10 phase14_ integration tests anchor UNOWN-01..03 success criteria to the real binary via assert_cmd; 845 tests green
+- [Phase 15-cli-hardening]: Plan 15-01: cmd_<name> helpers inlined in lib.rs (per CONTEXT.md Claude's Discretion); commands/ module deferred unless lib.rs grows further. Test split: 16 per-domain cli_*.rs files mirroring cmd_<name> structure; tests/common/mod.rs idiom with module-level #[allow(dead_code)]. Snapshot rename cli__*.snap -> cli_<domain>__*.snap to match insta per-test-crate convention.
+- [Phase 15-cli-hardening]: Plan 15-02: config.rs (3122 LOC) split into config/{mod,types,overrides,validate}.rs with Config::save_checked locked to mod.rs (S3 lock for Plan 15-04 grep target); tilde helpers (expand_tilde, unexpand_tilde) live in paths.rs per CONTEXT.md Claude's Discretion; mod.rs re-exports expand_tilde so byte-identical public API preserved
+- [Phase 15-cli-hardening]: Plan 15-02: paths::unexpand_tilde added (inverse of expand_tilde via shared dirs::home_dir()); Config::save_checked rewrites under-$HOME paths to ~/-shape on serialise (D-TILDE-1); MachinePrefs::save left untouched per D-TILDE-2 fence (3 verbatim regression tests pin contract); PORT-02 invariant preserved by construction (save_checked operates on \&self, never re-runs apply_machine_overrides)
+- [Phase 15-cli-hardening]: Plan 15-03: ScanMode variant names use call-site semantics (Local / ManagedNoProvenance / ManagedWith) rather than the plan's recommended encoding-shape names (Bare / Provenanced / ProvenancedNullable). Per plan author guidance — variant names should reflect what the inner Some(None) actually means, not its old encoding.
+- [Phase 15-cli-hardening]: Plan 15-03: HARD-06 scope kept to Lockfile top-level fields only (version, skills); LockEntry pub fields preserved per plan <interfaces> example. Internal get_mut sites in reconcile.rs preserved as direct pub(crate) field access — adding pub fn skills_mut would leak a mutable map handle externally, defeating the v1.0 GUI Tauri IPC goal.
+- [Phase 15-cli-hardening]: Plan 15-03: HARD-07 LogLevel inlined in cli.rs per CONTEXT.md Claude's Discretion (it's a CLI-facing enum, not worth a separate log.rs module). Internal helpers continue to take 'verbose: bool' / 'quiet: bool' parameters — the plan only mandates removing the public boolean surface, so the dispatcher converts at the boundary, keeping the refactor contained to cli.rs + ~5 dispatch lines in lib.rs.
+- [Phase 15-cli-hardening]: Bundle the cmd_migrate_library site with HARD-04: literal acceptance criteria require lib.rs to have NO process::exit(1); both lint and migrate-library now bubble typed errors through anyhow and main.rs downcasts
+- [Phase 15-cli-hardening]: DiagnosticIssue kept as struct with optional kind field instead of converted to enum: backward-compat JSON shape preserved; POLISH-04 ALL-array applies at the kind level (DiagnosticIssueKind::ForeignSymlink)
+- [Phase 15-cli-hardening]: Config::save and Config::save_checked promoted to atomic temp+rename via shared atomic_write_toml helper: pre-this-plan they used direct fs::write (not atomic); the plan called this out as fix-first scenario
+- [Phase 15-cli-hardening]: Foreign-symlink detection uses 2x2 canonicalize+lexical prefix matrix instead of canonicalize-only: handles macOS symlinks-in-the-middle (/var → /private/var) and missing-leaf staleness without false-foreign-positives
+- [Phase 15-cli-hardening]: Hostile-input rejection added in apply_machine_overrides (close to source) using PORT-04 wrapper convention (mention machine.toml). Covers .. traversal, NUL bytes, broken/looping symlinks, and duplicate target paths
+- [Phase 15]: Plan 15-05: ratatui TestBackend + insta snapshots cover 13 canonical browse scenes (status dashboard, skill list default/empty/filtered/grouped, detail managed/local/unowned, help overlay, light theme, post-toggle); browse + machine modules widened to pub under feature 'test-support' (production stays pub(crate))
+- [Phase 15]: Plan 15-05: HARD-21 D-BROWSE-2 vs D-BROWSE-3 enforced as TWO DISTINCT STRINGS — action-menu LABEL has NO skill name (verb + scope only); StatusMessage BODY DOES include skill name (verb + skill + scope). DetailAction::label takes (&row, &prefs) and returns String; fallback_label() covers prefs-less paths
+- [Phase 15]: Plan 15-05: ToggleScope smart-routing (D-BROWSE-1) most-specific-list-wins (per-dir blocklist > per-dir allowlist > global) mirrors MachinePrefs::is_skill_allowed read-path; MACH-04 invariant preserved by construction (per-list mutators only ever touch one of disabled/enabled per directory)
+- [Phase 15]: Plan 15-06 (closes Phase 15 / v0.10 beta cut): HARD-14 backup gpg-signing flake fix (per-test-fixture local commit.gpgsign=false + cli_backup GIT_CONFIG_GLOBAL isolation); HARD-15 wizard chrome routed to stderr (eprintln!), only the dry-run TOML body stays on stdout; HARD-16 provenance_from_link_result renamed to warn_if_unreadable_symlink (intent-first naming); HARD-18 cross-fs cleanup recovery hint as Phase 7 D-10 Conflict/Why/Suggestion via cross_fs_recovery_hint pure formatter; HARD-19 reassign PreReassignState read-once snapshot (closes plan/execute drift class — execute() consumes manifest_entry_at_plan rather than re-reading); HARD-20 manifest epoch-0 timestamp warning at Manifest::load via epoch_zero_warning pure formatter. 11 new tests (4 cross-fs hint + 3 reassign snapshot + 4 epoch warning); 955 total tests green.
 
 ### v0.10 design context (consume during planning)
 
@@ -106,6 +129,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-05T21:40:45.857Z
-Stopped at: Phase 13 complete (Plan 13-05 final: cli_sync_reconcile integration tests; RECON-01..05 fully wired and verified end-to-end)
+Last session: 2026-05-08T07:40:10.197Z
+Stopped at: Completed 15-06-polish-and-older-bugs-PLAN.md (final plan of Phase 15 / v0.10 beta cut)
 Resume file: None

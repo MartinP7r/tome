@@ -8,6 +8,29 @@ use std::path::Path;
 
 use crate::skill;
 
+/// Lint command failure marker (HARD-04).
+///
+/// Bubbled through `anyhow::Result` from [`crate::cmd_lint`] when the lint
+/// report contains errors. The top-level error handler in `main.rs`
+/// downcasts to this type and exits with code 1, instead of `cmd_lint`
+/// itself calling `process::exit(1)` mid-library.
+///
+/// This keeps the library free of `process::exit` so embedding callers
+/// (and future Phase 16/17 exit-code differentiation) can choose how to
+/// translate the failure.
+#[derive(Debug)]
+pub struct LintFailed {
+    pub violations: usize,
+}
+
+impl std::fmt::Display for LintFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "lint failed: {} violation(s)", self.violations)
+    }
+}
+
+impl std::error::Error for LintFailed {}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
     Error,
@@ -74,7 +97,7 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         Err(e) => {
             issues.push(LintIssue {
                 severity: Severity::Error,
-                message: e,
+                message: format!("{e:#}"),
             });
             return issues;
         }
@@ -512,5 +535,34 @@ mod tests {
 
         let report = lint_library(tmp.path());
         assert_eq!(report.skills_checked, 0);
+    }
+
+    // -- HARD-04: LintFailed error type --
+
+    #[test]
+    fn lint_failed_constructs_with_violation_count() {
+        let f = LintFailed { violations: 3 };
+        assert_eq!(f.violations, 3);
+        // Display includes the violation count so end users see how many
+        // errors caused the non-zero exit.
+        assert_eq!(f.to_string(), "lint failed: 3 violation(s)");
+    }
+
+    #[test]
+    fn lint_failed_is_std_error() {
+        // Ensure trait composition works for `Box<dyn std::error::Error>`
+        // consumers and anyhow's `Error::from`.
+        fn _accepts(_: &dyn std::error::Error) {}
+        let f = LintFailed { violations: 1 };
+        _accepts(&f);
+    }
+
+    #[test]
+    fn lint_failed_downcast_through_anyhow() {
+        // The whole point of HARD-04: main.rs needs to downcast.
+        let err: anyhow::Error = LintFailed { violations: 7 }.into();
+        let recovered = err.downcast_ref::<LintFailed>();
+        assert!(recovered.is_some(), "anyhow downcast must round-trip");
+        assert_eq!(recovered.unwrap().violations, 7);
     }
 }

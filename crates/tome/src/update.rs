@@ -180,6 +180,7 @@ mod tests {
     fn entry(source: &str, hash_seed: &str) -> LockEntry {
         LockEntry {
             source_name: Some(DirectoryName::new(source).unwrap()),
+            previous_source: None,
             content_hash: test_hash(hash_seed),
             registry_id: None,
             version: None,
@@ -190,6 +191,7 @@ mod tests {
     fn managed_entry(source: &str, hash_seed: &str, registry_id: &str) -> LockEntry {
         LockEntry {
             source_name: Some(DirectoryName::new(source).unwrap()),
+            previous_source: None,
             content_hash: test_hash(hash_seed),
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),

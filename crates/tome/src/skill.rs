@@ -2,6 +2,7 @@
 //!
 //! Extracts and parses YAML frontmatter from SKILL.md files.
 
+use anyhow::{Context, bail};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -52,14 +53,19 @@ pub fn extract_frontmatter(content: &str) -> Option<(&str, &str)> {
 }
 
 /// Parse SKILL.md content into frontmatter + body.
-pub fn parse(content: &str) -> Result<(SkillFrontmatter, String), String> {
+///
+/// # Errors
+///
+/// Returns an `anyhow::Error` describing the parse failure. Callers can
+/// chain `.context(...)` without `.map_err(anyhow::anyhow!)` boilerplate.
+pub fn parse(content: &str) -> anyhow::Result<(SkillFrontmatter, String)> {
     match extract_frontmatter(content) {
         Some((yaml, body)) => {
             let fm: SkillFrontmatter =
-                serde_yaml::from_str(yaml).map_err(|e| format!("invalid YAML frontmatter: {e}"))?;
+                serde_yaml::from_str(yaml).context("invalid YAML frontmatter")?;
             Ok((fm, body.to_string()))
         }
-        None => Err("no frontmatter found (expected --- delimiters)".to_string()),
+        None => bail!("no frontmatter found (expected --- delimiters)"),
     }
 }
 
@@ -120,5 +126,46 @@ mod tests {
     #[test]
     fn extract_unclosed_frontmatter_returns_none() {
         assert!(extract_frontmatter("---\nname: test\n").is_none());
+    }
+
+    // -- HARD-01: anyhow::Result migration tests --
+
+    #[test]
+    fn parse_missing_frontmatter_error_describes_failure() {
+        // Returns an anyhow::Error whose Display preserves the existing message
+        // text. Tests `Err(anyhow::Error)` shape rather than `Err(String)`.
+        let err = parse("# Just a heading").unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("no frontmatter found"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_invalid_yaml_chains_serde_context() {
+        // serde_yaml's failure becomes the underlying cause, with our context
+        // wrapper "invalid YAML frontmatter" on top. Display alternate ({:#})
+        // renders the chain.
+        let err = parse("---\n: invalid yaml [[\n---\nbody").unwrap_err();
+        let chained = format!("{err:#}");
+        assert!(
+            chained.contains("invalid YAML frontmatter"),
+            "expected context wrapper in chain: {chained}"
+        );
+    }
+
+    #[test]
+    fn parse_error_can_be_contexted_without_map_err_anyhow() {
+        // Caller-side ergonomics: callers can chain `.context(...)` without
+        // `.map_err(anyhow::anyhow!)` boilerplate.
+        use anyhow::Context;
+        let result: anyhow::Result<()> = parse("# no frontmatter")
+            .context("while linting fixture")
+            .map(|_| ());
+        let err = result.unwrap_err();
+        let chained = format!("{err:#}");
+        assert!(chained.contains("while linting fixture"));
+        assert!(chained.contains("no frontmatter"));
     }
 }

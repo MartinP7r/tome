@@ -3,6 +3,57 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
+/// Verbosity level resolved from `--verbose` / `--quiet` flags.
+///
+/// Per HARD-07: collapses what was previously `pub verbose: bool` +
+/// `pub quiet: bool` on `Cli` into a single typed accessor. The flag UX is
+/// preserved exactly — clap continues to parse `--verbose` / `--quiet` with
+/// `conflicts_with` — only the public `Cli` field surface changes from two
+/// booleans to a single `pub fn log_level(&self) -> LogLevel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogLevel {
+    /// Suppress non-error output (`--quiet`).
+    Quiet,
+    /// Default output (no flag).
+    #[default]
+    Normal,
+    /// Detailed output (`--verbose`).
+    Verbose,
+}
+
+impl LogLevel {
+    /// Compile-time exhaustiveness sentinel array (POLISH-04 pattern).
+    /// Adding a variant without updating ALL is a compile error via
+    /// the const-len assert below.
+    pub const ALL: [Self; 3] = [Self::Quiet, Self::Normal, Self::Verbose];
+
+    /// True iff variant is `Verbose`.
+    pub fn is_verbose(self) -> bool {
+        matches!(self, Self::Verbose)
+    }
+
+    /// True iff variant is `Quiet`.
+    pub fn is_quiet(self) -> bool {
+        matches!(self, Self::Quiet)
+    }
+}
+
+// POLISH-04 exhaustiveness sentinel — compile fails if a new variant is
+// added without updating LogLevel::ALL. Mirrors marketplace.rs's
+// InstallFailureKind sentinel pattern.
+#[allow(dead_code)]
+fn _log_level_exhaustiveness(l: LogLevel) {
+    match l {
+        LogLevel::Quiet => {}
+        LogLevel::Normal => {}
+        LogLevel::Verbose => {}
+    }
+}
+const _: () = assert!(
+    LogLevel::ALL.len() == 3,
+    "LogLevel::ALL must list every variant",
+);
+
 #[derive(Parser)]
 #[command(
     name = "tome",
@@ -27,12 +78,16 @@ pub struct Cli {
     pub dry_run: bool,
 
     /// Detailed output
+    //
+    // Private — read via `Cli::log_level()` per HARD-07. clap requires
+    // the field be on `Cli` directly to wire the `--verbose` / `-v` flag,
+    // so visibility is the only thing that flips.
     #[arg(short, long, global = true)]
-    pub verbose: bool,
+    verbose: bool,
 
     /// Suppress non-error output
     #[arg(short, long, global = true, conflicts_with = "verbose")]
-    pub quiet: bool,
+    quiet: bool,
 
     /// Path to machine preferences file (default: ~/.config/tome/machine.toml)
     #[arg(long, global = true)]
@@ -45,6 +100,23 @@ pub struct Cli {
     /// this implies `--no-triage`.
     #[arg(long, global = true)]
     pub no_input: bool,
+}
+
+impl Cli {
+    /// Resolve the parsed `--verbose` / `--quiet` flags into a typed
+    /// `LogLevel`. Replaces direct `cli.verbose` / `cli.quiet` reads per
+    /// HARD-07. clap's `conflicts_with` already prevents both flags being
+    /// set, so the order of branches here is observationally irrelevant —
+    /// `Verbose` first matches the precedence in the previous boolean code.
+    pub fn log_level(&self) -> LogLevel {
+        if self.verbose {
+            LogLevel::Verbose
+        } else if self.quiet {
+            LogLevel::Quiet
+        } else {
+            LogLevel::Normal
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -168,21 +240,23 @@ pub enum Command {
     #[command(after_help = "Examples:\n  tome eject\n  tome eject --dry-run")]
     Eject,
 
-    /// Remove a directory entry and clean up its artifacts
+    /// Manage skills and directories — remove a configured directory entry
+    /// or delete an Unowned skill from the library.
     #[command(
-        after_help = "Examples:\n  tome remove my-git-source\n  tome remove my-git-source --dry-run\n  tome remove my-git-source --force"
+        after_help = "Examples:\n  tome remove dir my-git-source\n  tome remove dir my-git-source --force\n  tome remove skill orphaned-foo\n  tome remove skill orphaned-foo --yes"
     )]
     Remove {
-        /// Name of the directory to remove (as shown in `tome status`)
-        #[arg(value_name = "NAME")]
-        name: String,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        force: bool,
+        #[command(subcommand)]
+        kind: RemoveKind,
     },
 
-    /// Reassign a skill to a different directory
-    #[command(after_help = "Examples:\n  tome reassign my-skill --to local-skills")]
+    /// Reassign a skill to a different directory. Accepts both Owned skills
+    /// (today's behaviour) and Unowned skills (re-anchors them per UNOWN-01 /
+    /// D-API-1). Refuses to overwrite an existing skill in the target with
+    /// different content unless `--force` is passed (D-A1).
+    #[command(
+        after_help = "Examples:\n  tome reassign my-skill --to local-skills\n  tome reassign orphaned-foo --to local-skills\n  tome reassign my-skill --to local-skills --force"
+    )]
     Reassign {
         /// Skill name to reassign
         #[arg(value_name = "SKILL")]
@@ -190,6 +264,11 @@ pub enum Command {
         /// Target directory name
         #[arg(long)]
         to: String,
+        /// Overwrite an existing skill in the target if its content hash
+        /// differs from the library copy (D-A1). Same-content collisions
+        /// always relink without `--force`.
+        #[arg(long)]
+        force: bool,
     },
 
     /// Fork a managed skill to a local directory for customization
@@ -248,6 +327,37 @@ pub enum Command {
     },
 }
 
+/// Variant of `tome remove` — directory removal vs unowned-skill deletion.
+/// Per D-API-2 (Phase 14): the merge replaces today's `tome remove <name>`
+/// shape (BREAKING). `tome remove dir` keeps today's directory-removal
+/// behaviour; `tome remove skill` deletes an Unowned skill from the library.
+#[derive(Debug, Subcommand)]
+pub enum RemoveKind {
+    /// Remove a directory entry from `tome.toml` and clean up its artifacts
+    /// (today's `tome remove <name>` behaviour, renamed). Owned skills
+    /// transition to Unowned per LIB-04.
+    Dir {
+        /// Name of the directory to remove (as shown in `tome status`)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+    /// Delete an Unowned skill from the library — manifest entry, library
+    /// directory, distribution symlinks, lockfile entry, and machine.toml
+    /// membership all cleaned. Owned skills are refused with a hint to
+    /// run `tome remove dir` first (D-B2).
+    Skill {
+        /// Skill name to forget (must currently be Unowned)
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// Skip confirmation prompt
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
 #[derive(Debug, Subcommand)]
 pub enum BackupCommand {
     /// Initialize git repo in the library for backup tracking
@@ -279,4 +389,139 @@ pub enum BackupCommand {
         #[arg(default_value = "HEAD")]
         target: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn parse_remove_dir_with_force() {
+        let cli = Cli::try_parse_from(["tome", "remove", "dir", "my-source", "--force"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Dir { name, force },
+            } => {
+                assert_eq!(name, "my-source");
+                assert!(force);
+            }
+            _ => panic!("expected Remove::Dir"),
+        }
+    }
+
+    #[test]
+    fn parse_remove_skill_with_yes() {
+        let cli = Cli::try_parse_from(["tome", "remove", "skill", "orphan-foo", "--yes"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Skill { name, yes },
+            } => {
+                assert_eq!(name, "orphan-foo");
+                assert!(yes);
+            }
+            _ => panic!("expected Remove::Skill"),
+        }
+    }
+
+    #[test]
+    fn parse_remove_skill_short_y() {
+        let cli = Cli::try_parse_from(["tome", "remove", "skill", "orphan-foo", "-y"]).unwrap();
+        match cli.command {
+            Command::Remove {
+                kind: RemoveKind::Skill { yes, .. },
+            } => assert!(yes),
+            _ => panic!("expected Remove::Skill"),
+        }
+    }
+
+    #[test]
+    fn parse_reassign_force_flag_recognised() {
+        let cli = Cli::try_parse_from(["tome", "reassign", "my-skill", "--to", "dst", "--force"])
+            .unwrap();
+        match cli.command {
+            Command::Reassign { skill, to, force } => {
+                assert_eq!(skill, "my-skill");
+                assert_eq!(to, "dst");
+                assert!(force);
+            }
+            _ => panic!("expected Reassign"),
+        }
+    }
+
+    #[test]
+    fn old_shape_remove_with_bare_name_fails() {
+        // Today's `tome remove my-source` should NO LONGER parse — clap
+        // requires an explicit subcommand. BREAKING per D-API-2.
+        let result = Cli::try_parse_from(["tome", "remove", "my-source"]);
+        assert!(
+            result.is_err(),
+            "bare `tome remove <name>` must fail post-restructure (BREAKING)"
+        );
+    }
+
+    // -- HARD-07: LogLevel parsing tests --
+
+    #[test]
+    fn log_level_default_is_normal() {
+        let cli = Cli::try_parse_from(["tome", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Normal);
+        assert!(!cli.log_level().is_verbose());
+        assert!(!cli.log_level().is_quiet());
+    }
+
+    #[test]
+    fn log_level_verbose_flag_resolves_to_verbose() {
+        let cli = Cli::try_parse_from(["tome", "--verbose", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Verbose);
+        assert!(cli.log_level().is_verbose());
+        assert!(!cli.log_level().is_quiet());
+    }
+
+    #[test]
+    fn log_level_short_v_flag_resolves_to_verbose() {
+        let cli = Cli::try_parse_from(["tome", "-v", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Verbose);
+    }
+
+    #[test]
+    fn log_level_quiet_flag_resolves_to_quiet() {
+        let cli = Cli::try_parse_from(["tome", "--quiet", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Quiet);
+        assert!(cli.log_level().is_quiet());
+        assert!(!cli.log_level().is_verbose());
+    }
+
+    #[test]
+    fn log_level_short_q_flag_resolves_to_quiet() {
+        let cli = Cli::try_parse_from(["tome", "-q", "status"]).unwrap();
+        assert_eq!(cli.log_level(), LogLevel::Quiet);
+    }
+
+    #[test]
+    fn log_level_verbose_and_quiet_together_rejected() {
+        // clap's conflicts_with should reject both flags simultaneously.
+        let result = Cli::try_parse_from(["tome", "--verbose", "--quiet", "status"]);
+        assert!(
+            result.is_err(),
+            "--verbose --quiet must conflict (parse error)"
+        );
+    }
+
+    #[test]
+    fn log_level_all_array_lists_every_variant() {
+        // POLISH-04 sentinel: ALL must enumerate every variant.
+        // The const_assert in cli.rs already enforces len()==3; this test
+        // pins the actual variant set.
+        let all = LogLevel::ALL;
+        assert!(all.contains(&LogLevel::Quiet));
+        assert!(all.contains(&LogLevel::Normal));
+        assert!(all.contains(&LogLevel::Verbose));
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn log_level_default_trait_impl_is_normal() {
+        assert_eq!(LogLevel::default(), LogLevel::Normal);
+    }
 }

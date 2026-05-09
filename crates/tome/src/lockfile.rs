@@ -22,9 +22,28 @@ pub(crate) const LOCKFILE_NAME: &str = "tome.lock";
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Lockfile {
     /// Schema version (currently 1).
-    pub version: u32,
+    pub(crate) version: u32,
     /// One entry per skill, keyed by skill name.
-    pub skills: BTreeMap<SkillName, LockEntry>,
+    pub(crate) skills: BTreeMap<SkillName, LockEntry>,
+}
+
+impl Lockfile {
+    /// Lockfile schema version.
+    ///
+    /// Mirrors the accessor surface of `Manifest::skills()` for consistency
+    /// across the two file-backed registries. Per HARD-06, the underlying
+    /// fields are `pub(crate)` so external crates (including the v1.0 GUI
+    /// Tauri IPC) interact with `Lockfile` only via these methods.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn version(&self) -> u32 {
+        self.version
+    }
+
+    /// Per-skill entries indexed by skill name (alphabetical).
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn skills(&self) -> &BTreeMap<SkillName, LockEntry> {
+        &self.skills
+    }
 }
 
 /// A single skill entry in the lockfile.
@@ -39,6 +58,11 @@ pub struct LockEntry {
     /// Unowned entries omit the key on serialize.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<DirectoryName>,
+    /// Last directory that owned this skill before transition to Unowned.
+    /// Mirrors `SkillEntry.previous_source` (D-C1) for cross-machine
+    /// surfacing in `tome status` / `tome doctor` Unowned section.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_source: Option<DirectoryName>,
     /// SHA-256 content hash of the skill directory.
     pub content_hash: ContentHash,
     /// Registry identifier (e.g. "my-plugin@npm"). Present for managed plugins.
@@ -79,6 +103,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
             name.clone(),
             LockEntry {
                 source_name: entry.source_name.clone(),
+                previous_source: entry.previous_source.clone(),
                 content_hash: entry.content_hash.clone(),
                 registry_id,
                 version,
@@ -407,6 +432,7 @@ mod tests {
                 SkillName::new("my-skill").unwrap(),
                 LockEntry {
                     source_name: Some(DirectoryName::new("test").unwrap()),
+                    previous_source: None,
                     content_hash: test_hash("abc123"),
                     registry_id: None,
                     version: None,
@@ -636,6 +662,7 @@ mod tests {
             SkillName::new("seed-skill").unwrap(),
             LockEntry {
                 source_name: Some(DirectoryName::new(source).unwrap()),
+                previous_source: None,
                 content_hash: test_hash("seed"),
                 registry_id: None,
                 version: None,
@@ -881,7 +908,7 @@ mod tests {
         let mut manifest = Manifest::default();
         manifest.insert(
             SkillName::new("orphan").unwrap(),
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false),
+            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("h"), false, None),
         );
         let lockfile = generate(&manifest, &[]);
         let json = serde_json::to_string_pretty(&lockfile).unwrap();
@@ -890,6 +917,203 @@ mod tests {
         assert!(
             orphan.get("source_name").is_none(),
             "Unowned skill must omit source_name in lockfile JSON, got: {json}"
+        );
+    }
+
+    #[test]
+    fn lockentry_round_trip_with_previous_source() {
+        use crate::manifest::SkillEntry;
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/orphan"),
+                test_hash("h"),
+                false,
+                Some(DirectoryName::new("old-source").unwrap()),
+            ),
+        );
+        let lf = generate(&manifest, &[]);
+        let key = SkillName::new("orphan").unwrap();
+        assert_eq!(
+            lf.skills[&key].previous_source,
+            Some(DirectoryName::new("old-source").unwrap()),
+            "generate() must copy previous_source from manifest entry"
+        );
+
+        // Round-trip through JSON.
+        let json = serde_json::to_string_pretty(&lf).unwrap();
+        let parsed: Lockfile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, lf);
+    }
+
+    #[test]
+    fn deserialize_old_shape_lockfile_without_previous_source() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(r#"{{"source_name":"foo","content_hash":"{valid_hash}"}}"#);
+        let entry: LockEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.previous_source, None);
+    }
+
+    // -- HARD-06: Lockfile accessor parity tests --
+    //
+    // Lockfile.version and Lockfile.skills are pub(crate); external callers
+    // (and the v1.0 GUI Tauri IPC) must use Lockfile::version() and
+    // Lockfile::skills() accessors. These tests pin parity between accessor
+    // output and the underlying field shape.
+
+    #[test]
+    fn lockfile_version_accessor_returns_field() {
+        let lf = Lockfile {
+            version: 1,
+            skills: BTreeMap::new(),
+        };
+        assert_eq!(lf.version(), 1);
+    }
+
+    #[test]
+    fn lockfile_skills_accessor_returns_full_map() {
+        let mut skills = BTreeMap::new();
+        skills.insert(
+            SkillName::new("alpha").unwrap(),
+            LockEntry {
+                source_name: Some(DirectoryName::new("src").unwrap()),
+                previous_source: None,
+                content_hash: test_hash("a"),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        skills.insert(
+            SkillName::new("bravo").unwrap(),
+            LockEntry {
+                source_name: Some(DirectoryName::new("src").unwrap()),
+                previous_source: None,
+                content_hash: test_hash("b"),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let lf = Lockfile { version: 1, skills };
+        let via_accessor = lf.skills();
+        assert_eq!(via_accessor.len(), 2);
+        assert!(via_accessor.contains_key(&SkillName::new("alpha").unwrap()));
+        assert!(via_accessor.contains_key(&SkillName::new("bravo").unwrap()));
+    }
+
+    /// HARD-08: rename failure during atomic save must leave the previous
+    /// `tome.lock` content untouched. Phase 13 D-22 makes the lockfile the
+    /// authoritative cross-machine state — corrupting it on a partial save
+    /// would break reconciliation.
+    ///
+    /// Mechanism: chmod 0o500 on the parent dir → fs::rename returns
+    /// EACCES → save() returns Err → original file content is unchanged.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use crate::manifest::SkillEntry;
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+
+        // Build lockfile A with one entry, save through the canonical
+        // happy path so we know the on-disk shape.
+        let mut manifest_a = Manifest::default();
+        manifest_a.insert(
+            SkillName::new("alpha").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/alpha"),
+                DirectoryName::new("src-a").unwrap(),
+                test_hash("a"),
+                false,
+            ),
+        );
+        let lockfile_a = generate(&manifest_a, &[]);
+        save(&lockfile_a, tmp.path()).unwrap();
+        let lock_path = tmp.path().join(LOCKFILE_NAME);
+        let bytes_a = std::fs::read(&lock_path).unwrap();
+
+        // Lock the parent dir so rename will EACCES.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Build a different lockfile B and try to save it.
+        let mut manifest_b = Manifest::default();
+        manifest_b.insert(
+            SkillName::new("beta").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/beta"),
+                DirectoryName::new("src-b").unwrap(),
+                test_hash("b"),
+                false,
+            ),
+        );
+        let lockfile_b = generate(&manifest_b, &[]);
+        let result = save(&lockfile_b, tmp.path());
+
+        // Restore permissions before any assertion to keep TempDir cleanup
+        // working even on assertion panic.
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(original_mode))
+            .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when the rename target dir is not writable"
+        );
+
+        let bytes_after = std::fs::read(&lock_path).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: lockfile content corrupted by \
+             a failed save"
+        );
+
+        // Re-load and confirm the surviving entry is the original alpha,
+        // not the would-be-saved beta.
+        let reloaded = load(tmp.path()).unwrap().expect("lockfile must exist");
+        assert!(
+            reloaded
+                .skills
+                .contains_key(&SkillName::new("alpha").unwrap())
+        );
+        assert!(
+            !reloaded
+                .skills
+                .contains_key(&SkillName::new("beta").unwrap())
+        );
+    }
+
+    /// HARD-08 round-trip pin: previous_source survives a save -> load
+    /// cycle when the entry is Owned (companion to the Unowned-state
+    /// `lockentry_round_trip_with_previous_source` above).
+    #[test]
+    fn previous_source_round_trip_through_lockfile_save_load_owned() {
+        use crate::manifest::SkillEntry;
+
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("kept").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/kept"),
+                DirectoryName::new("active").unwrap(),
+                test_hash("k"),
+                false,
+            ),
+        );
+        let lf = generate(&manifest, &[]);
+        save(&lf, tmp.path()).unwrap();
+
+        let reloaded = load(tmp.path()).unwrap().expect("lockfile must exist");
+        let entry = &reloaded.skills[&SkillName::new("kept").unwrap()];
+        // Owned entries serialise without previous_source — the field is
+        // None in memory and the JSON omits it via skip_serializing_if.
+        assert_eq!(entry.previous_source, None);
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("active").unwrap())
         );
     }
 }

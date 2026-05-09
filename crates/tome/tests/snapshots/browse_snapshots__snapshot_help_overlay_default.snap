@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+SKILL                          SOURCE                   PATH
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+alpha-helpers  claude-plu ~/.tome/library/alpha-helper│Preview: alpha-helpers
+beta-tools     local      ~/.tome/library/beta-tools  │source: claude-plugins
+fixture-skill  claude-plu ~/.tome/library/fixture-skil│path: ~/.tome/library/alpha-helpers
+foo-bar        local      ~/.tome/library/foo-bar     │
+zeta-utility   local      ~/.tome/library/zeta-utility│alpha-helpers
+                                                      │A test skill body.
+                                                      │
+                                                      │
+                                                      │
+                                        ┌Keyboard Shortcuts────────────────────┐
+                                        │  j / Down      Move down             │
+                                        │  k / Up        Move up               │
+                                        │  g             Jump to top           │
+                                        │  G             Jump to bottom        │
+                                        │  Ctrl+d        Half page down        │
+                                        │  Ctrl+u        Half page up          │
+                                        │  /             Search                │
+                                        │  Esc           Clear search / back   │
+                                        │  s             Cycle sort mode       │
+                                        │  Tab           Toggle source grouping│
+                                        │  Enter         Skill detail          │
+                                        │  q             Quit                  │
+                                        │  ?             This help             │
+                                        │                                      │
+                                        │      Press any key to close          │
+                                        │                                      │
+                                        └──────────────────────────────────────┘
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+ 5 skills   j/k ↕  / search  s sort:name  tab group  ? help  ⏎ detail  q quit

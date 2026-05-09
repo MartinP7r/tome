@@ -252,22 +252,26 @@ mod tests {
     fn read_head_sha_returns_40_char_hex() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path();
-        // Init a repo with a commit
+        // Init a repo with a commit. HARD-14: disable signing per-repo so
+        // the test does not flake on developer machines that have global
+        // gpg-signing turned on (closes #500).
         std::process::Command::new("git")
             .args(["init"])
             .current_dir(dir)
             .output()
             .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(dir)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(dir)
-            .output()
-            .unwrap();
+        for args in [
+            ["config", "--local", "commit.gpgsign", "false"].as_slice(),
+            ["config", "--local", "tag.gpgsign", "false"].as_slice(),
+            ["config", "--local", "user.email", "test@test.com"].as_slice(),
+            ["config", "--local", "user.name", "Test"].as_slice(),
+        ] {
+            std::process::Command::new("git")
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+        }
         std::fs::write(dir.join("file.txt"), "content").unwrap();
         std::process::Command::new("git")
             .args(["add", "-A"])

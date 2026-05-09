@@ -73,6 +73,12 @@ impl Manifest {
     /// `false` if missing or already Unowned. Preserves `content_hash`,
     /// `synced_at`, and other fields. Does NOT transition Unowned → Owned —
     /// callers wanting that semantic should re-insert with `SkillEntry::new`.
+    ///
+    /// `dead_code` allow: the only production caller (`reassign::execute`)
+    /// migrated to a snapshot-based approach in HARD-19 (closes #430), but
+    /// the method is preserved as a public API surface for hand-edits and
+    /// is exercised by unit tests + the HARD-19 drift-test.
+    #[allow(dead_code)]
     pub fn update_source_name(&mut self, skill_name: &str, new_source: &DirectoryName) -> bool {
         if let Some(entry) = self.skills.get_mut(skill_name)
             && entry.source_name.is_some()
@@ -112,6 +118,12 @@ pub struct SkillEntry {
     /// (per `skip_serializing_if`) and read back as `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_name: Option<DirectoryName>,
+    /// Last directory that owned this skill before transition to Unowned.
+    /// Surfaced in `tome status`/`tome doctor` Unowned section. Cleared
+    /// (set to None) when an Unowned skill is re-anchored via
+    /// `tome reassign`. Per D-C1 (14-CONTEXT.md).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous_source: Option<DirectoryName>,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
@@ -138,6 +150,7 @@ impl SkillEntry {
         Self {
             source_path,
             source_name: Some(source_name),
+            previous_source: None,
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -146,21 +159,30 @@ impl SkillEntry {
 
     /// Create a new `SkillEntry` for an **Unowned** skill — its source was
     /// removed from `tome.toml` but the library copy is preserved (per LIB-04).
-    /// Records the current timestamp automatically.
-    //
-    // dead_code allow: Phase 11 LIB-03 lifted the schema to support Unowned
-    // entries; the first non-test caller arrives in Phase 14
-    // (`tome adopt`/`tome forget` — UNOWN-01..03). Tests in this module
-    // exercise the constructor today. Drop this attr when Phase 14 lands.
+    /// Records the current timestamp automatically. Optionally records the
+    /// `previous_source` (D-C1) — the last directory that owned this skill
+    /// before the transition.
     //
     // Note: production transitions to Unowned in-place via
-    // `entry.source_name = None` (which preserves the original `synced_at`
-    // timestamp — see `cleanup_library` Case 1 and `remove::execute`).
+    // `entry.previous_source = entry.source_name.take()` (which preserves the
+    // original `synced_at` timestamp — see `cleanup_library` Case 1,
+    // `remove::execute`, and `apply_edit_decisions` Fork branch).
+    //
+    // dead_code allow: Phase 14 Plan 14-01 widens the signature with
+    // `previous_source`. Production callers arrive in Plans 14-04 (reassign
+    // re-anchor flow) and 14-05 (remove-skill plan/render/execute). Drop
+    // this attr when those plans land. Tracked in deferred-items.md.
     #[allow(dead_code)]
-    pub fn new_unowned(source_path: PathBuf, content_hash: ContentHash, managed: bool) -> Self {
+    pub fn new_unowned(
+        source_path: PathBuf,
+        content_hash: ContentHash,
+        managed: bool,
+        previous_source: Option<DirectoryName>,
+    ) -> Self {
         Self {
             source_path,
             source_name: None,
+            previous_source,
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -168,7 +190,42 @@ impl SkillEntry {
     }
 }
 
+/// The unix-epoch timestamp string. A `synced_at` value of exactly this
+/// almost always means a partial-save artefact or a migration bug — no
+/// production codepath legitimately produces it.
+const EPOCH_ZERO_TIMESTAMP: &str = "1970-01-01T00:00:00Z";
+
+/// Pure formatter for HARD-20 (closes #433): if `synced_at` is the unix
+/// epoch, return a warning string naming the affected skill; otherwise
+/// return `None`. The split between detect-and-format (here) and emit
+/// (in `load`) keeps the message unit-testable without stderr capture.
+///
+/// `dead_code` allow: the function is currently consumed only by the
+/// `load` warning path and its own unit tests; preserving it as a
+/// crate-private helper means future callers (e.g. `tome doctor`) can
+/// reuse the exact same message.
+fn epoch_zero_warning(skill_name: &SkillName, synced_at: &str) -> Option<String> {
+    if synced_at == EPOCH_ZERO_TIMESTAMP {
+        Some(format!(
+            "warning: manifest entry for '{skill}' has unix-epoch sync-timestamp \
+             ({EPOCH_ZERO_TIMESTAMP}) — this almost always indicates a partial-save \
+             or migration artefact. Run `tome sync` to refresh the entry, or \
+             `tome doctor` for full diagnosis.",
+            skill = skill_name.as_str(),
+        ))
+    } else {
+        None
+    }
+}
+
 /// Load the manifest from the tome home directory, or return an empty one if missing.
+///
+/// HARD-20 (closes #433): emits a stderr warning for any entry whose
+/// `synced_at` field is the unix epoch (`1970-01-01T00:00:00Z`). The
+/// warning fires once per load, never poisons downstream features (the
+/// entry remains in the loaded manifest), and names the skill so the
+/// user can act. Implementation goes through the pure
+/// `epoch_zero_warning` formatter for testability.
 pub fn load(tome_home: &Path) -> Result<Manifest> {
     let path = tome_home.join(MANIFEST_FILENAME);
     if !path.exists() {
@@ -178,6 +235,11 @@ pub fn load(tome_home: &Path) -> Result<Manifest> {
         .with_context(|| format!("failed to read manifest {}", path.display()))?;
     let manifest: Manifest = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse manifest {}", path.display()))?;
+    for (name, entry) in manifest.iter() {
+        if let Some(warning) = epoch_zero_warning(name, &entry.synced_at) {
+            eprintln!("{warning}");
+        }
+    }
     Ok(manifest)
 }
 
@@ -306,6 +368,96 @@ mod tests {
     use crate::validation::test_hash;
     use tempfile::TempDir;
 
+    // ---- HARD-20 epoch-0 timestamp warning (closes #433) -------------------
+    // An on-disk manifest entry with `synced_at = "1970-01-01T00:00:00Z"`
+    // almost always means a partial save or a migration artefact: the field
+    // is the unix epoch, which never appears legitimately in production.
+    // Manifest::load surfaces it as a stderr warning (informational, not
+    // fatal) so future diff comparisons or display output don't silently
+    // present garbage data.
+
+    #[test]
+    fn epoch_zero_warning_returns_some_for_unix_epoch() {
+        let name = crate::discover::SkillName::new("ghost-skill").unwrap();
+        let warning = epoch_zero_warning(&name, "1970-01-01T00:00:00Z")
+            .expect("epoch-0 timestamp must produce a warning");
+        // The warning must name the affected skill so the user can act.
+        assert!(
+            warning.contains("ghost-skill"),
+            "warning must name the affected skill, got: {warning}"
+        );
+        // And mention "warning" or "epoch" so the user knows what they're seeing.
+        assert!(
+            warning.to_lowercase().contains("warning") || warning.to_lowercase().contains("epoch"),
+            "warning must self-identify, got: {warning}"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_warning_returns_none_for_normal_timestamp() {
+        let name = crate::discover::SkillName::new("normal-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&name, "2024-06-01T12:34:56Z").is_none(),
+            "non-epoch timestamps must not trigger a warning"
+        );
+        assert!(
+            epoch_zero_warning(&name, "2026-05-08T00:00:00Z").is_none(),
+            "non-epoch timestamps must not trigger a warning"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_warning_is_offered_to_load() {
+        // Round-trip via the public load path: write a manifest with one
+        // epoch-0 entry to disk, load it, assert the entry survives.
+        let tmp = TempDir::new().unwrap();
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"skills":{{"ghost-skill":{{"source_path":"/tmp/x","source_name":"old","content_hash":"{valid_hash}","synced_at":"1970-01-01T00:00:00Z","managed":false}}}}}}"#
+        );
+        std::fs::write(tmp.path().join(".tome-manifest.json"), json).unwrap();
+
+        let manifest = load(tmp.path()).expect("epoch-0 entries must NOT poison load");
+        let entry = manifest
+            .get("ghost-skill")
+            .expect("epoch-0 entries must remain loadable");
+        assert_eq!(
+            entry.synced_at, "1970-01-01T00:00:00Z",
+            "load must preserve the literal timestamp; the warning is informational"
+        );
+    }
+
+    #[test]
+    fn epoch_zero_load_does_not_warn_for_normal_entries() {
+        // Mixed manifest: one epoch-0 entry, one normal entry. The normal
+        // entry must NOT trigger the warning. We check this via the pure
+        // formatter (already covered above) and round-trip the load to
+        // verify both entries are loadable.
+        let tmp = TempDir::new().unwrap();
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"skills":{{
+                "ghost-skill":{{"source_path":"/tmp/x","source_name":"old","content_hash":"{valid_hash}","synced_at":"1970-01-01T00:00:00Z","managed":false}},
+                "fresh-skill":{{"source_path":"/tmp/y","source_name":"new","content_hash":"{valid_hash}","synced_at":"2026-05-08T07:00:00Z","managed":false}}
+            }}}}"#
+        );
+        std::fs::write(tmp.path().join(".tome-manifest.json"), json).unwrap();
+
+        let manifest = load(tmp.path()).expect("mixed manifest must load");
+        assert_eq!(manifest.len(), 2, "both entries must be present");
+        // Pure-formatter assertion mirrors what load() emits at runtime:
+        let normal_name = crate::discover::SkillName::new("fresh-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&normal_name, "2026-05-08T07:00:00Z").is_none(),
+            "normal entry must not trigger warning"
+        );
+        let ghost_name = crate::discover::SkillName::new("ghost-skill").unwrap();
+        assert!(
+            epoch_zero_warning(&ghost_name, "1970-01-01T00:00:00Z").is_some(),
+            "epoch-0 entry must trigger warning"
+        );
+    }
+
     #[test]
     fn hash_directory_deterministic() {
         let tmp = TempDir::new().unwrap();
@@ -349,6 +501,7 @@ mod tests {
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -503,8 +656,12 @@ mod tests {
 
     #[test]
     fn serialize_unowned_entry_omits_source_name_key() {
-        let entry =
-            SkillEntry::new_unowned(PathBuf::from("/tmp/orphan"), test_hash("orphan"), false);
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/orphan"),
+            test_hash("orphan"),
+            false,
+            None,
+        );
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
             !json.contains("source_name"),
@@ -530,12 +687,91 @@ mod tests {
 
     #[test]
     fn new_unowned_constructor_sets_source_name_none() {
-        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false);
+        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false, None);
         assert_eq!(entry.source_name, None);
+        assert_eq!(entry.previous_source, None);
         assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
         assert_eq!(entry.content_hash, test_hash("h"));
         assert!(!entry.managed);
         assert!(!entry.synced_at.is_empty());
+    }
+
+    #[test]
+    fn deserialize_old_shape_without_previous_source_key() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"source_path":"/tmp/x","source_name":"foo","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
+        );
+        let entry: SkillEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(entry.previous_source, None);
+        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+    }
+
+    #[test]
+    fn serialize_owned_entry_omits_previous_source_when_none() {
+        let entry = SkillEntry::new(
+            PathBuf::from("/tmp/x"),
+            DirectoryName::new("foo").unwrap(),
+            test_hash("h"),
+            false,
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            !json.contains("previous_source"),
+            "Owned entry with previous_source=None must omit key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn serialize_unowned_entry_with_previous_source_includes_key() {
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/x"),
+            test_hash("h"),
+            false,
+            Some(DirectoryName::new("old-dir").unwrap()),
+        );
+        let json = serde_json::to_string(&entry).unwrap();
+        assert!(
+            json.contains("\"previous_source\":\"old-dir\""),
+            "Unowned entry with previous_source=Some must include key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn new_unowned_records_previous_source() {
+        let entry = SkillEntry::new_unowned(
+            PathBuf::from("/tmp/x"),
+            test_hash("h"),
+            false,
+            Some(DirectoryName::new("old").unwrap()),
+        );
+        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.previous_source,
+            Some(DirectoryName::new("old").unwrap())
+        );
+    }
+
+    #[test]
+    fn previous_source_round_trips_through_save_load() {
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new("orphan").unwrap(),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/orphan"),
+                test_hash("h"),
+                false,
+                Some(DirectoryName::new("old-source").unwrap()),
+            ),
+        );
+        save(&manifest, tmp.path()).unwrap();
+        let loaded = load(tmp.path()).unwrap();
+        assert_eq!(
+            loaded.get("orphan").unwrap().previous_source,
+            Some(DirectoryName::new("old-source").unwrap()),
+        );
+        assert_eq!(loaded.get("orphan").unwrap().source_name, None);
     }
 
     #[test]
@@ -563,5 +799,111 @@ mod tests {
     fn skills_get_mut_returns_none_for_missing_entry() {
         let mut manifest = Manifest::default();
         assert!(manifest.skills_get_mut("nonexistent").is_none());
+    }
+
+    /// HARD-08: if the rename step of the atomic save fails, the previous
+    /// on-disk manifest content must remain untouched.
+    ///
+    /// Mechanism: write a known content A via the happy path, then chmod
+    /// the parent directory to 0o500 (read+exec, no write). Calling
+    /// `save()` with content B fails at the rename step (EACCES); the
+    /// original file must still parse to content A.
+    ///
+    /// Cross-platform: chmod-on-parent-dir is portable across macOS and
+    /// Linux. Permissions are restored before the test exits so TempDir
+    /// drop can clean up.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+
+        // Step 1: write content A via the canonical save path.
+        let mut manifest_a = Manifest::default();
+        manifest_a.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/alpha"),
+                DirectoryName::new("src-a").unwrap(),
+                test_hash("a"),
+                false,
+            ),
+        );
+        save(&manifest_a, tmp.path()).unwrap();
+        let path_a = tmp.path().join(MANIFEST_FILENAME);
+        let bytes_a = std::fs::read(&path_a).unwrap();
+
+        // Step 2: chmod parent to read+exec only — rename will EACCES.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Step 3: attempt to save a DIFFERENT content B; it must fail.
+        let mut manifest_b = Manifest::default();
+        manifest_b.insert(
+            crate::discover::SkillName::new("beta").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/beta"),
+                DirectoryName::new("src-b").unwrap(),
+                test_hash("b"),
+                false,
+            ),
+        );
+        let result = save(&manifest_b, tmp.path());
+
+        // Restore permissions BEFORE asserting so TempDir cleanup works
+        // even if the assertion panics.
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(original_mode))
+            .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when rename target is unwritable"
+        );
+
+        // Step 4: re-read the manifest. It must STILL be content A.
+        let bytes_after = std::fs::read(&path_a).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: original manifest content was \
+             corrupted by a failed save"
+        );
+        let reloaded = load(tmp.path()).unwrap();
+        assert!(
+            reloaded.get("alpha").is_some(),
+            "post-fail manifest must still hold the previous (alpha) entry"
+        );
+        assert!(
+            reloaded.get("beta").is_none(),
+            "post-fail manifest must NOT hold the new (beta) entry"
+        );
+    }
+
+    /// HARD-08 round-trip pin: previous_source survives a full save -> load
+    /// round-trip when the entry is Owned (Some) — companion to the existing
+    /// Unowned-state round-trip test above. Ensures Phase 14 D-C1 schema is
+    /// stable across save() failures and successes alike.
+    #[test]
+    fn previous_source_round_trip_through_save_load_owned_keeps_owned() {
+        let tmp = TempDir::new().unwrap();
+        let mut manifest = Manifest::default();
+        // Owned entry with NO previous_source (the common case).
+        manifest.insert(
+            crate::discover::SkillName::new("kept").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/kept"),
+                DirectoryName::new("active-source").unwrap(),
+                test_hash("k"),
+                false,
+            ),
+        );
+        save(&manifest, tmp.path()).unwrap();
+        let loaded = load(tmp.path()).unwrap();
+        let entry = loaded.get("kept").unwrap();
+        assert_eq!(
+            entry.source_name,
+            Some(DirectoryName::new("active-source").unwrap())
+        );
+        assert_eq!(entry.previous_source, None);
     }
 }

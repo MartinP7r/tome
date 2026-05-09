@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+< alpha-helpers                                 │Preview: alpha-helpers
+                                                │source: claude-plugins
+────────────────────                            │path: ~/.tome/library/alpha-helpers
+Source:   claude-plugins                        │
+Type:     managed                               │alpha-helpers
+Path:     ~/.tome/library/alpha-helpers         │A test skill body.
+Synced:   2026-05-08T00:00:00Z                  │
+                                                │
+Actions─────────────────────────────────────────│
+> Open source directory                         │
+  Copy path to clipboard                        │
+  Disable on this machine                       │
+  Back                                          │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+ Detail  j/k select  ⏎ run action  esc back

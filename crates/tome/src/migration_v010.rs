@@ -134,6 +134,30 @@ impl MigrationResult {
     }
 }
 
+/// Migration command failure marker (HARD-04 sibling).
+///
+/// Bubbled through `anyhow::Result` from `cmd_migrate_library` when the
+/// migration result is partial-or-failed (D-05). Pinned with a typed
+/// error so `main.rs` can downcast and exit 1 instead of the library
+/// calling `process::exit(1)` directly.
+#[derive(Debug)]
+pub struct MigrationPartialOrFailed {
+    pub skipped_broken_source: usize,
+    pub failed: usize,
+}
+
+impl std::fmt::Display for MigrationPartialOrFailed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "migrate-library finished with skips or failures (skipped: {}, failed: {})",
+            self.skipped_broken_source, self.failed,
+        )
+    }
+}
+
+impl std::error::Error for MigrationPartialOrFailed {}
+
 /// Detection (D-03): a `library_dir/<name>` qualifies for migration ONLY when ALL of:
 ///   (a) the path is a symlink, AND
 ///   (b) `manifest[name].managed == true`, AND

@@ -39,11 +39,16 @@ A pluggable adapter trait isolates marketplace-specific install/update logic. v0
 
 ### Unowned-library lifecycle (UNOWN)
 
-Two new commands explicitly manage skills whose source has been removed.
+Two new user-facing flows explicitly manage skills whose source has been
+removed. The verbs were folded into existing commands during Phase 14
+discussion (CONTEXT.md D-API-1 / D-API-2): `tome adopt` is delivered by
+extending `tome reassign`; `tome forget` is delivered as a new
+`tome remove skill <name>` subcommand. Behaviour is delivered in full;
+the verbs are different from the original wording.
 
-- [ ] **UNOWN-01**: `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set.
-- [ ] **UNOWN-02**: `tome forget <skill>` explicitly deletes an unowned skill from the library. Confirms via interactive prompt unless `--yes`. Removes manifest entry, library directory, and downstream distribution symlinks.
-- [ ] **UNOWN-03**: `tome status` and `tome doctor` surface the unowned set: count + per-skill list with last-known source. JSON output includes an `unowned: [SkillSummary]` array.
+- [x] **UNOWN-01**: ~~`tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory.~~ **(superseded by Phase 14 D-API-1)** Re-anchor an unowned skill via `tome reassign <skill> --to <directory>`. Updates manifest `source_name` from `None` to `Some(<directory>)` and copies the skill content into the directory's path on disk. Skill leaves the unowned set. `tome reassign foo --to nonexistent` fails fast naming the missing directory. Different-content collisions at the target are refused without `--force` (D-A1); target-only directory roles are rejected (D-A2).
+- [x] **UNOWN-02**: ~~`tome forget <skill>` explicitly deletes an unowned skill from the library.~~ **(superseded by Phase 14 D-API-2)** Delete an unowned skill via `tome remove skill <name>`. Confirms via interactive prompt unless `--yes`. Removes manifest entry, library directory, downstream distribution symlinks, lockfile entry, and machine.toml memberships (D-B1). Owned skills are refused with a hint to use `tome remove dir` first (D-B2).
+- [x] **UNOWN-03**: `tome status` and `tome doctor` surface the unowned set: count + per-skill list with last-known source. JSON output includes `unowned: [SkillSummary]` (status) / `unowned_skills: [SkillSummary]` (doctor). Doctor's `total_issues()` is unaffected by the unowned set per D-D3.
 
 ### Cleanup UX rewrite (UX)
 
@@ -56,28 +61,28 @@ The original trigger of this milestone discussion: the "no longer configured" cl
 
 Bundle of v0.9-review followups + older bug backlog. Each requirement closes one or more existing GitHub issues; full mapping in Traceability.
 
-- [ ] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
-- [ ] **HARD-02**: `lib.rs::run()` decomposed into per-subcommand `cmd_<name>(...)` helpers. Closes [#486](https://github.com/MartinP7r/tome/issues/486).
-- [ ] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
-- [ ] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
-- [ ] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
-- [ ] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
-- [ ] **HARD-07**: `(verbose: bool, quiet: bool)` flags replaced with `LogLevel` enum (`Quiet | Normal | Verbose`). Closes [#493](https://github.com/MartinP7r/tome/issues/493).
-- [ ] **HARD-08**: Atomic-save preservation regression test (manifest, lockfile, machine.toml all preserve previous contents on rename failure). Closes [#494](https://github.com/MartinP7r/tome/issues/494).
-- [ ] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
-- [ ] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
-- [ ] **HARD-11**: `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests. Closes [#497](https://github.com/MartinP7r/tome/issues/497).
-- [ ] **HARD-12**: `browse/ui.rs` rendering tests via ratatui `TestBackend` + `insta` snapshots (status dashboard, skill list, detail pane, help overlay). Closes [#498](https://github.com/MartinP7r/tome/issues/498).
-- [ ] **HARD-13**: `tests/cli.rs` (5580 LOC) split into per-domain integration test files (`cli_sync.rs`, `cli_doctor.rs`, etc.) with shared `common/` helpers. Closes [#499](https://github.com/MartinP7r/tome/issues/499).
-- [ ] **HARD-14**: `backup::tests::push_and_pull_roundtrip` and `diff_shows_changes` flake fix — disable git signing in test repos via local config. Closes [#500](https://github.com/MartinP7r/tome/issues/500).
-- [ ] **HARD-15**: `wizard.rs` diagnostic `println!` calls converted to `eprintln!` for stdout/stderr discipline. Closes [#501](https://github.com/MartinP7r/tome/issues/501).
-- [ ] **HARD-16**: Rename `relocate.rs::provenance_from_link_result` → `warn_if_unreadable_symlink` so the side-effect intent is in the function name. Closes [#502](https://github.com/MartinP7r/tome/issues/502).
-- [ ] **HARD-17**: `impl TryFrom<String> for SkillName` and `DirectoryName` to avoid clones at owned-string construction sites. Closes [#503](https://github.com/MartinP7r/tome/issues/503).
-- [ ] **HARD-18**: `tome relocate` cross-fs cleanup recovery hint when the orphan-copy preservation logic kicks in. Closes [#416](https://github.com/MartinP7r/tome/issues/416).
-- [ ] **HARD-19**: `tome reassign` plan/execute reads filesystem state once (eliminate drift risk between plan and execute). Closes [#430](https://github.com/MartinP7r/tome/issues/430).
-- [ ] **HARD-20**: Manifest epoch-0 timestamp fallback fixed — surfaces as warning rather than silent garbage data in future diffs. Closes [#433](https://github.com/MartinP7r/tome/issues/433).
-- [ ] **HARD-21**: Browse UI Disable/Enable actions wired up (currently stubbed with `#[allow(dead_code)]`). Closes [#447](https://github.com/MartinP7r/tome/issues/447).
-- [ ] **HARD-22**: `Config::save_checked` preserves tilde-shaped paths instead of writing expanded absolute paths (breaks dotfiles sync). Closes [#457](https://github.com/MartinP7r/tome/issues/457).
+- [x] **HARD-01**: `skill::parse` returns `anyhow::Result` instead of `Result<_, String>`. Closes [#485](https://github.com/MartinP7r/tome/issues/485).
+- [x] **HARD-02**: `lib.rs::run()` decomposed into per-subcommand `cmd_<name>(...)` helpers. Closes [#486](https://github.com/MartinP7r/tome/issues/486).
+- [x] **HARD-03**: `config.rs` split into `config/{mod,types,overrides,validate}.rs`. Closes [#487](https://github.com/MartinP7r/tome/issues/487).
+- [x] **HARD-04**: `process::exit(1)` in `lib.rs::run()` (lint command) replaced with downcastable `LintFailed` error; `main.rs` maps to exit code 1. Closes [#488](https://github.com/MartinP7r/tome/issues/488).
+- [x] **HARD-05**: `scan_for_skills(Option<Option<SkillProvenance>>)` replaced with named `ScanMode` enum. Closes [#491](https://github.com/MartinP7r/tome/issues/491).
+- [x] **HARD-06**: `Lockfile.{skills,version}` tightened to `pub(crate)` with accessors mirroring `Manifest`. Closes [#492](https://github.com/MartinP7r/tome/issues/492).
+- [x] **HARD-07**: `(verbose: bool, quiet: bool)` flags replaced with `LogLevel` enum (`Quiet | Normal | Verbose`). Closes [#493](https://github.com/MartinP7r/tome/issues/493).
+- [x] **HARD-08**: Atomic-save preservation regression test (manifest, lockfile, machine.toml all preserve previous contents on rename failure). Closes [#494](https://github.com/MartinP7r/tome/issues/494).
+- [x] **HARD-09**: `distribute` refuses to clobber pre-existing symlinks pointing outside the current library (foreign tome install / stale relocate protection). Closes [#495](https://github.com/MartinP7r/tome/issues/495).
+- [x] **HARD-10**: Hostile-input tests for `[directory_overrides]` (`..` traversal, symlink loops, two directories overriding to the same path). Closes [#496](https://github.com/MartinP7r/tome/issues/496).
+- [x] **HARD-11**: `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests. Closes [#497](https://github.com/MartinP7r/tome/issues/497).
+- [x] **HARD-12**: `browse/ui.rs` rendering tests via ratatui `TestBackend` + `insta` snapshots (status dashboard, skill list, detail pane, help overlay). Closes [#498](https://github.com/MartinP7r/tome/issues/498).
+- [x] **HARD-13**: `tests/cli.rs` (5580 LOC) split into per-domain integration test files (`cli_sync.rs`, `cli_doctor.rs`, etc.) with shared `common/` helpers. Closes [#499](https://github.com/MartinP7r/tome/issues/499).
+- [x] **HARD-14**: `backup::tests::push_and_pull_roundtrip` and `diff_shows_changes` flake fix — disable git signing in test repos via local config. Closes [#500](https://github.com/MartinP7r/tome/issues/500).
+- [x] **HARD-15**: `wizard.rs` diagnostic `println!` calls converted to `eprintln!` for stdout/stderr discipline. Closes [#501](https://github.com/MartinP7r/tome/issues/501).
+- [x] **HARD-16**: Rename `relocate.rs::provenance_from_link_result` → `warn_if_unreadable_symlink` so the side-effect intent is in the function name. Closes [#502](https://github.com/MartinP7r/tome/issues/502).
+- [x] **HARD-17**: `impl TryFrom<String> for SkillName` and `DirectoryName` to avoid clones at owned-string construction sites. Closes [#503](https://github.com/MartinP7r/tome/issues/503).
+- [x] **HARD-18**: `tome relocate` cross-fs cleanup recovery hint when the orphan-copy preservation logic kicks in. Closes [#416](https://github.com/MartinP7r/tome/issues/416).
+- [x] **HARD-19**: `tome reassign` plan/execute reads filesystem state once (eliminate drift risk between plan and execute). Closes [#430](https://github.com/MartinP7r/tome/issues/430).
+- [x] **HARD-20**: Manifest epoch-0 timestamp fallback fixed — surfaces as warning rather than silent garbage data in future diffs. Closes [#433](https://github.com/MartinP7r/tome/issues/433).
+- [x] **HARD-21**: Browse UI Disable/Enable actions wired up (currently stubbed with `#[allow(dead_code)]`). Closes [#447](https://github.com/MartinP7r/tome/issues/447).
+- [x] **HARD-22**: `Config::save_checked` preserves tilde-shaped paths instead of writing expanded absolute paths (breaks dotfiles sync). Closes [#457](https://github.com/MartinP7r/tome/issues/457).
 
 ### Documentation (DOC)
 
@@ -137,31 +142,31 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | RECON-03 | Phase 13 | — | Pending |
 | RECON-04 | Phase 13 | — | Pending |
 | RECON-05 | Phase 13 | — | Pending |
-| UNOWN-01 | Phase 14 | — | Pending |
-| UNOWN-02 | Phase 14 | — | Pending |
-| UNOWN-03 | Phase 14 | — | Pending |
-| HARD-01 | Phase 15 | #485 | Pending |
-| HARD-02 | Phase 15 | #486 | Pending |
-| HARD-03 | Phase 15 | #487 | Pending |
-| HARD-04 | Phase 15 | #488 | Pending |
-| HARD-05 | Phase 15 | #491 | Pending |
-| HARD-06 | Phase 15 | #492 | Pending |
-| HARD-07 | Phase 15 | #493 | Pending |
-| HARD-08 | Phase 15 | #494 | Pending |
-| HARD-09 | Phase 15 | #495 | Pending |
-| HARD-10 | Phase 15 | #496 | Pending |
-| HARD-11 | Phase 15 | #497 | Pending |
-| HARD-12 | Phase 15 | #498 | Pending |
-| HARD-13 | Phase 15 | #499 | Pending |
-| HARD-14 | Phase 15 | #500 | Pending |
-| HARD-15 | Phase 15 | #501 | Pending |
-| HARD-16 | Phase 15 | #502 | Pending |
-| HARD-17 | Phase 15 | #503 | Pending |
-| HARD-18 | Phase 15 | #416 | Pending |
-| HARD-19 | Phase 15 | #430 | Pending |
-| HARD-20 | Phase 15 | #433 | Pending |
-| HARD-21 | Phase 15 | #447 | Pending |
-| HARD-22 | Phase 15 | #457 | Pending |
+| UNOWN-01 | Phase 14 | — | Validated (D-API-1 — `tome reassign` Unowned input) |
+| UNOWN-02 | Phase 14 | — | Validated (D-API-2 — `tome remove skill`) |
+| UNOWN-03 | Phase 14 | — | Validated |
+| HARD-01 | Phase 15 | #485 | Validated |
+| HARD-02 | Phase 15 | #486 | Validated |
+| HARD-03 | Phase 15 | #487 | Validated |
+| HARD-04 | Phase 15 | #488 | Validated |
+| HARD-05 | Phase 15 | #491 | Validated |
+| HARD-06 | Phase 15 | #492 | Validated |
+| HARD-07 | Phase 15 | #493 | Validated |
+| HARD-08 | Phase 15 | #494 | Validated |
+| HARD-09 | Phase 15 | #495 | Validated |
+| HARD-10 | Phase 15 | #496 | Validated |
+| HARD-11 | Phase 15 | #497 | Validated |
+| HARD-12 | Phase 15 | #498 | Validated |
+| HARD-13 | Phase 15 | #499 | Validated |
+| HARD-14 | Phase 15 | #500 | Validated |
+| HARD-15 | Phase 15 | #501 | Validated |
+| HARD-16 | Phase 15 | #502 | Validated |
+| HARD-17 | Phase 15 | #503 | Validated |
+| HARD-18 | Phase 15 | #416 | Validated |
+| HARD-19 | Phase 15 | #430 | Validated |
+| HARD-20 | Phase 15 | #433 | Validated |
+| HARD-21 | Phase 15 | #447 | Validated |
+| HARD-22 | Phase 15 | #457 | Validated |
 | UX-01 | Phase 16 | — | Pending |
 | UX-02 | Phase 16 | — | Pending |
 | DOC-01 | Phase 16 | — | Pending |
@@ -172,6 +177,13 @@ Filled by `gsd-roadmapper` 2026-05-02. 49 requirements mapped to 7 phases (11–
 | REL-03 | Phase 17 | — | Pending |
 | REL-04 | Phase 17 | — | Pending |
 | REL-05 | Phase 17 | — | Pending |
+
+**Phase 14 vocabulary note:** UNOWN-01's "tome adopt" wording is
+superseded by Phase 14 D-API-1 (folded into `tome reassign`); UNOWN-02's
+"tome forget" wording is superseded by Phase 14 D-API-2 (subcommand on
+`tome remove`). Behaviour is delivered in full; verbs are different. See
+`.planning/phases/14-unowned-library-lifecycle/14-CONTEXT.md` for
+rationale.
 
 **Coverage:**
 - v0.10 requirements: 49 total (5 LIB + 4 ADP + 5 RECON + 3 UNOWN + 2 UX + 22 HARD + 3 DOC + 5 REL)

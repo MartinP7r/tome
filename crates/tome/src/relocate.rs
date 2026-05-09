@@ -90,12 +90,12 @@ pub(crate) fn plan(
         // unreadable symlink produces a stderr warning during plan() instead
         // of silently disappearing during execute(). The provenance return
         // value is no longer stored on SkillMoveEntry (TEST-05 / POLISH-05
-        // option a — removed as dead code). We call provenance_from_link_result
+        // option a — removed as dead code). We call warn_if_unreadable_symlink
         // for its stderr side effect only and discard the return value.
         if entry.managed {
             let link_path = old_library_dir.join(name.as_str());
             if link_path.is_symlink() {
-                let _ = provenance_from_link_result(std::fs::read_link(&link_path), &link_path);
+                let _ = warn_if_unreadable_symlink(std::fs::read_link(&link_path), &link_path);
             }
         }
 
@@ -311,24 +311,31 @@ pub(crate) fn verify(config: &Config, new_library_dir: &Path, tome_home: &Path) 
 
 // --- Internal helpers ---
 
-/// Translate a `read_link` result into a provenance `Option<PathBuf>`, warning
-/// on Err instead of silently dropping (SAFE-03 / #449).
+/// Emit a stderr warning when a managed symlink cannot be read; otherwise
+/// resolve its target. Renamed from `provenance_from_link_result` per
+/// HARD-16 (closes #502) — the old name described the return value, but the
+/// function's primary contract is the side effect (the warning). The
+/// resolved-path return is retained for testability.
+///
+/// SAFE-03 / #449 traceability: the `Err` arm is the regression guard. When
+/// `read_link` fails on a managed-skill symlink during `relocate::plan()`,
+/// the user sees a stderr `warning:` line instead of the silent "no
+/// provenance" data loss the old code produced.
 ///
 /// **Note (TEST-05 / POLISH-05 option a):** the return value is no longer
 /// consumed by `relocate::plan()` — the dead provenance field was removed
-/// from `SkillMoveEntry`. The function is retained because its primary
-/// purpose is the stderr WARNING on the Err arm; the `Option<PathBuf>` return
-/// shape is kept for testability (the SAFE-03 unit test asserts `None` on the
-/// Err path). Future consumers (e.g. a debug tool that needs provenance) can
-/// use the return value; current callers `let _ = ...` it.
+/// from `SkillMoveEntry`. The `Option<PathBuf>` return shape is kept for
+/// testability (the SAFE-03 unit test asserts `None` on the Err path).
+/// Future consumers (e.g. a debug tool that needs provenance) can use the
+/// return value; current callers `let _ = ...` it.
 ///
-/// This is factored out so the Err arm is directly unit-testable with a
+/// This is factored out so the `Err` arm is directly unit-testable with a
 /// synthetic `io::Error` — on Unix, engineering a real `read_link` failure
-/// after a successful `is_symlink()` check is racy because both calls share the
-/// same parent-directory search-permission gate. Same rationale as the
-/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves a
-/// stderr line, not silent "no provenance" data loss.
-fn provenance_from_link_result(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
+/// after a successful `is_symlink()` check is racy because both calls share
+/// the same parent-directory search-permission gate. Same rationale as the
+/// `git`-HEAD-sha warning: an observable-but-recoverable I/O error deserves
+/// a stderr line, not silent "no provenance" data loss.
+fn warn_if_unreadable_symlink(raw: std::io::Result<PathBuf>, link_path: &Path) -> Option<PathBuf> {
     match raw {
         Ok(raw_target) => Some(resolve_symlink_target(link_path, &raw_target)),
         Err(e) => {
@@ -366,6 +373,27 @@ fn is_cross_filesystem(src: &Path, dst: &Path) -> bool {
         let _ = dst_ancestor;
         true
     }
+}
+
+/// Format the recovery hint shown when the post-copy `remove_dir_all` of
+/// the original library fails on the cross-fs path. HARD-18 (closes #416):
+/// the user is left with both the old (untouched) and new (just-copied)
+/// library directories on disk and needs guidance on which to keep and
+/// what to do next. Pure formatter for testability — see relocate::tests
+/// `cross_fs_recovery_hint_*`.
+///
+/// Follows the Phase 7 D-10 Conflict / Why / Suggestion template (same
+/// shape as `Config::validate()` errors and `migration_v010::Conflict`
+/// blocks) so users see a consistent voice across destructive-flow safety
+/// guards.
+fn cross_fs_recovery_hint(old_library: &Path, new_library: &Path) -> String {
+    format!(
+        "Conflict: relocate could not delete the original library after a cross-filesystem copy.\n\
+         Why: the new copy at {new} was created and verified, but removing the original at {old} failed (the copy itself succeeded — your data is safe in two places).\n\
+         Suggestion: verify the new library with `tome status` and `tome doctor`. Once you are satisfied, manually clean up the original with `rm -rf {old}` (or restore from {old} if you would rather keep the original location).",
+        old = old_library.display(),
+        new = new_library.display(),
+    )
 }
 
 /// Move the library across filesystems: copy preserving symlinks, verify, then delete old.
@@ -418,13 +446,25 @@ fn move_cross_filesystem(plan: &RelocatePlan) -> Result<()> {
         }
     }
 
-    // All verified -- delete old directory
-    std::fs::remove_dir_all(&plan.old_library_dir).with_context(|| {
-        format!(
-            "failed to remove old library directory {} after successful copy",
-            plan.old_library_dir.display()
-        )
-    })?;
+    // All verified -- delete old directory.
+    //
+    // HARD-18 (closes #416): on failure here we have an orphan copy at
+    // `old_library_dir` AND a verified copy at `new_library_dir`. Surface a
+    // Conflict / Why / Suggestion block to stderr so the user knows the
+    // copy succeeded, the original was preserved, and exactly what to do
+    // next. We still return the underlying error so the CLI exits non-zero.
+    if let Err(e) = std::fs::remove_dir_all(&plan.old_library_dir) {
+        eprintln!(
+            "{}",
+            cross_fs_recovery_hint(&plan.old_library_dir, &plan.new_library_dir)
+        );
+        return Err(e).with_context(|| {
+            format!(
+                "failed to remove old library directory {} after successful copy",
+                plan.old_library_dir.display()
+            )
+        });
+    }
 
     Ok(())
 }
@@ -859,13 +899,13 @@ mod tests {
     /// Regression test for SAFE-03 (#449) covering the `is_symlink()`-false
     /// branch: when the library-dir parent has no search permission,
     /// `is_symlink()` returns false (Rust treats metadata errors as "not a
-    /// symlink") and `plan()` skips the `provenance_from_link_result` call
+    /// symlink") and `plan()` skips the `warn_if_unreadable_symlink` call
     /// entirely via the outer `if link_path.is_symlink()` guard — upholding
     /// the contract that `plan()` does not propagate the error or silently
     /// claim "no provenance".
     ///
     /// The new `read_link` Err arm added by SAFE-03 is covered separately by
-    /// `provenance_from_link_result_warns_and_returns_none_on_err` below. That
+    /// `warn_if_unreadable_symlink_warns_and_returns_none_on_err` below. That
     /// unit test uses a synthetic `io::Error` because engineering a real
     /// `read_link` failure AFTER a successful `is_symlink()` check is racy on
     /// Unix — both syscalls share the same parent-search permission gate.
@@ -936,7 +976,7 @@ mod tests {
             "corrupt-skill manifest entry is managed"
         );
         // Note: the SAFE-03 stderr-warning contract on read_link failure is
-        // verified by the standalone `provenance_from_link_result_warns_and_returns_none_on_err`
+        // verified by the standalone `warn_if_unreadable_symlink_warns_and_returns_none_on_err`
         // unit test below. A previous integration-style assertion on the
         // dead provenance field was removed alongside the field itself
         // (TEST-05 / POLISH-05 option a — dead code removal).
@@ -944,7 +984,7 @@ mod tests {
 
     /// Unit test covering the SAFE-03 (#449) `Err` arm of `read_link` directly.
     ///
-    /// Passes a synthetic `io::Error` to `provenance_from_link_result` to verify
+    /// Passes a synthetic `io::Error` to `warn_if_unreadable_symlink` to verify
     /// the warn+None behavior without engineering a real `read_link` failure
     /// (which is racy on Unix — see `managed_symlink_unreadable_records_no_provenance`
     /// for the contract-level test via the `is_symlink()`-false branch).
@@ -955,11 +995,11 @@ mod tests {
     /// format string itself is pinned by the integration-style contract with
     /// PR #448's git-HEAD-sha warning.
     #[test]
-    fn provenance_from_link_result_warns_and_returns_none_on_err() {
+    fn warn_if_unreadable_symlink_warns_and_returns_none_on_err() {
         let synthetic_err = std::io::Error::other("synthetic io failure for SAFE-03");
         let fake_link = Path::new("/nonexistent/library/skill");
 
-        let result = provenance_from_link_result(Err(synthetic_err), fake_link);
+        let result = warn_if_unreadable_symlink(Err(synthetic_err), fake_link);
 
         assert!(
             result.is_none(),
@@ -967,10 +1007,119 @@ mod tests {
         );
     }
 
+    // ---- HARD-18 cross-fs cleanup recovery hint (closes #416) -----------
+    // The cross-fs branch of `relocate::execute` keeps the original library
+    // intact while copying to the new location. If the post-copy
+    // `remove_dir_all` then fails, the user is left with an orphan copy and
+    // no obvious next step. HARD-18 surfaces a Phase 7 D-10 Conflict / Why
+    // / Suggestion block naming the orphan path so the user can clean up.
+    //
+    // The hint is implemented as a pure formatter so it can be unit-tested
+    // without needing to engineer a real EXDEV failure (real cross-fs
+    // setups in CI are flaky and usually require root). Same factoring as
+    // `warn_if_unreadable_symlink` above.
+
+    #[test]
+    fn cross_fs_recovery_hint_includes_three_label_block() {
+        let old = Path::new("/tmp/old-lib");
+        let new = Path::new("/Volumes/External/new-lib");
+        let hint = cross_fs_recovery_hint(old, new);
+        assert!(
+            hint.contains("Conflict:"),
+            "hint must label the conflict — Phase 7 D-10 template:\n{hint}"
+        );
+        assert!(
+            hint.contains("Why:"),
+            "hint must explain the why — Phase 7 D-10 template:\n{hint}"
+        );
+        assert!(
+            hint.contains("Suggestion:"),
+            "hint must offer a suggestion — Phase 7 D-10 template:\n{hint}"
+        );
+    }
+
+    #[test]
+    fn cross_fs_recovery_hint_names_orphan_path_and_destination() {
+        let old = Path::new("/tmp/old-lib");
+        let new = Path::new("/Volumes/External/new-lib");
+        let hint = cross_fs_recovery_hint(old, new);
+        // The user needs both paths to act on the hint.
+        assert!(
+            hint.contains("/tmp/old-lib"),
+            "hint must name the orphan source path so the user can rm -rf it:\n{hint}"
+        );
+        assert!(
+            hint.contains("/Volumes/External/new-lib"),
+            "hint must name the new library so the user can verify before deleting:\n{hint}"
+        );
+    }
+
+    #[test]
+    fn cross_fs_recovery_hint_label_order_matches_d10_template() {
+        let old = Path::new("/a");
+        let new = Path::new("/b");
+        let hint = cross_fs_recovery_hint(old, new);
+        let conflict = hint.find("Conflict:").expect("missing Conflict label");
+        let why = hint.find("Why:").expect("missing Why label");
+        let suggestion = hint.find("Suggestion:").expect("missing Suggestion label");
+        assert!(
+            conflict < why && why < suggestion,
+            "Phase 7 D-10 template requires Conflict → Why → Suggestion order, got: {hint}",
+        );
+    }
+
+    /// Regression-pin for HARD-18: the recovery hint is emitted only from
+    /// the cross-fs branch (`move_cross_filesystem`). The same-fs branch
+    /// uses `fs::rename` and physically cannot leave an orphan copy. A
+    /// structural test grep-pins the contract: only one call site, and it
+    /// lives next to the cross-fs `remove_dir_all`.
+    ///
+    /// Source-byte regression test follows the same pattern as v0.9
+    /// TEST-04 (regen_warnings deferred until after success banner).
+    #[test]
+    fn cross_fs_recovery_hint_is_invoked_only_from_cross_fs_branch() {
+        let src = include_str!("relocate.rs");
+        // Exclude the test module itself + the function definition so we
+        // count only production call sites.
+        let prod = src
+            .split_once("#[cfg(test)]")
+            .map(|(prod, _tests)| prod)
+            .expect("relocate.rs must contain a #[cfg(test)] block");
+        let prod_no_def = prod
+            .split_once("fn cross_fs_recovery_hint(")
+            .map(|(before, _after)| before)
+            .expect("cross_fs_recovery_hint definition must exist in production code");
+        let production_call_sites: usize = prod_no_def.matches("cross_fs_recovery_hint(").count();
+        assert_eq!(
+            production_call_sites, 0,
+            "production callers BEFORE the definition: pinned at 0 — calls must come AFTER the definition.",
+        );
+        let after_def = prod
+            .split_once("fn cross_fs_recovery_hint(")
+            .map(|(_before, after)| after)
+            .expect("split should not fail");
+        let post_def_call_sites: usize = after_def.matches("cross_fs_recovery_hint(").count();
+        assert_eq!(
+            post_def_call_sites, 1,
+            "expected exactly 1 production call to cross_fs_recovery_hint (in move_cross_filesystem), got {post_def_call_sites}; same-fs path must not invoke the hint.",
+        );
+        // And the call must live inside `move_cross_filesystem`, immediately
+        // before the `with_context` wrapping the orphan `remove_dir_all`.
+        let move_xfs = after_def
+            .split_once("fn move_cross_filesystem")
+            .map(|(_before, after)| after)
+            .expect("move_cross_filesystem must exist after the helper");
+        assert!(
+            move_xfs.contains("cross_fs_recovery_hint("),
+            "cross_fs_recovery_hint must be called from inside move_cross_filesystem; \
+             this regression-pins HARD-18's scope (same-fs branch never emits the hint).",
+        );
+    }
+
     /// Unit test covering the SAFE-03 `Ok` arm: when `read_link` succeeds, the
     /// resolver is applied and the result is `Some(resolved_target)`.
     #[test]
-    fn provenance_from_link_result_returns_resolved_target_on_ok() {
+    fn warn_if_unreadable_symlink_returns_resolved_target_on_ok() {
         let tmp = TempDir::new().unwrap();
         let link_path = tmp.path().join("link");
         let target = tmp.path().join("target");
@@ -980,7 +1129,7 @@ mod tests {
         // Simulate a successful read_link returning a raw relative target; the
         // helper should apply `resolve_symlink_target` to canonicalize it.
         let raw_target = std::fs::read_link(&link_path).unwrap();
-        let result = provenance_from_link_result(Ok(raw_target), &link_path);
+        let result = warn_if_unreadable_symlink(Ok(raw_target), &link_path);
 
         let resolved = result.expect("Ok arm must return Some(resolved_target)");
         assert_eq!(

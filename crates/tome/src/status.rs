@@ -61,6 +61,11 @@ pub struct StatusReport {
     /// Number of skills consolidated in the library, or an error message.
     pub library_count: CountOrError,
     pub directories: Vec<DirectoryStatus>,
+    /// Skills in the library whose source was removed from `tome.toml`
+    /// (Unowned per LIB-04). Surfaces in text rendering between the
+    /// Directories table and the Health line (D-D2). Always present in
+    /// JSON output for stable shape; empty array when no Unowned skills.
+    pub unowned: Vec<crate::summary::SkillSummary>,
     /// Number of health issues, or an error message.
     pub health: CountOrError,
 }
@@ -108,11 +113,28 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         Ok(0)
     };
 
+    // Populate the Unowned set per UNOWN-03. Read the manifest from
+    // paths.config_dir() and project entries with source_name.is_none()
+    // through SkillSummary::from_entry. Sorted ascending by name (D-D1
+    // discretion choice — matches the BTreeMap natural order of Manifest).
+    //
+    // Manifest read errors are surfaced via library_count.error / health.error;
+    // the Unowned section degrades gracefully to empty on read failure.
+    let unowned: Vec<crate::summary::SkillSummary> = match manifest::load(paths.config_dir()) {
+        Ok(m) => m
+            .iter()
+            .filter(|(_, entry)| entry.source_name.is_none())
+            .map(|(name, entry)| crate::summary::SkillSummary::from_entry(name, entry))
+            .collect(),
+        Err(_) => Vec::new(),
+    };
+
     Ok(StatusReport {
         configured,
         library_dir: paths.library_dir().to_path_buf(),
         library_count: library_count.into(),
         directories,
+        unowned,
         health: health.into(),
     })
 }
@@ -130,6 +152,42 @@ fn format_dir_path_column(path: &str, override_applied: bool) -> String {
     } else {
         collapsed
     }
+}
+
+/// Format the Unowned skills section (heading + table) per D-D1/D-D2.
+/// Returns `None` when the unowned set is empty so the section omits
+/// cleanly (no header, no blank line). Pure formatter — no I/O — so
+/// rendering can be unit-tested without capturing stdout.
+fn format_unowned_section(unowned: &[crate::summary::SkillSummary]) -> Option<String> {
+    if unowned.is_empty() {
+        return None;
+    }
+    let heading = format!("{} ({}):", style("Unowned skills").bold(), unowned.len());
+    let mut rows: Vec<[String; 3]> = Vec::with_capacity(unowned.len() + 1);
+    rows.push([
+        "NAME".to_string(),
+        "LAST-KNOWN SOURCE".to_string(),
+        "SYNCED".to_string(),
+    ]);
+    for s in unowned {
+        // D-C1 / D-C2 fallback: render previous_source when present;
+        // fall back to source_path_display (already collapse_home-rendered
+        // by SkillSummary::from_entry).
+        let last_known = s
+            .previous_source
+            .clone()
+            .unwrap_or_else(|| s.source_path_display.clone());
+        rows.push([s.name.clone(), last_known, s.synced_at.clone()]);
+    }
+    let table = tabled::Table::from_iter(rows)
+        .with(Style::blank())
+        .with(
+            Modify::new(Rows::first()).with(tabled::settings::Format::content(|s| {
+                style(s).bold().to_string()
+            })),
+        )
+        .to_string();
+    Some(format!("{heading}\n{table}"))
 }
 
 /// Display the current status of the tome system.
@@ -217,6 +275,12 @@ fn render_status(report: &StatusReport) {
         }
     }
     println!();
+
+    // Unowned skills (UNOWN-03 / D-D1, D-D2). Section omits cleanly when empty.
+    if let Some(rendered) = format_unowned_section(&report.unowned) {
+        println!("{rendered}");
+        println!();
+    }
 
     // Health
     let health = match (&report.health.count, &report.health.error) {
@@ -591,6 +655,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -630,6 +695,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -663,6 +729,7 @@ mod tests {
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
                 source_name: Some(DirectoryName::new("plugins").unwrap()),
+                previous_source: None,
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
@@ -786,6 +853,218 @@ mod tests {
         assert!(
             json.contains("\"override_applied\":true"),
             "JSON output should include override_applied field, got: {json}"
+        );
+    }
+
+    // -- UNOWN-03: status surfaces Unowned skills section (D-D1, D-D2, D-D3) --
+
+    #[test]
+    fn gather_populates_unowned_for_entries_with_no_source_name() {
+        let tome_home = tempfile::TempDir::new().unwrap();
+        let library = tome_home.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(library.join("orphan")).unwrap();
+        std::fs::create_dir_all(library.join("kept")).unwrap();
+
+        // Build manifest with one Owned + one Unowned (with previous_source).
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("kept").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/src/kept"),
+                DirectoryName::new("active").unwrap(),
+                crate::validation::test_hash("h"),
+                false,
+            ),
+        );
+        m.insert(
+            crate::discover::SkillName::new("orphan").unwrap(),
+            manifest::SkillEntry::new_unowned(
+                PathBuf::from("/tmp/old/orphan"),
+                crate::validation::test_hash("o"),
+                false,
+                Some(DirectoryName::new("removed-dir").unwrap()),
+            ),
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+
+        let report = gather(&config, &paths).unwrap();
+        assert_eq!(
+            report.unowned.len(),
+            1,
+            "expected exactly one Unowned entry, got {:?}",
+            report.unowned
+        );
+        assert_eq!(report.unowned[0].name, "orphan");
+        assert_eq!(
+            report.unowned[0].previous_source,
+            Some("removed-dir".to_string())
+        );
+    }
+
+    #[test]
+    fn gather_returns_empty_unowned_when_all_entries_are_owned() {
+        let tome_home = tempfile::TempDir::new().unwrap();
+        let library = tome_home.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(library.join("kept")).unwrap();
+
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("kept").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/src/kept"),
+                DirectoryName::new("active").unwrap(),
+                crate::validation::test_hash("h"),
+                false,
+            ),
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+
+        let report = gather(&config, &paths).unwrap();
+        assert!(
+            report.unowned.is_empty(),
+            "expected no Unowned entries, got {:?}",
+            report.unowned
+        );
+    }
+
+    #[test]
+    fn json_status_always_includes_unowned_field() {
+        let report = StatusReport {
+            configured: false,
+            library_dir: PathBuf::from("/tmp/lib"),
+            library_count: CountOrError {
+                count: Some(0),
+                error: None,
+            },
+            directories: Vec::new(),
+            unowned: Vec::new(),
+            health: CountOrError {
+                count: Some(0),
+                error: None,
+            },
+        };
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(
+            json.contains("\"unowned\""),
+            "JSON must include 'unowned' key for stable shape: {json}"
+        );
+        // Empty array, not omitted, for stable shape.
+        assert!(
+            json.contains("\"unowned\":[]"),
+            "JSON empty unowned must serialize as [], got: {json}"
+        );
+    }
+
+    #[test]
+    fn json_status_serializes_unowned_skill_summaries() {
+        // Round-trip: Unowned entry projects through SkillSummary::from_entry
+        // and lands as a JSON object on `unowned[0]`.
+        let entry = manifest::SkillEntry::new_unowned(
+            PathBuf::from("/tmp/old/orphan"),
+            crate::validation::test_hash("o"),
+            false,
+            Some(DirectoryName::new("removed-dir").unwrap()),
+        );
+        let name = crate::discover::SkillName::new("orphan").unwrap();
+        let summary = crate::summary::SkillSummary::from_entry(&name, &entry);
+        let report = StatusReport {
+            configured: true,
+            library_dir: PathBuf::from("/tmp/lib"),
+            library_count: CountOrError {
+                count: Some(1),
+                error: None,
+            },
+            directories: Vec::new(),
+            unowned: vec![summary],
+            health: CountOrError {
+                count: Some(0),
+                error: None,
+            },
+        };
+        let value = serde_json::to_value(&report).unwrap();
+        let arr = value["unowned"].as_array().expect("unowned must be array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["name"], "orphan");
+        assert_eq!(arr[0]["previous_source"], "removed-dir");
+    }
+
+    #[test]
+    fn format_unowned_section_returns_none_for_empty_set() {
+        let rendered = format_unowned_section(&[]);
+        assert!(
+            rendered.is_none(),
+            "empty unowned set must return None so the section omits cleanly: {rendered:?}"
+        );
+    }
+
+    #[test]
+    fn format_unowned_section_renders_heading_and_columns() {
+        let summaries = vec![crate::summary::SkillSummary {
+            name: "orphan".to_string(),
+            previous_source: Some("removed-dir".to_string()),
+            source_path_display: "~/old/orphan".to_string(),
+            synced_at: "2026-01-01T00:00:00Z".to_string(),
+            managed: false,
+        }];
+        let rendered = format_unowned_section(&summaries).expect("non-empty must Some");
+        // Heading with count.
+        assert!(
+            rendered.contains("Unowned skills") && rendered.contains("(1)"),
+            "heading missing 'Unowned skills' or count: {rendered}"
+        );
+        // D-D1 column headers.
+        assert!(rendered.contains("NAME"), "missing NAME column: {rendered}");
+        assert!(
+            rendered.contains("LAST-KNOWN SOURCE"),
+            "missing LAST-KNOWN SOURCE column: {rendered}"
+        );
+        assert!(
+            rendered.contains("SYNCED"),
+            "missing SYNCED column: {rendered}"
+        );
+        // Body row.
+        assert!(
+            rendered.contains("orphan"),
+            "missing skill name: {rendered}"
+        );
+        assert!(
+            rendered.contains("removed-dir"),
+            "missing previous_source value: {rendered}"
+        );
+        assert!(
+            rendered.contains("2026-01-01T00:00:00Z"),
+            "missing synced_at value: {rendered}"
+        );
+    }
+
+    #[test]
+    fn format_unowned_section_falls_back_to_source_path_when_previous_missing() {
+        // D-C2 fallback: previous_source = None -> render source_path_display.
+        let summaries = vec![crate::summary::SkillSummary {
+            name: "legacy".to_string(),
+            previous_source: None,
+            source_path_display: "~/legacy/path".to_string(),
+            synced_at: "2026-02-02T00:00:00Z".to_string(),
+            managed: true,
+        }];
+        let rendered = format_unowned_section(&summaries).expect("non-empty must Some");
+        assert!(
+            rendered.contains("~/legacy/path"),
+            "D-C2 fallback: should render source_path_display when previous_source is None: {rendered}"
         );
     }
 }

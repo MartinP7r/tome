@@ -66,6 +66,33 @@ pub struct DirectoryPrefs {
     pub(crate) enabled: Option<BTreeSet<SkillName>>,
 }
 
+impl DirectoryPrefs {
+    /// Read-only view of the blocklist for HARD-21 D-BROWSE-1 scope
+    /// resolution. Stays `pub(crate)` because the underlying field is
+    /// per-machine implementation detail; the v1.0 GUI Tauri IPC will
+    /// surface a different read-shape.
+    pub(crate) fn disabled_set(&self) -> &BTreeSet<SkillName> {
+        &self.disabled
+    }
+
+    /// Read-only view of the allowlist for HARD-21 D-BROWSE-1 scope
+    /// resolution. Returns `None` when no allowlist is configured (the
+    /// directory falls through to blocklist-or-global semantics).
+    pub(crate) fn enabled_set(&self) -> Option<&BTreeSet<SkillName>> {
+        self.enabled.as_ref()
+    }
+}
+
+/// Read-only accessor for `MachinePrefs::directory[<name>]` so the
+/// `browse` module (HARD-21 D-BROWSE-1) can query scope without
+/// widening the underlying field's visibility past `pub(crate)`.
+pub(crate) fn directory_prefs<'a>(
+    prefs: &'a MachinePrefs,
+    name: &DirectoryName,
+) -> Option<&'a DirectoryPrefs> {
+    prefs.directory.get(name)
+}
+
 /// Per-machine preferences — disabled skills and directories for this machine.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MachinePrefs {
@@ -129,6 +156,57 @@ impl MachinePrefs {
             }
         }
         Ok(())
+    }
+
+    /// Mutate or insert the per-directory `disabled` blocklist for `dir`.
+    ///
+    /// Used by `browse::App::apply_toggle` (HARD-21 D-BROWSE-1, scope =
+    /// `PerDirBlocklist`). Returns true if the set changed (insert on
+    /// `Disable`, remove on `Enable`). Honors MACH-04 by construction:
+    /// only the `disabled` field is touched; `enabled` is never set here.
+    pub(crate) fn toggle_per_dir_blocklist(
+        &mut self,
+        dir: &DirectoryName,
+        skill: SkillName,
+        disable: bool,
+    ) -> bool {
+        let entry = self.directory.entry(dir.clone()).or_default();
+        if disable {
+            entry.disabled.insert(skill)
+        } else {
+            entry.disabled.remove(skill.as_str())
+        }
+    }
+
+    /// Mutate the per-directory `enabled` allowlist for `dir` with
+    /// inverted polarity: `Disable` REMOVES the skill from the allowlist
+    /// (membership = "include"), `Enable` INSERTS it.
+    ///
+    /// Used by `browse::App::apply_toggle` (HARD-21 D-BROWSE-1, scope =
+    /// `PerDirAllowlist`). Honors MACH-04 by construction.
+    pub(crate) fn toggle_per_dir_allowlist(
+        &mut self,
+        dir: &DirectoryName,
+        skill: SkillName,
+        disable: bool,
+    ) -> bool {
+        let entry = self.directory.entry(dir.clone()).or_default();
+        let allowlist = entry.enabled.get_or_insert_with(BTreeSet::new);
+        if disable {
+            allowlist.remove(skill.as_str())
+        } else {
+            allowlist.insert(skill)
+        }
+    }
+
+    /// Mutate the global `disabled` blocklist. `disable=true` adds,
+    /// `disable=false` removes.
+    pub(crate) fn toggle_global_disabled(&mut self, skill: SkillName, disable: bool) -> bool {
+        if disable {
+            self.disabled.insert(skill)
+        } else {
+            self.disabled.remove(skill.as_str())
+        }
     }
 
     /// Check if a skill should be distributed to a specific directory.
@@ -256,6 +334,100 @@ mod tests {
         // Should be parseable
         let parsed: MachinePrefs = toml::from_str(&toml_str).unwrap();
         assert!(parsed.is_disabled("unwanted-skill"));
+    }
+
+    // === HARD-22 / D-TILDE-2: machine.toml override paths preserved verbatim ===
+    //
+    // Plan 15-02 explicitly fences `paths::unexpand_tilde` to `Config::save_checked`
+    // only — `MachinePrefs::save` MUST NOT rewrite path fields. Per-machine
+    // preferences are by definition machine-local; rewriting `/Volumes/External/...`
+    // to `~/...` here would be wrong (Volumes paths don't live under $HOME on
+    // any sane setup).
+    //
+    // Verified by save+load round-trips that compare the on-disk path bytes
+    // against the input bytes for three representative cases.
+
+    #[test]
+    fn save_preserves_override_path_outside_home_verbatim() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Pick an absolute path that on every machine is OUTSIDE $HOME.
+        let original = "/Volumes/External/skills";
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: PathBuf::from(original),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original}\"")),
+            "machine.toml MUST preserve override path verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("~/"),
+            "machine.toml MUST NOT contain ~/ rewrites (D-TILDE-2), got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_preserves_override_tilde_path_verbatim() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // User-supplied tilde path: must survive byte-for-byte.
+        let original = "~/skills";
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: PathBuf::from(original),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original}\"")),
+            "machine.toml MUST preserve user-supplied tilde verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+    }
+
+    #[test]
+    fn save_preserves_override_absolute_under_home_verbatim() {
+        // Even an absolute path under $HOME must NOT be rewritten in machine.toml
+        // — D-TILDE-2 fences the unexpand pass to Config::save_checked only.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let home = dirs::home_dir().expect("home dir required for this test");
+        let original = home.join("dotfiles/external");
+        let original_str = original.to_str().unwrap();
+
+        let mut prefs = MachinePrefs::default();
+        prefs.directory_overrides.insert(
+            crate::config::DirectoryName::new("foo").unwrap(),
+            DirectoryOverride {
+                path: original.clone(),
+            },
+        );
+
+        save(&prefs, &path).unwrap();
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            on_disk.contains(&format!("path = \"{original_str}\"")),
+            "machine.toml MUST preserve absolute under-$HOME path verbatim (D-TILDE-2), got:\n{on_disk}"
+        );
+        assert!(
+            !on_disk.contains("path = \"~/"),
+            "machine.toml MUST NOT rewrite under-$HOME paths to ~/ (D-TILDE-2 — fenced to tome.toml only), got:\n{on_disk}"
+        );
     }
 
     #[test]
@@ -730,5 +902,59 @@ bogus = "y"
             result.is_err(),
             "expected parse failure for unknown auto_install_plugins value, got: {result:?}"
         );
+    }
+
+    /// HARD-08: rename failure during atomic save must leave the previous
+    /// `machine.toml` content untouched. machine.toml carries per-machine
+    /// disable/override state — corrupting it would silently desync user
+    /// preferences across the next sync.
+    ///
+    /// Mechanism: chmod 0o500 on the parent directory so fs::rename
+    /// returns EACCES. Verify the on-disk bytes are byte-identical to
+    /// the pre-fail state.
+    #[cfg(unix)]
+    #[test]
+    fn save_preserves_previous_on_rename_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Step 1: write A via the canonical happy path.
+        let mut prefs_a = MachinePrefs::default();
+        prefs_a.disable(SkillName::new("alpha").unwrap());
+        save(&prefs_a, &path).unwrap();
+        let bytes_a = std::fs::read(&path).unwrap();
+
+        // Step 2: lock the parent dir.
+        let original_mode = std::fs::metadata(tmp.path()).unwrap().permissions().mode();
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+
+        // Step 3: attempt to save B; must fail.
+        let mut prefs_b = MachinePrefs::default();
+        prefs_b.disable(SkillName::new("beta").unwrap());
+        prefs_b.disable(SkillName::new("gamma").unwrap());
+        let result = save(&prefs_b, &path);
+
+        // Restore permissions BEFORE asserting so TempDir cleanup works.
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(original_mode))
+            .unwrap();
+
+        assert!(
+            result.is_err(),
+            "save() must fail when the parent directory is not writable"
+        );
+
+        // Step 4: re-read the file. It must still match A.
+        let bytes_after = std::fs::read(&path).unwrap();
+        assert_eq!(
+            bytes_after, bytes_a,
+            "atomic-save invariant violated: machine.toml content was \
+             corrupted by a failed save"
+        );
+        let reloaded = load(&path).unwrap();
+        assert!(reloaded.is_disabled("alpha"));
+        assert!(!reloaded.is_disabled("beta"));
+        assert!(!reloaded.is_disabled("gamma"));
     }
 }

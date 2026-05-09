@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+< unowned-skill                                 │Preview: unowned-skill
+                                                │source: (unowned)
+────────────────────                            │path: ~/.tome/library/unowned-skill
+Source:   (unowned)                             │
+Type:     local                                 │unowned-skill
+Path:     ~/.tome/library/unowned-skill         │A test skill body.
+Synced:   2026-05-08T00:00:00Z                  │
+                                                │
+Actions─────────────────────────────────────────│
+> Open source directory                         │
+  Copy path to clipboard                        │
+  Disable on this machine                       │
+  Back                                          │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+                                                │
+ Detail  j/k select  ⏎ run action  esc back

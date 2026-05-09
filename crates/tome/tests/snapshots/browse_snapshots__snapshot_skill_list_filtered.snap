@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+SKILL                          SOURCE                   PATH
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+foo-bar        local      ~/.tome/library/foo-bar     │Preview: foo-bar
+                                                      │source: local
+                                                      │path: ~/.tome/library/foo-bar
+                                                      │
+                                                      │foo-bar
+                                                      │A test skill body.
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+ 1/5 skills   j/k ↕  / search  s sort:name  tab group  ? help  ⏎ detail  q quit

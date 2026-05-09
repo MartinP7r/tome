@@ -66,8 +66,8 @@
 - [x] **Phase 11: Library-canonical core** — Managed skills become real directory copies; source removal preserves library content; first-sync migration converts symlink libraries (LIB-01..05) (completed 2026-05-03)
 - [x] **Phase 12: Marketplace adapter** — `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` + `GitAdapter`; aggregated install/update failure surfacing (ADP-01..04) (completed 2026-05-05)
 - [x] **Phase 13: Lockfile-authoritative sync** — `tome sync` reconciles installed plugins to lockfile state; Match/Drift/Vanished classification; auto-install consent; edit-in-library detection (RECON-01..05) — **alpha cut** (completed 2026-05-05)
-- [ ] **Phase 14: Unowned-library lifecycle** — `tome adopt` / `tome forget` commands; `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03)
-- [ ] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut**
+- [x] **Phase 14: Unowned-library lifecycle** — `tome reassign` accepts Unowned input (per D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01); `tome remove skill <name>` deletes an Unowned skill (per D-API-2, supersedes `tome forget`); `tome status` and `tome doctor` surface the unowned set (UNOWN-01..03) (completed 2026-05-07)
+- [x] **Phase 15: CLI hardening** — 22 review-followups + older bug backlog: refactors (#485-#487, #491-#493), safety (#488, #494, #495), test coverage (#496-#500), polish (#501-#503), older bugs (#416, #430, #433, #447, #457) (HARD-01..22) — **beta cut** (completed 2026-05-08)
 - [ ] **Phase 16: Cleanup-message UX + docs** — Three-bucket cleanup partition with actionable hints; migration prompt summary table; architecture, changelog, cross-machine docs (UX-01..02, DOC-01..03) — **rc cut**
 - [ ] **Phase 17: Migration polish + UAT + release** — In-flight PR landing; issue triage; Linux UAT; real-library migration smoke-test; cargo-dist v0.10.0 release (REL-01..05) — **v0.10 final**
 
@@ -130,10 +130,18 @@
 **Depends on**: Phase 11 (unowned state must exist in manifest before commands can manipulate it)
 **Requirements**: UNOWN-01, UNOWN-02, UNOWN-03
 **Success Criteria** (what must be TRUE):
-  1. `tome adopt <skill> <directory>` re-anchors an unowned skill to a configured directory: manifest `source_name` updates from `None` to `Some(<directory>)`, the skill content is copied into the directory's path on disk, and the skill leaves the unowned set on next discovery. `tome adopt foo nonexistent-dir` fails fast with a clear error naming the missing directory.
-  2. `tome forget <skill>` deletes an unowned skill: manifest entry removed, library directory removed, downstream distribution symlinks removed. Interactive confirmation prompt unless `--yes` is passed. `tome forget` on a still-owned skill fails fast with a message directing the user to remove the source directory first.
-  3. `tome status` and `tome doctor` text output include an `Unowned skills (N):` section listing each unowned skill with its last-known source name; JSON output of both commands includes an `unowned: [SkillSummary]` array. When the unowned set is empty, the section omits cleanly (no empty header).
-**Plans**: TBD
+  1. `tome reassign <skill> --to <directory>` re-anchors an Unowned skill (per Phase 14 D-API-1, supersedes the literal `tome adopt` wording in UNOWN-01): manifest `source_name` updates from `None` to `Some(<directory>)`, the skill content is copied into the directory's path on disk, `previous_source` is cleared, and the skill leaves the unowned set on next discovery. `tome reassign foo --to nonexistent-dir` fails fast with a clear error naming the missing directory. `tome reassign foo --to <target-only-dir>` is rejected per D-A2. Different-content collisions at the target are refused without `--force` per D-A1.
+  2. `tome remove skill <name>` deletes an Unowned skill (per Phase 14 D-API-2, supersedes the literal `tome forget` wording in UNOWN-02): manifest entry removed, library directory removed, downstream distribution symlinks removed, lockfile entry removed, machine.toml memberships removed. Interactive confirmation prompt unless `--yes` is passed. `tome remove skill <name>` on a still-owned skill fails fast per D-B2 with a message directing the user to `tome remove dir` first.
+  3. `tome status` and `tome doctor` text output include an `Unowned skills (N):` section listing each unowned skill with its last-known source name (column LAST-KNOWN SOURCE renders `previous_source` per D-C1, falling back to `source_path` per D-C2); JSON output of both commands includes the new field (`unowned: [SkillSummary]` on `StatusReport`, `unowned_skills: [SkillSummary]` on `DoctorReport`). When the unowned set is empty, the section omits cleanly. Per D-D3, the unowned set does NOT contribute to `DoctorReport::total_issues` and does NOT affect `tome doctor` exit code.
+**Plans**: 8 plans
+- [x] 14-01-previous-source-schema-PLAN.md — Add `previous_source` field to SkillEntry/LockEntry + capture at all 3 Owned→Unowned transition sites (closes Phase 13 D-13 lossy-fork-in-place gap)
+- [x] 14-02-skill-summary-type-PLAN.md — Shared `SkillSummary` type in new `summary.rs` module (consumed by 14-06 status + 14-07 doctor)
+- [x] 14-03-cli-restructure-PLAN.md — `Remove { kind: RemoveKind::Dir | Skill }` clap split + `Reassign --force` flag + lib.rs dispatch (BREAKING: `tome remove <name>` → `tome remove dir <name>`)
+- [x] 14-04-reassign-unowned-input-PLAN.md — `tome reassign` accepts Unowned input (UNOWN-01 / D-API-1) + D-A1 content-hash collision check + D-A2 target-only role rejection + D-C1 clear-on-re-anchor
+- [x] 14-05-remove-skill-PLAN.md — `tome remove skill <name>` plan/render/execute triple + RemoveSkillFailureKind (4 variants, ALL array, compile-time guard) + D-B1 full cleanup (manifest+library+dist+lockfile+machine.toml) + D-B2 owned guard + D-B3 confirmation default-no
+- [x] 14-06-status-unowned-section-PLAN.md — `StatusReport.unowned: Vec<SkillSummary>` field + text Unowned-skills section + JSON shape (UNOWN-03 status side)
+- [x] 14-07-doctor-unowned-section-PLAN.md — `DoctorReport.unowned_skills` field + parallel informational section + D-D3 (does NOT contribute to total_issues; exit code unaffected)
+- [x] 14-08-docs-and-integration-tests-PLAN.md — REQUIREMENTS.md/ROADMAP.md/PROJECT.md vocabulary update for D-API-1/-2 merge + CHANGELOG.md BREAKING callout + 8+ end-to-end integration tests in tests/cli.rs
 
 ### Phase 15: CLI hardening
 **Goal**: Bundle of v0.9-review followups (#485-#503) plus older bug backlog (#416, #430, #433, #447, #457) lands as a single hardening pass. Most touch the same modules as the library-canonical work, so doing them together is more efficient than serializing.
@@ -144,7 +152,13 @@
   2. The "safety + tests" cluster lands cleanly: atomic-save preservation regression test exists for manifest+lockfile+machine.toml; `distribute` refuses to clobber pre-existing symlinks pointing outside the current library; hostile-input tests cover `..` traversal, symlink loops, and same-target overrides for `[directory_overrides]`; `tome remove <git-dir>` and `tome remove <claude-plugins-dir>` end-to-end integration tests pass; `browse/ui.rs` has ratatui `TestBackend` + `insta` snapshot coverage for status dashboard, skill list, detail pane, help overlay; `tests/cli.rs` (was 5580 LOC) splits into per-domain `cli_*.rs` files with shared `common/` helpers; `backup::tests::push_and_pull_roundtrip` flake fixed via local-config-disabled git signing.
   3. The "polish + older bugs" cluster lands cleanly: `wizard.rs` diagnostic prints converted to `eprintln!`; `relocate.rs::provenance_from_link_result` renamed to `warn_if_unreadable_symlink`; `TryFrom<String>` impls for `SkillName`/`DirectoryName`; `tome relocate` cross-fs cleanup recovery hint surfaces; `tome reassign` plan/execute reads filesystem state once (no plan/execute drift); manifest epoch-0 timestamp surfaces a warning instead of silent garbage; browse UI Disable/Enable actions wired up (no `#[allow(dead_code)]`); `Config::save_checked` preserves tilde-shaped paths instead of expanding to absolute (#457 dotfiles regression closed).
   4. CI green on all three platforms (ubuntu-latest, macos-latest) for the entire HARD bundle; clippy-D-warnings clean; test count grows by at least the snapshot + integration additions (target: ≥720 tests at end of Phase 15, was 662 at v0.9.0).
-**Plans**: TBD
+**Plans**: 6 plans (Wave 1: 15-01, 15-02, 15-03 — independent module surfaces; Wave 2: 15-04, 15-05, 15-06 — depend on Wave 1 landings)
+- [x] 15-01-cli-decomposition-PLAN.md — lib.rs::run() decomposition into cmd_<name> helpers + tests/cli.rs split into per-domain files (HARD-02, HARD-13)
+- [x] 15-02-config-module-PLAN.md — config.rs split into config/{mod,types,overrides,validate}.rs + paths::unexpand_tilde + tilde-preserving Config::save_checked (HARD-03, HARD-22)
+- [x] 15-03-type-system-tightening-PLAN.md — skill::parse anyhow + ScanMode enum + Lockfile pub(crate) + LogLevel enum + TryFrom<String> for SkillName/DirectoryName (HARD-01, HARD-05, HARD-06, HARD-07, HARD-17)
+- [x] 15-04-safety-guards-and-integration-tests-PLAN.md — LintFailed error + atomic-save regression + distribute foreign-symlink refuse + directory_overrides hostile-input tests + tome remove dir e2e tests (HARD-04, HARD-08, HARD-09, HARD-10, HARD-11)
+- [x] 15-05-browse-ui-PLAN.md — ratatui TestBackend + insta snapshots + DetailAction Disable/Enable wiring per D-BROWSE-1/-2/-3 (HARD-12, HARD-21)
+- [x] 15-06-polish-and-older-bugs-PLAN.md — backup test flake fix + wizard eprintln! + relocate rename + cross-fs hint + reassign read-once + manifest epoch-0 warning (HARD-14, HARD-15, HARD-16, HARD-18, HARD-19, HARD-20)
 
 ### Phase 16: Cleanup-message UX + docs
 **Goal**: Rewrite the cleanup message that originally triggered this milestone discussion into three actionable buckets. Document the library-canonical model + cross-machine workflow + behavior change in user-facing docs.
@@ -191,7 +205,7 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 11. Library-canonical core | v0.10 | 5/5 | Complete    | 2026-05-03 |
 | 12. Marketplace adapter | v0.10 | 4/4 | Complete    | 2026-05-05 |
 | 13. Lockfile-authoritative sync (alpha) | v0.10 | 5/5 | Complete    | 2026-05-05 |
-| 14. Unowned-library lifecycle | v0.10 | 0/TBD | Not started | - |
-| 15. CLI hardening (beta) | v0.10 | 0/TBD | Not started | - |
+| 14. Unowned-library lifecycle | v0.10 | 8/8 | Complete    | 2026-05-07 |
+| 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 0/TBD | Not started | - |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 0/TBD | Not started | - |

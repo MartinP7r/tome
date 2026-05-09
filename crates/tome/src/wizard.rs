@@ -141,22 +141,27 @@ pub(crate) fn run(
     tome_home_source: TomeHomeSource,
     prefill: Option<&Config>,
 ) -> Result<Config> {
-    println!();
-    println!("{}", style("Welcome to tome setup!").bold().cyan());
-    println!("This wizard will help you configure your skill directories.");
-    println!();
+    // HARD-15: wizard chrome (banner, step dividers, status confirmations,
+    // tables) emits to stderr. Dialoguer renders prompts on its own
+    // (already on stderr by default) — we don't compete with it. The only
+    // stdout we still emit is the dry-run TOML (a programmatic artifact a
+    // user may pipe).
+    eprintln!();
+    eprintln!("{}", style("Welcome to tome setup!").bold().cyan());
+    eprintln!("This wizard will help you configure your skill directories.");
+    eprintln!();
 
-    println!("{}", style("How it works:").bold());
-    println!("  Each directory you configure has a role:");
-    println!("    Managed  - read-only, owned by a package manager (e.g. Claude plugins)");
-    println!("    Synced   - skills are discovered AND distributed here");
-    println!("    Source   - skills are discovered here but not distributed");
-    println!("    Target   - skills are distributed here but not discovered");
-    println!();
-    println!("  Tome copies local skills into a central library for safekeeping.");
-    println!("  Managed skills are symlinked instead. Each tool receives symlinks");
-    println!("  into the library -- your originals are never touched.");
-    println!();
+    eprintln!("{}", style("How it works:").bold());
+    eprintln!("  Each directory you configure has a role:");
+    eprintln!("    Managed  - read-only, owned by a package manager (e.g. Claude plugins)");
+    eprintln!("    Synced   - skills are discovered AND distributed here");
+    eprintln!("    Source   - skills are discovered here but not distributed");
+    eprintln!("    Target   - skills are distributed here but not discovered");
+    eprintln!();
+    eprintln!("  Tome copies local skills into a central library for safekeeping.");
+    eprintln!("  Managed skills are symlinked instead. Each tool receives symlinks");
+    eprintln!("  into the library -- your originals are never touched.");
+    eprintln!();
 
     // Step 0: Greenfield tome_home prompt (WUX-01)
     // Only runs when:
@@ -209,13 +214,13 @@ pub(crate) fn run(
                 .interact()?;
             if persist {
                 crate::config::write_xdg_tome_home(&chosen_tome_home)?;
-                println!(
+                eprintln!(
                     "  {} Wrote tome_home to ~/.config/tome/config.toml",
                     style("done").green()
                 );
             }
         }
-        println!();
+        eprintln!();
     }
     // Downstream helpers take `&Path`; rebind a borrow under the name they expect.
     // `chosen_tome_home` equals the incoming parameter unless Step 0 chose a custom path.
@@ -274,7 +279,7 @@ pub(crate) fn run(
             .collect();
 
         if editable.is_empty() {
-            println!("  No editable directories (ClaudePlugins are always Managed).");
+            eprintln!("  No editable directories (ClaudePlugins are always Managed).");
             break;
         }
 
@@ -370,7 +375,7 @@ pub(crate) fn run(
         show_directory_summary(&directories);
     }
 
-    println!();
+    eprintln!();
 
     let config = assemble_config(directories, library_dir, exclude);
 
@@ -380,13 +385,13 @@ pub(crate) fn run(
     // disagree with what sync() uses below). This fixes the latent bug where the
     // wizard could display a save path that differed from the one sync() used.
     let config_path = crate::config::resolve_config_dir(tome_home).join("tome.toml");
-    println!(
+    eprintln!(
         "Config will be saved to: {}",
         style(config_path.display()).cyan()
     );
 
     if dry_run {
-        println!("  (dry run -- not saving)");
+        eprintln!("  (dry run -- not saving)");
         // Dry-run validates the same way a real save would, but without writing
         // to disk. Use a clone so we can expand tildes without mutating the
         // original Config (which is returned to the caller).
@@ -403,8 +408,11 @@ pub(crate) fn run(
         // telling the user "this config would save cleanly".
         let _: Config =
             toml::from_str(&toml_str).context("wizard dry-run: generated TOML did not reparse")?;
-        println!();
-        println!("{}", style("Generated config:").bold());
+        // The TOML body itself stays on stdout — it's a programmatic artifact
+        // a user may pipe (e.g. `tome init --dry-run > tome.toml`). Header +
+        // surrounding whitespace are diagnostic chrome and go to stderr.
+        eprintln!();
+        eprintln!("{}", style("Generated config:").bold());
         println!("{}", toml_str);
     } else if no_input
         || Confirm::new()
@@ -417,7 +425,7 @@ pub(crate) fn run(
         config
             .save_checked(&config_path)
             .context("wizard save aborted: configuration is invalid")?;
-        println!("{} Config saved!", style("done").green());
+        eprintln!("{} Config saved!", style("done").green());
 
         // Offer to git-init the tome home directory for backup tracking
         let tome_home = config_path.parent().with_context(|| {
@@ -482,7 +490,7 @@ pub(crate) fn assemble_config(
 // ---------------------------------------------------------------------------
 
 fn step_divider(label: &str) {
-    println!(
+    eprintln!(
         "{}",
         style(format!("-- {label} ----------------------------------")).dim()
     );
@@ -490,7 +498,7 @@ fn step_divider(label: &str) {
 
 fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>) {
     if directories.is_empty() {
-        println!("  (no directories configured)");
+        eprintln!("  (no directories configured)");
         return;
     }
 
@@ -526,8 +534,8 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
         .with(Modify::new(Rows::first()).with(Format::content(|s| style(s).bold().to_string())))
         .with(Width::truncate(term_cols).priority(PriorityMax::right()))
         .to_string();
-    println!("{table}");
-    println!();
+    eprintln!("{table}");
+    eprintln!();
 }
 
 fn configure_directories(
@@ -599,7 +607,7 @@ fn configure_directories(
             );
         }
 
-        println!(
+        eprintln!(
             "  {} {} directory(ies) selected",
             style("v").green(),
             selections.len()
@@ -617,7 +625,7 @@ fn configure_directories(
         }
     }
 
-    println!();
+    eprintln!();
     Ok(directories)
 }
 
@@ -664,7 +672,7 @@ fn configure_library(no_input: bool, tome_home: &Path, prefill: Option<&Path>) -
         paths[selection].clone()
     };
 
-    println!();
+    eprintln!();
     Ok(path)
 }
 
@@ -676,8 +684,8 @@ fn configure_exclusions(
     step_divider("Step 3: Exclusions");
 
     if skills.is_empty() {
-        println!("  (no skills discovered yet -- exclusions can be added manually to config)");
-        println!();
+        eprintln!("  (no skills discovered yet -- exclusions can be added manually to config)");
+        eprintln!();
         // Under empty skill list the prefill is the only source of exclusions.
         return Ok(prefill.cloned().unwrap_or_default());
     }
@@ -715,7 +723,7 @@ fn configure_exclusions(
             },
         )
         .collect();
-    println!();
+    eprintln!();
     Ok(exclude)
 }
 
@@ -866,14 +874,14 @@ fn has_legacy_sections(path: &Path) -> Result<Option<PathBuf>> {
 /// Under `--no-input` the effective default is "leave" per plan spec
 /// (WUX-03 must-haves: "Under --no-input, the legacy file is left alone").
 pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Result<()> {
-    println!();
-    println!(
+    eprintln!();
+    eprintln!(
         "{} Legacy pre-v0.6 config detected: {}",
         style("warning:").yellow(),
         style(legacy_path.display()).cyan()
     );
-    println!("  This file contains [[sources]] or [targets.*] sections, which tome v0.6+");
-    println!("  does not read. It is silently ignored -- likely not what you want.");
+    eprintln!("  This file contains [[sources]] or [targets.*] sections, which tome v0.6+");
+    eprintln!("  does not read. It is silently ignored -- likely not what you want.");
 
     if no_input {
         eprintln!(
@@ -896,7 +904,7 @@ pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Resul
 
     match selection {
         0 => {
-            println!("  {} Left unchanged.", style("note:").cyan());
+            eprintln!("  {} Left unchanged.", style("note:").cyan());
         }
         1 => {
             let ts = std::time::SystemTime::now()
@@ -915,7 +923,7 @@ pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Resul
                     backup_path.display()
                 )
             })?;
-            println!(
+            eprintln!(
                 "  {} Moved to: {}",
                 style("done").green(),
                 style(backup_path.display()).cyan()
@@ -924,7 +932,7 @@ pub(crate) fn handle_legacy_cleanup(legacy_path: &Path, no_input: bool) -> Resul
         2 => {
             std::fs::remove_file(legacy_path)
                 .with_context(|| format!("failed to delete {}", legacy_path.display()))?;
-            println!(
+            eprintln!(
                 "  {} Deleted: {}",
                 style("done").green(),
                 style(legacy_path.display()).cyan()
@@ -966,15 +974,15 @@ pub(crate) fn brownfield_decision(
     no_input: bool,
 ) -> Result<BrownfieldAction> {
     step_divider("Existing config detected");
-    println!(
+    eprintln!(
         "  {} {}",
         style("path:").bold(),
         style(existing_config_path.display()).cyan()
     );
     match existing_config {
         Ok(c) => {
-            println!("  directories: {}", c.directories().len());
-            println!(
+            eprintln!("  directories: {}", c.directories().len());
+            eprintln!(
                 "  library_dir: {}",
                 crate::paths::collapse_home(c.library_dir())
             );
@@ -983,15 +991,15 @@ pub(crate) fn brownfield_decision(
                 && let Ok(mtime) = meta.modified()
                 && let Ok(dur) = std::time::SystemTime::now().duration_since(mtime)
             {
-                println!("  last modified: {} ago", format_duration(dur));
+                eprintln!("  last modified: {} ago", format_duration(dur));
             }
         }
         Err(e) => {
-            println!("  {} {:#}", style("invalid:").red(), e);
-            println!("  ('use existing' and 'edit' unavailable while config is invalid)");
+            eprintln!("  {} {:#}", style("invalid:").red(), e);
+            eprintln!("  ('use existing' and 'edit' unavailable while config is invalid)");
         }
     }
-    println!();
+    eprintln!();
 
     // --no-input: D-3 says default = UseExisting. But refuse to default when
     // the config doesn't parse — in headless mode, advancing with an invalid

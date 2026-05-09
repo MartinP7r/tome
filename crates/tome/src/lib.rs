@@ -24,6 +24,16 @@
 
 pub(crate) mod add;
 pub(crate) mod backup;
+// `browse` is normally `pub(crate)` so the rest of v1.0's GUI Tauri IPC
+// surface doesn't accidentally bind to it. When the `test-support`
+// feature is enabled (used by integration tests in `tests/browse_snapshots/`
+// per HARD-12) it widens to `pub` so the snapshot harness can construct
+// `App` fixtures and call `ui::render` against a `TestBackend`. Production
+// builds (`cargo build` without features) keep the old `pub(crate)`
+// visibility byte-for-byte.
+#[cfg(any(test, feature = "test-support"))]
+pub mod browse;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod browse;
 pub(crate) mod cleanup;
 pub mod cli;
@@ -36,6 +46,13 @@ pub(crate) mod git;
 pub(crate) mod library;
 pub(crate) mod lint;
 pub(crate) mod lockfile;
+// `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
+// v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
+// test (under `test-support`) needs to construct `MachinePrefs` to
+// drive the post-toggle snapshot — same gating as `browse`.
+#[cfg(any(test, feature = "test-support"))]
+pub mod machine;
+#[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod machine;
 pub(crate) mod manifest;
 pub mod marketplace;
@@ -47,6 +64,7 @@ pub(crate) mod relocate;
 pub(crate) mod remove;
 pub(crate) mod skill;
 pub(crate) mod status;
+pub(crate) mod summary;
 pub(crate) mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
@@ -73,6 +91,12 @@ pub use paths::TomePaths;
 /// drift). Production code should still call `manifest::hash_directory`
 /// directly via the crate path.
 pub use manifest::hash_directory;
+
+/// HARD-04: surface lint-failure and migrate-failure typed errors so the
+/// thin `main.rs` binary can downcast and map them to exit code 1 without
+/// the library calling `process::exit` itself.
+pub use lint::LintFailed;
+pub use migration_v010::MigrationPartialOrFailed;
 
 /// Summary of a complete sync operation.
 pub struct SyncReport {
@@ -180,12 +204,16 @@ pub fn run(cli: Cli) -> Result<()> {
         // to be populated (e.g. a stray `TOME_HOME=/wrong/path` in their
         // shell rc). Printed in both interactive and --no-input modes.
         //
+        // HARD-15: this is wizard chrome (informational, around an
+        // interactive flow), so it goes to stderr alongside wizard.rs's
+        // banner. Stdout stays reserved for the dry-run TOML body.
+        //
         // `tome_home_source` is intentionally bound here; later plans in
         // this phase will consume it to gate greenfield prompts (WUX-01).
         let (tome_home, tome_home_source) =
             config::resolve_tome_home_with_source(cli.tome_home.as_deref(), cli.config.as_deref())?;
-        println!();
-        println!(
+        eprintln!();
+        eprintln!(
             "resolved tome_home: {} (from {})",
             style(tome_home.display()).cyan(),
             tome_home_source.label()
@@ -294,8 +322,8 @@ pub fn run(cli: Cli) -> Result<()> {
                     no_triage: true, // skip on initial sync after init
                     no_input: cli.no_input,
                     no_install: false,
-                    verbose: cli.verbose,
-                    quiet: cli.quiet,
+                    verbose: cli.log_level().is_verbose(),
+                    quiet: cli.log_level().is_quiet(),
                     machine_path: &machine_path,
                     machine_prefs: &machine_prefs,
                 },
@@ -320,246 +348,775 @@ pub fn run(cli: Cli) -> Result<()> {
     let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
     let paths = TomePaths::new(tome_home, config.library_dir.clone())?;
 
+    // HARD-02: dispatch via per-subcommand `cmd_<name>` helpers defined later
+    // in this file. Each match arm is a one-line call into the helper, keeping
+    // `run` itself a thin router. Init and Version are dispatched via
+    // early-returns above, so the corresponding arms here are unreachable
+    // contract guards.
     match cli.command {
-        Command::Init => {
-            // Init is dispatched ~150 lines above (see `if matches!(cli.command, Command::Init)`).
-            // Reaching this arm means a refactor broke that early-return contract;
-            // bail so the user sees an actionable error instead of a panic.
-            anyhow::bail!(
-                "internal: Command::Init reached the main dispatch but should have been handled by the early-return path"
-            );
-        }
+        Command::Init => unreachable_early_return("Command::Init"),
+        Command::Version => unreachable_early_return("Command::Version"),
         Command::Add {
             url,
             name,
             branch,
             tag,
             rev,
-        } => {
-            let mut config = config;
-            add::add(
-                &mut config,
-                add::AddOptions {
-                    url: &url,
-                    name: name.as_deref(),
-                    branch: branch.as_deref(),
-                    tag: tag.as_deref(),
-                    rev: rev.as_deref(),
-                    dry_run: cli.dry_run,
-                    config_path: &paths.config_path(),
-                },
-            )?;
-        }
+        } => cmd_add(url, name, branch, tag, rev, config, &paths, cli.dry_run),
         Command::Sync {
             force,
             no_triage,
             no_install,
-        } => sync(
-            &config,
-            &paths,
-            SyncOptions {
-                dry_run: cli.dry_run,
+        } => {
+            let log = cli.log_level();
+            cmd_sync(
                 force,
-                no_triage: no_triage || cli.no_input,
-                no_input: cli.no_input,
+                no_triage,
                 no_install,
-                verbose: cli.verbose,
-                quiet: cli.quiet,
-                machine_path: &machine_path,
-                machine_prefs: &machine_prefs,
-            },
-        )?,
-        Command::Status { json } => status::show(&config, &paths, json)?,
-        Command::Doctor { json } => {
-            doctor::diagnose(&config, &paths, cli.dry_run, cli.no_input, json)?;
+                &config,
+                &paths,
+                &machine_path,
+                &machine_prefs,
+                cli.dry_run,
+                cli.no_input,
+                log.is_verbose(),
+                log.is_quiet(),
+            )
         }
-        Command::Lint { path, format } => {
-            let report = match path {
-                Some(p) => {
-                    let dir_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
-                    let issues = lint::lint_skill(dir_name, &p);
-                    lint::LintReport {
-                        results: vec![(dir_name.to_string(), issues)],
-                        skills_checked: 1,
-                    }
-                }
-                None => lint::lint_library(paths.library_dir()),
-            };
-            match format {
-                cli::LintFormat::Text => lint::render_text(&report),
-                cli::LintFormat::Json => lint::render_json(&report),
-            }
-            if report.has_errors() {
-                std::process::exit(1);
-            }
-        }
+        Command::Status { json } => cmd_status(&config, &paths, json),
+        Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
+        Command::Lint { path, format } => cmd_lint(path, format, &paths),
         Command::Browse => {
-            let mut warnings = Vec::new();
-            let skills = discover::discover_all(&config, &BTreeMap::new(), &mut warnings)?;
-            if !cli.quiet {
-                for w in &warnings {
-                    eprintln!("warning: {}", w);
-                }
-            }
-            if skills.is_empty() {
-                println!("No skills found. Run `tome init` to configure sources.");
-                return Ok(());
-            }
-            let manifest = manifest::load(paths.config_dir())?;
-            browse::browse(skills, &manifest)?;
+            // HARD-21: thread per-machine prefs into browse so the
+            // Detail-mode Disable/Enable toggle can persist via
+            // machine.toml atomic save (D-BROWSE-3 step 2).
+            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+            let machine_prefs = machine::load(&machine_path)?;
+            cmd_browse(
+                &config,
+                &paths,
+                cli.log_level().is_quiet(),
+                machine_prefs,
+                machine_path,
+            )
         }
-        Command::Remove { name, force } => {
-            let manifest = manifest::load(paths.config_dir())?;
-            let plan = remove::plan(&name, &config, &paths, &manifest)?;
-            remove::render_plan(&plan);
-
-            if cli.dry_run {
-                println!("\n{}", style("Dry run — no changes made.").yellow());
-                return Ok(());
-            }
-
-            if !force {
-                if !cli.no_input && std::io::stdin().is_terminal() {
-                    let confirmed = dialoguer::Confirm::new()
-                        .with_prompt(format!("Remove directory '{}'?", name))
-                        .default(false)
-                        .interact()?;
-                    if !confirmed {
-                        println!("Aborted.");
-                        return Ok(());
-                    }
-                } else {
-                    anyhow::bail!(
-                        "tome remove requires confirmation — use --force in non-interactive mode"
-                    );
-                }
-            }
-
-            let mut config = config;
-            let mut manifest = manifest;
-            let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
-
-            // Surface partial-cleanup failures BEFORE the save chain. If any of
-            // config.save / manifest::save / discover_all / lockfile::save returns
-            // Err, `?` would otherwise propagate and the user would only see a
-            // disk-write error — never the ⚠ block or the I2/I3 retention messaging
-            // ("config entry and manifest retained so you can retry"). Returning
-            // here also means in-memory mutations to `config` and `manifest` are
-            // never persisted on the failure path, which is correct: remove::execute
-            // deliberately leaves them in their pre-mutation state when failures
-            // occur, so the disk state on retry matches the in-memory state.
-            if !result.failures.is_empty() {
-                let k = result.failures.len();
-                eprintln!(
-                    "{} {} operations failed during remove of '{}' — config entry and \
-                     manifest retained so you can retry after addressing these. \
-                     Run {} after resolving:",
-                    style("⚠").yellow(),
-                    k,
-                    name,
-                    style("`tome doctor`").bold(),
-                );
-
-                for kind in crate::remove::FailureKind::ALL {
-                    let group: Vec<&crate::remove::RemoveFailure> =
-                        result.failures.iter().filter(|f| f.kind == kind).collect();
-                    if group.is_empty() {
-                        continue;
-                    }
-                    eprintln!("  {} ({}):", kind.label(), group.len());
-                    for f in group {
-                        eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
-                    }
-                }
-
-                return Err(anyhow::anyhow!("remove completed with {k} failures"));
-            }
-
-            // Save updated config
-            config.save(&paths.config_path())?;
-            // Save updated manifest
-            manifest::save(&manifest, paths.config_dir())?;
-            // Regenerate lockfile. Recover git-skill provenance offline from
-            // the previous lockfile + on-disk cache so git-type directories
-            // are not silently dropped during regen (#461 H1). Warnings
-            // collected here are deferred until AFTER the success banner —
-            // see comment below (TEST-04 option a).
-            let (resolved_paths, mut regen_warnings) =
-                lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
-            let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-            let lockfile = lockfile::generate(&manifest, &skills);
-            lockfile::save(&lockfile, paths.config_dir())?;
-
-            // Success banner FIRST (TEST-04 option a — deferred regen-warnings).
-            // The banner is the user's anchor for "what just happened"; warnings
-            // come after as a footnote. Without this ordering, multi-warning
-            // regen output buries the green ✓ confirmation and the user has to
-            // scroll up to find it. The deferred ordering is regression-tested
-            // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
-            // in tests/cli.rs.
-            println!(
-                "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
-                style("✓").green(),
-                name,
-                result.library_entries_transitioned_to_unowned,
-                result.symlinks_removed,
-                if result.git_cache_removed {
-                    ", git cache"
-                } else {
-                    ""
-                },
-            );
-            for w in &regen_warnings {
-                eprintln!("warning: {}", w);
-            }
-        }
-        Command::Reassign { skill, to } => {
-            let mut manifest = manifest::load(paths.config_dir())?;
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, false)?;
-            reassign::render_plan(&plan);
-
-            let target_dir_path = config
-                .directories
-                .get(&config::DirectoryName::new(&to)?)
-                .map(|d| config::expand_tilde(&d.path))
-                .transpose()?
-                .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
-
-            reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
-            if !cli.dry_run {
-                manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync. Recover git-skill
-                // provenance offline from the previous lockfile + on-disk
-                // cache so git-type directories are not silently dropped
-                // during regen (#461 H1).
-                let (resolved_paths, mut regen_warnings) =
-                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
-                let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-                for w in &regen_warnings {
-                    eprintln!("warning: {}", w);
-                }
-                let lockfile_data = lockfile::generate(&manifest, &skills);
-                lockfile::save(&lockfile_data, paths.config_dir())?;
-                println!(
-                    "{} '{}' from '{}' to '{}'",
-                    style("Reassigned").green(),
-                    style(&skill).cyan(),
-                    style(&plan.from_directory).cyan(),
-                    style(&to).cyan(),
-                );
-            }
+        Command::Remove { kind } => cmd_remove(
+            kind,
+            config,
+            &paths,
+            cli.machine.as_deref(),
+            cli.dry_run,
+            cli.no_input,
+        ),
+        Command::Reassign { skill, to, force } => {
+            cmd_reassign(skill, to, force, &config, &paths, cli.dry_run)
         }
         Command::Fork { skill, to, force } => {
-            let mut manifest = manifest::load(paths.config_dir())?;
-            let plan = reassign::plan(&skill, &to, &config, &paths, &manifest, true)?;
-            reassign::render_plan(&plan);
+            cmd_fork(skill, to, force, &config, &paths, cli.dry_run, cli.no_input)
+        }
+        Command::MigrateLibrary { dry_run } => cmd_migrate_library(&paths, dry_run || cli.dry_run),
+        Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
+        Command::Relocate { new_path } => cmd_relocate(
+            new_path,
+            &config,
+            &paths,
+            cli.config.as_deref(),
+            cli.dry_run,
+        ),
+        Command::Completions { shell, print } => cmd_completions(shell, print),
+        Command::List { json } => cmd_list(&config, cli.log_level().is_quiet(), json),
+        Command::Config { path } => cmd_config(&config, path, &paths),
+        Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
+    }
+}
 
+/// Guard for command variants whose handling is dispatched via an early
+/// return at the top of `run()` (Init, Version). Reaching the post-setup
+/// match for one of these means a refactor broke the early-return contract;
+/// bail so the user sees an actionable error instead of a silent fallthrough.
+#[cold]
+fn unreachable_early_return(variant: &str) -> Result<()> {
+    anyhow::bail!(
+        "internal: {variant} reached the main dispatch but should have been handled by the early-return path"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Per-subcommand dispatch helpers (HARD-02)
+//
+// One `cmd_<name>` per `cli::Command` variant. Each helper consumes args
+// already extracted from the variant plus the shared state `run()` resolves
+// once (paths, config, machine prefs). Helpers do NOT re-load config or paths.
+// ---------------------------------------------------------------------------
+
+/// `tome add <url>` — register a git directory in config from a URL.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cmd_add(
+    url: String,
+    name: Option<String>,
+    branch: Option<String>,
+    tag: Option<String>,
+    rev: Option<String>,
+    config: Config,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
+    let mut config = config;
+    add::add(
+        &mut config,
+        add::AddOptions {
+            url: &url,
+            name: name.as_deref(),
+            branch: branch.as_deref(),
+            tag: tag.as_deref(),
+            rev: rev.as_deref(),
+            dry_run,
+            config_path: &paths.config_path(),
+        },
+    )?;
+    Ok(())
+}
+
+/// `tome sync` — run the full discover → consolidate → distribute → cleanup pipeline.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn cmd_sync(
+    force: bool,
+    no_triage: bool,
+    no_install: bool,
+    config: &Config,
+    paths: &TomePaths,
+    machine_path: &Path,
+    machine_prefs: &machine::MachinePrefs,
+    dry_run: bool,
+    no_input: bool,
+    verbose: bool,
+    quiet: bool,
+) -> Result<()> {
+    sync(
+        config,
+        paths,
+        SyncOptions {
+            dry_run,
+            force,
+            no_triage: no_triage || no_input,
+            no_input,
+            no_install,
+            verbose,
+            quiet,
+            machine_path,
+            machine_prefs,
+        },
+    )
+}
+
+/// `tome status` — read-only summary of library, directories, and health.
+pub(crate) fn cmd_status(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
+    status::show(config, paths, json)
+}
+
+/// `tome doctor` — diagnose and (optionally) repair library/symlink issues.
+pub(crate) fn cmd_doctor(
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    no_input: bool,
+    json: bool,
+) -> Result<()> {
+    doctor::diagnose(config, paths, dry_run, no_input, json)
+}
+
+/// `tome lint` — validate skill frontmatter; exits 1 when errors are found.
+pub(crate) fn cmd_lint(
+    path: Option<PathBuf>,
+    format: cli::LintFormat,
+    paths: &TomePaths,
+) -> Result<()> {
+    let report = match path {
+        Some(p) => {
+            let dir_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+            let issues = lint::lint_skill(dir_name, &p);
+            lint::LintReport {
+                results: vec![(dir_name.to_string(), issues)],
+                skills_checked: 1,
+            }
+        }
+        None => lint::lint_library(paths.library_dir()),
+    };
+    match format {
+        cli::LintFormat::Text => lint::render_text(&report),
+        cli::LintFormat::Json => lint::render_json(&report),
+    }
+    // HARD-04: bubble up a downcastable error rather than `process::exit(1)`
+    // so embedding callers can decide how to translate the failure.
+    // `main.rs` downcasts and maps to exit code 1.
+    if report.has_errors() {
+        anyhow::bail!(lint::LintFailed {
+            violations: report.error_count(),
+        });
+    }
+    Ok(())
+}
+
+/// `tome browse` — interactive TUI browser for the discovered skills.
+pub(crate) fn cmd_browse(
+    config: &Config,
+    paths: &TomePaths,
+    quiet: bool,
+    machine_prefs: machine::MachinePrefs,
+    machine_path: std::path::PathBuf,
+) -> Result<()> {
+    let mut warnings = Vec::new();
+    let skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
+    if !quiet {
+        for w in &warnings {
+            eprintln!("warning: {}", w);
+        }
+    }
+    if skills.is_empty() {
+        println!("No skills found. Run `tome init` to configure sources.");
+        return Ok(());
+    }
+    let manifest = manifest::load(paths.config_dir())?;
+    browse::browse(skills, &manifest, machine_prefs, machine_path)?;
+    Ok(())
+}
+
+/// `tome remove dir|skill` — directory removal vs Unowned-skill deletion (D-API-2).
+pub(crate) fn cmd_remove(
+    kind: cli::RemoveKind,
+    config: Config,
+    paths: &TomePaths,
+    cli_machine: Option<&Path>,
+    dry_run: bool,
+    no_input: bool,
+) -> Result<()> {
+    match kind {
+        cli::RemoveKind::Dir { name, force } => {
+            cmd_remove_dir(name, force, config, paths, dry_run, no_input)
+        }
+        cli::RemoveKind::Skill { name, yes } => {
+            cmd_remove_skill(name, yes, &config, paths, cli_machine, dry_run, no_input)
+        }
+    }
+}
+
+/// `tome remove dir <name>` — remove a directory entry from `tome.toml` and
+/// clean up its artifacts (D-API-2). Owned skills transition to Unowned.
+fn cmd_remove_dir(
+    name: String,
+    force: bool,
+    config: Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    no_input: bool,
+) -> Result<()> {
+    let manifest = manifest::load(paths.config_dir())?;
+    let plan = remove::plan(&name, &config, paths, &manifest)?;
+    remove::render_plan(&plan);
+
+    if dry_run {
+        println!("\n{}", style("Dry run — no changes made.").yellow());
+        return Ok(());
+    }
+
+    if !force {
+        if !no_input && std::io::stdin().is_terminal() {
+            let confirmed = dialoguer::Confirm::new()
+                .with_prompt(format!("Remove directory '{}'?", name))
+                .default(false)
+                .interact()?;
+            if !confirmed {
+                println!("Aborted.");
+                return Ok(());
+            }
+        } else {
+            anyhow::bail!(
+                "tome remove requires confirmation — use --force in non-interactive mode"
+            );
+        }
+    }
+
+    let mut config = config;
+    let mut manifest = manifest;
+    let result = remove::execute(&plan, &mut config, &mut manifest, false)?;
+
+    // Surface partial-cleanup failures BEFORE the save chain. If any of
+    // config.save / manifest::save / discover_all / lockfile::save returns
+    // Err, `?` would otherwise propagate and the user would only see a
+    // disk-write error — never the ⚠ block or the I2/I3 retention messaging
+    // ("config entry and manifest retained so you can retry"). Returning
+    // here also means in-memory mutations to `config` and `manifest` are
+    // never persisted on the failure path, which is correct: remove::execute
+    // deliberately leaves them in their pre-mutation state when failures
+    // occur, so the disk state on retry matches the in-memory state.
+    if !result.failures.is_empty() {
+        let k = result.failures.len();
+        eprintln!(
+            "{} {} operations failed during remove of '{}' — config entry and \
+             manifest retained so you can retry after addressing these. \
+             Run {} after resolving:",
+            style("⚠").yellow(),
+            k,
+            name,
+            style("`tome doctor`").bold(),
+        );
+
+        for kind in crate::remove::FailureKind::ALL {
+            let group: Vec<&crate::remove::RemoveFailure> =
+                result.failures.iter().filter(|f| f.kind == kind).collect();
+            if group.is_empty() {
+                continue;
+            }
+            eprintln!("  {} ({}):", kind.label(), group.len());
+            for f in group {
+                eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+            }
+        }
+
+        return Err(anyhow::anyhow!("remove completed with {k} failures"));
+    }
+
+    // Save updated config
+    config.save(&paths.config_path())?;
+    // Save updated manifest
+    manifest::save(&manifest, paths.config_dir())?;
+    // Regenerate lockfile. Recover git-skill provenance offline from
+    // the previous lockfile + on-disk cache so git-type directories
+    // are not silently dropped during regen (#461 H1). Warnings
+    // collected here are deferred until AFTER the success banner —
+    // see comment below (TEST-04 option a).
+    let (resolved_paths, mut regen_warnings) =
+        lockfile::resolved_paths_from_lockfile_cache(&config, paths);
+    let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
+    let lockfile = lockfile::generate(&manifest, &skills);
+    lockfile::save(&lockfile, paths.config_dir())?;
+
+    // Success banner FIRST (TEST-04 option a — deferred regen-warnings).
+    // The banner is the user's anchor for "what just happened"; warnings
+    // come after as a footnote. Without this ordering, multi-warning
+    // regen output buries the green ✓ confirmation and the user has to
+    // scroll up to find it. The deferred ordering is regression-tested
+    // by `lib_rs_remove_handler_prints_success_banner_before_regen_warnings`
+    // in tests/cli.rs.
+    println!(
+        "\n{} Removed directory '{}': {} library entries kept as Unowned, {} symlinks{}",
+        style("✓").green(),
+        name,
+        result.library_entries_transitioned_to_unowned,
+        result.symlinks_removed,
+        if result.git_cache_removed {
+            ", git cache"
+        } else {
+            ""
+        },
+    );
+    for w in &regen_warnings {
+        eprintln!("warning: {}", w);
+    }
+    Ok(())
+}
+
+/// `tome remove skill <name>` — delete an Unowned skill from the library
+/// (manifest entry, library directory, distribution symlinks, lockfile entry,
+/// machine.toml memberships) per Phase 14 D-B1.
+fn cmd_remove_skill(
+    name: String,
+    yes: bool,
+    config: &Config,
+    paths: &TomePaths,
+    cli_machine: Option<&Path>,
+    dry_run: bool,
+    no_input: bool,
+) -> Result<()> {
+    // Load all the pieces skill_plan needs to compute the cleanup
+    // scope (D-B1): manifest entry, lockfile entry, and machine
+    // prefs memberships.
+    let manifest = manifest::load(paths.config_dir())?;
+    let lockfile = lockfile::load(paths.config_dir())?;
+    let machine_path = resolve_machine_path(cli_machine)?;
+    let machine_prefs = machine::load(&machine_path)?;
+
+    let plan = remove::skill_plan(
+        &name,
+        config,
+        paths,
+        &manifest,
+        lockfile.as_ref(),
+        &machine_prefs,
+    )?;
+    remove::skill_render_plan(&plan);
+
+    if dry_run {
+        println!("\n{}", style("Dry run — no changes made.").yellow());
+        return Ok(());
+    }
+
+    // D-B3: confirmation default-no, --yes / -y bypasses. Mirrors
+    // the existing `tome remove dir` confirmation default.
+    if !yes {
+        if !no_input && std::io::stdin().is_terminal() {
+            let confirmed = dialoguer::Confirm::new()
+                .with_prompt(format!("Are you sure you want to forget skill '{}'?", name))
+                .default(false)
+                .interact()?;
+            if !confirmed {
+                println!("Aborted.");
+                return Ok(());
+            }
+        } else {
+            anyhow::bail!(
+                "tome remove skill requires confirmation — use --yes in non-interactive mode"
+            );
+        }
+    }
+
+    let mut manifest = manifest;
+    let mut lockfile = lockfile;
+    let mut machine_prefs = machine_prefs;
+    let result = remove::skill_execute(
+        &plan,
+        &mut manifest,
+        &mut lockfile,
+        &mut machine_prefs,
+        false,
+    )?;
+
+    // SAFE-01 grouped partial-failure summary BEFORE any save call.
+    // skill_execute deliberately leaves manifest/lockfile/machine_prefs
+    // unchanged on partial failure (matches the dir-flavour I2/I3
+    // retention semantic), so returning here without saving keeps
+    // disk state consistent with in-memory state for retry.
+    if !result.failures.is_empty() {
+        let k = result.failures.len();
+        eprintln!(
+            "{} {} operations failed during remove of skill '{}' — \
+             in-memory state retained so you can retry after addressing these. \
+             Run {} after resolving:",
+            style("⚠").yellow(),
+            k,
+            name,
+            style("`tome doctor`").bold(),
+        );
+        for kind in remove::RemoveSkillFailureKind::ALL {
+            let group: Vec<&remove::RemoveSkillFailure> =
+                result.failures.iter().filter(|f| f.kind == kind).collect();
+            if group.is_empty() {
+                continue;
+            }
+            eprintln!("  {} ({}):", kind.label(), group.len());
+            for f in group {
+                eprintln!("    {}: {}", paths::collapse_home(&f.path), f.error);
+            }
+        }
+        return Err(anyhow::anyhow!(
+            "tome remove skill completed with {k} failures"
+        ));
+    }
+
+    // D-B1 atomic-save chain: manifest + lockfile + machine.toml
+    // (each uses temp+rename internally).
+    manifest::save(&manifest, paths.config_dir())?;
+    if let Some(lf) = &lockfile {
+        lockfile::save(lf, paths.config_dir())?;
+    }
+    machine::save(&machine_prefs, &machine_path)?;
+
+    // Success banner. Reports each step that actually cleaned
+    // something so the user sees the full scope of the operation
+    // (library, symlinks, lockfile, machine.toml). Counters that
+    // were no-ops (e.g. skill had no lockfile entry) are omitted.
+    let mut parts: Vec<String> = Vec::new();
+    if result.library_removed {
+        parts.push("library".to_string());
+    }
+    if result.symlinks_removed > 0 {
+        parts.push(format!("{} symlinks", result.symlinks_removed));
+    }
+    if result.lockfile_entry_removed {
+        parts.push("lockfile entry".to_string());
+    }
+    if result.machine_disabled_removed {
+        parts.push("machine.toml disabled".to_string());
+    }
+    if result.per_directory_cleanups > 0 {
+        parts.push(format!(
+            "{} per-directory entries",
+            result.per_directory_cleanups
+        ));
+    }
+    let summary = if parts.is_empty() {
+        "manifest entry only (nothing else to clean)".to_string()
+    } else {
+        parts.join(", ")
+    };
+    println!(
+        "\n{} Forgot skill '{}' — cleaned: {}.",
+        style("✓").green(),
+        name,
+        summary,
+    );
+    Ok(())
+}
+
+/// `tome reassign <skill> --to <dir>` — change skill provenance.
+pub(crate) fn cmd_reassign(
+    skill: String,
+    to: String,
+    force: bool,
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
+    let mut manifest = manifest::load(paths.config_dir())?;
+    let plan = reassign::plan(&skill, &to, config, paths, &manifest, false, force)?;
+    reassign::render_plan(&plan);
+
+    let target_dir_path = config
+        .directories
+        .get(&config::DirectoryName::new(&to)?)
+        .map(|d| config::expand_tilde(&d.path))
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
+
+    reassign::execute(&plan, &mut manifest, &target_dir_path, dry_run)?;
+    if !dry_run {
+        manifest::save(&manifest, paths.config_dir())?;
+        // Regenerate lockfile to keep it in sync. Recover git-skill
+        // provenance offline from the previous lockfile + on-disk
+        // cache so git-type directories are not silently dropped
+        // during regen (#461 H1).
+        let (resolved_paths, mut regen_warnings) =
+            lockfile::resolved_paths_from_lockfile_cache(config, paths);
+        let skills = discover::discover_all(config, &resolved_paths, &mut regen_warnings)?;
+        for w in &regen_warnings {
+            eprintln!("warning: {}", w);
+        }
+        let lockfile_data = lockfile::generate(&manifest, &skills);
+        lockfile::save(&lockfile_data, paths.config_dir())?;
+        let from_label = match &plan.from_directory {
+            Some(d) => style(d.as_str().to_string()).cyan().to_string(),
+            None => style("Unowned").yellow().to_string(),
+        };
+        println!(
+            "{} '{}' from '{}' to '{}'",
+            style("Reassigned").green(),
+            style(&skill).cyan(),
+            from_label,
+            style(&to).cyan(),
+        );
+    }
+    Ok(())
+}
+
+/// `tome fork <skill> --to <dir>` — fork a managed skill to a local directory.
+pub(crate) fn cmd_fork(
+    skill: String,
+    to: String,
+    force: bool,
+    config: &Config,
+    paths: &TomePaths,
+    dry_run: bool,
+    no_input: bool,
+) -> Result<()> {
+    let mut manifest = manifest::load(paths.config_dir())?;
+    // Phase 14 D-A1: Fork shares the reassign::plan path, so Fork's
+    // existing --force flag (skip-confirmation) now also bypasses
+    // the D-A1 different-content collision refusal. The user's
+    // mental model — "--force on fork bypasses safety checks" —
+    // still holds; the surface is just slightly bigger.
+    let plan = reassign::plan(&skill, &to, config, paths, &manifest, true, force)?;
+    reassign::render_plan(&plan);
+
+    if !force {
+        if !no_input && std::io::stdin().is_terminal() {
+            let confirmed = dialoguer::Confirm::new()
+                .with_prompt(format!(
+                    "Fork '{}' to '{}'? This copies skill files to the target directory.",
+                    skill, to
+                ))
+                .default(false)
+                .interact()?;
+            if !confirmed {
+                println!("Aborted.");
+                return Ok(());
+            }
+        } else {
+            anyhow::bail!("tome fork requires confirmation — use --force in non-interactive mode");
+        }
+    }
+
+    let target_dir_path = config
+        .directories
+        .get(&config::DirectoryName::new(&to)?)
+        .map(|d| config::expand_tilde(&d.path))
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
+
+    reassign::execute(&plan, &mut manifest, &target_dir_path, dry_run)?;
+    if !dry_run {
+        manifest::save(&manifest, paths.config_dir())?;
+        // Regenerate lockfile to keep it in sync. Recover git-skill
+        // provenance offline from the previous lockfile + on-disk
+        // cache so git-type directories are not silently dropped
+        // during regen (#461 H1).
+        let (resolved_paths, mut regen_warnings) =
+            lockfile::resolved_paths_from_lockfile_cache(config, paths);
+        let skills = discover::discover_all(config, &resolved_paths, &mut regen_warnings)?;
+        for w in &regen_warnings {
+            eprintln!("warning: {}", w);
+        }
+        let lockfile_data = lockfile::generate(&manifest, &skills);
+        lockfile::save(&lockfile_data, paths.config_dir())?;
+        println!(
+            "{} '{}' to '{}' (local copy created)",
+            style("Forked").green(),
+            style(&skill).cyan(),
+            style(&to).cyan(),
+        );
+    }
+    Ok(())
+}
+
+/// `tome migrate-library` — one-shot v0.9 → v0.10 library migration.
+/// Per D-05: any skip or failure means non-zero exit.
+pub(crate) fn cmd_migrate_library(paths: &TomePaths, dry_run: bool) -> Result<()> {
+    let result = migration_v010::run_migrate_library(paths, dry_run)?;
+    // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
+    // `main.rs` downcasts `MigrationPartialOrFailed` and exits with code 1.
+    if result.is_partial_or_failed() {
+        anyhow::bail!(migration_v010::MigrationPartialOrFailed {
+            skipped_broken_source: result.skipped_broken_source,
+            failed: result.failed,
+        });
+    }
+    Ok(())
+}
+
+/// `tome eject` — remove tome's symlinks from all distribution directories.
+pub(crate) fn cmd_eject(config: &Config, paths: &TomePaths, dry_run: bool) -> Result<()> {
+    let plan = eject::plan(config, paths)?;
+    eject::render_plan(&plan);
+
+    if plan.total_symlinks == 0 {
+        return Ok(());
+    }
+
+    if dry_run {
+        println!("\n{}", style("Dry run — no changes made.").yellow());
+        return Ok(());
+    }
+
+    if std::io::stdin().is_terminal() {
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt("Remove these symlinks?")
+            .default(true)
+            .interact()?;
+        if !confirmed {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    let removed = eject::execute(&plan, false)?;
+    println!(
+        "\n{} Removed {} symlink(s). Run {} to re-distribute.",
+        style("✓").green(),
+        removed,
+        style("tome sync").cyan()
+    );
+    Ok(())
+}
+
+/// `tome relocate <new_path>` — move the skill library to a new location safely.
+pub(crate) fn cmd_relocate(
+    new_path: PathBuf,
+    config: &Config,
+    paths: &TomePaths,
+    cli_config: Option<&Path>,
+    dry_run: bool,
+) -> Result<()> {
+    let config_path = cli_config
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| paths.config_path());
+
+    let plan = relocate::plan(config, paths, &new_path, &config_path)?;
+    relocate::render_plan(&plan);
+
+    if dry_run {
+        println!("\n{}", style("Dry run -- no changes made.").yellow());
+        return Ok(());
+    }
+
+    if std::io::stdin().is_terminal() {
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt("Proceed with relocation?")
+            .default(false)
+            .interact()?;
+        if !confirmed {
+            println!("Aborted.");
+            return Ok(());
+        }
+    } else {
+        anyhow::bail!(
+            "tome relocate requires interactive confirmation -- refusing in non-interactive mode"
+        );
+    }
+
+    relocate::execute(&plan, false)?;
+
+    // Use plain Config::load (no overrides) — relocate verifies the
+    // newly-written config exactly as it lives on disk. Applying
+    // machine overrides here would mask the relocation result.
+    let new_config = Config::load(&config_path)?;
+    relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
+    Ok(())
+}
+
+/// `tome completions <shell>` — print or install shell completions.
+pub(crate) fn cmd_completions(shell: clap_complete::Shell, print: bool) -> Result<()> {
+    if print {
+        print_completions(shell);
+        Ok(())
+    } else {
+        install_completions(shell)
+    }
+}
+
+/// `tome list` — list all discovered skills (text or JSON).
+pub(crate) fn cmd_list(config: &Config, quiet: bool, json: bool) -> Result<()> {
+    list(config, quiet, json)
+}
+
+/// `tome config` — show resolved config (TOML) or just the path.
+pub(crate) fn cmd_config(config: &Config, path: bool, paths: &TomePaths) -> Result<()> {
+    show_config(config, path, &paths.config_path())
+}
+
+/// `tome backup <sub>` — git-backed snapshot/restore for the library.
+pub(crate) fn cmd_backup(sub: cli::BackupCommand, paths: &TomePaths, dry_run: bool) -> Result<()> {
+    match sub {
+        cli::BackupCommand::Init => {
+            backup::init(paths.tome_home(), dry_run)?;
+            // Offer remote setup after successful init (interactive only)
+            if !dry_run && std::io::stdin().is_terminal() && !backup::has_remote(paths.tome_home())
+            {
+                offer_remote_setup(paths.tome_home())?;
+            }
+        }
+        cli::BackupCommand::Snapshot { message } => {
+            backup::snapshot(paths.tome_home(), message.as_deref(), dry_run)?;
+        }
+        cli::BackupCommand::List { count } => {
+            let entries = backup::list(paths.tome_home(), count)?;
+            backup::render_list(&entries);
+        }
+        cli::BackupCommand::Restore { target, force } => {
             if !force {
-                if !cli.no_input && std::io::stdin().is_terminal() {
+                if std::io::stdin().is_terminal() {
                     let confirmed = dialoguer::Confirm::new()
                         .with_prompt(format!(
-                            "Fork '{}' to '{}'? This copies skill files to the target directory.",
-                            skill, to
+                            "Restore to {}? This will overwrite current state",
+                            target
                         ))
                         .default(false)
                         .interact()?;
@@ -569,184 +1126,21 @@ pub fn run(cli: Cli) -> Result<()> {
                     }
                 } else {
                     anyhow::bail!(
-                        "tome fork requires confirmation — use --force in non-interactive mode"
+                        "tome backup restore requires confirmation — use --force in non-interactive mode"
                     );
                 }
             }
-
-            let target_dir_path = config
-                .directories
-                .get(&config::DirectoryName::new(&to)?)
-                .map(|d| config::expand_tilde(&d.path))
-                .transpose()?
-                .ok_or_else(|| anyhow::anyhow!("directory '{}' not found in config", to))?;
-
-            reassign::execute(&plan, &mut manifest, &target_dir_path, cli.dry_run)?;
-            if !cli.dry_run {
-                manifest::save(&manifest, paths.config_dir())?;
-                // Regenerate lockfile to keep it in sync. Recover git-skill
-                // provenance offline from the previous lockfile + on-disk
-                // cache so git-type directories are not silently dropped
-                // during regen (#461 H1).
-                let (resolved_paths, mut regen_warnings) =
-                    lockfile::resolved_paths_from_lockfile_cache(&config, &paths);
-                let skills = discover::discover_all(&config, &resolved_paths, &mut regen_warnings)?;
-                for w in &regen_warnings {
-                    eprintln!("warning: {}", w);
-                }
-                let lockfile_data = lockfile::generate(&manifest, &skills);
-                lockfile::save(&lockfile_data, paths.config_dir())?;
-                println!(
-                    "{} '{}' to '{}' (local copy created)",
-                    style("Forked").green(),
-                    style(&skill).cyan(),
-                    style(&to).cyan(),
-                );
-            }
+            backup::restore(paths.tome_home(), &target, dry_run)?;
         }
-        Command::MigrateLibrary { dry_run } => {
-            // Per D-05: any skip or failure means non-zero exit. The
-            // run_migrate_library helper returns Ok(result) on partial;
-            // we interpret here and `process::exit(1)` on partial-or-failed.
-            let result = migration_v010::run_migrate_library(&paths, dry_run || cli.dry_run)?;
-            if result.is_partial_or_failed() {
-                std::process::exit(1);
-            }
-        }
-        Command::Eject => {
-            let plan = eject::plan(&config, &paths)?;
-            eject::render_plan(&plan);
-
-            if plan.total_symlinks == 0 {
-                return Ok(());
-            }
-
-            if cli.dry_run {
-                println!("\n{}", style("Dry run — no changes made.").yellow());
-                return Ok(());
-            }
-
-            if std::io::stdin().is_terminal() {
-                let confirmed = dialoguer::Confirm::new()
-                    .with_prompt("Remove these symlinks?")
-                    .default(true)
-                    .interact()?;
-                if !confirmed {
-                    println!("Aborted.");
-                    return Ok(());
-                }
-            }
-
-            let removed = eject::execute(&plan, false)?;
-            println!(
-                "\n{} Removed {} symlink(s). Run {} to re-distribute.",
-                style("✓").green(),
-                removed,
-                style("tome sync").cyan()
-            );
-        }
-        Command::Relocate { new_path } => {
-            let config_path = cli.config.clone().unwrap_or_else(|| paths.config_path());
-
-            let plan = relocate::plan(&config, &paths, &new_path, &config_path)?;
-            relocate::render_plan(&plan);
-
-            if cli.dry_run {
-                println!("\n{}", style("Dry run -- no changes made.").yellow());
-                return Ok(());
-            }
-
-            if std::io::stdin().is_terminal() {
-                let confirmed = dialoguer::Confirm::new()
-                    .with_prompt("Proceed with relocation?")
-                    .default(false)
-                    .interact()?;
-                if !confirmed {
-                    println!("Aborted.");
-                    return Ok(());
-                }
+        cli::BackupCommand::Diff { target } => {
+            let diff = backup::diff(paths.tome_home(), &target)?;
+            if diff.is_empty() {
+                println!("No changes since {}", target);
             } else {
-                anyhow::bail!(
-                    "tome relocate requires interactive confirmation -- refusing in non-interactive mode"
-                );
-            }
-
-            relocate::execute(&plan, false)?;
-
-            // Use plain Config::load (no overrides) — relocate verifies the
-            // newly-written config exactly as it lives on disk. Applying
-            // machine overrides here would mask the relocation result.
-            let new_config = Config::load(&config_path)?;
-            relocate::verify(&new_config, &plan.new_library_dir, paths.tome_home())?;
-        }
-        Command::Version => {
-            // Version is dispatched ~500 lines above (see `if matches!(cli.command, Command::Version)`).
-            // Reaching this arm means a refactor broke that early-return contract;
-            // bail so the user sees an actionable error instead of a panic.
-            anyhow::bail!(
-                "internal: Command::Version reached the main dispatch but should have been handled by the early-return path"
-            );
-        }
-        Command::Completions { shell, print } => {
-            if print {
-                print_completions(shell);
-            } else {
-                install_completions(shell)?;
+                println!("{}", diff);
             }
         }
-        Command::List { json } => list(&config, cli.quiet, json)?,
-        Command::Config { path } => show_config(&config, path, &paths.config_path())?,
-        Command::Backup { sub } => match sub {
-            cli::BackupCommand::Init => {
-                backup::init(paths.tome_home(), cli.dry_run)?;
-                // Offer remote setup after successful init (interactive only)
-                if !cli.dry_run
-                    && std::io::stdin().is_terminal()
-                    && !backup::has_remote(paths.tome_home())
-                {
-                    offer_remote_setup(paths.tome_home())?;
-                }
-            }
-            cli::BackupCommand::Snapshot { message } => {
-                backup::snapshot(paths.tome_home(), message.as_deref(), cli.dry_run)?;
-            }
-            cli::BackupCommand::List { count } => {
-                let entries = backup::list(paths.tome_home(), count)?;
-                backup::render_list(&entries);
-            }
-            cli::BackupCommand::Restore { target, force } => {
-                if !force {
-                    if std::io::stdin().is_terminal() {
-                        let confirmed = dialoguer::Confirm::new()
-                            .with_prompt(format!(
-                                "Restore to {}? This will overwrite current state",
-                                target
-                            ))
-                            .default(false)
-                            .interact()?;
-                        if !confirmed {
-                            println!("Aborted.");
-                            return Ok(());
-                        }
-                    } else {
-                        anyhow::bail!(
-                            "tome backup restore requires confirmation — use --force in non-interactive mode"
-                        );
-                    }
-                }
-                backup::restore(paths.tome_home(), &target, cli.dry_run)?;
-            }
-            cli::BackupCommand::Diff { target } => {
-                let diff = backup::diff(paths.tome_home(), &target)?;
-                if diff.is_empty() {
-                    println!("No changes since {}", target);
-                } else {
-                    println!("{}", diff);
-                }
-            }
-        },
     }
-
     Ok(())
 }
 
@@ -978,7 +1372,10 @@ fn apply_edit_decisions(
             reconcile::EditDecision::Fork => {
                 if let Some(entry) = manifest.skills_get_mut(edit.name.as_str()) {
                     entry.managed = false;
-                    entry.source_name = None;
+                    // Per D-C1 (Phase 14, transition site 3): capture
+                    // previous_source before clearing source_name. Closes the
+                    // Phase 13 D-13 lossy fork-in-place gap.
+                    entry.previous_source = entry.source_name.take();
                     mutated = true;
                 }
             }
@@ -1933,6 +2330,56 @@ mod tests {
         assert!(
             target.path().join("disabled-skill").is_symlink(),
             "dry-run should not actually remove"
+        );
+    }
+
+    // -- apply_edit_decisions tests (Phase 14 / D-C1 transition site 3) --
+
+    #[test]
+    fn apply_edit_decisions_fork_records_previous_source() {
+        // Build a minimal manifest with one Owned managed skill and exercise
+        // apply_edit_decisions with EditDecision::Fork — verify the manifest
+        // entry transitions to Unowned (managed=false, source_name=None) AND
+        // captures previous_source per D-C1 / Phase 13 D-13 closure.
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library).unwrap();
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+
+        let mut manifest = manifest::Manifest::default();
+        manifest.insert(
+            discover::SkillName::new("plug").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/plug"),
+                config::DirectoryName::new("claude-plugins").unwrap(),
+                validation::test_hash("h"),
+                true, // managed
+            ),
+        );
+        manifest::save(&manifest, paths.config_dir()).unwrap();
+
+        // Build a ReconcileReport with one Edited entry and Fork decision.
+        let report = reconcile::ReconcileReport {
+            edited: vec![reconcile::Edited {
+                name: discover::SkillName::new("plug").unwrap(),
+                old_source: config::DirectoryName::new("claude-plugins").unwrap(),
+                old_version: Some("1.0.0".to_string()),
+            }],
+            edit_decisions: vec![reconcile::EditDecision::Fork],
+            ..Default::default()
+        };
+
+        apply_edit_decisions(&report, &paths, false).unwrap();
+
+        let reloaded = manifest::load(paths.config_dir()).unwrap();
+        let entry = reloaded.get("plug").unwrap();
+        assert_eq!(entry.source_name, None, "fork-in-place clears source_name");
+        assert!(!entry.managed, "fork-in-place clears managed");
+        assert_eq!(
+            entry.previous_source,
+            Some(config::DirectoryName::new("claude-plugins").unwrap()),
+            "fork-in-place must record previous_source per D-C1 / Phase 13 D-13 closure"
         );
     }
 

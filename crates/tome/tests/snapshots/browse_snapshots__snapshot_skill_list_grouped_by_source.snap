@@ -1,0 +1,44 @@
+---
+source: crates/tome/tests/browse_snapshots.rs
+expression: out
+---
+SKILL                          SOURCE                   PATH
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+── claude-plug                                        │Preview: alpha-helpers
+alpha-helpers  claude-plu ~/.tome/library/alpha-helper│source: claude-plugins
+fixture-skill  claude-plu ~/.tome/library/fixture-skil│path: ~/.tome/library/alpha-helpers
+── local (3) ─                                        │
+beta-tools     local      ~/.tome/library/beta-tools  │alpha-helpers
+foo-bar        local      ~/.tome/library/foo-bar     │A test skill body.
+zeta-utility   local      ~/.tome/library/zeta-utility│
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+                                                      │
+ 5 skills   j/k ↕  / search  s sort:source  tab group  ? help  ⏎ detail  q quit

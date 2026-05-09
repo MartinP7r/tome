@@ -18,6 +18,7 @@ use console::style;
 use std::path::PathBuf;
 
 use crate::config::{Config, DirectoryName, DirectoryRole, DirectoryType};
+use crate::discover::SkillName;
 use crate::manifest::Manifest;
 use crate::paths::TomePaths;
 
@@ -143,6 +144,112 @@ impl RemoveFailure {
         );
         RemoveFailure { kind, path, error }
     }
+}
+
+/// Which step of `tome remove skill` produced a partial-cleanup failure.
+///
+/// Variants follow D-B1 cleanup scope (Phase 14):
+/// 1. `LibraryDir` — `remove_dir_all` failed on `library_dir/<name>/`
+/// 2. `DistributionSymlink` — `remove_file` failed on a per-skill
+///    distribution symlink in some Target/Synced directory
+/// 3. `Lockfile` — `lockfile::save` failed after removing the entry
+/// 4. `MachineToml` — `machine::save` failed after removing memberships
+///
+/// Manifest mutation is in-memory and saves last; if `manifest::save`
+/// fails the error propagates via `?` and never lands here. The aggregate
+/// failure-summary semantic only kicks in for filesystem-touch steps that
+/// need group reporting (Phase 8 SAFE-01 + Phase 10 POLISH-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RemoveSkillFailureKind {
+    LibraryDir,
+    DistributionSymlink,
+    Lockfile,
+    MachineToml,
+}
+
+impl RemoveSkillFailureKind {
+    /// All variants, in the order preferred for user-facing grouped output.
+    pub(crate) const ALL: [RemoveSkillFailureKind; 4] = [
+        RemoveSkillFailureKind::LibraryDir,
+        RemoveSkillFailureKind::DistributionSymlink,
+        RemoveSkillFailureKind::Lockfile,
+        RemoveSkillFailureKind::MachineToml,
+    ];
+
+    /// Human-readable label used in the grouped failure summary.
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            RemoveSkillFailureKind::LibraryDir => "Library directory",
+            RemoveSkillFailureKind::DistributionSymlink => "Distribution symlinks",
+            RemoveSkillFailureKind::Lockfile => "Lockfile",
+            RemoveSkillFailureKind::MachineToml => "Machine prefs",
+        }
+    }
+}
+
+/// Compile-time drift guard for `RemoveSkillFailureKind::ALL` (POLISH-04 option c).
+/// Mirrors `_ensure_failure_kind_all_exhaustive` for `FailureKind`.
+#[allow(dead_code)]
+const fn _ensure_remove_skill_failure_kind_all_exhaustive(k: RemoveSkillFailureKind) -> usize {
+    match k {
+        RemoveSkillFailureKind::LibraryDir => 0,
+        RemoveSkillFailureKind::DistributionSymlink => 1,
+        RemoveSkillFailureKind::Lockfile => 2,
+        RemoveSkillFailureKind::MachineToml => 3,
+    }
+}
+
+const _: () = {
+    // If this fails: RemoveSkillFailureKind::ALL is missing or has extra
+    // variants. The match arms in
+    // _ensure_remove_skill_failure_kind_all_exhaustive are the source
+    // of truth — ALL must contain exactly one entry per arm.
+    assert!(RemoveSkillFailureKind::ALL.len() == 4);
+};
+
+/// A single partial-cleanup failure aggregated from `skill_execute`.
+/// Mirror of `RemoveFailure` for the `skill` flavour.
+#[derive(Debug)]
+pub(crate) struct RemoveSkillFailure {
+    pub path: PathBuf,
+    pub kind: RemoveSkillFailureKind,
+    pub error: std::io::Error,
+}
+
+impl RemoveSkillFailure {
+    /// Construct a `RemoveSkillFailure` (POLISH-05 mirror).
+    ///
+    /// The path MUST be absolute — downstream rendering uses
+    /// `paths::collapse_home(&f.path)` which expects an absolute path.
+    /// Debug-only via `debug_assert!` to keep release builds zero-cost.
+    pub(crate) fn new(kind: RemoveSkillFailureKind, path: PathBuf, error: std::io::Error) -> Self {
+        debug_assert!(
+            path.is_absolute(),
+            "RemoveSkillFailure::path must be absolute, got: {}",
+            path.display()
+        );
+        RemoveSkillFailure { kind, path, error }
+    }
+}
+
+/// What `tome remove skill <name>` will do (per D-B1).
+#[derive(Debug)]
+pub(crate) struct RemoveSkillPlan {
+    /// Skill name being deleted.
+    pub skill_name: SkillName,
+    /// Library directory path (`library_dir/<skill_name>/`). Absolute.
+    pub library_path: PathBuf,
+    /// Distribution symlinks pointing at this skill in target/synced dirs.
+    /// Each path is absolute.
+    pub symlinks_to_remove: Vec<PathBuf>,
+    /// Whether the skill has a lockfile entry that needs deleting.
+    pub has_lockfile_entry: bool,
+    /// Whether the skill is in `machine.toml::disabled`.
+    pub in_machine_disabled: bool,
+    /// Per-directory machine.toml memberships to clean. Each tuple is
+    /// `(directory_name, in_enabled, in_disabled)`. Empty when the skill
+    /// isn't referenced by any per-directory list.
+    pub per_directory_memberships: Vec<(DirectoryName, bool, bool)>,
 }
 
 /// Result of executing the remove plan.
@@ -358,7 +465,11 @@ pub(crate) fn execute(
     if !dry_run && failures.is_empty() {
         for skill_name in &plan.skills {
             if let Some(entry) = manifest.skills_get_mut(skill_name) {
-                entry.source_name = None;
+                // Per D-C1 (Phase 14, transition site 2): capture
+                // previous_source before flipping to Unowned so the user can
+                // see the original owner name in `tome status` after this
+                // directory is gone from config.
+                entry.previous_source = entry.source_name.take();
                 library_entries_transitioned_to_unowned += 1;
             }
         }
@@ -372,6 +483,293 @@ pub(crate) fn execute(
         symlinks_removed,
         library_entries_transitioned_to_unowned,
         git_cache_removed,
+        failures,
+    })
+}
+
+// ============================================================================
+// `tome remove skill <name>` — Phase 14 Plan 14-05 (UNOWN-02)
+// ============================================================================
+//
+// Mirror of the `dir`-flavour `plan/render_plan/execute` triple above, for
+// deleting an Unowned skill from the library. Cleanup scope per D-B1:
+//
+//   1. manifest[name] entry (Manifest::remove)
+//   2. library_dir/<name>/ directory tree (std::fs::remove_dir_all)
+//   3. Distribution symlinks for the skill in every distribution-role dir
+//   4. tome.lock entry for the skill (LockEntry removal)
+//   5. machine.toml::disabled set membership
+//   6. machine.toml::directories.<dir>.enabled / .disabled list memberships
+//
+// D-B2: Owned skills are refused (no --force bypass).
+// D-B3: caller (lib.rs::run) handles confirmation default-no, --yes bypass.
+// SAFE-01 + POLISH-04: failures aggregate via RemoveSkillFailureKind::ALL
+// with compile-time exhaustiveness pinning (above).
+
+/// Result of `skill_execute`.
+#[derive(Debug)]
+pub(crate) struct RemoveSkillResult {
+    pub library_removed: bool,
+    pub symlinks_removed: usize,
+    pub lockfile_entry_removed: bool,
+    pub machine_disabled_removed: bool,
+    pub per_directory_cleanups: usize,
+    /// Partial-cleanup failures aggregated from `skill_execute`. Empty on
+    /// full success. On any failure, in-memory state (manifest, lockfile,
+    /// machine_prefs) is NOT mutated — matching the dir-flavour I2/I3
+    /// retention semantic so the caller can retry after addressing the
+    /// underlying cause without losing state.
+    pub failures: Vec<RemoveSkillFailure>,
+}
+
+/// Build a plan for `tome remove skill <name>`. Refuses Owned skills (D-B2).
+pub(crate) fn skill_plan(
+    name: &str,
+    config: &Config,
+    paths: &TomePaths,
+    manifest: &Manifest,
+    lockfile: Option<&crate::lockfile::Lockfile>,
+    machine_prefs: &crate::machine::MachinePrefs,
+) -> Result<RemoveSkillPlan> {
+    // Validate skill exists in manifest.
+    let entry = manifest
+        .get(name)
+        .ok_or_else(|| anyhow::anyhow!("skill '{}' not found in library", name))?;
+
+    // D-B2 owned guard: refuse to operate on Owned skills. No --force bypass —
+    // the source file is still on disk and the next `tome sync` would
+    // re-discover the skill. The hint points at actionable paths.
+    if let Some(owner) = &entry.source_name {
+        anyhow::bail!(
+            "skill '{}' is owned by directory '{}' (source_name = {}). \
+             Remove the source directory with `tome remove dir {}` first, \
+             or remove the file from disk and re-sync.",
+            name,
+            owner,
+            owner,
+            owner,
+        );
+    }
+
+    let skill_name =
+        SkillName::new(name).with_context(|| format!("invalid skill name in manifest: {name}"))?;
+    let library_path = paths.library_dir().join(name);
+
+    // Find distribution symlinks pointing at this skill across every
+    // distribution-role directory (Target or Synced).
+    let mut symlinks_to_remove = Vec::new();
+    for other_config in config.directories.values() {
+        let role = other_config.role();
+        if !role.is_distribution() {
+            continue;
+        }
+        let skills_dir = match crate::config::expand_tilde(&other_config.path) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !skills_dir.is_dir() {
+            continue;
+        }
+        let candidate = skills_dir.join(name);
+        // is_symlink() returns true for both intact and broken symlinks; both
+        // should be cleaned up. A non-symlink with the same name (e.g. a real
+        // directory the user created manually) is left alone.
+        if candidate.is_symlink() {
+            symlinks_to_remove.push(candidate);
+        }
+    }
+
+    // Lockfile membership.
+    let has_lockfile_entry = lockfile
+        .map(|lf| lf.skills.contains_key(&skill_name))
+        .unwrap_or(false);
+
+    // machine.toml memberships.
+    let in_machine_disabled = machine_prefs.is_disabled(name);
+
+    let mut per_directory_memberships: Vec<(DirectoryName, bool, bool)> = Vec::new();
+    for (dir_name, dir_prefs) in &machine_prefs.directory {
+        let in_enabled = dir_prefs
+            .enabled
+            .as_ref()
+            .map(|set| set.iter().any(|s| s.as_str() == name))
+            .unwrap_or(false);
+        let in_disabled = dir_prefs.disabled.iter().any(|s| s.as_str() == name);
+        if in_enabled || in_disabled {
+            per_directory_memberships.push((dir_name.clone(), in_enabled, in_disabled));
+        }
+    }
+
+    Ok(RemoveSkillPlan {
+        skill_name,
+        library_path,
+        symlinks_to_remove,
+        has_lockfile_entry,
+        in_machine_disabled,
+        per_directory_memberships,
+    })
+}
+
+/// Render the skill-removal plan to stdout.
+pub(crate) fn skill_render_plan(plan: &RemoveSkillPlan) {
+    println!(
+        "Forget skill plan for '{}':",
+        style(plan.skill_name.as_str()).cyan()
+    );
+    if plan.library_path.exists() {
+        println!(
+            "  Library directory will be removed: {}",
+            style(crate::paths::collapse_home(&plan.library_path)).dim()
+        );
+    }
+    if !plan.symlinks_to_remove.is_empty() {
+        println!(
+            "  Distribution symlinks to remove: {}",
+            style(plan.symlinks_to_remove.len()).bold()
+        );
+    }
+    if plan.has_lockfile_entry {
+        println!("  Lockfile entry will be removed.");
+    }
+    if plan.in_machine_disabled {
+        println!("  Membership in `machine.toml::disabled` will be removed.");
+    }
+    if !plan.per_directory_memberships.is_empty() {
+        println!(
+            "  Per-directory machine.toml memberships to clean: {}",
+            style(plan.per_directory_memberships.len()).bold()
+        );
+        for (dir, in_e, in_d) in &plan.per_directory_memberships {
+            let parts: Vec<&str> = match (in_e, in_d) {
+                (true, true) => vec!["enabled", "disabled"],
+                (true, false) => vec!["enabled"],
+                (false, true) => vec!["disabled"],
+                (false, false) => continue,
+            };
+            println!("    - {}: {}", dir, parts.join(", "));
+        }
+    }
+}
+
+/// Execute the skill-removal plan.
+///
+/// On full success, mutates manifest, lockfile, and machine_prefs in memory.
+/// Caller is responsible for calling `manifest::save` / `lockfile::save` /
+/// `machine::save` (atomic temp+rename) — this function does no disk writes
+/// for those three artifacts.
+///
+/// On partial filesystem failure (LibraryDir or DistributionSymlink), returns
+/// `failures` without mutating in-memory state — matching the dir-flavour
+/// I2/I3 retention semantic so the caller can retry after addressing the
+/// underlying cause.
+///
+/// `dry_run = true` skips all filesystem and in-memory mutation but still
+/// reports would-be counters in the result.
+pub(crate) fn skill_execute(
+    plan: &RemoveSkillPlan,
+    manifest: &mut Manifest,
+    lockfile: &mut Option<crate::lockfile::Lockfile>,
+    machine_prefs: &mut crate::machine::MachinePrefs,
+    dry_run: bool,
+) -> Result<RemoveSkillResult> {
+    let mut failures: Vec<RemoveSkillFailure> = Vec::new();
+    let mut library_removed = false;
+    let mut symlinks_removed = 0usize;
+
+    // 1. Remove library directory.
+    if plan.library_path.exists() {
+        if dry_run {
+            library_removed = true;
+        } else {
+            match std::fs::remove_dir_all(&plan.library_path) {
+                Ok(_) => library_removed = true,
+                Err(e) => failures.push(RemoveSkillFailure::new(
+                    RemoveSkillFailureKind::LibraryDir,
+                    plan.library_path.clone(),
+                    e,
+                )),
+            }
+        }
+    }
+
+    // 2. Remove distribution symlinks.
+    for symlink in &plan.symlinks_to_remove {
+        if dry_run {
+            symlinks_removed += 1;
+        } else {
+            match std::fs::remove_file(symlink) {
+                Ok(_) => symlinks_removed += 1,
+                Err(e) => failures.push(RemoveSkillFailure::new(
+                    RemoveSkillFailureKind::DistributionSymlink,
+                    symlink.clone(),
+                    e,
+                )),
+            }
+        }
+    }
+
+    // On partial filesystem failure: bail out before mutating in-memory state.
+    // The caller will not call save() on this branch, so disk state remains
+    // consistent (matches dir-flavour I2/I3 retention).
+    let mut lockfile_entry_removed = false;
+    let mut machine_disabled_removed = false;
+    let mut per_directory_cleanups = 0usize;
+
+    if failures.is_empty() && !dry_run {
+        // 3. Remove lockfile entry (in-memory).
+        if let Some(lf) = lockfile.as_mut()
+            && lf.skills.remove(&plan.skill_name).is_some()
+        {
+            lockfile_entry_removed = true;
+        }
+
+        // 4. Remove machine.toml::disabled membership (in-memory).
+        if machine_prefs
+            .disabled
+            .iter()
+            .any(|s| s.as_str() == plan.skill_name.as_str())
+        {
+            machine_prefs
+                .disabled
+                .retain(|s| s.as_str() != plan.skill_name.as_str());
+            machine_disabled_removed = true;
+        }
+
+        // 5. Remove per-directory memberships (in-memory).
+        for (dir_name, _in_e, _in_d) in &plan.per_directory_memberships {
+            if let Some(dir_prefs) = machine_prefs.directory.get_mut(dir_name) {
+                let before_e = dir_prefs.enabled.as_ref().map(|s| s.len()).unwrap_or(0);
+                if let Some(enabled) = dir_prefs.enabled.as_mut() {
+                    enabled.retain(|s| s.as_str() != plan.skill_name.as_str());
+                }
+                let after_e = dir_prefs.enabled.as_ref().map(|s| s.len()).unwrap_or(0);
+                let before_d = dir_prefs.disabled.len();
+                dir_prefs
+                    .disabled
+                    .retain(|s| s.as_str() != plan.skill_name.as_str());
+                let after_d = dir_prefs.disabled.len();
+                if (before_e > after_e) || (before_d > after_d) {
+                    per_directory_cleanups += 1;
+                }
+            }
+        }
+
+        // 6. Remove manifest entry (in-memory). Last so the in-memory mutation
+        //    sequence matches the lockfile/machine.toml ordering and a panic
+        //    mid-sequence still leaves the manifest entry available for retry.
+        manifest.remove(plan.skill_name.as_str());
+    } else if dry_run {
+        lockfile_entry_removed = plan.has_lockfile_entry;
+        machine_disabled_removed = plan.in_machine_disabled;
+        per_directory_cleanups = plan.per_directory_memberships.len();
+    }
+
+    Ok(RemoveSkillResult {
+        library_removed,
+        symlinks_removed,
+        lockfile_entry_removed,
+        machine_disabled_removed,
+        per_directory_cleanups,
         failures,
     })
 }
@@ -630,6 +1028,23 @@ mod tests {
         );
     }
 
+    #[test]
+    fn execute_records_previous_source_on_unowned_transition() {
+        let (_tmp, mut config, paths, mut manifest) = make_test_setup();
+        let p = plan("test-source", &config, &paths, &manifest).unwrap();
+
+        let result = execute(&p, &mut config, &mut manifest, false).unwrap();
+        assert_eq!(result.library_entries_transitioned_to_unowned, 1);
+
+        let entry = manifest.get("my-skill").unwrap();
+        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.previous_source,
+            Some(DirectoryName::new("test-source").unwrap()),
+            "previous_source must record the original owner per D-C1"
+        );
+    }
+
     /// Cover FailureKind::label() exhaustively — pins user-visible label
     /// strings for every variant (a rename in one variant would fail here).
     /// In v0.10 (LIB-04 / Plan 11-03) the LibraryDir/LibrarySymlink variants
@@ -722,5 +1137,568 @@ mod tests {
         );
         assert_eq!(f.kind, FailureKind::DistributionSymlink);
         assert_eq!(f.path, PathBuf::from("/abs/path"));
+    }
+
+    // === Phase 14 Plan 14-05 Task 1: RemoveSkillFailureKind tests ===
+    //
+    // Mirror of the `FailureKind` runtime tests above. Pin the variant
+    // count, label coverage, ALL ordering, and pairwise uniqueness so a
+    // hand-edit that grows the enum without growing ALL fails CI.
+
+    #[test]
+    fn remove_skill_failure_kind_all_pinned_size_four() {
+        assert_eq!(RemoveSkillFailureKind::ALL.len(), 4);
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::LibraryDir));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::DistributionSymlink));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::Lockfile));
+        assert!(RemoveSkillFailureKind::ALL.contains(&RemoveSkillFailureKind::MachineToml));
+    }
+
+    #[test]
+    fn remove_skill_failure_kind_label_coverage() {
+        assert_eq!(
+            RemoveSkillFailureKind::LibraryDir.label(),
+            "Library directory"
+        );
+        assert_eq!(
+            RemoveSkillFailureKind::DistributionSymlink.label(),
+            "Distribution symlinks"
+        );
+        assert_eq!(RemoveSkillFailureKind::Lockfile.label(), "Lockfile");
+        assert_eq!(RemoveSkillFailureKind::MachineToml.label(), "Machine prefs");
+    }
+
+    #[test]
+    fn remove_skill_failure_kind_all_unique() {
+        let all = RemoveSkillFailureKind::ALL;
+        for (i, a) in all.iter().enumerate() {
+            for b in all.iter().skip(i + 1) {
+                assert_ne!(a, b, "ALL contains duplicate variant {a:?}");
+            }
+        }
+    }
+
+    /// `RemoveSkillFailureKind::ALL` ordering is part of the user-visible
+    /// grouping contract (consumed by lib.rs::run in Task 3). A reorder is
+    /// a UI change that must require an explicit code edit.
+    #[test]
+    fn remove_skill_failure_kind_all_ordering_pinned() {
+        assert_eq!(
+            RemoveSkillFailureKind::ALL,
+            [
+                RemoveSkillFailureKind::LibraryDir,
+                RemoveSkillFailureKind::DistributionSymlink,
+                RemoveSkillFailureKind::Lockfile,
+                RemoveSkillFailureKind::MachineToml,
+            ],
+            "RemoveSkillFailureKind::ALL ordering is part of the user-visible grouping contract"
+        );
+    }
+
+    /// POLISH-05 mirror: `RemoveSkillFailure::new` carries a debug-only
+    /// `is_absolute` invariant. Debug builds panic on relative paths;
+    /// release builds compile out the assert.
+    #[test]
+    fn remove_skill_failure_new_relative_path_panics_in_debug() {
+        let result = std::panic::catch_unwind(|| {
+            RemoveSkillFailure::new(
+                RemoveSkillFailureKind::LibraryDir,
+                PathBuf::from("relative/path"),
+                std::io::Error::other("test"),
+            )
+        });
+        if cfg!(debug_assertions) {
+            assert!(result.is_err(), "debug build must panic on relative path");
+        } else {
+            assert!(
+                result.is_ok(),
+                "release build must allow construction (debug_assert compiled out)"
+            );
+        }
+    }
+
+    #[test]
+    fn remove_skill_failure_new_absolute_path_succeeds() {
+        let f = RemoveSkillFailure::new(
+            RemoveSkillFailureKind::Lockfile,
+            PathBuf::from("/abs/lock.toml"),
+            std::io::Error::other("test"),
+        );
+        assert_eq!(f.kind, RemoveSkillFailureKind::Lockfile);
+        assert_eq!(f.path, PathBuf::from("/abs/lock.toml"));
+    }
+
+    // === Phase 14 Plan 14-05 Task 2: skill_plan / skill_execute tests ===
+
+    /// D-B2: skill_plan refuses to operate on Owned skills with the verbatim
+    /// error message containing the actionable hint.
+    #[test]
+    fn skill_plan_refuses_owned_skill() {
+        let (_tmp, config, paths, manifest) = make_test_setup();
+        // make_test_setup creates an Owned "my-skill" in test-source.
+        let lockfile = None;
+        let machine_prefs = crate::machine::MachinePrefs::default();
+        let err = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile,
+            &machine_prefs,
+        )
+        .expect_err("must refuse Owned per D-B2")
+        .to_string();
+        assert!(err.contains("is owned by directory"), "got: {err}");
+        assert!(err.contains("Remove the source directory"), "got: {err}");
+        assert!(err.contains("tome remove dir"), "got: {err}");
+    }
+
+    /// skill_plan errors when the named skill isn't in the manifest at all.
+    #[test]
+    fn skill_plan_skill_not_in_library() {
+        let (_tmp, config, paths, manifest) = make_test_setup();
+        let lockfile = None;
+        let machine_prefs = crate::machine::MachinePrefs::default();
+        let err = skill_plan(
+            "nonexistent",
+            &config,
+            &paths,
+            &manifest,
+            lockfile,
+            &machine_prefs,
+        )
+        .err()
+        .unwrap()
+        .to_string();
+        assert!(err.contains("not found in library"));
+    }
+
+    /// D-B1 happy path: skill_execute removes manifest, library directory,
+    /// distribution symlinks, lockfile entry, and machine.toml memberships
+    /// in one shot.
+    #[test]
+    fn skill_execute_full_cleanup_happy_path() {
+        let (tmp, config, paths, mut manifest) = make_test_setup();
+        // Transition my-skill to Unowned for this test (production callers
+        // never pass an Owned skill to skill_execute — D-B2 guard above).
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        // Build fake lockfile with my-skill.
+        use crate::lockfile::{LockEntry, Lockfile};
+        use std::collections::BTreeMap;
+        let mut skills = BTreeMap::new();
+        skills.insert(
+            SkillName::new("my-skill").unwrap(),
+            LockEntry {
+                source_name: None,
+                previous_source: None,
+                content_hash: test_hash(),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let mut lockfile = Some(Lockfile { version: 1, skills });
+
+        // Build machine_prefs with my-skill disabled.
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+        machine_prefs.disable(SkillName::new("my-skill").unwrap());
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+        assert!(plan.has_lockfile_entry);
+        assert!(plan.in_machine_disabled);
+        assert_eq!(plan.symlinks_to_remove.len(), 1);
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+        assert!(result.library_removed);
+        assert_eq!(result.symlinks_removed, 1, "1 dist symlink in fixture");
+        assert!(result.lockfile_entry_removed);
+        assert!(result.machine_disabled_removed);
+        assert!(result.failures.is_empty());
+
+        // Verify in-memory state.
+        assert!(!manifest.contains_key("my-skill"));
+        assert!(
+            !lockfile
+                .as_ref()
+                .unwrap()
+                .skills
+                .contains_key(&SkillName::new("my-skill").unwrap())
+        );
+        assert!(!machine_prefs.is_disabled("my-skill"));
+
+        // Verify on-disk state.
+        assert!(!tmp.path().join("library").join("my-skill").exists());
+        assert!(!tmp.path().join("target").join("my-skill").exists());
+    }
+
+    /// D-B1 partial: skill not in lockfile is OK — just skip the lockfile
+    /// step (no error).
+    #[test]
+    fn skill_execute_skill_not_in_lockfile_succeeds() {
+        let (_tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+        assert!(!plan.has_lockfile_entry);
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+        assert!(result.failures.is_empty());
+        assert!(!result.lockfile_entry_removed);
+        assert!(!manifest.contains_key("my-skill"));
+    }
+
+    /// D-B1 partial: skill not in machine.toml is OK — no error, no mutation
+    /// of the machine_disabled bool.
+    #[test]
+    fn skill_execute_skill_not_in_machine_toml_succeeds() {
+        let (_tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+        assert!(!plan.in_machine_disabled);
+        assert!(plan.per_directory_memberships.is_empty());
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+        assert!(result.failures.is_empty());
+        assert!(!result.machine_disabled_removed);
+        assert_eq!(result.per_directory_cleanups, 0);
+    }
+
+    /// SAFE-01 partial-failure aggregation: when a distribution-symlink
+    /// delete fails, the failure is recorded and in-memory state retained.
+    #[test]
+    fn skill_execute_partial_failure_preserves_in_memory_state() {
+        let (tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+        assert_eq!(plan.symlinks_to_remove.len(), 1);
+
+        // Pre-delete the dist symlink so std::fs::remove_file fails with ENOENT
+        // during execute's symlink loop.
+        let dist_symlink = tmp.path().join("target").join("my-skill");
+        std::fs::remove_file(&dist_symlink).ok();
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+        assert!(
+            !result.failures.is_empty(),
+            "expected DistributionSymlink failure"
+        );
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|f| f.kind == RemoveSkillFailureKind::DistributionSymlink),
+            "expected DistributionSymlink kind, got: {:?}",
+            result.failures
+        );
+
+        // I2/I3 retention: manifest entry retained on partial failure so the
+        // user can re-run after addressing the underlying cause.
+        assert!(
+            manifest.contains_key("my-skill"),
+            "manifest entry must be preserved on partial failure for retry"
+        );
+    }
+
+    /// SAFE-01 partial-failure on the library_dir step: when remove_dir_all
+    /// fails (here simulated by pre-deleting the library dir so ENOENT is
+    /// returned), the failure is recorded and in-memory state retained.
+    #[test]
+    fn skill_execute_library_dir_failure_preserves_state() {
+        // Note: std::fs::remove_dir_all on a missing path returns Ok in
+        // recent Rust. We synthesise a real failure by passing a path that
+        // exists but is a regular file (remove_dir_all returns NotADirectory).
+        let (tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        // Replace the library dir with a regular file so remove_dir_all errors.
+        let lib_path = tmp.path().join("library").join("my-skill");
+        std::fs::remove_dir_all(&lib_path).unwrap();
+        std::fs::write(&lib_path, "not a dir").unwrap();
+
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            result
+                .failures
+                .iter()
+                .any(|f| f.kind == RemoveSkillFailureKind::LibraryDir),
+            "expected LibraryDir failure, got: {:?}",
+            result.failures
+        );
+        // I2/I3 retention.
+        assert!(manifest.contains_key("my-skill"));
+    }
+
+    /// dry_run = true: nothing is mutated; counters reflect would-be ops.
+    #[test]
+    fn skill_execute_dry_run_no_mutation() {
+        let (tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            true,
+        )
+        .unwrap();
+        // Counters reflect would-be operations.
+        assert!(result.library_removed);
+        assert_eq!(result.symlinks_removed, 1);
+        // Manifest still has it.
+        assert!(manifest.contains_key("my-skill"));
+        // Library still on disk.
+        assert!(tmp.path().join("library").join("my-skill").exists());
+        // Distribution symlink still on disk.
+        assert!(tmp.path().join("target").join("my-skill").is_symlink());
+    }
+
+    /// D-B1 step 6 (per-directory memberships): cleanup of both `enabled`
+    /// and `disabled` lists across multiple directories.
+    #[test]
+    fn skill_execute_cleans_per_directory_memberships() {
+        use crate::machine::DirectoryPrefs;
+
+        let (_tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        let mut lockfile: Option<crate::lockfile::Lockfile> = None;
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+
+        // Add per-directory memberships across two directories: one in
+        // `disabled`, one in `enabled`.
+        machine_prefs.directory.insert(
+            DirectoryName::new("test-source").unwrap(),
+            DirectoryPrefs {
+                disabled: [SkillName::new("my-skill").unwrap()].into_iter().collect(),
+                ..Default::default()
+            },
+        );
+        machine_prefs.directory.insert(
+            DirectoryName::new("test-target").unwrap(),
+            DirectoryPrefs {
+                enabled: Some([SkillName::new("my-skill").unwrap()].into_iter().collect()),
+                ..Default::default()
+            },
+        );
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+        assert_eq!(plan.per_directory_memberships.len(), 2);
+
+        let result = skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+        assert!(result.failures.is_empty());
+        assert_eq!(result.per_directory_cleanups, 2);
+
+        // Verify the lists are now empty.
+        let src_prefs = machine_prefs
+            .directory
+            .get(&DirectoryName::new("test-source").unwrap())
+            .unwrap();
+        assert!(src_prefs.disabled.is_empty());
+        let tgt_prefs = machine_prefs
+            .directory
+            .get(&DirectoryName::new("test-target").unwrap())
+            .unwrap();
+        assert!(
+            tgt_prefs
+                .enabled
+                .as_ref()
+                .map(|s| s.is_empty())
+                .unwrap_or(true)
+        );
+    }
+
+    /// Atomic save round-trip: after `skill_execute` mutates lockfile +
+    /// machine_prefs in memory, calling lockfile::save and machine::save
+    /// produces a clean on-disk state with the entries gone.
+    #[test]
+    fn skill_execute_save_round_trip() {
+        use crate::lockfile::{LockEntry, Lockfile};
+        use std::collections::BTreeMap;
+
+        let (tmp, config, paths, mut manifest) = make_test_setup();
+        let entry = manifest.skills_get_mut("my-skill").unwrap();
+        entry.source_name = None;
+
+        // Lockfile with my-skill entry.
+        let mut skills = BTreeMap::new();
+        skills.insert(
+            SkillName::new("my-skill").unwrap(),
+            LockEntry {
+                source_name: None,
+                previous_source: None,
+                content_hash: test_hash(),
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let mut lockfile = Some(Lockfile { version: 1, skills });
+
+        // Machine prefs with my-skill disabled.
+        let mut machine_prefs = crate::machine::MachinePrefs::default();
+        machine_prefs.disable(SkillName::new("my-skill").unwrap());
+
+        let plan = skill_plan(
+            "my-skill",
+            &config,
+            &paths,
+            &manifest,
+            lockfile.as_ref(),
+            &machine_prefs,
+        )
+        .unwrap();
+
+        skill_execute(
+            &plan,
+            &mut manifest,
+            &mut lockfile,
+            &mut machine_prefs,
+            false,
+        )
+        .unwrap();
+
+        // Save and reload — verify atomic save round-trips cleanly.
+        let machine_path = tmp.path().join("machine.toml");
+        crate::machine::save(&machine_prefs, &machine_path).unwrap();
+        let reloaded = crate::machine::load(&machine_path).unwrap();
+        assert!(!reloaded.is_disabled("my-skill"));
+
+        if let Some(lf) = &lockfile {
+            crate::lockfile::save(lf, paths.config_dir()).unwrap();
+            let reloaded_lf = crate::lockfile::load(paths.config_dir()).unwrap().unwrap();
+            assert!(
+                !reloaded_lf
+                    .skills
+                    .contains_key(&SkillName::new("my-skill").unwrap())
+            );
+        }
     }
 }
