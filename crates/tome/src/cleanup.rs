@@ -80,24 +80,43 @@ pub struct DistributionCleanupFailure {
     pub error: std::io::Error,
 }
 
-/// Result of cleanup operation.
+/// One stale-candidate skill captured for Bucket A (removed-from-config) or
+/// Bucket B (missing-from-disk). The source semantics differ per bucket:
+///
+/// - In Bucket A, `source` is the **previous** source (recorded at the moment
+///   the manifest entry transitioned to Unowned).
+/// - In Bucket B, `source` is the **currently configured** source the file
+///   vanished from.
+///
+/// The bucket-vs-source-meaning mapping is encoded in the `CleanupResult`
+/// field name, not in the inner type, so a single struct fits both buckets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaleSkill {
+    pub name: SkillName,
+    pub source: DirectoryName,
+}
+
+/// Result of cleanup operation. Fields are `pub(crate)` because the renderer
+/// owns the user-facing surface — external callers should not mutate the
+/// bucket vecs directly (would break the "renderer reflects what cleanup
+/// detected" invariant).
 #[derive(Debug, Default)]
 pub struct CleanupResult {
-    pub removed_from_library: usize,
+    pub(crate) removed_from_library: usize,
     /// Skills transitioned from owned -> Unowned (Case 1 of LIB-04 / D-09).
     /// Library content for these skills is preserved on disk; the manifest
     /// entry's `source_name` is set to `None`.
-    pub transitioned_to_unowned: usize,
+    pub(crate) transitioned_to_unowned: usize,
     /// Bucket A entries (removed-from-config) collected for the unified
-    /// three-bucket renderer (UX-01 D-UX01-1). Each tuple is
-    /// `(skill_name, last_known_source)` — the source name is the
-    /// `previous_source` recorded at transition time.
-    pub bucket_a_removed_from_config: Vec<(SkillName, DirectoryName)>,
+    /// three-bucket renderer (UX-01 D-UX01-1). Each carries the skill name
+    /// and the **previous** source (recorded at transition time).
+    pub(crate) bucket_a_removed_from_config: Vec<StaleSkill>,
     /// Bucket B entries (missing-from-disk) collected for the unified
-    /// three-bucket renderer (UX-01 D-UX01-1). Each tuple is
-    /// `(skill_name, currently_configured_source)`.
-    pub bucket_b_missing_from_disk: Vec<(SkillName, DirectoryName)>,
+    /// three-bucket renderer (UX-01 D-UX01-1). Each carries the skill name
+    /// and the **currently configured** source the file vanished from.
+    pub(crate) bucket_b_missing_from_disk: Vec<StaleSkill>,
 }
+
 
 /// Render the three cleanup buckets to a writer. Used by `lib.rs::sync`
 /// after both `cleanup_library` (Buckets A + B) and the distribution-cleanup
@@ -116,8 +135,8 @@ pub struct CleanupResult {
 /// - Bucket C: "now in exclude list"
 pub(crate) fn render_cleanup_buckets(
     writer: &mut impl Write,
-    bucket_a: &[(SkillName, DirectoryName)],
-    bucket_b: &[(SkillName, DirectoryName)],
+    bucket_a: &[StaleSkill],
+    bucket_b: &[StaleSkill],
     bucket_c: &[ExcludedSkill],
 ) -> std::io::Result<()> {
     if bucket_a.is_empty() && bucket_b.is_empty() && bucket_c.is_empty() {
@@ -137,14 +156,14 @@ pub(crate) fn render_cleanup_buckets(
             .yellow()
             .bold()
         )?;
-        for (name, prev_source) in bucket_a {
+        for entry in bucket_a {
             writeln!(
                 writer,
                 "  {} {} — re-add `{}`, or run `tome reassign {} --to <dir>`",
-                name,
-                console::style(format!("(was: {})", prev_source)).dim(),
-                prev_source,
-                name,
+                entry.name,
+                console::style(format!("(was: {})", entry.source)).dim(),
+                entry.source,
+                entry.name,
             )?;
         }
     }
@@ -162,13 +181,13 @@ pub(crate) fn render_cleanup_buckets(
             .yellow()
             .bold()
         )?;
-        for (name, source) in bucket_b {
+        for entry in bucket_b {
             writeln!(
                 writer,
                 "  {} {} — restore the file, or run `tome remove skill {}`",
-                name,
-                console::style(format!("(from: {})", source)).dim(),
-                name,
+                entry.name,
+                console::style(format!("(from: {})", entry.source)).dim(),
+                entry.name,
             )?;
         }
     }
@@ -314,8 +333,8 @@ pub fn cleanup_library(
     // Case 2 (delete / Bucket B). Capture the source-name pairing for
     // each so the unified three-bucket renderer (UX-01) can show
     // per-skill provenance + actionable hints.
-    let mut case1_unowned_transition: Vec<(SkillName, DirectoryName)> = Vec::new();
-    let mut case2_delete: Vec<(SkillName, DirectoryName)> = Vec::new();
+    let mut case1_unowned_transition: Vec<StaleSkill> = Vec::new();
+    let mut case2_delete: Vec<StaleSkill> = Vec::new();
     for name in &stale {
         let entry = manifest
             .get(name.as_str())
@@ -326,12 +345,16 @@ pub fn cleanup_library(
             .as_ref()
             .expect("filter-guard ensures Some")
             .clone();
-        if config.directories().contains_key(&source) {
+        let stale_entry = StaleSkill {
+            name: name.clone(),
+            source,
+        };
+        if config.directories().contains_key(&stale_entry.source) {
             // Source dir is still configured -> file vanished from disk -> Case 2.
-            case2_delete.push((name.clone(), source));
+            case2_delete.push(stale_entry);
         } else {
             // Source dir is gone from config -> preserve library, transition -> Case 1.
-            case1_unowned_transition.push((name.clone(), source));
+            case1_unowned_transition.push(stale_entry);
         }
     }
 
@@ -340,7 +363,7 @@ pub fn cleanup_library(
     // No per-skill output here — the unified three-bucket renderer in
     // `lib.rs::sync` drains `result.bucket_a_removed_from_config` after
     // both library and distribution cleanup have run (D-UX01-2 / D-UX01-4).
-    for (name, prev_source) in &case1_unowned_transition {
+    for entry in &case1_unowned_transition {
         if !dry_run {
             // Per D-C1 (Phase 14): capture previous_source before clearing
             // source_name so tome status / tome doctor can render a clean
@@ -348,14 +371,12 @@ pub fn cleanup_library(
             // to source_path. The .take() pattern atomically moves the old
             // value into previous_source and leaves source_name = None.
             // skills_get_mut is provided by Plan 11-01 in manifest.rs.
-            if let Some(entry) = manifest.skills_get_mut(name.as_str()) {
-                entry.previous_source = entry.source_name.take();
+            if let Some(manifest_entry) = manifest.skills_get_mut(entry.name.as_str()) {
+                manifest_entry.previous_source = manifest_entry.source_name.take();
             }
         }
         result.transitioned_to_unowned += 1;
-        result
-            .bucket_a_removed_from_config
-            .push((name.clone(), prev_source.clone()));
+        result.bucket_a_removed_from_config.push(entry.clone());
     }
 
     // --- Case 2 / Bucket B: delete (today's behavior) ---
@@ -374,12 +395,12 @@ pub fn cleanup_library(
             .default(false)
             .interact_opt()?;
         if confirmed == Some(true) {
-            case2_delete.iter().map(|(n, _)| n.clone()).collect()
+            case2_delete.iter().map(|e| e.name.clone()).collect()
         } else {
             Vec::new()
         }
     } else if !case2_delete.is_empty() {
-        case2_delete.iter().map(|(n, _)| n.clone()).collect()
+        case2_delete.iter().map(|e| e.name.clone()).collect()
     } else {
         Vec::new()
     };
@@ -388,10 +409,8 @@ pub fn cleanup_library(
     // user-facing summary should reflect what tome detected as missing,
     // not the post-confirmation delete decision (which is a destructive
     // action the user explicitly confirms).
-    for (name, source) in &case2_delete {
-        result
-            .bucket_b_missing_from_disk
-            .push((name.clone(), source.clone()));
+    for entry in &case2_delete {
+        result.bucket_b_missing_from_disk.push(entry.clone());
     }
 
     for name in skills_to_remove {
@@ -1060,11 +1079,11 @@ mod tests {
             "Bucket A should hold the orphan-a Case 1 entry"
         );
         assert_eq!(
-            result.bucket_a_removed_from_config[0].0.as_str(),
+            result.bucket_a_removed_from_config[0].name.as_str(),
             "orphan-a",
         );
         assert_eq!(
-            result.bucket_a_removed_from_config[0].1.as_str(),
+            result.bucket_a_removed_from_config[0].source.as_str(),
             "removed-source",
         );
 
@@ -1075,11 +1094,11 @@ mod tests {
             "Bucket B should hold the vanished-b Case 2 entry"
         );
         assert_eq!(
-            result.bucket_b_missing_from_disk[0].0.as_str(),
+            result.bucket_b_missing_from_disk[0].name.as_str(),
             "vanished-b",
         );
         assert_eq!(
-            result.bucket_b_missing_from_disk[0].1.as_str(),
+            result.bucket_b_missing_from_disk[0].source.as_str(),
             "active-source",
         );
 
@@ -1114,11 +1133,11 @@ mod tests {
 
     #[test]
     fn render_bucket_a_includes_tome_reassign_hint() {
-        let bucket_a = vec![(
-            crate::discover::SkillName::new("foo").unwrap(),
-            crate::config::DirectoryName::new("my-old-dir").unwrap(),
-        )];
-        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_a = vec![StaleSkill {
+            name: crate::discover::SkillName::new("foo").unwrap(),
+            source: crate::config::DirectoryName::new("my-old-dir").unwrap(),
+        }];
+        let bucket_b: Vec<StaleSkill> = Vec::new();
         let bucket_c: Vec<ExcludedSkill> = Vec::new();
 
         let mut buf = Vec::new();
@@ -1141,11 +1160,11 @@ mod tests {
 
     #[test]
     fn render_bucket_b_includes_tome_remove_skill_hint() {
-        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
-        let bucket_b = vec![(
-            crate::discover::SkillName::new("qux").unwrap(),
-            crate::config::DirectoryName::new("my-current-dir").unwrap(),
-        )];
+        let bucket_a: Vec<StaleSkill> = Vec::new();
+        let bucket_b = vec![StaleSkill {
+            name: crate::discover::SkillName::new("qux").unwrap(),
+            source: crate::config::DirectoryName::new("my-current-dir").unwrap(),
+        }];
         let bucket_c: Vec<ExcludedSkill> = Vec::new();
 
         let mut buf = Vec::new();
@@ -1164,8 +1183,8 @@ mod tests {
 
     #[test]
     fn render_bucket_c_global_and_per_directory_phrasing() {
-        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
-        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_a: Vec<StaleSkill> = Vec::new();
+        let bucket_b: Vec<StaleSkill> = Vec::new();
         let bucket_c = vec![
             ExcludedSkill {
                 name: crate::discover::SkillName::new("quux").unwrap(),
@@ -1205,8 +1224,8 @@ mod tests {
 
     #[test]
     fn render_empty_buckets_produces_no_output() {
-        let bucket_a: Vec<(SkillName, DirectoryName)> = Vec::new();
-        let bucket_b: Vec<(SkillName, DirectoryName)> = Vec::new();
+        let bucket_a: Vec<StaleSkill> = Vec::new();
+        let bucket_b: Vec<StaleSkill> = Vec::new();
         let bucket_c: Vec<ExcludedSkill> = Vec::new();
 
         let mut buf = Vec::new();
