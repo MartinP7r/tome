@@ -44,13 +44,40 @@ use crate::paths::resolve_symlink_target;
 /// skill is now in `machine.toml::disabled` (global) or
 /// `directories.<dir>.disabled` (per-directory). Surfaced in the unified
 /// cleanup output as Bucket C (UX-01 D-UX01-1).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExcludedSkill {
     pub name: SkillName,
     /// `None` = excluded globally via `machine.toml::disabled`.
     /// `Some(dir)` = excluded for a specific directory via
     /// `directories.<dir>.disabled`.
     pub directory: Option<DirectoryName>,
+}
+
+/// Which filesystem operation failed during distribution-symlink cleanup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DistributionCleanupOp {
+    /// `std::fs::read_link` failed when inspecting the symlink target.
+    ReadLink,
+    /// `std::fs::remove_file` failed when removing the stale symlink.
+    Remove,
+}
+
+/// One per-symlink cleanup failure aggregated by `cleanup_disabled_from_target`
+/// so a single ENOENT/EACCES on one stale symlink does not abort the whole
+/// sync's cleanup output. Mirrors the SAFE-01 aggregation pattern from
+/// `crate::marketplace::InstallFailure` and `crate::remove::RemoveFailure`.
+#[derive(Debug)]
+pub struct DistributionCleanupFailure {
+    /// Distribution directory the failed symlink lived in.
+    pub directory: DirectoryName,
+    /// Filename on disk (raw — may not pass `SkillName` validation).
+    pub skill: String,
+    /// Path of the symlink that could not be cleaned up.
+    pub path: std::path::PathBuf,
+    /// Which operation failed.
+    pub operation: DistributionCleanupOp,
+    /// Verbatim `io::Error` from the failed call.
+    pub error: std::io::Error,
 }
 
 /// Result of cleanup operation.
@@ -184,6 +211,46 @@ pub(crate) fn render_cleanup_buckets(
         }
     }
 
+    Ok(())
+}
+
+/// Render aggregated distribution-cleanup failures (SAFE-01 grouped summary
+/// shape). Empty slice produces no output so successful syncs stay quiet.
+///
+/// Goes to **stderr** via the writer the caller provides (D-UX01-4).
+pub(crate) fn render_distribution_cleanup_failures(
+    writer: &mut impl Write,
+    failures: &[DistributionCleanupFailure],
+) -> std::io::Result<()> {
+    if failures.is_empty() {
+        return Ok(());
+    }
+    writeln!(writer)?;
+    writeln!(
+        writer,
+        "{}",
+        console::style(format!(
+            "⚠ {} distribution cleanup operation(s) failed:",
+            failures.len()
+        ))
+        .yellow()
+        .bold()
+    )?;
+    for f in failures {
+        let op = match f.operation {
+            DistributionCleanupOp::ReadLink => "read symlink",
+            DistributionCleanupOp::Remove => "remove symlink",
+        };
+        writeln!(
+            writer,
+            "  {} {} ({}: {}) — {}",
+            f.skill,
+            console::style(format!("(in: {})", f.directory)).dim(),
+            op,
+            f.path.display(),
+            f.error,
+        )?;
+    }
     Ok(())
 }
 
@@ -1149,6 +1216,58 @@ mod tests {
             buf.is_empty(),
             "all-empty buckets should produce no output (silent on no-op syncs); got: {:?}",
             String::from_utf8_lossy(&buf)
+        );
+    }
+
+    #[test]
+    fn render_distribution_cleanup_failures_empty_is_silent() {
+        let mut buf = Vec::new();
+        render_distribution_cleanup_failures(&mut buf, &[]).unwrap();
+        assert!(buf.is_empty(), "empty failure list must produce no output");
+    }
+
+    #[test]
+    fn render_distribution_cleanup_failures_groups_by_op_and_dir() {
+        let failures = vec![
+            DistributionCleanupFailure {
+                directory: DirectoryName::new("claude").unwrap(),
+                skill: "stale-foo".into(),
+                path: std::path::PathBuf::from("/tmp/claude/stale-foo"),
+                operation: DistributionCleanupOp::ReadLink,
+                error: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            },
+            DistributionCleanupFailure {
+                directory: DirectoryName::new("codex").unwrap(),
+                skill: "stale-bar".into(),
+                path: std::path::PathBuf::from("/tmp/codex/stale-bar"),
+                operation: DistributionCleanupOp::Remove,
+                error: std::io::Error::from(std::io::ErrorKind::NotFound),
+            },
+        ];
+
+        let mut buf = Vec::new();
+        render_distribution_cleanup_failures(&mut buf, &failures).unwrap();
+        let rendered = String::from_utf8(buf).unwrap();
+
+        assert!(
+            rendered.contains("2 distribution cleanup operation(s) failed"),
+            "header missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("stale-foo") && rendered.contains("(in: claude)"),
+            "first failure not surfaced: {rendered}"
+        );
+        assert!(
+            rendered.contains("stale-bar") && rendered.contains("(in: codex)"),
+            "second failure not surfaced: {rendered}"
+        );
+        assert!(
+            rendered.contains("read symlink"),
+            "operation label missing for ReadLink: {rendered}"
+        );
+        assert!(
+            rendered.contains("remove symlink"),
+            "operation label missing for Remove: {rendered}"
         );
     }
 }

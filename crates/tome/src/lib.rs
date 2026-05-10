@@ -1719,16 +1719,21 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // 6. Cleanup stale symlinks from distribution directories
+    // 6. Cleanup stale symlinks from distribution directories. Per-symlink
+    // I/O failures aggregate into `distribution_cleanup_failures` (SAFE-01
+    // pattern) so one stale ENOENT/EACCES does not erase the user-facing
+    // Bucket A/B/C summary; sync exits non-zero at end if the slice is
+    // non-empty.
     let mut removed_from_targets = 0usize;
     let mut excluded_skills: Vec<cleanup::ExcludedSkill> = Vec::new();
+    let mut distribution_cleanup_failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
     for (name, dir_config) in config.distribution_dirs() {
         let skills_dir = &dir_config.path;
         removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
         // Also clean up symlinks for disabled skills (global + per-directory).
         // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
         // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
-        let (n, excluded) = cleanup_disabled_from_target(
+        let (n, excluded, dir_failures) = cleanup_disabled_from_target(
             skills_dir,
             paths.library_dir(),
             name,
@@ -1737,11 +1742,13 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         )?;
         removed_from_targets += n;
         excluded_skills.extend(excluded);
+        distribution_cleanup_failures.extend(dir_failures);
     }
 
-    // 6b. Render the unified three-bucket cleanup output (UX-01 D-UX01-2 /
-    // D-UX01-4 stderr discipline). Empty buckets produce no output, so
-    // syncs that touched nothing stay quiet.
+    // 6b. Render the unified three-bucket cleanup output + any aggregated
+    // distribution-cleanup failures (UX-01 D-UX01-2 / D-UX01-4 stderr
+    // discipline). Empty buckets and empty failure list both produce no
+    // output, so syncs that touched nothing stay quiet.
     if !quiet {
         let mut stderr = std::io::stderr().lock();
         // Best-effort: failure to write to stderr is non-fatal for sync
@@ -1751,6 +1758,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             &cleanup_result.bucket_a_removed_from_config,
             &cleanup_result.bucket_b_missing_from_disk,
             &excluded_skills,
+        );
+        let _ = cleanup::render_distribution_cleanup_failures(
+            &mut stderr,
+            &distribution_cleanup_failures,
         );
     }
 
@@ -1813,6 +1824,18 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
+    // SAFE-01 mirror: surface non-zero exit when distribution-symlink
+    // cleanup hit per-symlink I/O failures. The grouped summary already
+    // printed via cleanup::render_distribution_cleanup_failures; this
+    // bail surfaces the exit code only.
+    if !distribution_cleanup_failures.is_empty() {
+        anyhow::bail!(
+            "{} distribution cleanup operation(s) failed during sync (see \
+             grouped summary above)",
+            distribution_cleanup_failures.len(),
+        );
+    }
+
     // RESEARCH OQ-6: surface non-zero exit when reconcile failed any
     // install/update. The grouped failure summary already printed via
     // marketplace::render_install_failures; this bail surfaces the exit
@@ -1862,11 +1885,16 @@ fn cleanup_disabled_from_target(
     dir_name: &config::DirectoryName,
     machine_prefs: &machine::MachinePrefs,
     dry_run: bool,
-) -> Result<(usize, Vec<cleanup::ExcludedSkill>)> {
+) -> Result<(
+    usize,
+    Vec<cleanup::ExcludedSkill>,
+    Vec<cleanup::DistributionCleanupFailure>,
+)> {
     let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
+    let mut failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
 
     if !target_dir.is_dir() {
-        return Ok((0, excluded));
+        return Ok((0, excluded, failures));
     }
 
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
@@ -1899,9 +1927,24 @@ fn cleanup_disabled_from_target(
         // precedence in the bucket-C surface even though the underlying
         // removal logic is the same.
         if is_global || !is_allowed {
-            // Only remove if symlink points into the tome library.
-            let raw_target = std::fs::read_link(&path)
-                .with_context(|| format!("failed to read symlink {}", path.display()))?;
+            // Only remove if symlink points into the tome library. Per-symlink
+            // I/O failures aggregate into `failures` instead of bailing the
+            // loop so one stale ENOENT/EACCES does not erase the user-facing
+            // Bucket A/B/C summary (SAFE-01 pattern, mirrors `RemoveFailure`
+            // and `InstallFailure`).
+            let raw_target = match std::fs::read_link(&path) {
+                Ok(t) => t,
+                Err(e) => {
+                    failures.push(cleanup::DistributionCleanupFailure {
+                        directory: dir_name.clone(),
+                        skill: name_owned.clone(),
+                        path: path.clone(),
+                        operation: cleanup::DistributionCleanupOp::ReadLink,
+                        error: e,
+                    });
+                    continue;
+                }
+            };
             let target = paths::resolve_symlink_target(&path, &raw_target);
             let points_into_library =
                 target.starts_with(library_dir) || target.starts_with(&canonical_library);
@@ -1909,10 +1952,17 @@ fn cleanup_disabled_from_target(
                 continue;
             }
 
-            if !dry_run {
-                std::fs::remove_file(&path).with_context(|| {
-                    format!("failed to remove disabled symlink {}", path.display())
-                })?;
+            if !dry_run
+                && let Err(e) = std::fs::remove_file(&path)
+            {
+                failures.push(cleanup::DistributionCleanupFailure {
+                    directory: dir_name.clone(),
+                    skill: name_owned.clone(),
+                    path: path.clone(),
+                    operation: cleanup::DistributionCleanupOp::Remove,
+                    error: e,
+                });
+                continue;
             }
             removed += 1;
 
@@ -1936,7 +1986,7 @@ fn cleanup_disabled_from_target(
         }
     }
 
-    Ok((removed, excluded))
+    Ok((removed, excluded, failures))
 }
 
 fn render_sync_report(report: &SyncReport) {
@@ -2376,9 +2426,10 @@ mod tests {
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
         let dir_name = test_dir_name();
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(removed, 1);
         assert!(!target.path().join("disabled-skill").exists());
         assert_eq!(excluded.len(), 1, "Bucket C should record the removal");
@@ -2404,9 +2455,10 @@ mod tests {
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
         let dir_name = test_dir_name();
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(
             removed, 0,
             "should not remove symlink pointing outside library"
@@ -2430,9 +2482,10 @@ mod tests {
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
         let dir_name = test_dir_name();
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(removed, 0);
         assert!(target.path().join("disabled-skill").is_dir());
         assert!(excluded.is_empty());
@@ -2442,7 +2495,7 @@ mod tests {
     fn cleanup_disabled_nonexistent_dir_returns_zero() {
         let prefs = machine::MachinePrefs::default();
         let dir_name = test_dir_name();
-        let (removed, excluded) = cleanup_disabled_from_target(
+        let (removed, excluded, failures) = cleanup_disabled_from_target(
             std::path::Path::new("/nonexistent/target"),
             std::path::Path::new("/nonexistent/library"),
             &dir_name,
@@ -2452,6 +2505,7 @@ mod tests {
         .unwrap();
         assert_eq!(removed, 0);
         assert!(excluded.is_empty());
+        assert!(failures.is_empty());
     }
 
     #[test]
@@ -2467,9 +2521,10 @@ mod tests {
         prefs.disable(SkillName::new("disabled-skill").unwrap());
 
         let dir_name = test_dir_name();
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, true)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(removed, 1, "should count the would-be removal");
         assert!(
             target.path().join("disabled-skill").is_symlink(),
@@ -2497,9 +2552,10 @@ mod tests {
         let mut prefs = machine::MachinePrefs::default();
         prefs.toggle_per_dir_blocklist(&dir_name, SkillName::new("excluded-here").unwrap(), true);
 
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(removed, 1);
         assert!(!target.path().join("excluded-here").exists());
         assert_eq!(
@@ -2537,9 +2593,10 @@ mod tests {
             true,
         );
 
-        let (removed, excluded) =
+        let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
+        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
         assert_eq!(removed, 1);
         assert_eq!(
             excluded.len(),
@@ -2550,6 +2607,66 @@ mod tests {
             excluded[0].directory.is_none(),
             "global takes precedence — directory should be None"
         );
+    }
+
+    /// SAFE-01 mirror — when `remove_file` fails on one stale symlink (here
+    /// simulated by chmod-ing the parent directory to deny writes), the
+    /// failure aggregates into the returned `Vec<DistributionCleanupFailure>`
+    /// instead of aborting the loop. Other symlinks in the same directory
+    /// continue to be processed.
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_disabled_aggregates_remove_failures() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+
+        // Two disabled skills with valid library targets.
+        for name in &["disabled-foo", "disabled-bar"] {
+            let skill_dir = library.path().join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            unix_fs::symlink(&skill_dir, target.path().join(name)).unwrap();
+        }
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-foo").unwrap());
+        prefs.disable(SkillName::new("disabled-bar").unwrap());
+
+        // Strip write perms on the target dir so `remove_file` fails for both
+        // symlinks. Read perms remain so the loop can still enumerate.
+        let mut perms = std::fs::metadata(target.path()).unwrap().permissions();
+        let original_mode = perms.mode();
+        perms.set_mode(0o555);
+        std::fs::set_permissions(target.path(), perms).unwrap();
+
+        let dir_name = test_dir_name();
+        let result =
+            cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false);
+
+        // Restore perms before any assertion can panic so TempDir cleanup works.
+        let mut restored = std::fs::metadata(target.path()).unwrap().permissions();
+        restored.set_mode(original_mode);
+        std::fs::set_permissions(target.path(), restored).unwrap();
+
+        let (removed, excluded, failures) = result.unwrap();
+        assert_eq!(
+            removed, 0,
+            "no symlinks should have been removed (all failed)"
+        );
+        assert!(
+            excluded.is_empty(),
+            "excluded set must skip failed entries — Bucket C only reports successes"
+        );
+        assert_eq!(
+            failures.len(),
+            2,
+            "both remove failures should aggregate, not abort the loop: {failures:?}"
+        );
+        for f in &failures {
+            assert_eq!(f.operation, cleanup::DistributionCleanupOp::Remove);
+            assert_eq!(f.directory.as_str(), "test-dir");
+        }
     }
 
     // -- apply_edit_decisions tests (Phase 14 / D-C1 transition site 3) --
