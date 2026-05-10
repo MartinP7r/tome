@@ -1144,6 +1144,22 @@ fn build_synthetic_claude_plugins(parent: &std::path::Path, plugin: &str, skill:
 #[cfg(unix)]
 #[test]
 fn tome_remove_dir_cleans_claude_plugins() {
+    // Phase 13's lockfile-authoritative reconcile probes `claude --version`
+    // at sync time when any directory has `type = "claude-plugins"` (per
+    // ADP-02). CI runners that don't ship the `claude` CLI cannot drive
+    // this test end-to-end, so skip rather than fail. Mirrors the
+    // `is_claude_available` skip-and-warn pattern in `marketplace.rs`'s
+    // smoke tests.
+    let claude_available = std::process::Command::new("claude")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !claude_available {
+        eprintln!("SKIP tome_remove_dir_cleans_claude_plugins: claude CLI not on PATH");
+        return;
+    }
+
     let tmp = TempDir::new().unwrap();
 
     // Build a synthetic claude-plugins source dir (v2 installed_plugins.json

@@ -9,3 +9,11 @@ extend-exclude = [
 [default.extend-words]
 ratatui = "ratatui"
 Invokable = "Invokable"
+# `mis-classified` (hyphenated compound) appears intentionally in the
+# foreign-symlink detection doc-comment — typos suggests `mis` → `miss`/`mist`
+# but the hyphen is part of the compound modifier.
+mis = "mis"
+# `fo` is a deliberate fuzzy-search fixture token in browse snapshot tests
+# (the test asserts that `fo` matches `foo-bar`); typos suggests `of` / `for`
+# / etc.
+fo = "fo"
