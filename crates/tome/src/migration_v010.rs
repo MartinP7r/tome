@@ -1146,7 +1146,10 @@ mod tests {
             PromptMode::from_flags(false, true),
             PromptMode::NoInputRequiresYes
         );
-        assert_eq!(PromptMode::from_flags(false, false), PromptMode::Interactive);
+        assert_eq!(
+            PromptMode::from_flags(false, false),
+            PromptMode::Interactive
+        );
     }
 
     #[test]

@@ -117,7 +117,6 @@ pub struct CleanupResult {
     pub(crate) bucket_b_missing_from_disk: Vec<StaleSkill>,
 }
 
-
 /// Render the three cleanup buckets to a writer. Used by `lib.rs::sync`
 /// after both `cleanup_library` (Buckets A + B) and the distribution-cleanup
 /// loop (Bucket C) have run.

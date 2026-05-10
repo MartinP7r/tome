@@ -1964,9 +1964,7 @@ fn cleanup_disabled_from_target(
                 continue;
             }
 
-            if !dry_run
-                && let Err(e) = std::fs::remove_file(&path)
-            {
+            if !dry_run && let Err(e) = std::fs::remove_file(&path) {
                 failures.push(cleanup::DistributionCleanupFailure {
                     directory: dir_name.clone(),
                     skill: name_owned.clone(),
@@ -2456,7 +2454,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(removed, 1);
         assert!(!target.path().join("disabled-skill").exists());
         assert_eq!(excluded.len(), 1, "Bucket C should record the removal");
@@ -2485,7 +2486,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(
             removed, 0,
             "should not remove symlink pointing outside library"
@@ -2512,7 +2516,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(removed, 0);
         assert!(target.path().join("disabled-skill").is_dir());
         assert!(excluded.is_empty());
@@ -2551,7 +2558,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, true)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(removed, 1, "should count the would-be removal");
         assert!(
             target.path().join("disabled-skill").is_symlink(),
@@ -2582,7 +2592,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(removed, 1);
         assert!(!target.path().join("excluded-here").exists());
         assert_eq!(
@@ -2623,7 +2636,10 @@ mod tests {
         let (removed, excluded, failures) =
             cleanup_disabled_from_target(target.path(), library.path(), &dir_name, &prefs, false)
                 .unwrap();
-        assert!(failures.is_empty(), "no I/O failures expected: {failures:?}");
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
         assert_eq!(removed, 1);
         assert_eq!(
             excluded.len(),
