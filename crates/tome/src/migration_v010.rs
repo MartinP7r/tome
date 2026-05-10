@@ -614,8 +614,13 @@ pub(crate) fn prompt_confirmation(mode: PromptMode) -> Result<bool> {
 /// Render the SAFE-01 grouped failure summary + final ✓/⚠ banner into `w`.
 /// Per HARD-15 stderr discipline, production callers pass an
 /// `io::stderr().lock()` writer.
+///
+/// `dry_run` switches the success-banner verb so the user can't misread
+/// a dry-run preview as a completed migration (#526). The partial/failed
+/// banner stays the same in both modes — failure surface is identical.
 pub(crate) fn render_result_to(
     result: &MigrationResult,
+    dry_run: bool,
     w: &mut impl std::io::Write,
 ) -> std::io::Result<()> {
     writeln!(w)?;
@@ -626,17 +631,19 @@ pub(crate) fn render_result_to(
     if result.is_partial_or_failed() {
         writeln!(w, "{}", style(&banner).yellow().bold())?;
     } else {
-        writeln!(
-            w,
-            "{}",
-            style(format!(
-                "✓ {} skill{} migrated to v0.10 shape",
+        let plural_s = if result.converted == 1 { "" } else { "s" };
+        let line = if dry_run {
+            format!(
+                "✓ Plan validated: {} skill{plural_s} ready to migrate (dry-run, no changes made)",
                 result.converted,
-                if result.converted == 1 { "" } else { "s" }
-            ))
-            .green()
-            .bold()
-        )?;
+            )
+        } else {
+            format!(
+                "✓ {} skill{plural_s} migrated to v0.10 shape",
+                result.converted,
+            )
+        };
+        writeln!(w, "{}", style(line).green().bold())?;
     }
 
     if result.failures.is_empty() {
@@ -1109,6 +1116,51 @@ mod tests {
         assert!(
             out.contains("may undercount"),
             "summary must warn estimate may undercount, got: {out}"
+        );
+    }
+
+    #[test]
+    fn render_result_to_dry_run_uses_validated_verb() {
+        // #526 — dry-run banner must not claim migration completed.
+        // Live mode says "migrated"; dry-run says "Plan validated"
+        // + "(dry-run, no changes made)".
+        let result = MigrationResult {
+            converted: 57,
+            skipped_broken_source: 0,
+            failed: 0,
+            failures: vec![],
+        };
+
+        let mut live_buf = Vec::new();
+        render_result_to(&result, false, &mut live_buf).unwrap();
+        let live = String::from_utf8(live_buf).unwrap();
+        assert!(
+            live.contains("57 skills migrated to v0.10 shape"),
+            "live banner regression: {live}"
+        );
+        assert!(
+            !live.contains("dry-run"),
+            "live banner must not mention dry-run: {live}"
+        );
+
+        let mut dry_buf = Vec::new();
+        render_result_to(&result, true, &mut dry_buf).unwrap();
+        let dry = String::from_utf8(dry_buf).unwrap();
+        assert!(
+            dry.contains("Plan validated"),
+            "dry-run banner must use 'Plan validated' verb: {dry}"
+        );
+        assert!(
+            dry.contains("57 skills ready to migrate"),
+            "dry-run banner must report skill count: {dry}"
+        );
+        assert!(
+            dry.contains("(dry-run, no changes made)"),
+            "dry-run banner must explicitly disclaim mutation: {dry}"
+        );
+        assert!(
+            !dry.contains("migrated to v0.10 shape"),
+            "dry-run banner must not claim migration: {dry}"
         );
     }
 
