@@ -1031,7 +1031,7 @@ pub(crate) fn cmd_migrate_library(
     let result = migration_v010::execute(&plan, dry_run)?;
     {
         let mut stderr = std::io::stderr().lock();
-        let _ = migration_v010::render_result_to(&result, &mut stderr);
+        let _ = migration_v010::render_result_to(&result, dry_run, &mut stderr);
     }
 
     // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
