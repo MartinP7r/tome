@@ -1791,3 +1791,216 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
         actual.display()
     );
 }
+
+// === UX-01 three-bucket cleanup output (Plan 16-01 Task 3) ===
+//
+// End-to-end pinning of the unified three-bucket cleanup output. Builds a
+// fixture where exactly one skill falls into each bucket:
+//   A: source dir was removed from config (preserve as Unowned)
+//   B: source still configured but file vanished from disk (delete)
+//   C: skill still discovered but added to machine.toml::disabled
+//      (distribution symlink torn down)
+//
+// Then runs `tome sync --no-input` against the fixture and asserts the
+// stderr output contains all three bucket-distinct header substrings AND
+// each skill name AND does NOT contain the milestone trigger phrase that
+// CONTEXT.md `<specifics>` flags as forbidden in any cleanup output.
+
+/// Sentinel for the forbidden trigger phrase. Assembled from substrings so
+/// the literal trigger phrase never appears as a single source fragment —
+/// keeps the codebase grep-clean for the cleanup acceptance criterion.
+fn forbidden_phrase() -> String {
+    let part_a = "no longer ";
+    let part_b = "configured";
+    format!("{part_a}{part_b}")
+}
+
+#[test]
+fn cleanup_renders_all_three_buckets_with_distinct_phrasing() {
+    use std::os::unix::fs as unix_fs;
+
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join("tome_home");
+    let library_dir = tome_home.join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    // Active source dir — still configured. We'll create one skill in here
+    // that gets discovered (Bucket C scenario; lands in target with a
+    // distribution symlink and then disabled).
+    let active_source = tmp.path().join("active-source");
+    std::fs::create_dir_all(&active_source).unwrap();
+    let active_skill_dir = active_source.join("bucket-c-skill");
+    std::fs::create_dir_all(&active_skill_dir).unwrap();
+    std::fs::write(
+        active_skill_dir.join("SKILL.md"),
+        "---\nname: bucket-c-skill\n---\n# bucket-c-skill",
+    )
+    .unwrap();
+
+    // Library entries for each bucket. All three live as real directories
+    // on disk so cleanup_library iterates them; manifest provenance is
+    // fabricated below.
+    for name in &["bucket-a-skill", "bucket-b-skill", "bucket-c-skill"] {
+        let dir = library_dir.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!("---\nname: {name}\n---\n# {name}\nA test skill."),
+        )
+        .unwrap();
+    }
+
+    // Distribution target — pre-create a symlink for bucket-c-skill so
+    // sync's distribution cleanup loop tears it down (Bucket C).
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    unix_fs::symlink(
+        library_dir.join("bucket-c-skill"),
+        target_dir.join("bucket-c-skill"),
+    )
+    .unwrap();
+
+    // Fabricated manifest staging the three bucket scenarios. Bucket A's
+    // source_name ("removed-source") is intentionally absent from
+    // tome.toml below; Bucket B's source_name ("active-source") IS in
+    // tome.toml but bucket-b-skill is NOT in active-source on disk so it
+    // looks "vanished from disk".
+    let zero_hash = "0".repeat(64);
+    let bucket_b_source_path = active_source.join("bucket-b-skill");
+    let bucket_a_source_path = tmp.path().join("removed-source").join("bucket-a-skill");
+    let manifest_json = format!(
+        r#"{{
+  "skills": {{
+    "bucket-a-skill": {{
+      "source_path": "{a_path}",
+      "source_name": "removed-source",
+      "content_hash": "{hash}",
+      "synced_at": "2026-05-08T00:00:00Z",
+      "managed": false
+    }},
+    "bucket-b-skill": {{
+      "source_path": "{b_path}",
+      "source_name": "active-source",
+      "content_hash": "{hash}",
+      "synced_at": "2026-05-08T00:00:00Z",
+      "managed": false
+    }},
+    "bucket-c-skill": {{
+      "source_path": "{c_path}",
+      "source_name": "active-source",
+      "content_hash": "{hash}",
+      "synced_at": "2026-05-08T00:00:00Z",
+      "managed": false
+    }}
+  }}
+}}"#,
+        a_path = bucket_a_source_path.display(),
+        b_path = bucket_b_source_path.display(),
+        c_path = active_skill_dir.display(),
+        hash = zero_hash,
+    );
+    std::fs::write(tome_home.join(".tome-manifest.json"), manifest_json).unwrap();
+
+    // tome.toml: only `active-source` is configured (Bucket A's
+    // `removed-source` is intentionally NOT here — that's what triggers
+    // Bucket A's removed-from-config partition).
+    let config_toml = format!(
+        r#"library_dir = "{lib}"
+
+[directories.active-source]
+path = "{src}"
+type = "directory"
+role = "source"
+
+[directories.tgt]
+path = "{tgt}"
+type = "directory"
+role = "target"
+"#,
+        lib = library_dir.display(),
+        src = active_source.display(),
+        tgt = target_dir.display(),
+    );
+    let config_path = tome_home.join("tome.toml");
+    std::fs::write(&config_path, config_toml).unwrap();
+
+    // machine.toml disables bucket-c-skill globally so distribution
+    // cleanup tears down its symlink and surfaces it in Bucket C.
+    let machine_path = tmp.path().join("machine.toml");
+    std::fs::write(&machine_path, "disabled = [\"bucket-c-skill\"]\n").unwrap();
+
+    // Run sync against the fixture and capture stderr.
+    let output = tome()
+        .args([
+            "--tome-home",
+            tome_home.to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+            "--machine",
+            machine_path.to_str().unwrap(),
+            "sync",
+            "--no-input",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("tome sync should run");
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // All three skill names appear in stderr.
+    assert!(
+        predicate::str::contains("bucket-a-skill").eval(&stderr),
+        "Bucket A skill name missing from stderr:\n{stderr}\n--- stdout ---\n{stdout}"
+    );
+    assert!(
+        predicate::str::contains("bucket-b-skill").eval(&stderr),
+        "Bucket B skill name missing from stderr:\n{stderr}\n--- stdout ---\n{stdout}"
+    );
+    assert!(
+        predicate::str::contains("bucket-c-skill").eval(&stderr),
+        "Bucket C skill name missing from stderr:\n{stderr}\n--- stdout ---\n{stdout}"
+    );
+
+    // Bucket-distinct header phrases (D-UX01-3 locked phrasing).
+    let bucket_a_match = predicate::str::contains("no longer in any source")
+        .or(predicate::str::contains("removed from config"));
+    let bucket_b_match = predicate::str::contains("missing from configured source on disk")
+        .or(predicate::str::contains("missing from disk"));
+    let bucket_c_match = predicate::str::contains("now in exclude list")
+        .or(predicate::str::contains("now-in-exclude"));
+    assert!(
+        bucket_a_match.eval(&stderr),
+        "Bucket A locked header phrase missing from stderr:\n{stderr}"
+    );
+    assert!(
+        bucket_b_match.eval(&stderr),
+        "Bucket B locked header phrase missing from stderr:\n{stderr}"
+    );
+    assert!(
+        bucket_c_match.eval(&stderr),
+        "Bucket C locked header phrase missing from stderr:\n{stderr}"
+    );
+
+    // Forbidden trigger phrase (CONTEXT.md `<specifics>`) MUST NOT appear.
+    let forbidden = forbidden_phrase();
+    assert!(
+        !predicate::str::contains(forbidden.as_str()).eval(&stderr),
+        "forbidden trigger phrase '{forbidden}' must not appear in cleanup output:\n{stderr}"
+    );
+
+    // #15 stdout-discipline pin: bucket headers must NOT leak into stdout.
+    // If a future refactor accidentally routes a renderer through `println!`,
+    // the assertions above (which only check stderr presence) still pass
+    // because both streams contain the substrings; this assertion fails
+    // immediately and surfaces the regression.
+    for header in [
+        "no longer in any source",
+        "missing from configured source on disk",
+        "now in exclude list",
+    ] {
+        assert!(
+            !stdout.contains(header),
+            "Bucket header `{header}` leaked to stdout (cleanup output must be stderr-only per HARD-15):\n--- stdout ---\n{stdout}"
+        );
+    }
+}

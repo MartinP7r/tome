@@ -155,6 +155,9 @@ fn migrate_library_converts_managed_symlinks_to_real_dirs() {
         .unwrap()
         .args([
             "migrate-library",
+            // UX-02 D-UX02-2: `--yes` bypasses the confirm gate (non-interactive
+            // test runs cannot answer the prompt).
+            "--yes",
             "--config",
             fix.config_path.to_str().unwrap(),
             "--tome-home",
@@ -348,11 +351,13 @@ fn sync_succeeds_after_migrate_library() {
     )
     .unwrap();
 
-    // Step 1: migrate-library.
+    // Step 1: migrate-library. `--yes` bypasses the UX-02 confirm gate
+    // (non-interactive test runs cannot answer the prompt).
     let migrate = assert_cmd::Command::cargo_bin("tome")
         .unwrap()
         .args([
             "migrate-library",
+            "--yes",
             "--config",
             fix.config_path.to_str().unwrap(),
             "--tome-home",
@@ -527,4 +532,169 @@ role = "source"
         alpha_hash.as_str(),
         "content_hash must remain unchanged across the Case 1 transition"
     );
+}
+
+// -- UX-02 / Plan 16-02 Task 3 — confirm-gate integration tests --
+
+/// `tome migrate-library --dry-run --no-input` MUST succeed without prompting,
+/// and the v0.9-shape fixture symlinks must be preserved (no mutation).
+#[test]
+fn migrate_library_dry_run_does_not_prompt() {
+    let fix = build_v09_fixture();
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--dry-run",
+            "--no-input",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // --dry-run + --no-input is a clean preview; the bail message for
+    // --no-input-without-yes must NOT appear (the prompt is skipped under
+    // --dry-run before prompt_confirmation is consulted).
+    assert!(
+        !stderr.contains("destructive (converts symlinks"),
+        "dry-run must skip the confirm-gate bail; got stderr: {stderr}"
+    );
+
+    // Library symlinks are preserved (no conversion).
+    assert!(
+        fix.library_dir.join("p1").is_symlink(),
+        "dry-run must NOT convert p1.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+    assert!(
+        fix.library_dir.join("p2").is_symlink(),
+        "dry-run must NOT convert p2"
+    );
+}
+
+/// `tome migrate-library --no-input` (without `--yes`, without `--dry-run`)
+/// MUST exit non-zero with a Phase 7 D-10 Conflict/Why/Suggestion bail
+/// naming `destructive`, `--yes`, and `--no-input`. The library MUST be
+/// untouched on the bail path.
+#[test]
+fn migrate_library_no_input_without_yes_bails() {
+    let fix = build_v09_fixture();
+
+    // Snapshot library state pre-run for byte-for-byte invariance.
+    let p1_was_symlink = fix.library_dir.join("p1").is_symlink();
+    let p2_was_symlink = fix.library_dir.join("p2").is_symlink();
+    let broken_was_symlink = fix.library_dir.join("broken").is_symlink();
+    let user_was_symlink = fix.library_dir.join("user-symlink").is_symlink();
+    assert!(
+        p1_was_symlink && p2_was_symlink && broken_was_symlink && user_was_symlink,
+        "fixture sanity"
+    );
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--no-input",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "must exit non-zero on --no-input without --yes"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("destructive"),
+        "stderr must mention 'destructive': {stderr}"
+    );
+    assert!(
+        stderr.contains("--yes"),
+        "stderr must mention '--yes': {stderr}"
+    );
+    assert!(
+        stderr.contains("--no-input"),
+        "stderr must mention '--no-input': {stderr}"
+    );
+
+    // Library MUST be byte-for-byte unchanged on the bail path.
+    assert!(
+        fix.library_dir.join("p1").is_symlink(),
+        "p1 symlink must be preserved on bail"
+    );
+    assert!(fix.library_dir.join("p2").is_symlink());
+    assert!(fix.library_dir.join("broken").is_symlink());
+    assert!(fix.library_dir.join("user-symlink").is_symlink());
+}
+
+/// `tome migrate-library --yes --no-input` MUST skip the prompt and
+/// proceed: managed symlinks become real directories. The broken
+/// symlink (D-04) is preserved and forces a non-zero exit, so we
+/// remove the broken entry first to test the clean-success path.
+#[test]
+fn migrate_library_yes_skips_prompt() {
+    let fix = build_v09_fixture();
+
+    // Drop the broken symlink + manifest entry so this test exercises the
+    // clean-success path of `--yes --no-input` (the abort-on-broken case
+    // is already covered by `migrate_library_converts_managed_symlinks_to_real_dirs`).
+    std::fs::remove_file(fix.library_dir.join("broken")).unwrap();
+    let manifest_path = fix.tome_home.join(".tome-manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["skills"].as_object_mut().unwrap().remove("broken");
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let output = assert_cmd::Command::cargo_bin("tome")
+        .unwrap()
+        .args([
+            "migrate-library",
+            "--yes",
+            "--no-input",
+            "--config",
+            fix.config_path.to_str().unwrap(),
+            "--tome-home",
+            fix.tome_home.to_str().unwrap(),
+            "--machine",
+            fix.machine_path.to_str().unwrap(),
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "--yes --no-input must succeed.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+
+    // Conversion happened — library entries are real directories now.
+    for n in &["p1", "p2"] {
+        let dest = fix.library_dir.join(n);
+        assert!(
+            dest.is_dir() && !dest.is_symlink(),
+            "{n} must be converted to a real dir under --yes --no-input"
+        );
+    }
 }

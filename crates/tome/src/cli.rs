@@ -157,6 +157,12 @@ pub enum Command {
 
     /// Discover, consolidate, and distribute skills
     #[command(
+        long_about = "Discover, consolidate, and distribute skills.\n\n\
+                      For the cross-machine library-as-dotfiles workflow — committing \
+                      ~/.tome/ to dotfiles, bootstrapping a fresh machine, and the \
+                      auto_install_plugins consent flow — see docs/src/cross-machine-sync.md \
+                      (or the rendered mdbook page at the same path if you have the docs \
+                      built locally).",
         after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input\n  tome sync --no-install"
     )]
     Sync {
@@ -223,13 +229,18 @@ pub enum Command {
     /// Commit your library (or back it up) BEFORE running — there is no
     /// path back to v0.9 shape.
     #[command(
-        after_help = "Examples:\n  tome migrate-library --dry-run\n  tome migrate-library\n\nThis is a one-shot command for migrating from tome v0.9.x to v0.10. \
+        after_help = "Examples:\n  tome migrate-library --dry-run\n  tome migrate-library\n  tome migrate-library --yes\n\nThis is a one-shot command for migrating from tome v0.9.x to v0.10. \
                        On v0.10 fresh installs it has nothing to do."
     )]
     MigrateLibrary {
         /// Preview changes without modifying filesystem
         #[arg(long)]
         dry_run: bool,
+        /// Skip the confirmation prompt and proceed directly. Mirrors
+        /// `tome remove skill --yes` (Phase 14 D-B3). Required when running
+        /// under `--no-input` to confirm the destructive conversion.
+        #[arg(long, short)]
+        yes: bool,
     },
 
     /// Interactively browse discovered skills
@@ -523,5 +534,54 @@ mod tests {
     #[test]
     fn log_level_default_trait_impl_is_normal() {
         assert_eq!(LogLevel::default(), LogLevel::Normal);
+    }
+
+    // -- UX-02 / Plan 16-02 Task 2 — `tome migrate-library --yes` parsing --
+
+    #[test]
+    fn migrate_library_parses_yes_flag() {
+        let cli = Cli::try_parse_from(["tome", "migrate-library", "--yes"]).unwrap();
+        match cli.command {
+            Command::MigrateLibrary { dry_run, yes } => {
+                assert!(yes, "--yes must parse as yes: true");
+                assert!(!dry_run);
+            }
+            _ => panic!("expected MigrateLibrary"),
+        }
+    }
+
+    #[test]
+    fn migrate_library_short_y_alias() {
+        let cli = Cli::try_parse_from(["tome", "migrate-library", "-y"]).unwrap();
+        match cli.command {
+            Command::MigrateLibrary { yes, .. } => {
+                assert!(yes, "-y short alias must set yes: true")
+            }
+            _ => panic!("expected MigrateLibrary"),
+        }
+    }
+
+    #[test]
+    fn migrate_library_yes_default_false() {
+        let cli = Cli::try_parse_from(["tome", "migrate-library"]).unwrap();
+        match cli.command {
+            Command::MigrateLibrary { yes, dry_run } => {
+                assert!(!yes, "yes must default to false when --yes is absent");
+                assert!(!dry_run);
+            }
+            _ => panic!("expected MigrateLibrary"),
+        }
+    }
+
+    #[test]
+    fn migrate_library_dry_run_and_yes_compose() {
+        let cli = Cli::try_parse_from(["tome", "migrate-library", "--dry-run", "--yes"]).unwrap();
+        match cli.command {
+            Command::MigrateLibrary { dry_run, yes } => {
+                assert!(dry_run);
+                assert!(yes);
+            }
+            _ => panic!("expected MigrateLibrary"),
+        }
     }
 }

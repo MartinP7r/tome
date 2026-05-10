@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
 status: verifying
-stopped_at: Completed 15-06-polish-and-older-bugs-PLAN.md (final plan of Phase 15 / v0.10 beta cut)
-last_updated: "2026-05-08T07:51:22.624Z"
+stopped_at: Completed Plan 16-05 (DOC-03 cross-machine-sync.md)
+last_updated: "2026-05-08T14:36:04.945Z"
 last_activity: 2026-05-08
 progress:
   total_phases: 7
-  completed_phases: 5
-  total_plans: 28
-  completed_plans: 28
+  completed_phases: 6
+  total_plans: 33
+  completed_plans: 33
 ---
 
 # Project State
@@ -20,11 +20,11 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-02)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 15 — cli-hardening
+**Current focus:** Phase 16 — cleanup-message-ux-docs
 
 ## Current Position
 
-Phase: 16
+Phase: 17
 Plan: Not started
 Status: Phase complete — ready for verification
 Last activity: 2026-05-08
@@ -91,6 +91,11 @@ Historical decisions are archived in:
 - [Phase 15]: Plan 15-05: HARD-21 D-BROWSE-2 vs D-BROWSE-3 enforced as TWO DISTINCT STRINGS — action-menu LABEL has NO skill name (verb + scope only); StatusMessage BODY DOES include skill name (verb + skill + scope). DetailAction::label takes (&row, &prefs) and returns String; fallback_label() covers prefs-less paths
 - [Phase 15]: Plan 15-05: ToggleScope smart-routing (D-BROWSE-1) most-specific-list-wins (per-dir blocklist > per-dir allowlist > global) mirrors MachinePrefs::is_skill_allowed read-path; MACH-04 invariant preserved by construction (per-list mutators only ever touch one of disabled/enabled per directory)
 - [Phase 15]: Plan 15-06 (closes Phase 15 / v0.10 beta cut): HARD-14 backup gpg-signing flake fix (per-test-fixture local commit.gpgsign=false + cli_backup GIT_CONFIG_GLOBAL isolation); HARD-15 wizard chrome routed to stderr (eprintln!), only the dry-run TOML body stays on stdout; HARD-16 provenance_from_link_result renamed to warn_if_unreadable_symlink (intent-first naming); HARD-18 cross-fs cleanup recovery hint as Phase 7 D-10 Conflict/Why/Suggestion via cross_fs_recovery_hint pure formatter; HARD-19 reassign PreReassignState read-once snapshot (closes plan/execute drift class — execute() consumes manifest_entry_at_plan rather than re-reading); HARD-20 manifest epoch-0 timestamp warning at Manifest::load via epoch_zero_warning pure formatter. 11 new tests (4 cross-fs hint + 3 reassign snapshot + 4 epoch warning); 955 total tests green.
+- [Phase 16-cleanup-message-ux-docs]: Plan 16-01 / UX-01: Three-bucket cleanup output landed. Coordination shape = CleanupResult fields for Buckets A+B + sibling Vec<ExcludedSkill> for Bucket C (chosen over unified CleanupSummary because cross-module ownership). Bucket-distinct phrasing locked (Bucket A 'no longer in any source', Bucket B 'missing from configured source on disk', Bucket C 'now in exclude list'). Forbidden trigger phrase eliminated from cleanup.rs/lib.rs. D-UX01-4 stderr discipline honoured. Per-directory exclusion gap-fix (Rule 2) — cleanup_disabled_from_target now uses is_skill_allowed() so per-dir blocklists/allowlists also tear down stale symlinks.
+- [Phase 16]: Plan 16-02 / UX-02: tome migrate-library confirm gate landed. dialoguer::Confirm::default(false) with --yes/-y bypass (Phase 14 D-B3); --no-input without --yes bails with Phase 7 D-10 Conflict/Why/Suggestion. MigrationEntry.byte_size: Option<u64> populated via walkdir+metadata().len() walk (follow_links(false) per D-UX02-4). render_plan rewritten as thin wrapper around render_plan_to(writer); summary line + tabled::Style::rounded() four-column SKILL/SOURCE/SIZE/STATUS table (D-UX02-3). Inline humanize_bytes helper chosen over humansize crate. run_migrate_library deleted; cmd_migrate_library composes plan/render_plan/prompt_confirmation/execute/render_result directly.
+- [Phase 16]: Plan 16-03 / DOC-01: docs/src/architecture.md rewritten 60->251 lines for v0.10 library-canonical model. Sync Pipeline reorder lists Reconcile as step 1 (matches lib.rs::sync code). Modules list alphabetised + 4 new entries (marketplace.rs, reconcile.rs, migration_v010.rs, summary.rs). 4 new H2 sections inserted between Key Patterns and Testing (Library-canonical model / Lockfile-authoritative reconciliation / Marketplace adapter trait / Unowned lifecycle). D-API-1/-2 vocab merge honoured (tome adopt / tome forget appear only in supersession footnotes). 4 deviations auto-fixed (Reconcile pipeline step add, Excalidraw caption v0.10 staleness note, AutoInstall variant names corrected to Always/Ask/Never, MarketplaceAdapter trait uses &self per actual code).
+- [Phase 16]: Plan 16-04 / DOC-02: CHANGELOG.md `[Unreleased]` rewritten 22->209 lines as v0.10 release notes draft. Migration walkthrough leads, three explicit BREAKING call-outs (library shape conversion, plugin-update propagation gone, `tome remove <name>` -> `tome remove dir <name>`). 22 HARD-cluster issue links + 5 older-bug links + #459 epic link present. Locked wordings honoured: 16-01 bucket names verbatim, 16-02 summary line verbatim, Phase-7-D-10 bail message paraphrased (CHANGELOG-appropriate). Phase 14 D-API-1/-2 supersession honoured (tome adopt / tome forget only in "Replaces the proposed" sentences). Phase 11 D-01 supersession honoured (no auto-on-first-sync). UX-01 trigger phrase absent. Process note: orchestrator inline execution after two prior gsd-executor agents stalled (stream-idle-timeout + watchdog 600s); plan content was verbatim and acceptance checks were rg-based, well-suited to inline.
+- [Phase 16]: Plan 16-05 / DOC-03: docs/src/cross-machine-sync.md created (259 lines) with two walkthroughs (Machine A source-of-truth, Machine B fresh-machine bootstrap) + five reference sections (tome.lock semantics, auto_install_plugins consent Always|Ask|Never, directory_overrides, missing-claude error, v0.9 migration). Page wired into mdbook TOC between Configuration and Development Workflow; Command::Sync gains long_about referencing the page so 'tome sync --help' surfaces it; in-prose cross-link added from architecture.md Library-canonical model. Auto-install consent prompt rendering uses actual dialoguer::Select labels (not literal [Y/n/never] shorthand); missing-claude error reproduced verbatim from marketplace.rs. AutoInstall variant names corrected to Always|Ask|Never per actual code (CONTEXT.md DOC-03 D-DOC03-2 reference to Yes|Never|Prompt is wrong).
 
 ### v0.10 design context (consume during planning)
 
@@ -129,6 +134,6 @@ Phase 14 can land in parallel with Phase 13 once Phase 11 is complete (both depe
 
 ## Session Continuity
 
-Last session: 2026-05-08T07:40:10.197Z
-Stopped at: Completed 15-06-polish-and-older-bugs-PLAN.md (final plan of Phase 15 / v0.10 beta cut)
+Last session: 2026-05-08T14:28:25.779Z
+Stopped at: Completed Plan 16-05 (DOC-03 cross-machine-sync.md)
 Resume file: None
