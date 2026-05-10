@@ -1238,6 +1238,24 @@ mod tests {
         );
     }
 
+    /// UX-01 invariant: the trigger phrase that motivated the v0.10 milestone
+    /// discussion must NOT appear anywhere in the cleanup module's source.
+    /// Pinning it at source level (not just rendered output) prevents a
+    /// future refactor from re-introducing it in a code path the integration
+    /// test fixture doesn't reach (e.g. a quiet branch, alternate
+    /// formatter, or doc comment).
+    #[test]
+    fn cleanup_module_source_does_not_contain_forbidden_phrase() {
+        // Substring assembled at runtime so this very assertion line cannot
+        // false-positive against `include_str!`.
+        let forbidden = format!("{} {}", "no longer", "configured");
+        let source = include_str!("cleanup.rs");
+        assert!(
+            !source.contains(&forbidden),
+            "cleanup.rs source must not contain the UX-01 trigger phrase \"{forbidden}\"",
+        );
+    }
+
     #[test]
     fn render_distribution_cleanup_failures_empty_is_silent() {
         let mut buf = Vec::new();

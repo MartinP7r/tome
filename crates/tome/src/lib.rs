@@ -2414,6 +2414,21 @@ mod tests {
         assert_eq!(sync_commit_message(0, 0, 0), "tome sync");
     }
 
+    /// UX-01 invariant: the trigger phrase that motivated the v0.10
+    /// milestone discussion must NOT appear anywhere in `lib.rs`. Pinned
+    /// at source level (not just rendered output) so a future refactor
+    /// cannot re-introduce it in a code path the integration test fixture
+    /// doesn't exercise. Sibling test in `cleanup.rs` covers that module.
+    #[test]
+    fn lib_module_source_does_not_contain_forbidden_phrase() {
+        let forbidden = format!("{} {}", "no longer", "configured");
+        let source = include_str!("lib.rs");
+        assert!(
+            !source.contains(&forbidden),
+            "lib.rs source must not contain the UX-01 trigger phrase \"{forbidden}\"",
+        );
+    }
+
     // -- cleanup_disabled_from_target tests --
 
     fn test_dir_name() -> config::DirectoryName {
