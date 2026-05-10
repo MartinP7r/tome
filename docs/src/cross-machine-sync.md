@@ -56,7 +56,7 @@ Machine-specific preferences (`~/.config/tome/machine.toml`) are
 deliberately NOT in `~/.tome/` — they're per-machine by design. Things
 like `disabled` skills, `auto_install_plugins` consent, and
 `[directory_overrides.<name>]` belong there. See
-[Configuration — Machine preferences](configuration.md#machine-preferences)
+[Configuration — `machine.toml` Machine-Local Preferences](configuration.md#machinetoml--machine-local-preferences)
 for the full schema.
 
 ## Walkthrough — Machine B (fresh machine)

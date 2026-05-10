@@ -239,7 +239,7 @@ pub enum Command {
         /// Skip the confirmation prompt and proceed directly. Mirrors
         /// `tome remove skill --yes` (Phase 14 D-B3). Required when running
         /// under `--no-input` to confirm the destructive conversion.
-        #[arg(long, short = 'y')]
+        #[arg(long, short)]
         yes: bool,
     },
 
