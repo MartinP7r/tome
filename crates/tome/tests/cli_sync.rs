@@ -1987,4 +1987,20 @@ role = "target"
         !predicate::str::contains(forbidden.as_str()).eval(&stderr),
         "forbidden trigger phrase '{forbidden}' must not appear in cleanup output:\n{stderr}"
     );
+
+    // #15 stdout-discipline pin: bucket headers must NOT leak into stdout.
+    // If a future refactor accidentally routes a renderer through `println!`,
+    // the assertions above (which only check stderr presence) still pass
+    // because both streams contain the substrings; this assertion fails
+    // immediately and surfaces the regression.
+    for header in [
+        "no longer in any source",
+        "missing from configured source on disk",
+        "now in exclude list",
+    ] {
+        assert!(
+            !stdout.contains(header),
+            "Bucket header `{header}` leaked to stdout (cleanup output must be stderr-only per HARD-15):\n--- stdout ---\n{stdout}"
+        );
+    }
 }

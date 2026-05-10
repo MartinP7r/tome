@@ -168,14 +168,19 @@ pub(crate) fn render_cleanup_buckets(
         }
     }
 
-    // Bucket B — missing from configured source on disk (delete from library).
+    // Bucket B — missing from configured source on disk. The header
+    // intentionally does NOT carry an action verb in parentheses (see
+    // Bucket A and C above): in interactive mode the user may decline
+    // the destructive prompt, in which case nothing is removed but the
+    // entry still surfaces here as "tome detected this is missing". The
+    // per-skill hint below carries the action context.
     if !bucket_b.is_empty() {
         writeln!(writer)?;
         writeln!(
             writer,
             "{}",
             console::style(format!(
-                "{} skill(s) missing from configured source on disk (removing from library):",
+                "{} skill(s) missing from configured source on disk:",
                 bucket_b.len()
             ))
             .yellow()

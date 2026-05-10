@@ -982,10 +982,12 @@ pub(crate) fn cmd_fork(
 /// `tome migrate-library` — one-shot v0.9 → v0.10 library migration.
 ///
 /// Per D-05: any skip or failure means non-zero exit.
-/// Per UX-02 D-UX02-1/-2: drives plan → render_plan → confirm gate →
-/// execute → render_result. The confirm gate is bypassed under `--dry-run`
-/// (no destructive action runs) or `--yes`; under `--no-input` without
-/// `--yes` it bails with a Conflict/Why/Suggestion error.
+/// Per UX-02 D-UX02-1/-2: drives plan → render_plan_to → confirm gate →
+/// execute → render_result_to. The confirm gate is bypassed under
+/// `--dry-run` (no destructive action runs) or `--yes`. Under
+/// `--no-input` AND not `--dry-run`, missing `--yes` bails with a
+/// Conflict/Why/Suggestion error; `--dry-run --no-input` is fine without
+/// `--yes` because the dry run never reaches the gate.
 pub(crate) fn cmd_migrate_library(
     paths: &TomePaths,
     dry_run: bool,
@@ -1017,9 +1019,11 @@ pub(crate) fn cmd_migrate_library(
     }
 
     if !dry_run {
-        // UX-02 confirm-or-abort. `--yes` skips; `--no-input` without
-        // `--yes` returns Err. User answering `n` → Ok(false) → clean exit.
-        if !migration_v010::prompt_confirmation(yes, no_input)? {
+        // UX-02 confirm-or-abort. PromptMode encodes the three valid arms
+        // (Forced / NoInputRequiresYes / Interactive); `yes` always wins
+        // over `no_input` so the impossible state is unrepresentable.
+        let mode = migration_v010::PromptMode::from_flags(yes, no_input);
+        if !migration_v010::prompt_confirmation(mode)? {
             return Ok(());
         }
     }

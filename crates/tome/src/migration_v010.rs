@@ -37,24 +37,28 @@ use crate::paths::collapse_home;
 /// Walk `source` and sum `metadata().len()` for every regular file.
 ///
 /// Uses `WalkDir::follow_links(false)` per D-UX02-4 to avoid double-counting
-/// nested symlinked subdirectories. Errors during walk or metadata are
-/// silently treated as zero contribution — this is a UX size estimate, not a
-/// correctness-critical measurement. Saturating arithmetic guards against
-/// pathological accumulation overflow on enormous libraries.
-fn walk_byte_size(source: &Path) -> u64 {
+/// nested symlinked subdirectories. Returns `(total_bytes, unreadable_entries)`:
+/// per-entry walk errors and `metadata()` failures count toward the unreadable
+/// tally (surfaced in the summary so the user knows the estimate may
+/// undercount when permissions block parts of the source). Saturating
+/// arithmetic guards against accumulation overflow on enormous libraries.
+fn walk_byte_size(source: &Path) -> (u64, u64) {
     let mut total: u64 = 0;
-    for entry in walkdir::WalkDir::new(source)
-        .follow_links(false)
-        .into_iter()
-        .flatten()
-    {
-        if entry.file_type().is_file()
-            && let Ok(meta) = entry.metadata()
-        {
-            total = total.saturating_add(meta.len());
+    let mut unreadable: u64 = 0;
+    for result in walkdir::WalkDir::new(source).follow_links(false) {
+        match result {
+            Ok(entry) => {
+                if entry.file_type().is_file() {
+                    match entry.metadata() {
+                        Ok(meta) => total = total.saturating_add(meta.len()),
+                        Err(_) => unreadable = unreadable.saturating_add(1),
+                    }
+                }
+            }
+            Err(_) => unreadable = unreadable.saturating_add(1),
         }
     }
-    total
+    (total, unreadable)
 }
 
 /// Render a byte count in the largest sensible binary unit (B / KB / MB /
@@ -165,6 +169,13 @@ pub(crate) struct MigrationEntry {
 #[derive(Debug, Default)]
 pub(crate) struct MigrationPlan {
     pub entries: Vec<MigrationEntry>,
+    /// Total walk/metadata failures encountered while computing per-entry
+    /// byte sizes (permission denied on a subdir, broken nested symlinks,
+    /// etc.). When > 0 the summary line surfaces a warning so the user
+    /// knows the estimate may undercount; non-zero counts do NOT block
+    /// the migration since `byte_size` is a UX estimate, not a correctness
+    /// signal.
+    pub unreadable_walk_entries: u64,
 }
 
 #[derive(Debug, Default)]
@@ -219,6 +230,7 @@ impl std::error::Error for MigrationPartialOrFailed {}
 /// check there must enforce (c) explicitly. See `detect_v09_shape` below.
 pub(crate) fn plan(library_dir: &Path, manifest: &Manifest) -> Result<MigrationPlan> {
     let mut entries = Vec::new();
+    let mut unreadable_walk_entries: u64 = 0;
 
     for (skill_name, skill_entry) in manifest.iter() {
         if !skill_entry.managed {
@@ -245,8 +257,14 @@ pub(crate) fn plan(library_dir: &Path, manifest: &Manifest) -> Result<MigrationP
         // `follow_links(false)` on the *walk* so nested symlinked subdirs
         // aren't double-counted, but the top-level symlink IS resolved by
         // `WalkDir::new()` itself so the walk still reaches real content.
+        // Per-entry walk failures accumulate into the plan-level
+        // `unreadable_walk_entries` count so the summary line can warn the
+        // user the estimate may undercount when permissions block parts of
+        // the source tree (#3).
         let byte_size = if source_reachable {
-            Some(walk_byte_size(&library_path))
+            let (bytes, unreadable) = walk_byte_size(&library_path);
+            unreadable_walk_entries = unreadable_walk_entries.saturating_add(unreadable);
+            Some(bytes)
         } else {
             None
         };
@@ -260,7 +278,10 @@ pub(crate) fn plan(library_dir: &Path, manifest: &Manifest) -> Result<MigrationP
         });
     }
 
-    Ok(MigrationPlan { entries })
+    Ok(MigrationPlan {
+        entries,
+        unreadable_walk_entries,
+    })
 }
 
 /// Quick check used by `lib.rs::sync` to refuse with a hint (D-02).
@@ -334,6 +355,19 @@ pub(crate) fn render_plan_to(
             style("⚠").yellow(),
             style(broken).bold(),
             if broken == 1 { "" } else { "s" }
+        )?;
+    }
+    if plan.unreadable_walk_entries > 0 {
+        writeln!(
+            w,
+            "  {} {} entr{} unreadable while sizing source content — disk estimate may undercount.",
+            style("⚠").yellow(),
+            style(plan.unreadable_walk_entries).bold(),
+            if plan.unreadable_walk_entries == 1 {
+                "y"
+            } else {
+                "ies"
+            }
         )?;
     }
     writeln!(w)?;
@@ -519,25 +553,51 @@ fn copy_dir_recursive_resolving(src: &Path, dst: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Confirm-or-abort gate before destructive migration (UX-02 D-UX02-1/-2).
+/// Three-arm semantic for the migration confirm gate (UX-02 D-UX02-1/-2).
+/// Replaces the original `(yes: bool, no_input: bool)` parameter pair so
+/// the impossible state (yes wins over no_input) is unrepresentable rather
+/// than implicit in arm ordering. Mirrors HARD-07's `LogLevel`-replacing-
+/// `(verbose, quiet)` pattern.
 ///
-/// Three-arm behaviour matrix:
-/// - `yes=true`               → `Ok(true)` — skip prompt, proceed
-///   (CI-friendly; mirrors Phase 14 D-B3 `tome remove skill --yes`).
-/// - `yes=false, no_input=true`  → `Err(_)` — refuses to silently mutate
-///   under `--no-input`. Phase 7 D-10 Conflict/Why/Suggestion shape.
-/// - `yes=false, no_input=false` → `dialoguer::Confirm::default(false)`;
-///   pressing anything other than `y` aborts cleanly (no mutation).
+/// Constructed at the CLI boundary via [`PromptMode::from_flags`]; consumed
+/// by [`prompt_confirmation`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PromptMode {
+    /// `--yes`: bypass the prompt entirely (CI-friendly; mirrors Phase 14
+    /// D-B3 `tome remove skill --yes`).
+    Forced,
+    /// `--no-input` without `--yes`: refuse to silently mutate; bail with
+    /// the Phase 7 D-10 Conflict/Why/Suggestion shape.
+    NoInputRequiresYes,
+    /// No flags: open `dialoguer::Confirm::default(false)`; pressing
+    /// anything other than `y` aborts cleanly.
+    Interactive,
+}
+
+impl PromptMode {
+    /// Convert the two CLI booleans to a `PromptMode` at the boundary.
+    /// `yes` always wins over `no_input` (the CI-friendly bypass).
+    pub(crate) fn from_flags(yes: bool, no_input: bool) -> Self {
+        if yes {
+            PromptMode::Forced
+        } else if no_input {
+            PromptMode::NoInputRequiresYes
+        } else {
+            PromptMode::Interactive
+        }
+    }
+}
+
+/// Confirm-or-abort gate before destructive migration (UX-02 D-UX02-1/-2).
 ///
 /// The interactive arm is intentionally not unit-tested here (dialoguer
 /// requires a TTY); the abort-leaves-library-untouched invariant is
-/// covered by the `cli_migrate_library` integration tests landing in
-/// Task 3.
-pub(crate) fn prompt_confirmation(yes: bool, no_input: bool) -> Result<bool> {
-    if yes {
+/// covered by the `cli_migrate_library` integration tests.
+pub(crate) fn prompt_confirmation(mode: PromptMode) -> Result<bool> {
+    if mode == PromptMode::Forced {
         return Ok(true);
     }
-    if no_input {
+    if mode == PromptMode::NoInputRequiresYes {
         anyhow::bail!(
             "tome migrate-library is destructive (converts symlinks to real copies).\n  \
              Why: --no-input mode skips the confirmation prompt; --yes is required to confirm.\n  \
@@ -995,6 +1055,64 @@ mod tests {
     }
 
     #[test]
+    fn render_plan_to_writer_emits_dash_and_warn_glyph_for_broken_entry() {
+        // #14 — broken-entry row in the SIZE column must show the em-dash
+        // sentinel and the entry must carry the ⚠ status glyph so the user
+        // can see at a glance which entries will be skipped.
+        let (_tmp, library, source, mut manifest) = setup_fixture();
+
+        // Make a managed entry whose source has been deleted on disk.
+        let src = make_managed_source(&source, "broken", "# broken");
+        add_managed_entry(&mut manifest, &library, &src, "broken");
+        std::fs::remove_dir_all(&src).unwrap();
+
+        let p = plan(&library, &manifest).unwrap();
+        assert!(p.entries[0].byte_size.is_none(), "fixture invariant");
+
+        let mut buf = Vec::new();
+        render_plan_to(&p, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+
+        assert!(
+            out.contains("—"),
+            "broken-entry SIZE column must show em-dash, got: {out}"
+        );
+        assert!(
+            out.contains("⚠"),
+            "broken-entry STATUS column must show ⚠ glyph, got: {out}"
+        );
+    }
+
+    #[test]
+    fn render_plan_to_warns_when_walk_entries_unreadable() {
+        // #3 — when `walk_byte_size` aggregated unreadable entries, the
+        // summary line must surface a "may undercount" warning so the
+        // user isn't asked to confirm a destructive op based on a
+        // silently-undercounted size estimate.
+        let plan = MigrationPlan {
+            entries: vec![MigrationEntry {
+                skill_name: "p1".to_string(),
+                library_path: PathBuf::from("/tmp/lib/p1"),
+                raw_link_target: PathBuf::from("/tmp/src/p1"),
+                source_reachable: true,
+                byte_size: Some(100),
+            }],
+            unreadable_walk_entries: 12,
+        };
+        let mut buf = Vec::new();
+        render_plan_to(&plan, &mut buf).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("12 entries unreadable"),
+            "summary must surface unreadable count, got: {out}"
+        );
+        assert!(
+            out.contains("may undercount"),
+            "summary must warn estimate may undercount, got: {out}"
+        );
+    }
+
+    #[test]
     fn render_plan_table_has_four_column_headers() {
         // D-UX02-3: tabled table emits all four expected column headers.
         let (_tmp, library, source, mut manifest) = setup_fixture();
@@ -1017,23 +1135,30 @@ mod tests {
     // -- UX-02 / Plan 16-02 Task 2 — prompt_confirmation --
 
     #[test]
-    fn prompt_confirmation_returns_true_when_yes_flag_set() {
-        // yes=true short-circuits before any dialoguer interaction.
-        let r = prompt_confirmation(true, false).unwrap();
-        assert!(r, "yes=true must return Ok(true) without prompting");
+    fn prompt_mode_from_flags_yes_wins_over_no_input() {
+        assert_eq!(
+            PromptMode::from_flags(true, true),
+            PromptMode::Forced,
+            "yes always wins — yes+no_input must collapse to Forced"
+        );
+        assert_eq!(PromptMode::from_flags(true, false), PromptMode::Forced);
+        assert_eq!(
+            PromptMode::from_flags(false, true),
+            PromptMode::NoInputRequiresYes
+        );
+        assert_eq!(PromptMode::from_flags(false, false), PromptMode::Interactive);
     }
 
     #[test]
-    fn prompt_confirmation_returns_true_when_yes_and_no_input_set() {
-        // yes=true wins over no_input=true (CI-friendly path).
-        let r = prompt_confirmation(true, true).unwrap();
-        assert!(r);
+    fn prompt_confirmation_forced_returns_true_without_prompting() {
+        let r = prompt_confirmation(PromptMode::Forced).unwrap();
+        assert!(r, "Forced must return Ok(true) without prompting");
     }
 
     #[test]
-    fn prompt_confirmation_bails_when_no_input_without_yes() {
+    fn prompt_confirmation_bails_on_no_input_requires_yes() {
         // Phase 7 D-10 Conflict/Why/Suggestion bail.
-        let err = prompt_confirmation(false, true).unwrap_err();
+        let err = prompt_confirmation(PromptMode::NoInputRequiresYes).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("destructive"),
@@ -1062,5 +1187,22 @@ mod tests {
         let thirty_mb = 30 * 1024 * 1024 + (1024 * 410); // ~30.4 MB
         let s = humanize_bytes(thirty_mb);
         assert!(s.starts_with("30.") && s.ends_with(" MB"), "got: {s}");
+    }
+
+    #[test]
+    fn humanize_bytes_saturates_on_extreme_input_without_panic() {
+        // #13 — extreme inputs must not panic and must produce non-empty
+        // output. u64::MAX should land in the largest unit (TB) since the
+        // promotion loop is bounded by UNITS.len().
+        let max = humanize_bytes(u64::MAX);
+        assert!(!max.is_empty(), "u64::MAX must produce non-empty output");
+        assert!(
+            max.ends_with(" TB"),
+            "u64::MAX should saturate at the largest unit (TB), got: {max}"
+        );
+        // Spot-check the boundary one byte below promotion to TB.
+        let just_below_tb = 1024_u64.pow(4) - 1;
+        let s = humanize_bytes(just_below_tb);
+        assert!(s.ends_with(" GB"), "just-below-TB should be GB, got: {s}");
     }
 }
