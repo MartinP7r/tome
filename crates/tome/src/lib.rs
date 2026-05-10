@@ -1003,9 +1003,14 @@ pub(crate) fn cmd_migrate_library(
 
     let manifest = manifest::load(paths.config_dir())?;
     let plan = migration_v010::plan(paths.library_dir(), &manifest)?;
-    migration_v010::render_plan(&plan);
+    // HARD-15 stderr discipline: render directly to a locked stderr handle.
+    // Best-effort write — failure to render is non-fatal for the migration.
+    {
+        let mut stderr = std::io::stderr().lock();
+        let _ = migration_v010::render_plan_to(&plan, &mut stderr);
+    }
 
-    // Empty plan — render_plan already printed the already-in-v0.10-shape
+    // Empty plan — render_plan_to already printed the already-in-v0.10-shape
     // message; nothing to confirm or execute.
     if plan.entries.is_empty() {
         return Ok(());
@@ -1020,7 +1025,10 @@ pub(crate) fn cmd_migrate_library(
     }
 
     let result = migration_v010::execute(&plan, dry_run)?;
-    migration_v010::render_result(&result);
+    {
+        let mut stderr = std::io::stderr().lock();
+        let _ = migration_v010::render_result_to(&result, &mut stderr);
+    }
 
     // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
     // `main.rs` downcasts `MigrationPartialOrFailed` and exits with code 1.

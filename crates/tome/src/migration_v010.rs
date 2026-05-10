@@ -279,17 +279,6 @@ pub(crate) fn detect_v09_shape(library_dir: &Path, manifest: &Manifest) -> bool 
     false
 }
 
-/// Stdout-printing thin wrapper around `render_plan_to`. Existing call-sites
-/// in `cmd_migrate_library` invoke this; tests use `render_plan_to` to
-/// capture output for assertion.
-pub(crate) fn render_plan(plan: &MigrationPlan) {
-    let mut buf = Vec::new();
-    let _ = render_plan_to(plan, &mut buf);
-    if let Ok(s) = std::str::from_utf8(&buf) {
-        print!("{s}");
-    }
-}
-
 /// Render the migration plan into `w`. Per UX-02 D-UX02-3 the output is:
 ///
 /// 1. Bold "v0.9 → v0.10 library migration plan" header.
@@ -562,17 +551,23 @@ pub(crate) fn prompt_confirmation(yes: bool, no_input: bool) -> Result<bool> {
     Ok(confirmed.unwrap_or(false))
 }
 
-/// Render the SAFE-01 grouped failure summary + final ✓/⚠ banner.
-pub(crate) fn render_result(result: &MigrationResult) {
-    println!();
+/// Render the SAFE-01 grouped failure summary + final ✓/⚠ banner into `w`.
+/// Per HARD-15 stderr discipline, production callers pass an
+/// `io::stderr().lock()` writer.
+pub(crate) fn render_result_to(
+    result: &MigrationResult,
+    w: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+    writeln!(w)?;
     let banner = format!(
         "⚠ {} converted · {} skipped (broken source) · {} failed",
         result.converted, result.skipped_broken_source, result.failed,
     );
     if result.is_partial_or_failed() {
-        println!("{}", style(&banner).yellow().bold());
+        writeln!(w, "{}", style(&banner).yellow().bold())?;
     } else {
-        println!(
+        writeln!(
+            w,
             "{}",
             style(format!(
                 "✓ {} skill{} migrated to v0.10 shape",
@@ -581,11 +576,11 @@ pub(crate) fn render_result(result: &MigrationResult) {
             ))
             .green()
             .bold()
-        );
+        )?;
     }
 
     if result.failures.is_empty() {
-        return;
+        return Ok(());
     }
 
     // Group by kind in `MigrationFailureKind::ALL` order (POLISH-04 pattern).
@@ -595,19 +590,21 @@ pub(crate) fn render_result(result: &MigrationResult) {
         if group.is_empty() {
             continue;
         }
-        println!();
-        println!(
+        writeln!(w)?;
+        writeln!(
+            w,
             "  {} ({}):",
             style(kind.label()).yellow().bold(),
             group.len()
-        );
+        )?;
         for f in group {
             match &f.error {
-                Some(e) => println!("    {} ({e})", collapse_home(&f.path)),
-                None => println!("    {}", collapse_home(&f.path)),
+                Some(e) => writeln!(w, "    {} ({e})", collapse_home(&f.path))?,
+                None => writeln!(w, "    {}", collapse_home(&f.path))?,
             }
         }
     }
+    Ok(())
 }
 
 // `run_migrate_library` was deleted in Plan 16-02 Task 3 — `cmd_migrate_library`
