@@ -309,17 +309,26 @@ fn classify_lockfile(
         } else if !installed_ids.contains(registry_id.as_str()) {
             ReconcileClass::MissingFromMachine
         } else {
-            // Compute live hash from library copy.
+            // Compute live hash from library copy. If the library copy is
+            // missing on disk (manifest/lockfile stale, cleanup hasn't run
+            // yet), treat as MissingFromMachine — consolidate will recreate
+            // it from the marketplace-installed plugin on this same sync.
+            // Avoids the hash_directory walkdir ENOENT that would otherwise
+            // hard-fail sync before cleanup gets a chance.
             let skill_dir = library_dir.join(name.as_str());
-            let live_hash = manifest::hash_directory(&skill_dir)
-                .with_context(|| format!("failed to hash library copy of {name}"))?;
-            if live_hash == entry.content_hash {
-                ReconcileClass::Match
+            if !skill_dir.is_dir() {
+                ReconcileClass::MissingFromMachine
             } else {
-                let new_version = adapter.current_version(registry_id)?;
-                ReconcileClass::Drift {
-                    old_version: entry.version.clone(),
-                    new_version,
+                let live_hash = manifest::hash_directory(&skill_dir)
+                    .with_context(|| format!("failed to hash library copy of {name}"))?;
+                if live_hash == entry.content_hash {
+                    ReconcileClass::Match
+                } else {
+                    let new_version = adapter.current_version(registry_id)?;
+                    ReconcileClass::Drift {
+                        old_version: entry.version.clone(),
+                        new_version,
+                    }
                 }
             }
         };
@@ -358,7 +367,20 @@ fn detect_edited(
             continue;
         };
 
-        let live_hash = manifest::hash_directory(&library_dir.join(name.as_str()))
+        // Skip if the library copy doesn't exist on disk. This happens when
+        // the manifest is stale (skill was uninstalled / source dir gone)
+        // but cleanup hasn't run yet — sync runs reconcile BEFORE cleanup,
+        // so detect_edited would otherwise hard-fail on `hash_directory`'s
+        // walkdir (ENOENT). The downstream cleanup phase classifies these
+        // as Bucket B (missing-from-disk) and removes them. Edited-in-
+        // library detection is by definition impossible if the library
+        // copy doesn't exist.
+        let skill_dir = library_dir.join(name.as_str());
+        if !skill_dir.is_dir() {
+            continue;
+        }
+
+        let live_hash = manifest::hash_directory(&skill_dir)
             .with_context(|| format!("failed to hash library copy of {name}"))?;
 
         if live_hash != lock_entry.content_hash {
@@ -1055,6 +1077,47 @@ mod tests {
         assert!(
             result.is_empty(),
             "Unowned managed entries must not be edit-classified (D-14), got {result:?}"
+        );
+    }
+
+    #[test]
+    fn detect_edited_skips_when_library_copy_missing() {
+        // Regression: stale manifest+lockfile entries for a skill whose
+        // library copy was deleted (plugin uninstalled, etc.) must not
+        // hard-fail reconcile with `failed to hash library copy`. Cleanup
+        // (which runs AFTER reconcile in sync) is responsible for these
+        // as Bucket B missing-from-disk.
+        let tmp = TempDir::new().unwrap();
+        let (_paths, lib) = paths_with_lib(tmp.path());
+        // Deliberately do NOT create a library directory for "ghost-skill".
+        let stale_hash = ContentHash::new("d".repeat(64)).unwrap();
+
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("ghost-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/ghost-skill"),
+                DirectoryName::new("claude-plugins").unwrap(),
+                stale_hash.clone(),
+                true, // managed
+            ),
+        );
+
+        let lockfile = lockfile_with(vec![(
+            "ghost-skill",
+            lock_entry(
+                "claude-plugins",
+                stale_hash,
+                Some("ghost@mp"),
+                Some("1.0.0"),
+            ),
+        )]);
+
+        // Must succeed (skip the missing entry), not error.
+        let result = detect_edited(&manifest, &lib, &lockfile).unwrap();
+        assert!(
+            result.is_empty(),
+            "missing library copy must skip — cleanup handles it as Bucket B; got {result:?}"
         );
     }
 
