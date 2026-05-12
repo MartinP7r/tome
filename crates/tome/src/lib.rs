@@ -35,6 +35,7 @@ pub(crate) mod backup;
 pub mod browse;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod browse;
+pub(crate) mod change_cause;
 pub(crate) mod cleanup;
 pub mod cli;
 pub mod config;
