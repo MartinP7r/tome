@@ -54,24 +54,24 @@ Deferred from v0.11 scoping; surface as candidates for v0.12 / v1.0 / v2.
 
 ## Traceability
 
-Filled by `gsd-roadmapper` 2026-05-12. 13 requirements expected to map across ~2 phases (18–19), 100% coverage.
+Filled by `gsd-roadmapper` 2026-05-12. 13 requirements mapped across 2 phases (18–19), 100% coverage.
 
 | Requirement | Phase | GitHub Issue | Status |
 |-------------|-------|--------------|--------|
-| OBS-01 | TBD | — | Pending roadmap |
-| OBS-02 | TBD | — | Pending roadmap |
-| OBS-03 | TBD | — | Pending roadmap |
-| OBS-04 | TBD | — | Pending roadmap |
-| OBS-05 | TBD | — | Pending roadmap |
-| OBS-06 | TBD | — | Pending roadmap |
-| OBS-07 | TBD | — | Pending roadmap |
-| FIX-01 | TBD | [#530](https://github.com/MartinP7r/tome/issues/530) | Pending roadmap |
-| FIX-02 | TBD | [#511](https://github.com/MartinP7r/tome/issues/511) | Pending roadmap |
-| FIX-03 | TBD | [#532](https://github.com/MartinP7r/tome/issues/532) | Pending roadmap |
-| FIX-04 | TBD | [#454](https://github.com/MartinP7r/tome/issues/454) | Pending roadmap |
-| FIX-05 | TBD | [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456) | Pending roadmap |
-| FIX-06 | TBD | [#533](https://github.com/MartinP7r/tome/issues/533) | Pending roadmap |
+| OBS-01 | Phase 18 | — | Pending |
+| OBS-02 | Phase 18 | — | Pending |
+| OBS-03 | Phase 18 | — | Pending |
+| OBS-04 | Phase 18 | — | Pending |
+| OBS-05 | Phase 18 | — | Pending |
+| OBS-06 | Phase 19 | — | Pending |
+| OBS-07 | Phase 19 | — | Pending |
+| FIX-01 | Phase 19 | [#530](https://github.com/MartinP7r/tome/issues/530) | Pending |
+| FIX-02 | Phase 19 | [#511](https://github.com/MartinP7r/tome/issues/511) | Pending |
+| FIX-03 | Phase 19 | [#532](https://github.com/MartinP7r/tome/issues/532) | Pending |
+| FIX-04 | Phase 19 | [#454](https://github.com/MartinP7r/tome/issues/454) | Pending |
+| FIX-05 | Phase 19 | [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456) | Pending |
+| FIX-06 | Phase 19 | [#533](https://github.com/MartinP7r/tome/issues/533) | Pending |
 
 **Coverage:**
 - v0.11 requirements: 13 total (7 OBS + 6 FIX)
-- Mapped to phases: 0 / 13 (roadmap pending)
+- Mapped to phases: 13 / 13 ✓
