@@ -13,7 +13,9 @@
 
 use anyhow::{Context, Result};
 use std::path::Path;
+use tracing::{info, warn};
 
+use crate::change_cause::ChangeCause;
 use crate::discover::DiscoveredSkill;
 use crate::manifest::{self, Manifest, SkillEntry};
 use crate::paths::TomePaths;
@@ -158,8 +160,8 @@ fn consolidate_managed(
             // Normally `lib.rs::sync` blocks this path entirely (per D-02);
             // this branch defends the boundary in case sync's gate is bypassed
             // (e.g. direct call to consolidate from a test or future helper).
-            eprintln!(
-                "warning: {} is a v0.9-shape symlink for managed skill — \
+            warn!(
+                "{} is a v0.9-shape symlink for managed skill — \
                  run `tome migrate-library` to convert to v0.10 shape, skipping",
                 dest.display()
             );
@@ -174,6 +176,16 @@ fn consolidate_managed(
                     if !entry.managed {
                         record_in_manifest(manifest, skill, content_hash.clone());
                         result.updated += 1;
+                        // OBS-04 emission: managed-flag flip with unchanged content.
+                        // Locally approximated as HashChanged (no separate
+                        // "flag flipped" variant in CONTEXT.md D-SPAN-3 vocabulary;
+                        // documented in 18-02 SUMMARY).
+                        info!(
+                            skill = %skill.name,
+                            directory = %skill.source_name,
+                            cause = %ChangeCause::HashChanged,
+                            "re-emitted",
+                        );
                     } else {
                         result.unchanged += 1;
                     }
@@ -188,10 +200,16 @@ fn consolidate_managed(
                 }
                 record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
+                info!(
+                    skill = %skill.name,
+                    directory = %skill.source_name,
+                    cause = %ChangeCause::HashChanged,
+                    "re-emitted",
+                );
             } else {
                 // Real dir exists but not in manifest — user-created collision, skip.
-                eprintln!(
-                    "warning: {} exists but is not in the manifest, skipping",
+                warn!(
+                    "{} exists but is not in the manifest, skipping",
                     dest.display()
                 );
                 result.skipped += 1;
@@ -204,10 +222,16 @@ fn consolidate_managed(
             }
             record_in_manifest(manifest, skill, content_hash.clone());
             result.created += 1;
+            info!(
+                skill = %skill.name,
+                directory = %skill.source_name,
+                cause = %ChangeCause::NewlyAdded,
+                "re-emitted",
+            );
         }
         DestinationState::Other => {
-            eprintln!(
-                "warning: {} exists but is not in the manifest, skipping",
+            warn!(
+                "{} exists but is not in the manifest, skipping",
                 dest.display()
             );
             result.skipped += 1;
@@ -244,6 +268,12 @@ fn consolidate_local(
                 }
                 record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
+                info!(
+                    skill = %skill.name,
+                    directory = %skill.source_name,
+                    cause = %ChangeCause::HashChanged,
+                    "re-emitted",
+                );
                 return Ok(());
             }
             // Legacy v0.1.x symlink — migrate to local copy
@@ -260,8 +290,8 @@ fn consolidate_local(
                 if abs_resolved.is_dir() {
                     copy_dir_recursive(&abs_resolved, dest)?;
                 } else {
-                    eprintln!(
-                        "warning: v0.1 symlink target for '{}' is gone, copying from current source",
+                    warn!(
+                        "v0.1 symlink target for '{}' is gone, copying from current source",
                         skill.name
                     );
                     copy_dir_recursive(&skill.path, dest)?;
@@ -269,6 +299,12 @@ fn consolidate_local(
             }
             record_in_manifest(manifest, skill, content_hash.clone());
             result.updated += 1;
+            info!(
+                skill = %skill.name,
+                directory = %skill.source_name,
+                cause = %ChangeCause::HashChanged,
+                "re-emitted",
+            );
         }
         DestinationState::Directory | DestinationState::Empty | DestinationState::Other => {
             if let Some(entry) = manifest.get(skill.name.as_str()) {
@@ -280,6 +316,16 @@ fn consolidate_local(
                     if entry.managed {
                         record_in_manifest(manifest, skill, content_hash.clone());
                         result.updated += 1;
+                        // OBS-04 emission: managed-flag flip with unchanged content
+                        // (symmetric to consolidate_managed line ~176). Approximated
+                        // as HashChanged per Plan 18-02 vocabulary; documented in
+                        // 18-02 SUMMARY.
+                        info!(
+                            skill = %skill.name,
+                            directory = %skill.source_name,
+                            cause = %ChangeCause::HashChanged,
+                            "re-emitted",
+                        );
                     } else {
                         result.unchanged += 1;
                     }
@@ -296,10 +342,16 @@ fn consolidate_local(
                 }
                 record_in_manifest(manifest, skill, content_hash.clone());
                 result.updated += 1;
+                info!(
+                    skill = %skill.name,
+                    directory = %skill.source_name,
+                    cause = %ChangeCause::HashChanged,
+                    "re-emitted",
+                );
             } else if dest.exists() {
                 // Something exists that's NOT in the manifest — skip with warning
-                eprintln!(
-                    "warning: {} exists but is not in the manifest, skipping",
+                warn!(
+                    "{} exists but is not in the manifest, skipping",
                     dest.display()
                 );
                 result.skipped += 1;
@@ -310,6 +362,12 @@ fn consolidate_local(
                 }
                 record_in_manifest(manifest, skill, content_hash.clone());
                 result.created += 1;
+                info!(
+                    skill = %skill.name,
+                    directory = %skill.source_name,
+                    cause = %ChangeCause::NewlyAdded,
+                    "re-emitted",
+                );
             }
         }
     }
@@ -349,8 +407,8 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
             })?;
         } else if entry.file_type().is_symlink() {
             // Skip symlinks inside skill dirs — we don't follow them
-            eprintln!(
-                "warning: skipping symlink inside skill dir: {}",
+            warn!(
+                "skipping symlink inside skill dir: {}",
                 entry.path().display()
             );
         }
