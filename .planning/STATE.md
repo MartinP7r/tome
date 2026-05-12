@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v0.10
 milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: verifying
-stopped_at: Completed Plan 16-05 (DOC-03 cross-machine-sync.md)
-last_updated: "2026-05-08T14:36:04.945Z"
-last_activity: 2026-05-08
+status: shipped
+stopped_at: v0.10.0 published 2026-05-11 (cargo-dist tag 578f787); REL-02 issue triage completed 2026-05-12
+last_updated: "2026-05-12T22:30:00.000Z"
+last_activity: 2026-05-12
 progress:
   total_phases: 7
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 33
   completed_plans: 33
 ---
