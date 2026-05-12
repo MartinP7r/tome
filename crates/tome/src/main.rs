@@ -17,6 +17,15 @@ fn main() -> ExitCode {
 
     let cli = tome::cli::Cli::parse();
 
+    // Install tracing subscriber per Phase 18 OBS-01/OBS-02. Failure is
+    // non-fatal — we fall back to no-subscriber (events drop silently) and
+    // warn on stderr. The typed-error downcasts below stay on raw eprintln!
+    // per D-OUT-1's "main.rs error printer stays raw" carve-out — they must
+    // print even if subscriber init failed.
+    if let Err(e) = tome::tracing_init::install(cli.log_level()) {
+        eprintln!("warning: tracing init failed: {e:#} — continuing without structured logging");
+    }
+
     match tome::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
