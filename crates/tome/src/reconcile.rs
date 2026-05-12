@@ -21,6 +21,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use console::style;
+use tracing::warn;
 
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
@@ -537,8 +538,8 @@ fn apply_drift_and_missing(
                     // makes content_hash mismatch the drift trigger).
                     match manifest::hash_directory(&library_dir.join(c.name.as_str())) {
                         Ok(h) => entry.content_hash = h,
-                        Err(e) => eprintln!(
-                            "warning: post-update hash_directory({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-update hash_directory({}) failed: {e:#} — \
                              leaving lockfile content_hash unchanged",
                             c.name.as_str()
                         ),
@@ -548,8 +549,8 @@ fn apply_drift_and_missing(
                     // lockfile version after a successful apply.
                     match adapter.current_version(&c.registry_id) {
                         Ok(v) => entry.version = v,
-                        Err(e) => eprintln!(
-                            "warning: post-update current_version({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-update current_version({}) failed: {e:#} — \
                              leaving lockfile version field unchanged",
                             c.registry_id
                         ),
@@ -581,8 +582,8 @@ fn apply_drift_and_missing(
                     // records the correct hash once consolidation has run.
                     match adapter.current_version(&c.registry_id) {
                         Ok(v) => entry.version = v,
-                        Err(e) => eprintln!(
-                            "warning: post-install current_version({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-install current_version({}) failed: {e:#} — \
                              leaving lockfile version field unchanged",
                             c.registry_id
                         ),
@@ -641,8 +642,8 @@ fn handle_edited(
     // D-16: --no-input or non-TTY → skip-with-warning per skill, exit zero.
     if opts.no_input || !std::io::stdin().is_terminal() {
         for e in edited {
-            eprintln!(
-                "warning: {} has local edits; skipping reconcile this sync (run interactively to fork/revert)",
+            warn!(
+                "{} has local edits; skipping reconcile this sync (run interactively to fork/revert)",
                 e.name.as_str()
             );
             report.edit_decisions.push(EditDecision::Skip);

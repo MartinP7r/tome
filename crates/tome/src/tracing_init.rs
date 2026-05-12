@@ -31,8 +31,8 @@ use crate::cli::LogLevel;
 /// calls inside the same process return an `Err` that the caller may
 /// downgrade to a non-fatal warning.
 pub fn install(level: LogLevel) -> Result<()> {
-    let filter = EnvFilter::try_from_env("TOME_LOG")
-        .unwrap_or_else(|_| EnvFilter::new(level.directive()));
+    let filter =
+        EnvFilter::try_from_env("TOME_LOG").unwrap_or_else(|_| EnvFilter::new(level.directive()));
 
     fmt::fmt()
         .with_writer(std::io::stderr)
