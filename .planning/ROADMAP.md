@@ -79,7 +79,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Phase Numbering:** Continues from Phase 17 (v0.10). Phase 18 is the first new phase.
 
-- [ ] **Phase 18: Observability foundation + sync diagnostics** — Adopt `tracing` + `tracing-subscriber`; wire `--verbose`/`--quiet`/`TOME_LOG` to subscriber filter; per-pipeline-step spans with elapsed-ms; change-cause attribution in `info!`; reconcile classification breakdown in `tome sync` summary (OBS-01..05)
+- [x] **Phase 18: Observability foundation + sync diagnostics** — Adopt `tracing` + `tracing-subscriber`; wire `--verbose`/`--quiet`/`TOME_LOG` to subscriber filter; per-pipeline-step spans with elapsed-ms; change-cause attribution in `info!`; reconcile classification breakdown in `tome sync` summary (OBS-01..05) (completed 2026-05-12)
 - [ ] **Phase 19: Doctor/status surface + bugfix bundle** — Richer `tome doctor` (per-category counts + JSON `category` field; folds in #530 auto-fixable contradiction fix); richer `tome status` (per-directory counts, last-sync timestamp, JSON parity); plus the v0.11 bugfix backlog: #511 browse copy-path timing flake, #532 stale managed-symlinks-in-git check, #454 wizard summary ANSI width, #453+#456 library-default follows `tome_home`, #533 `make release` CHANGELOG date stamp (OBS-06..07 + FIX-01..06)
 
 ## Phase Details
@@ -213,7 +213,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Plans**: 3 plans
 - [x] 18-01-tracing-substrate-and-reconcile-proof-PLAN.md — Substrate (Cargo.toml deps, `tracing_init.rs`, `LogLevel::directive`, main.rs wiring) + reconcile.rs proof migration (OBS-01 substrate, OBS-02)
 - [x] 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md — Sweep `lib.rs::sync` + `library.rs` + `distribute.rs` + `cleanup.rs`; add `change_cause.rs`; emit OBS-04 events; wrap 5 step spans; relocate OBS-05 reconcile line into `render_sync_report` (OBS-01 sweep, OBS-03, OBS-04, OBS-05)
-- [ ] 18-03-verification-and-changelog-PLAN.md — Integration test pinning OBS-03 span emission + CHANGELOG.md entry under `[Unreleased]` (OBS-01..OBS-05 verification anchor)
+- [x] 18-03-verification-and-changelog-PLAN.md — Integration test pinning OBS-03 span emission + CHANGELOG.md entry under `[Unreleased]` (OBS-01..OBS-05 verification anchor)
 
 ### Phase 19: Doctor/status surface + bugfix bundle
 **Goal**: Land the richer `tome doctor` / `tome status` surface and clear the v0.10-surfaced bug backlog in a single pass. `tome doctor` gains issue categorization (closing the #530 "auto-fixable" contradiction in the same change); `tome status` gains per-directory counts and a last-sync timestamp. Five independent bugfixes ship alongside.
@@ -256,5 +256,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
-| 18. Observability foundation + sync diagnostics | v0.11 | 2/3 | In Progress|  |
+| 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete   | 2026-05-12 |
 | 19. Doctor/status surface + bugfix bundle | v0.11 | 0/TBD | Not started | - |

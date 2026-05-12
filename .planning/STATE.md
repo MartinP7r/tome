@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: executing
-stopped_at: Completed 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md
-last_updated: "2026-05-12T15:29:21.531Z"
+status: verifying
+stopped_at: Completed 18-03-verification-and-changelog-PLAN.md (Phase 18 ready for gsd-verifier)
+last_updated: "2026-05-12T15:36:25.627Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 9
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 36
-  completed_plans: 35
+  completed_plans: 36
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 Milestone: v0.11 Polish + Observability
 Phase: 18 (observability-foundation-sync-diagnostics) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-05-12
 
 **v0.11 phase shape (Phases 18–19):**
@@ -65,6 +65,7 @@ Historical decisions are archived in:
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — Tauri GUI milestone (drafted, deferred to after v0.11 ships)
 - [Phase 18-observability-foundation-sync-diagnostics]: tracing substrate landed via tracing_init::install(LogLevel); TOME_LOG env > LogLevel directive precedence (D-ENV-1); reconcile.rs warnings routed through tracing::warn! as locked proof module (D-SUB-2)
 - [Phase 18]: Plan 18-02: 5 step spans + top-level sync span via lexical info_span!(...).entered() blocks; ChangeCause enum with four locked vocabulary strings; OBS-05 reconcile classification line in render_sync_report; DirectoryNowAllowed false-positive accepted, PreviouslyFailed deferred to v0.12 schema bump.
+- [Phase 18]: Plan 18-03: OBS-03 span emission pinned by sync_verbose_emits_step_spans_on_stderr regression test asserting on the 3 always-firing step span names + time.busy auto-field; CHANGELOG [Unreleased] documents OBS-01..05, D-ENV-1 trade-off, and PreviouslyFailed + DirectoryNowAllowed deferrals.
 
 ### v0.11 design context (consume during planning)
 
@@ -97,6 +98,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-12T15:29:21.528Z
-Stopped at: Completed 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md
+Last session: 2026-05-12T15:36:25.624Z
+Stopped at: Completed 18-03-verification-and-changelog-PLAN.md (Phase 18 ready for gsd-verifier)
 Resume file: None
