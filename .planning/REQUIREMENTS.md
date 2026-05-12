@@ -58,11 +58,11 @@ Filled by `gsd-roadmapper` 2026-05-12. 13 requirements mapped across 2 phases (1
 
 | Requirement | Phase | GitHub Issue | Status |
 |-------------|-------|--------------|--------|
-| OBS-01 | Phase 18 | — | Pending |
-| OBS-02 | Phase 18 | — | Pending |
-| OBS-03 | Phase 18 | — | Pending |
-| OBS-04 | Phase 18 | — | Pending |
-| OBS-05 | Phase 18 | — | Pending |
+| OBS-01 | Phase 18 | — | Done |
+| OBS-02 | Phase 18 | — | Done |
+| OBS-03 | Phase 18 | — | Done |
+| OBS-04 | Phase 18 | — | Done |
+| OBS-05 | Phase 18 | — | Done |
 | OBS-06 | Phase 19 | — | Pending |
 | OBS-07 | Phase 19 | — | Pending |
 | FIX-01 | Phase 19 | [#530](https://github.com/MartinP7r/tome/issues/530) | Pending |
