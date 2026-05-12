@@ -107,6 +107,10 @@ pub struct SyncReport {
     pub distributions: Vec<DistributeResult>,
     pub cleanup: CleanupResult,
     pub removed_from_targets: usize,
+    /// Phase 18 OBS-05: per-classification reconcile counts surfaced in
+    /// the final summary block. `None` when the sync didn't invoke a
+    /// reconcile pass (no Claude adapter configured).
+    pub reconcile: Option<reconcile::ReconcileReport>,
 }
 
 /// Create a spinner with a consistent style.
@@ -1438,14 +1442,6 @@ fn apply_edit_decisions(
     Ok(())
 }
 
-/// Move install_failures out of a ReconcileReport so the caller can hold
-/// them across the rest of the sync flow without keeping the report alive.
-fn take_install_failures(
-    mut report: reconcile::ReconcileReport,
-) -> Vec<marketplace::InstallFailure> {
-    std::mem::take(&mut report.install_failures)
-}
-
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
     let SyncOptions {
@@ -1528,10 +1524,17 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     //
     // OBS-03: `reconcile` step span. Even though it runs BEFORE discover in
     // code order, the span name reflects the pipeline step it represents.
+    //
+    // OBS-05 (D-ENV-4): the previous inline `reconcile::render_summary(...)`
+    // call at this site is REMOVED. The classification line is now emitted
+    // from `render_sync_report` (final summary block, immediately above the
+    // per-bucket cleanup output). The report is threaded into the eventual
+    // `SyncReport` via `reconcile_report`.
+    let mut reconcile_report: Option<reconcile::ReconcileReport> = None;
     {
         let _span = info_span!("reconcile").entered();
         if let Some(claude_adapter) = build_claude_adapter(config)? {
-            let report = reconcile::reconcile_lockfile(
+            let mut report = reconcile::reconcile_lockfile(
                 old_lockfile.as_ref(),
                 &manifest_for_reconcile,
                 paths.library_dir(),
@@ -1548,21 +1551,21 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 },
             )?;
 
-            if !quiet {
-                reconcile::render_summary(&report, quiet);
-            }
-
             // Apply edit-in-library decisions to the manifest. The manifest is
             // owned by sync(); reconcile_lockfile only proposed the user's
             // choice (RECON-05 D-13).
             apply_edit_decisions(&report, paths, dry_run)?;
 
             // ADP-04: render grouped install failures. Sync exits non-zero at end
-            // when this Vec is non-empty (RESEARCH OQ-6).
+            // when this Vec is non-empty (RESEARCH OQ-6). Drain install_failures
+            // in-place (instead of via the consuming `take_install_failures`)
+            // so the rest of the report (matches/drift/vanished/missing) can
+            // still be threaded into SyncReport for OBS-05.
             if !report.install_failures.is_empty() {
                 marketplace::render_install_failures(&report.install_failures);
-                reconcile_install_failures = take_install_failures(report);
+                reconcile_install_failures = std::mem::take(&mut report.install_failures);
             }
+            reconcile_report = Some(report);
         }
     }
 
@@ -1740,10 +1743,18 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     //    OBS-03: `cleanup` step span. Wraps target cleanup loop + the
     //    unified bucket render so the user-facing cleanup output is
     //    attributed to this step in the trace.
-    let (removed_from_targets, distribution_cleanup_failures) = {
+    //
+    //    OBS-05 ordering (D-ENV-4): the per-bucket cleanup output must
+    //    appear immediately AFTER the reconcile classification line in
+    //    `render_sync_report`. The cleanup span here only performs the
+    //    *work* (target cleanup); the user-facing bucket render is moved
+    //    OUT of the span and runs AFTER `render_sync_report` below
+    //    (Option 1 per Plan 18-02 Step 6 — smaller diff than widening
+    //    `render_sync_report`'s signature to accept a stderr writer).
+    let (removed_from_targets, distribution_cleanup_failures, excluded_skills) = {
         let _span = info_span!("cleanup").entered();
         let mut removed: usize = 0;
-        let mut excluded_skills: Vec<cleanup::ExcludedSkill> = Vec::new();
+        let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
         let mut failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
         for (name, dir_config) in config.distribution_dirs() {
             let skills_dir = &dir_config.path;
@@ -1751,7 +1762,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             // Also clean up symlinks for disabled skills (global + per-directory).
             // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
             // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
-            let (n, excluded, dir_failures) = cleanup_disabled_from_target(
+            let (n, dir_excluded, dir_failures) = cleanup_disabled_from_target(
                 skills_dir,
                 paths.library_dir(),
                 name,
@@ -1759,27 +1770,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 dry_run,
             )?;
             removed += n;
-            excluded_skills.extend(excluded);
+            excluded.extend(dir_excluded);
             failures.extend(dir_failures);
         }
-
-        // 6b. Render the unified three-bucket cleanup output + any aggregated
-        //     distribution-cleanup failures (UX-01 D-UX01-2 / D-UX01-4 stderr
-        //     discipline). Empty buckets and empty failure list both produce
-        //     no output, so syncs that touched nothing stay quiet.
-        if !quiet {
-            let mut stderr = std::io::stderr().lock();
-            // Best-effort: failure to write to stderr is non-fatal for sync
-            // (matches existing eprintln! semantics that ignore I/O errors).
-            let _ = cleanup::render_cleanup_buckets(
-                &mut stderr,
-                &cleanup_result.bucket_a_removed_from_config,
-                &cleanup_result.bucket_b_missing_from_disk,
-                &excluded_skills,
-            );
-            let _ = cleanup::render_distribution_cleanup_failures(&mut stderr, &failures);
-        }
-        (removed, failures)
+        (removed, failures, excluded)
     };
 
     // 7. Save manifest, gitignore, and lockfile
@@ -1800,10 +1794,34 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         distributions: distribute_results,
         cleanup: cleanup_result,
         removed_from_targets,
+        reconcile: reconcile_report,
     };
 
     if !quiet {
         render_sync_report(&report);
+    }
+
+    // 6b. Render the unified three-bucket cleanup output + any aggregated
+    //     distribution-cleanup failures (UX-01 D-UX01-2 / D-UX01-4 stderr
+    //     discipline). Empty buckets and empty failure list both produce
+    //     no output, so syncs that touched nothing stay quiet.
+    //     OBS-05 (D-ENV-4): runs AFTER `render_sync_report` so the
+    //     reconcile classification line sits visually ABOVE the cleanup
+    //     buckets in the user's terminal.
+    if !quiet {
+        let mut stderr = std::io::stderr().lock();
+        // Best-effort: failure to write to stderr is non-fatal for sync
+        // (matches existing eprintln! semantics that ignore I/O errors).
+        let _ = cleanup::render_cleanup_buckets(
+            &mut stderr,
+            &report.cleanup.bucket_a_removed_from_config,
+            &report.cleanup.bucket_b_missing_from_disk,
+            &excluded_skills,
+        );
+        let _ = cleanup::render_distribution_cleanup_failures(
+            &mut stderr,
+            &distribution_cleanup_failures,
+        );
     }
 
     // Post-sync health check
@@ -2038,6 +2056,32 @@ fn render_sync_report(report: &SyncReport) {
             "  Cleaned {} stale target link(s)",
             style(report.removed_from_targets).yellow()
         );
+    }
+
+    // Phase 18 OBS-05 (D-ENV-4): reconcile classification line, emitted
+    // immediately above the per-bucket cleanup summary block (rendered
+    // separately to stderr by the caller AFTER this function returns).
+    // The line only prints when reconcile actually fired (Some); syncs
+    // without a Claude adapter produce no line.
+    if let Some(rr) = &report.reconcile {
+        println!(
+            "  reconcile: {} {} match · {} {} drift · {} {} vanished · {} {} missing-from-machine",
+            style("✓").green(),
+            rr.matches,
+            style("⚠").yellow(),
+            rr.drift.len(),
+            style("⚠").yellow(),
+            rr.vanished.len(),
+            style("⚠").yellow(),
+            rr.missing.len(),
+        );
+
+        // Per-drift detail + per-vanished warnings relocated from the
+        // deleted inline `reconcile::render_summary` call site.
+        let detail = reconcile::format_classification_detail(rr);
+        if !detail.is_empty() {
+            print!("{}", detail);
+        }
     }
 }
 
