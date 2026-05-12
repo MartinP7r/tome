@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-11
+
 The **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation**
 milestone. Makes tome's library a single source of truth — managed AND
 local skills are stored as real-directory copies — with a lockfile-
