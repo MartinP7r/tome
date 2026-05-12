@@ -7,6 +7,102 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OBS-01 / OBS-02 — Structured logging substrate (`tracing`).** Adopted
+  `tracing` + `tracing-subscriber` as the application logging substrate.
+  Internal `eprintln!` / `println!` chatter in the sync, reconcile, consolidate,
+  distribute, and cleanup paths now routes through `tracing::{info,warn,debug}!`.
+  Wizard prompts, TUI browse output, and user-facing summary tables
+  (`tome status` / `list` / `doctor` tables, the `tome sync` final summary
+  block) remain on direct stdout — output discipline unchanged for byte-identical
+  stdout in `tome status` and `tome init --dry-run`. (Phase 18 plans 18-01,
+  18-02.)
+- **OBS-02 — `TOME_LOG` environment variable.** New `TOME_LOG` env var
+  configures the subscriber filter using `tracing_subscriber::EnvFilter`
+  directive syntax. Examples:
+
+  ```bash
+  TOME_LOG=debug tome sync                                # verbose globally
+  TOME_LOG=tome::sync=debug,tome::reconcile=info tome sync # scoped to sync
+  TOME_LOG=warn,tome::library=debug tome sync             # warn globally, debug consolidate
+  ```
+
+  When `TOME_LOG` is set, it fully replaces the flag-derived level. Malformed
+  directives silently fall back to the flag-derived level (matches the
+  `RUST_LOG` UX users bring from cargo / tokio).
+- **OBS-03 — Per-pipeline-step spans with timing.** `tome sync --verbose`
+  (or `TOME_LOG=tome::sync=debug`) now emits one `tracing` span per pipeline
+  step (`discover`, `reconcile`, `consolidate`, `distribute`, `cleanup`)
+  nested under a top-level `sync` span. Each span records `time.busy` and
+  `time.idle` timing fields on close — useful for diagnosing slow phases.
+  Note: the literal field name is `time.busy` (auto-emitted by
+  `FmtSpan::CLOSE`), NOT `elapsed_ms`. The OBS-03 success-criterion wording
+  said "elapsed_ms" conceptually; grep accordingly.
+- **OBS-04 — Change-cause attribution.** When `consolidate` or `distribute`
+  re-emits a skill, the log line names the cause at `info!` level via a typed
+  `ChangeCause` field. Three of four causes wire up in this release:
+  `cause=hash changed`, `cause=newly added`, `cause=directory now allowed`.
+  A user running `tome sync --verbose` can grep stderr for `cause=` to see
+  exactly why each re-emit happened.
+- **OBS-05 — Reconcile classification breakdown.** The `tome sync` final
+  summary block now includes a per-classification reconcile line:
+
+  ```
+    reconcile: ✓ N match · ⚠ M drift · ⚠ K vanished · ⚠ L missing-from-machine
+  ```
+
+  immediately above the per-bucket cleanup summary. Counts come from the
+  existing `ReconcileReport` populated since v0.10's Phase 13; no new
+  computation. Only emits when reconcile actually fires (i.e. when at least
+  one Claude adapter directory is configured).
+
+### Changed
+
+- **Logging output now routes to stderr by default** for all migrated diagnostic
+  chatter. Stdout remains reserved for user-facing summary tables and version
+  output (consistent with Unix convention; matches `tome sync`'s cleanup-bucket
+  output discipline from v0.10's Phase 16).
+- **`--quiet` and `--verbose` flags map to subscriber levels** through the new
+  `LogLevel::directive` accessor: `--quiet` → `warn`, default → `info`,
+  `--verbose` → `debug`. Behavior preserved for users who only use the flags;
+  no lines silently disappear. Warnings that were previously gated on
+  `if !quiet { eprintln!(\"warning: ...\") }` now always fire — the global
+  subscriber's `EnvFilter` is the single discipline point. If any of these
+  warnings turn out to be noise that should be silent under `--quiet`, a
+  future PR can demote individual ones to `debug!`.
+
+### Deferred (tracked in `.planning/phases/18-observability-foundation-sync-diagnostics/18-deferred-items.md`)
+
+- **`ChangeCause::PreviouslyFailed` cause not emitted.** The enum variant +
+  `Display` impl ship in this release (so the grep vocabulary `cause=previously
+  failed` is reachable if/when an emission site fires), but the emission site
+  requires a manifest-schema bump to track per-skill last-sync failure state.
+  Deferred to v0.12 or a later polish phase.
+- **`ChangeCause::DirectoryNowAllowed` inference false positive on fresh
+  skills.** `consolidate` inserts the manifest entry BEFORE `distribute`
+  iterates, so on the very first sync after a fresh `tome init` every new
+  skill emits `cause=directory now allowed` where the strict-correct cause
+  would be `cause=newly added`. Accepted for v0.11 (false-positive rate is
+  bounded; user-visible meaning is close enough). Strict fix requires
+  per-directory-per-skill "has been distributed before" state — same
+  schema-bump trade-off as `PreviouslyFailed`. Deferred to v0.12 or later.
+
+### Trade-offs (release-noted; no migration shim)
+
+- `--quiet` becomes a no-op when `TOME_LOG` is set in the environment. Matches
+  the `RUST_LOG` precedence mental model users bring from cargo / tokio. Per
+  the project's documented policy (Backward compat: None), this is not gated
+  on a shim.
+- The OBS-03 timing field is named `time.busy` (auto-emitted by
+  `tracing-subscriber`'s `FmtSpan::CLOSE` event), NOT `elapsed_ms`. The OBS-03
+  success-criterion wording said "elapsed_ms" conceptually; `time.busy` is the
+  literal field name — grep accordingly.
+- `tracing-error` and `tracing-appender` enter `Cargo.toml` as scaffolded deps
+  with no runtime wiring. They light up in a future phase (Phase 19's OBS-06
+  may wire `tracing-error::ErrorLayer` for `tome doctor`; v1.0 Tauri IPC wires
+  `tracing-appender` for log-file capture).
+
 ## [0.10.0] - 2026-05-11
 
 The **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation**
