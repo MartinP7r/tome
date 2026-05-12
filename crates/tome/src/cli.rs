@@ -36,6 +36,18 @@ impl LogLevel {
     pub fn is_quiet(self) -> bool {
         matches!(self, Self::Quiet)
     }
+
+    /// Map verbosity to a `tracing_subscriber::EnvFilter` directive string.
+    /// Single source of truth for the flag → tracing level translation per
+    /// D-ENV-3 (Phase 18). Called by `tracing_init::install` when `TOME_LOG`
+    /// is unset.
+    pub fn directive(self) -> &'static str {
+        match self {
+            Self::Quiet => "warn",
+            Self::Normal => "info",
+            Self::Verbose => "debug",
+        }
+    }
 }
 
 // POLISH-04 exhaustiveness sentinel — compile fails if a new variant is
@@ -534,6 +546,13 @@ mod tests {
     #[test]
     fn log_level_default_trait_impl_is_normal() {
         assert_eq!(LogLevel::default(), LogLevel::Normal);
+    }
+
+    #[test]
+    fn log_level_directive_maps_three_levels() {
+        assert_eq!(LogLevel::Quiet.directive(), "warn");
+        assert_eq!(LogLevel::Normal.directive(), "info");
+        assert_eq!(LogLevel::Verbose.directive(), "debug");
     }
 
     // -- UX-02 / Plan 16-02 Task 2 — `tome migrate-library --yes` parsing --
