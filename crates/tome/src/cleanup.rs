@@ -27,13 +27,14 @@
 //! unified renderer (`render_cleanup_buckets`) called from `lib.rs::sync`.
 //!
 //! All cleanup output goes to **stderr** (D-UX01-4); the output paths use
-//! `eprintln!` (or write through the renderer to a writer the caller routes
-//! to stderr) — never `print!`/macro variants targeting stdout.
+//! `tracing::warn!` (or write through the renderer to a writer the caller
+//! routes to stderr) — never `print!`/macro variants targeting stdout.
 
 use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
+use tracing::warn;
 
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
@@ -476,8 +477,8 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
     // contains a symlink component (e.g., /var -> /private/var on macOS).
     // We keep both forms so we can match symlinks created with either path variant.
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        eprintln!(
-            "warning: could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
+        warn!(
+            "could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
             library_dir.display(),
             e
         );

@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use std::os::unix::fs as unix_fs;
 use std::path::Path;
+use tracing::{info, warn};
 
+use crate::change_cause::ChangeCause;
 use crate::config::{DirectoryConfig, DirectoryName};
 use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
@@ -97,8 +99,8 @@ pub fn distribute_to_directory(
                 && target_link.is_symlink()
                 && let Err(e) = std::fs::remove_file(&target_link)
             {
-                eprintln!(
-                    "warning: failed to remove legacy symlink {}: {}",
+                warn!(
+                    "failed to remove legacy symlink {}: {}",
                     target_link.display(),
                     e
                 );
@@ -106,6 +108,11 @@ pub fn distribute_to_directory(
             result.skipped_managed += 1;
             continue;
         }
+
+        // OBS-04 state snapshot — sample BEFORE any remove/create happens so
+        // the cause classification is faithful to the world at iteration start.
+        let was_symlink = target_link.is_symlink();
+        let in_manifest = manifest.get(skill_name_str.as_ref()).is_some();
 
         if target_link.is_symlink() {
             if symlink_points_to(&target_link, &library_skill_path) && !force {
@@ -129,8 +136,8 @@ pub fn distribute_to_directory(
             if !force && is_foreign_symlink(&target_link, library_dir) {
                 let actual_target =
                     std::fs::read_link(&target_link).unwrap_or_else(|_| target_link.clone());
-                eprintln!(
-                    "warning: {} is a foreign symlink\n         (→ {}); skipping.\n         Pass --force to overwrite, or remove manually.",
+                warn!(
+                    "{} is a foreign symlink (→ {}); skipping. Pass --force to overwrite, or remove manually.",
                     target_link.display(),
                     actual_target.display(),
                 );
@@ -144,8 +151,8 @@ pub fn distribute_to_directory(
                 })?;
             }
         } else if target_link.exists() {
-            eprintln!(
-                "warning: {} exists in target and is not a symlink, skipping",
+            warn!(
+                "{} exists in target and is not a symlink, skipping",
                 target_link.display()
             );
             result.skipped += 1;
@@ -162,6 +169,27 @@ pub fn distribute_to_directory(
             })?;
         }
         result.changed += 1;
+
+        // OBS-04 emission. Classification per RESEARCH §Open Question 2:
+        // - was_symlink: an existing symlink was replaced (stale link update) → HashChanged
+        // - !was_symlink && in_manifest: skill already known to consolidate but no symlink
+        //   in this directory; plausibly the directory was disabled previously and is now
+        //   allowed (machine_prefs flip) → DirectoryNowAllowed inference
+        // - !was_symlink && !in_manifest: cannot occur in practice because consolidate
+        //   inserts the manifest entry BEFORE distribute runs; defensive NewlyAdded fallback
+        let cause = if was_symlink {
+            ChangeCause::HashChanged
+        } else if in_manifest {
+            ChangeCause::DirectoryNowAllowed
+        } else {
+            ChangeCause::NewlyAdded
+        };
+        info!(
+            skill = %skill_name_str,
+            directory = %dir_name,
+            cause = %cause,
+            "re-emitted",
+        );
     }
 
     Ok(result)
