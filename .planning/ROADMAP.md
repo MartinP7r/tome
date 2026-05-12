@@ -212,7 +212,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   5. The `tome sync` final summary block (printed at `info` level — visible by default) includes a reconcile classification breakdown line: `reconcile: N match · M drift · K vanished · L missing-from-machine` immediately above the existing per-bucket cleanup summary. Counts come from `ReconcileReport` (already populated in Phase 13); no new computation, just surfacing.
 **Plans**: 3 plans
 - [x] 18-01-tracing-substrate-and-reconcile-proof-PLAN.md — Substrate (Cargo.toml deps, `tracing_init.rs`, `LogLevel::directive`, main.rs wiring) + reconcile.rs proof migration (OBS-01 substrate, OBS-02)
-- [ ] 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md — Sweep `lib.rs::sync` + `library.rs` + `distribute.rs` + `cleanup.rs`; add `change_cause.rs`; emit OBS-04 events; wrap 5 step spans; relocate OBS-05 reconcile line into `render_sync_report` (OBS-01 sweep, OBS-03, OBS-04, OBS-05)
+- [x] 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md — Sweep `lib.rs::sync` + `library.rs` + `distribute.rs` + `cleanup.rs`; add `change_cause.rs`; emit OBS-04 events; wrap 5 step spans; relocate OBS-05 reconcile line into `render_sync_report` (OBS-01 sweep, OBS-03, OBS-04, OBS-05)
 - [ ] 18-03-verification-and-changelog-PLAN.md — Integration test pinning OBS-03 span emission + CHANGELOG.md entry under `[Unreleased]` (OBS-01..OBS-05 verification anchor)
 
 ### Phase 19: Doctor/status surface + bugfix bundle
@@ -256,5 +256,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
-| 18. Observability foundation + sync diagnostics | v0.11 | 1/3 | In Progress|  |
+| 18. Observability foundation + sync diagnostics | v0.11 | 2/3 | In Progress|  |
 | 19. Doctor/status surface + bugfix bundle | v0.11 | 0/TBD | Not started | - |

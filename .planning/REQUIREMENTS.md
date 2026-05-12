@@ -14,9 +14,9 @@ Adopt structured logging across the codebase so `tome sync`/`doctor`/`status` gi
 
 - [x] **OBS-01**: Adopt `tracing` + `tracing-subscriber` crates. Replace internal `eprintln!`/`println!` chatter with `tracing::{info,warn,debug}!` calls. Wizard prompts, TUI browse output, and user-facing summary tables (status/list/doctor) stay as direct stdout — instrument only the *log-like* output (sync progress, cleanup actions, diagnostic warnings).
 - [x] **OBS-02**: Wire `--verbose`/`--quiet` global flags + `TOME_LOG` env var to `tracing_subscriber::EnvFilter`. Default level `info`; `--verbose` → `debug`; `--quiet` → `warn`. Existing `LogLevel` enum (HARD-07) wraps the subscriber configuration; behavior preserved for users who only use the flags.
-- [ ] **OBS-03**: `tome sync` emits per-pipeline-step spans (discover, reconcile, consolidate, distribute, cleanup) with elapsed-ms attached. Visible in `--verbose` text output and reachable via `TOME_LOG=tome::sync=debug`.
-- [ ] **OBS-04**: Change-cause attribution — when consolidate or distribute re-emits a skill, the reason ("hash changed", "previously failed", "newly added", "directory now allowed") is logged at `info!` for user visibility.
-- [ ] **OBS-05**: Reconcile classification breakdown surfaced in `tome sync` summary — show counts of Match / Drift / Vanished / MissingFromMachine in the final summary block (not only the consolidated outcome).
+- [x] **OBS-03**: `tome sync` emits per-pipeline-step spans (discover, reconcile, consolidate, distribute, cleanup) with elapsed-ms attached. Visible in `--verbose` text output and reachable via `TOME_LOG=tome::sync=debug`.
+- [x] **OBS-04**: Change-cause attribution — when consolidate or distribute re-emits a skill, the reason ("hash changed", "previously failed", "newly added", "directory now allowed") is logged at `info!` for user visibility.
+- [x] **OBS-05**: Reconcile classification breakdown surfaced in `tome sync` summary — show counts of Match / Drift / Vanished / MissingFromMachine in the final summary block (not only the consolidated outcome).
 - [ ] **OBS-06**: `tome doctor` richer surface — categorize issues (Library / Directory / Config / Foreign-symlink) with per-category counts in text output; JSON shape gains `category` field per issue. Implementation overlaps with FIX-01 (#530); single change closes both.
 - [ ] **OBS-07**: `tome status` richer surface — surface per-directory skill counts, override status (already present in v0.9), and a "last sync" timestamp; JSON shape parity with text output.
 

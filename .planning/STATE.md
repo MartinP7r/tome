@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed 18-01-tracing-substrate-and-reconcile-proof-PLAN.md
-last_updated: "2026-05-12T15:05:07.730Z"
+stopped_at: Completed 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md
+last_updated: "2026-05-12T15:29:21.531Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 9
   completed_phases: 6
   total_plans: 36
-  completed_plans: 34
+  completed_plans: 35
 ---
 
 # Project State
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 Milestone: v0.11 Polish + Observability
 Phase: 18 (observability-foundation-sync-diagnostics) — EXECUTING
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Ready to execute
 Last activity: 2026-05-12
 
@@ -64,6 +64,7 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — Tauri GUI milestone (drafted, deferred to after v0.11 ships)
 - [Phase 18-observability-foundation-sync-diagnostics]: tracing substrate landed via tracing_init::install(LogLevel); TOME_LOG env > LogLevel directive precedence (D-ENV-1); reconcile.rs warnings routed through tracing::warn! as locked proof module (D-SUB-2)
+- [Phase 18]: Plan 18-02: 5 step spans + top-level sync span via lexical info_span!(...).entered() blocks; ChangeCause enum with four locked vocabulary strings; OBS-05 reconcile classification line in render_sync_report; DirectoryNowAllowed false-positive accepted, PreviouslyFailed deferred to v0.12 schema bump.
 
 ### v0.11 design context (consume during planning)
 
@@ -96,6 +97,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-12T15:05:07.726Z
-Stopped at: Completed 18-01-tracing-substrate-and-reconcile-proof-PLAN.md
+Last session: 2026-05-12T15:29:21.528Z
+Stopped at: Completed 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md
 Resume file: None
