@@ -1,10 +1,10 @@
 ---
 gsd_state_version: 1.0
 milestone: v0.11
-milestone_name: TBD (run /gsd:new-milestone to define)
-status: between_milestones
-stopped_at: v0.10.0 shipped 2026-05-11 + milestone archived 2026-05-12
-last_updated: "2026-05-12T22:55:00.000Z"
+milestone_name: Polish + Observability
+status: defining_requirements
+stopped_at: v0.11 milestone started 2026-05-12 — defining requirements
+last_updated: "2026-05-12T23:30:00.000Z"
 last_activity: 2026-05-12
 progress:
   total_phases: 0
@@ -17,18 +17,18 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated after v0.10)
+See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Between milestones — v0.10 shipped, v0.11 to be scoped
+**Current focus:** v0.11 Polish + Observability — structured logging foundation + v0.10-surfaced bug bundle.
 
 ## Current Position
 
-Milestone: v0.11 (not yet defined — run /gsd:new-milestone)
-Phase: —
+Milestone: v0.11 Polish + Observability
+Phase: Not started (defining requirements)
 Plan: —
-Status: v0.10 archived; awaiting v0.11 scope
-Last activity: 2026-05-12
+Status: Defining requirements
+Last activity: 2026-05-12 — Milestone v0.11 started
 
 **v0.10 phase shape (Phases 11–17):**
 

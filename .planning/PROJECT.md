@@ -142,19 +142,27 @@ v0.10 milestone complete — Library-canonical Model + Cross-Machine Plugin Reco
 
 **Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard / xdg-open) **formally deferred to v1.0** (Tauri Desktop GUI) — fifth consecutive milestone, written rationale in the UAT frontmatter. Will be naturally exercised when v1.0's GUI build target requires Linux hardware.
 
-## Next Milestone: v0.11 (to be defined)
+## Current Milestone: v0.11 Polish + Observability
 
-**Provisional theme:** Polish + observability + the v0.10.0-surfaced bugs.
+**Goal:** Ship the v0.10-surfaced bugs and adopt structured logging across the codebase so `tome sync`/`doctor`/`status` give clearer signal — laying groundwork for the v1.0 GUI's IPC + log-capture needs.
 
-**Likely scope candidates (from open issues):**
-- #530 doctor "auto-fixable" UX bug (count includes non-fixable items, prompt is no-op)
-- #511 timing flake under parallel test contention
-- "57 managed symlink(s) tracked in git" doctor false-positive (post-migration)
-- `make release` should stamp CHANGELOG date automatically
-- Wizard polish (#453, #454, #456)
-- Selective items from Phase 11/12/13 review followup bundles (#517, #518, #519)
+**Target features:**
 
-Run `/gsd:new-milestone` to scope formally. **v1.0 (Tauri Desktop GUI)** remains the milestone after v0.11 — drafted in [`milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`](milestones/v1.0-REQUIREMENTS.md).
+- **Structured logging foundation** — adopt `tracing` (default; `log` reconsidered if cost shows up), map existing `eprintln!`/`println!` to log levels, wire `--verbose`/`--quiet` to subscriber filter. Single-pass instrumentation, no output rewrite.
+- **Sync diagnostics surface** — per-step timing in `--verbose`, change-cause attribution ("why did this skill re-copy?"), reconcile classification breakdown in summary.
+- **Doctor / status richer surface** — better counts, categories, actionable hints in both text and JSON.
+- **Bugfix bundle** — #530 doctor auto-fixable UX, #511 timing flake (folds in HARD-14 `backup::push_and_pull_roundtrip` carry-over), managed-symlinks-in-git false positive, wizard polish (#453, #454, #456), `make release` CHANGELOG date stamp.
+
+**Key context:**
+
+- **Scope discipline:** observability is "instrument existing output" — not "redesign output." New JSON-by-default streams, OpenTelemetry, etc. stay out of scope.
+- **`tracing` is the default** structured-logging crate (spans, structured fields, async-aware; aligns with what v1.0 Tauri IPC will need). `log` is the cheaper fallback if adoption cost shows up during planning.
+- **Linux UAT carry-overs** (clipboard + xdg-open from v0.8 `08-HUMAN-UAT.md`) — fifth milestone without Linux hardware. Formally deferred to **v1.0** where the Tauri build forces Linux access.
+- **Backward compat:** None (per project policy). Log-level flag changes will be release-noted but not gated on a migration shim.
+- **TS migration parked.** `docs/migration/rust-to-typescript-feature-inventory.md` stays an untracked exploration artifact; v1.0 (Tauri GUI) remains the milestone after v0.11.
+- **Sized at ~2 phases, ~12–15 requirements, 2–4 weeks of focused work.** Phase numbering continues from 17 → starts at Phase 18.
+
+Run `/gsd:plan-phase 18` after roadmap approval to start execution. **v1.0 (Tauri Desktop GUI)** remains the milestone after v0.11 — drafted in [`milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`](milestones/v1.0-REQUIREMENTS.md).
 
 <details>
 <summary>v0.10 milestone details (archive recap)</summary>
@@ -275,6 +283,8 @@ Config is `directories: BTreeMap<DirectoryName, DirectoryConfig>` where each ent
 This document evolves at phase transitions and milestone boundaries.
 
 ---
+*Last updated: 2026-05-12 — v0.11 milestone started. Goal: ship v0.10-surfaced bugs and adopt structured logging so `tome sync`/`doctor`/`status` give clearer signal. Scope: structured logging foundation (default crate: `tracing`), sync diagnostics surface (per-step timing, change-cause attribution, reconcile classification breakdown), doctor/status richer surface (text + JSON), and a bugfix bundle (#530 doctor auto-fixable UX, #511 timing flake + HARD-14 backup roundtrip carry-over, managed-symlinks-in-git false positive, wizard polish #453/#454/#456, `make release` CHANGELOG date stamp). Out of scope: output redesign, OpenTelemetry, JSON-by-default streams, TS rewrite (parked exploration). v0.8 Linux UAT carry-overs formally deferred to v1.0 (sixth consecutive milestone without Linux hardware; Tauri build will force the access). Sized at ~2 phases, ~12–15 requirements, 2–4 weeks. Phase numbering continues from 17 → starts at Phase 18. v1.0 (Tauri Desktop GUI) remains the milestone after v0.11.*
+
 *Last updated: 2026-05-07 — Phase 14 (Unowned-library lifecycle) complete. All 3 UNOWN-* requirements validated via D-API-1/-2 vocabulary merge: `tome reassign` accepts Unowned input (UNOWN-01, supersedes "tome adopt") with content-hash collision check (D-A1) + target-only-role rejection (D-A2) + `previous_source` clear-on-re-anchor (D-C1); `tome remove skill <name>` deletes Unowned skills with full D-B1 cleanup scope (manifest + library + distribution symlinks + lockfile + machine.toml memberships) + Owned guard with no `--force` bypass (D-B2) + default-no confirmation (D-B3) + new `RemoveSkillFailureKind` enum with SAFE-01/POLISH-04 patterns (UNOWN-02, supersedes "tome forget"); `tome status` and `tome doctor` text + JSON output show `Unowned skills (N):` section with D-D3 invariant honoured (`total_issues` does NOT include unowned). New `previous_source: Option<DirectoryName>` field on SkillEntry/LockEntry captures breadcrumb at all 3 Owned→Unowned transition sites (cleanup orphan, `tome remove dir` flip, fork-in-place — closes Phase 13 D-13 lossy gap). New shared `summary.rs` module with `SkillSummary` consumed by both status and doctor. BREAKING change: `tome remove <name>` → `tome remove dir <name>`. Test count: 845 (684 unit + 151 cli + 10 cli_sync_reconcile), all green; 43 net new tests added in this phase. Phase 15 (CLI hardening, HARD-01..22, **beta cut**) is next.*
 
 *Last updated: 2026-05-05 — Phase 12 (Marketplace adapter) complete. All 4 ADP-* requirements validated: `MarketplaceAdapter` trait + `InstalledPlugin` + `MockMarketplaceAdapter` (ADP-01); `ClaudeMarketplaceAdapter` with `RefCell` snapshot cache, stdin-closed subprocess invocation, `errors[]`-field-based vanished signal, heuristic stderr classifier (ADP-02); `GitAdapter` thin shim with byte-for-byte D-05a regression contract honored (ADP-03); `InstallFailure` aggregation + POLISH-04 `ALL` exhaustiveness sentinel + SAFE-01-shaped grouped renderer (ADP-04). 599 unit + 141 integration tests pass. Phase 12 ships the trait + adapters in `crates/tome/src/marketplace.rs` only — no `lib.rs::sync()` call-site changes; Phase 13 (lockfile-authoritative sync — alpha cut) wires the D-11 dispatcher next.*
