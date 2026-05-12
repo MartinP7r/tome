@@ -124,21 +124,42 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 ## Current State
 
-**Shipped:** v0.9.0 (2026-04-29)
+**Shipped:** v0.10.0 (2026-05-11)
 
-v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requirements shipped (5 PORT + 6 POLISH + 5 TEST) across Phases 9-10. Archive: [`milestones/v0.9-ROADMAP.md`](milestones/v0.9-ROADMAP.md).
+v0.10 milestone complete — Library-canonical Model + Cross-Machine Plugin Reconciliation. **49 requirements shipped** across 7 phases (LIB-01..05 + ADP-01..04 + RECON-01..05 + UNOWN-01..03 + HARD-01..22 + UX-01..02 + DOC-01..03 + REL-01..05). Archive: [`milestones/v0.10-ROADMAP.md`](milestones/v0.10-ROADMAP.md).
 
-**Highlights:**
-- A single `tome.toml` checked into dotfiles now works across machines via per-machine `[directory_overrides.<name>]` blocks in `machine.toml` — overrides apply once at config load, every downstream command (`sync`, `status`, `doctor`, `lockfile::generate`) sees the merged result
-- `tome status` and `tome doctor` mark overridden directories with `(override)` in text output and `override_applied: bool` in JSON
-- `tome browse open` paints "Opening: <path>..." before blocking on `xdg-open`; `StatusMessage` redesigned as `Success | Warning | Pending` enum; `ClipboardOccupied` auto-retries with 100ms backoff
-- `FailureKind::ALL` compile-enforced via exhaustive-match sentinel; `RemoveFailure::new` gains `path.is_absolute()` debug invariant; `arboard` patch-pinned with bump-review policy
-- `regen_warnings` deferred until after the success banner; partial-failure success-banner-absence + retry-after-fix end-to-end tests pin the I2/I3 retention contract
-- Bare-slug `tome add` (PR #471) bundled in — `tome add planetscale/database-skills` expands to `https://github.com/planetscale/database-skills`
+**Headline transformation:**
+- The library moved from "two-tier symlink cache" (managed = symlink into machine-specific cache) to **library-canonical real-directory copies** for both managed and local skills. Plugin uninstall, version churn, and cross-machine sync now all preserve library content.
+- `tome sync` is now **lockfile-authoritative** — reconciles installed plugins against `tome.lock` via marketplace adapters (Cargo.lock-shaped). Match/Drift/Vanished classification + interactive consent + edit-in-library detection.
+- `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` (subprocess to `claude plugin install/update/list --json`) + `GitAdapter` (thin shim over `git.rs`).
+- **Unowned-library lifecycle** is first-class — source removal preserves library content; `tome reassign --to <dir>` re-anchors Unowned skills; `tome remove skill <name>` deletes them. The originally-proposed `tome adopt`/`forget` verbs were merged into existing commands per Phase 14 D-API-1/-2.
+- One-shot `tome migrate-library` converts v0.9-shape libraries to v0.10 shape with confirmation, summary table, and `--yes` bypass. Idempotent on re-run.
+- Three-bucket cleanup output (UX-01) — `removed-from-config` / `missing-from-disk` / `now-in-exclude-list` — with per-skill actionable hints. The "no longer configured" trigger phrase that motivated this milestone is gone.
+- Major hardening pass: 22 review-followup + older-bug fixes (HARD-01..22), test count 662 → 987 (+325, +49%), `lib.rs::run` decomposed into 16 `cmd_<name>` helpers, `config.rs` split into a 4-file module, `tests/cli.rs` (6,703 LOC) split into 16 per-domain files.
+- Documentation: `architecture.md` rewritten 60→254 lines; new `cross-machine-sync.md` (259 lines); CHANGELOG `[Unreleased]` rewritten 22→209 lines with full migration walkthrough.
 
-**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime) still pending Linux desktop hardware. Accepted as carry-over for the third consecutive milestone.
+**Released as:** v0.10.0 via cargo-dist (tag `578f787`, GitHub Release with 11 macOS + Linux artifacts, Homebrew formula updated). Real-library migration smoke-test (REL-04) executed on Martin's `~/dev/coding-agent-files` with 57/57 SHA-256 hashes byte-identical pre/post; one mid-stream bug found and fixed (PR #528 — reconcile hard-fail on stale manifest entries).
 
-## Current Milestone: v0.10 — Library-canonical Model + Cross-Machine Plugin Reconciliation
+**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard / xdg-open) **formally deferred to v1.0** (Tauri Desktop GUI) — fifth consecutive milestone, written rationale in the UAT frontmatter. Will be naturally exercised when v1.0's GUI build target requires Linux hardware.
+
+## Next Milestone: v0.11 (to be defined)
+
+**Provisional theme:** Polish + observability + the v0.10.0-surfaced bugs.
+
+**Likely scope candidates (from open issues):**
+- #530 doctor "auto-fixable" UX bug (count includes non-fixable items, prompt is no-op)
+- #511 timing flake under parallel test contention
+- "57 managed symlink(s) tracked in git" doctor false-positive (post-migration)
+- `make release` should stamp CHANGELOG date automatically
+- Wizard polish (#453, #454, #456)
+- Selective items from Phase 11/12/13 review followup bundles (#517, #518, #519)
+
+Run `/gsd:new-milestone` to scope formally. **v1.0 (Tauri Desktop GUI)** remains the milestone after v0.11 — drafted in [`milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`](milestones/v1.0-REQUIREMENTS.md).
+
+<details>
+<summary>v0.10 milestone details (archive recap)</summary>
+
+**Goal:** Make tome's library a single source of truth (real directory copies for both managed and local skills), with a lockfile-authoritative `tome sync` flow that reconciles installed plugins to the lockfile state on every machine via marketplace adapters. Closed the library-as-dotfiles workflow gap surfaced in the post-v0.9 codebase review.
 
 **Goal:** Make tome's library a single source of truth (real directory copies for both managed and local skills), with a lockfile-authoritative `tome sync` flow that reconciles installed plugins to the lockfile state on every machine via marketplace adapters. Closes the library-as-dotfiles workflow gap surfaced in the post-v0.9 codebase review.
 
@@ -170,15 +191,7 @@ v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requir
 - [x] Phase 14: Unowned-library lifecycle (UNOWN-01..03) — completed 2026-05-07; D-API-1/-2 merged the originally proposed `tome adopt`/`forget` verbs into existing commands (`tome reassign` accepts Unowned input + `tome remove skill <name>`). New `previous_source` schema captures Owned→Unowned breadcrumb at all 3 transition sites (closes Phase 13 D-13 lossy-fork-in-place gap). Status/doctor surface an `Unowned skills (N):` section (text + JSON); `total_issues` correctly excludes the unowned set per D-D3.
 - [x] Phase 15: CLI hardening (HARD-01..22) — **beta cut** completed 2026-05-08; 22/22 HARD requirements validated across 3 clusters (architecture, safety+tests, polish+older bugs); 17 atomic feature/fix commits; test count 662 → 955 (+293, well above the ≥720 success-criterion target); `tests/cli.rs` (6,703 LOC) replaced by 16 per-domain `cli_*.rs` files + `tests/common/mod.rs`; `lib.rs::run()` dispatches via 16 `cmd_<name>` helpers; `config.rs` is now a 4-file module; clippy `-D warnings` clean
 - [x] Phase 16: Cleanup-message UX + docs (UX-01..02, DOC-01..03) — **rc cut** completed 2026-05-08; UX-01 three-bucket cleanup output (named buckets + per-skill actionable hints, stderr discipline, trigger phrase eliminated); UX-02 migrate-library confirm gate + `tabled` summary table + `--yes` bypass + Phase-7-D-10 bail; DOC-01 architecture rewrite 60→254 lines with 4 new H2 sections; DOC-02 CHANGELOG `[Unreleased]` 22→209 lines with 3 explicit BREAKING call-outs and full migration walkthrough; DOC-03 new `cross-machine-sync.md` (259 lines) wired into mdbook TOC + `tome sync --help` `long_about`
-- [ ] Phase 17: Migration polish + UAT + release (REL-01..05) — **v0.10 final**
-
-<details>
-<summary>Previous milestones (recap)</summary>
-
-- v0.6 Unified Directory Model (Phases 1-3, shipped 2026-04-16) — `[directories.*]` BTreeMap config, git sources, per-directory selection, `tome add`/`remove`/`reassign`/`fork`, browse TUI polish
-- v0.7 Wizard Hardening (Phases 4-6, shipped 2026-04-22) — `Config::validate()` Conflict+Why+Suggestion errors, `Config::save_checked` round-trip, `--no-input` plumbing, 12-combo matrix test, `tabled` summary
-- v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1 hotfix, shipped 2026-04-27) — wizard greenfield/brownfield/legacy flows, partial-failure visibility, cross-platform browse, lockfile regen safety
-- v0.9 Cross-Machine Config Portability & Polish (Phases 9-10, shipped 2026-04-29) — `[directory_overrides.<name>]` schema, override surfacing, Phase 8 review tail (StatusMessage redesign, FailureKind compile-enforcement, RemoveFailure invariant, arboard patch-pin)
+- [x] Phase 17: Migration polish + UAT + release (REL-01..05) — **v0.10 final** completed 2026-05-12; cargo-dist published v0.10.0 (tag 578f787); REL-04 smoke + real-library passed; REL-02 issue triage closed 21 GitHub issues; REL-03 Linux UAT formally deferred to v1.0
 
 </details>
 
@@ -188,6 +201,7 @@ v0.9 milestone complete — Cross-Machine Config Portability & Polish. 16 requir
 - v0.6 Unified Directory Model (Phases 1-3, shipped 2026-04-16) — `[directories.*]` BTreeMap config, git sources, per-directory selection, `tome add`/`remove`/`reassign`/`fork`, browse TUI polish
 - v0.7 Wizard Hardening (Phases 4-6, shipped 2026-04-22) — `Config::validate()` Conflict+Why+Suggestion errors, `Config::save_checked` round-trip, `--no-input` plumbing, 12-combo matrix test, `tabled` summary
 - v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1 hotfix, shipped 2026-04-27) — wizard greenfield/brownfield/legacy flows, partial-failure visibility, cross-platform browse, lockfile regen safety
+- v0.9 Cross-Machine Config Portability & Polish (Phases 9-10, shipped 2026-04-29) — `[directory_overrides.<name>]` schema, override surfacing, Phase 8 review tail (StatusMessage redesign, FailureKind compile-enforcement, RemoveFailure invariant, arboard patch-pin)
 
 </details>
 
@@ -270,6 +284,8 @@ This document evolves at phase transitions and milestone boundaries.
 *Last updated: 2026-05-02 — v0.10 milestone started. Goal: library-canonical model (managed-as-copy, source removal preserves content) + lockfile-authoritative cross-machine sync via marketplace adapters + CLI hardening bundle (19 review-followups + ~10 older bug backlog issues). Closes epic #459 (cross-machine library-as-dotfiles). v1.0 (Tauri GUI) deferred — drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`, ratifies after v0.10 ships so it can build on the stable type surface and durable library. Design doc: `.planning/research/v0.10-library-canonical-design.md` (468 lines, 9 OQs resolved). Phase 11 is the next planning unit. Discussion lineage: PR #484 codebase review → "no longer configured" UX question → library-as-dotfiles realization → managed-as-copy resilience requirement → cross-machine reconciliation requirement.*
 
 *Last updated: 2026-04-29 after v0.9 milestone — v0.9.0 shipped via cargo-dist (commits c183e3f Phase 10 + 0ae6288 version bump on main). v0.9 milestone archived: 16 v0.9 requirements (5 PORT + 6 POLISH + 5 TEST) shipped across Phases 9 and 10 (10 in 1 wave, 9 in 2 waves). 662 tests passing (526 unit + 136 integration). Linux-runtime UAT items in `08-HUMAN-UAT.md` carried over for the third consecutive milestone (still pending hardware). Ready for v1.0 — Tauri GUI milestone artifacts already drafted in `milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`; ratify via `/gsd:new-milestone` to start phase planning.*
+
+*Last updated: 2026-05-12 — v0.10.0 SHIPPED. 49 requirements across 7 phases (LIB + ADP + RECON + UNOWN + HARD + UX + DOC + REL). cargo-dist published v0.10.0 (tag 578f787, 11 GitHub Release assets). REL-04 smoke-test + real-library migration both passed (57/57 SHA-256 hashes byte-identical; one mid-stream reconcile bug fixed via PR #528). REL-02 issue triage closed 21 issues; REL-03 Linux UAT deferred to v1.0 with written rationale. Test count: 987 (vs 662 at v0.9.0, +49%). v0.10 archived via /gsd:complete-milestone — see milestones/v0.10-{ROADMAP,REQUIREMENTS}.md.*
 
 *Last updated: 2026-05-05 — Phase 13 complete (Lockfile-authoritative sync, **v0.10 alpha cut**). All 5 RECON requirements shipped: classification (Match/Drift/Vanished/MissingFromMachine), `auto_install_plugins` consent + `--no-install` flag, drift apply with re-hash, vanished warnings + preserved distribution, edit-in-library 3-way prompt with `--no-input` skip-default. New `reconcile.rs` module (1714 LOC, 28 unit tests) replaces deleted `install.rs` (-312 LOC); `MockMarketplaceAdapter` lifted into feature-gated `pub mod testing`; new `cli_sync_reconcile.rs` integration suite (10 tests). Test count: 781 (630 unit + 141 integration cli + 10 cli_sync_reconcile). Modulo pre-existing HARD-14 timing flake.*
 

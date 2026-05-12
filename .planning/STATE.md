@@ -1,33 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.10
-milestone_name: Library-canonical Model + Cross-Machine Plugin Reconciliation
-status: shipped
-stopped_at: v0.10.0 published 2026-05-11 (cargo-dist tag 578f787); REL-02 issue triage completed 2026-05-12
-last_updated: "2026-05-12T22:30:00.000Z"
+milestone: v0.11
+milestone_name: TBD (run /gsd:new-milestone to define)
+status: between_milestones
+stopped_at: v0.10.0 shipped 2026-05-11 + milestone archived 2026-05-12
+last_updated: "2026-05-12T22:55:00.000Z"
 last_activity: 2026-05-12
 progress:
-  total_phases: 7
-  completed_phases: 7
-  total_plans: 33
-  completed_plans: 33
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-05-02)
+See: .planning/PROJECT.md (updated after v0.10)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 16 — cleanup-message-ux-docs
+**Current focus:** Between milestones — v0.10 shipped, v0.11 to be scoped
 
 ## Current Position
 
-Phase: 17
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-05-08
+Milestone: v0.11 (not yet defined — run /gsd:new-milestone)
+Phase: —
+Plan: —
+Status: v0.10 archived; awaiting v0.11 scope
+Last activity: 2026-05-12
 
 **v0.10 phase shape (Phases 11–17):**
 
