@@ -634,6 +634,90 @@ fn init_derived_library_default_under_custom_tome_home() {
     );
 }
 
+// === FIX-05: wizard library default follows TOME_HOME env (closes #453 + #456) ===
+//
+// `init_derived_library_default_under_custom_tome_home` above already pins the
+// flag-source case (`--tome-home <custom>`). The two tests below pin the
+// env-source case (`TOME_HOME=<custom>`) — D-FIX05-1 (positive: library default
+// follows TOME_HOME) and D-FIX05-2 (negative: no fallback to ~/.tome/skills).
+// Per RESEARCH, the implementation at `wizard.rs::configure_library` already
+// derives `<resolved_tome_home>/skills`; these tests are the regression guard
+// against someone re-introducing a hardcoded `~/.tome/skills` fallback.
+
+#[test]
+fn wizard_library_default_follows_custom_tome_home() {
+    // D-FIX05-1: With `TOME_HOME=<tmpdir>/custom-tome`, `tome init --dry-run
+    // --no-input` proposes `<custom-tome>/skills` as the library default
+    // (NOT ~/.tome/skills). The fixture seeds no config — pure greenfield —
+    // so the wizard's library-default selection (not the brownfield
+    // "Existing config detected" branch) is exercised.
+    let tmp = TempDir::new().unwrap();
+    let custom_tome_home = tmp.path().join("custom-tome");
+    std::fs::create_dir_all(&custom_tome_home).unwrap();
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &custom_tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init --dry-run --no-input failed.\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let config = parse_generated_config(&stdout);
+    // library_dir after tilde expansion should be under the custom tome_home,
+    // NOT under <HOME>/.tome/skills.
+    assert_eq!(
+        config.library_dir(),
+        custom_tome_home.join("skills"),
+        "library default must follow TOME_HOME (expected {:?}), got {:?}",
+        custom_tome_home.join("skills"),
+        config.library_dir(),
+    );
+}
+
+#[test]
+fn wizard_library_default_does_not_fall_back_to_home_tome_skills() {
+    // D-FIX05-2 (no-fallback contract): even though `<custom-tome>/skills`
+    // does not exist on disk, the wizard does NOT fall back to
+    // `<HOME>/.tome/skills`. Asserts the emitted TOML body's library_dir
+    // is NOT the HOME-anchored fallback path. (The fixture's HOME is the
+    // TempDir itself, so the fallback would deserialize to
+    // `<tmp>/.tome/skills` after tilde expansion in --dry-run.)
+    let tmp = TempDir::new().unwrap();
+    let custom_tome_home = tmp.path().join("custom-tome");
+    std::fs::create_dir_all(&custom_tome_home).unwrap();
+    let home_fallback = tmp.path().join(".tome").join("skills");
+
+    let output = tome()
+        .args(["init", "--dry-run", "--no-input"])
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &custom_tome_home)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "tome init --dry-run --no-input failed.\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let config = parse_generated_config(&stdout);
+    assert_ne!(
+        config.library_dir(),
+        home_fallback.as_path(),
+        "wizard must not fall back to <HOME>/.tome/skills when TOME_HOME is set; \
+         got library_dir={:?}",
+        config.library_dir(),
+    );
+}
+
 #[test]
 fn init_brownfield_no_input_keeps_existing() {
     let tmp = TempDir::new().unwrap();
