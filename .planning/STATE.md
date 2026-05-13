@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed 19-03 (OBS-07) + 19-04 (FIX-02 / #511 / HARD-14 carry-over)
+stopped_at: Completed Wave 2 plans 19-03 (OBS-07) + 19-04 (FIX-02) + 19-05 (FIX-04 admin close)
 last_updated: "2026-05-13T07:25:43.461Z"
 last_activity: 2026-05-13
 progress:
@@ -72,6 +72,7 @@ Historical decisions are archived in:
 - [Phase 19]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
 - [Phase 19]: OBS-07: stamp_last_synced_at() placed at lib.rs:1789, inside the !dry_run guard, immediately before manifest::save — D-LSYNC-3 honored. JSON last_sync emits literal null for fresh manifests (no skip_serializing_if), matching the stable-shape pattern used by unowned: [].
 - [Phase 19]: Plan 19-04: Outcome C selected for backup test flake — defensive FLAKE-WATCH comment shipped (50/50 isolated + 10/10 module + 5/5 lib-suite runs all pass locally on M1 macOS); browse-test bound relaxed 600ms→2000ms with arboard-rooted FLAKE-FIX comment (100/100 stability)
+- [Phase 19]: FIX-04 (#454) closes administratively: reproduce-first proved tabled[ansi] fix from 0803afb is sufficient; no strip-ansi-escapes dep added; snapshot test render_directory_summary_table pins header/body alignment as regression guard
 
 ### v0.11 design context (consume during planning)
 
@@ -105,5 +106,5 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 ## Session Continuity
 
 Last session: 2026-05-13T07:25:32.234Z
-Stopped at: Completed 19-03 (OBS-07) + 19-04 (FIX-02)
+Stopped at: Completed Wave 2 plans 19-03 + 19-04 + 19-05
 Resume file: None
