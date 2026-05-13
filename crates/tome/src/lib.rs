@@ -1778,6 +1778,15 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // 7. Save manifest, gitignore, and lockfile
     if !dry_run && paths.config_dir().is_dir() {
+        // D-LSYNC-3 (OBS-07): stamp after distribute + cleanup succeed,
+        // before persist. The stamp is INSIDE the `!dry_run` guard so
+        // dry-run does NOT update last_synced_at — honest reporting.
+        //
+        // Note: a subsequent reconcile-install-failure bail (`bail!` at
+        // the end of sync()) still treats `last_synced_at` as stamped —
+        // the user-facing semantics are "cleanup completed; install-
+        // failure exit is downstream." Per RESEARCH OQ-3.
+        manifest.stamp_last_synced_at();
         manifest::save(&manifest, paths.config_dir())?;
     }
     if !dry_run && paths.library_dir().is_dir() {

@@ -18,7 +18,7 @@ Adopt structured logging across the codebase so `tome sync`/`doctor`/`status` gi
 - [x] **OBS-04**: Change-cause attribution — when consolidate or distribute re-emits a skill, the reason ("hash changed", "previously failed", "newly added", "directory now allowed") is logged at `info!` for user visibility.
 - [x] **OBS-05**: Reconcile classification breakdown surfaced in `tome sync` summary — show counts of Match / Drift / Vanished / MissingFromMachine in the final summary block (not only the consolidated outcome).
 - [x] **OBS-06**: `tome doctor` richer surface — categorize issues (Library / Directory / Config / Foreign-symlink) with per-category counts in text output; JSON shape gains `category` field per issue. Implementation overlaps with FIX-01 (#530); single change closes both.
-- [ ] **OBS-07**: `tome status` richer surface — surface per-directory skill counts, override status (already present in v0.9), and a "last sync" timestamp; JSON shape parity with text output.
+- [x] **OBS-07**: `tome status` richer surface — surface per-directory skill counts, override status (already present in v0.9), and a "last sync" timestamp; JSON shape parity with text output.
 
 ### Bugfixes (FIX)
 

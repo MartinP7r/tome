@@ -366,6 +366,175 @@ fn phase14_status_json_includes_unowned_field() {
     }
 }
 
+// ============================================================================
+// OBS-07 (Plan 19-03): last_sync header + SKILLS column integration tests.
+//
+// These pin the user-visible behavior of D-LSYNC-1/-2/-3 + D-DIR-1:
+// - text Last sync: "never" when manifest missing, RFC-3339 when stamped
+// - JSON last_sync: null when fresh, RFC-3339 string after a successful sync
+// - text Directories table has a SKILLS column header
+// ============================================================================
+
+#[test]
+fn status_last_sync_never_for_fresh_manifest() {
+    // D-LSYNC-2: a fresh TempDir with no manifest must render "Last sync: never".
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Last sync: never"),
+        "fresh manifest must render 'Last sync: never', got:\n{stdout}"
+    );
+}
+
+#[test]
+fn status_last_sync_renders_after_sync() {
+    // D-LSYNC-3: a successful sync stamps last_synced_at; subsequent status
+    // renders an RFC-3339 timestamp (year prefix is the deterministic part).
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("skill-a", "local")
+        .build();
+
+    tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+        .assert()
+        .success();
+
+    let output = tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Last sync: "),
+        "post-sync status must render 'Last sync: <ts>', got:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("Last sync: never"),
+        "post-sync status must NOT render 'never', got:\n{stdout}"
+    );
+    // RFC-3339 year prefix: matches '20YY-' for any 21st-century stamp.
+    assert!(
+        stdout.contains("Last sync: 20"),
+        "post-sync status must render an RFC-3339 timestamp (year 20YY), got:\n{stdout}"
+    );
+}
+
+#[test]
+fn status_json_last_sync_null_for_fresh() {
+    // D-LSYNC-2: JSON shape emits `"last_sync": null` for fresh manifest —
+    // not omitted, for stable-shape JSON consumers.
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+
+    let output = tome()
+        .args(["--config", config.to_str().unwrap(), "status", "--json"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status --json must produce valid JSON");
+    assert!(
+        json.get("last_sync").is_some(),
+        "JSON must always include 'last_sync' key for stable shape: {json}"
+    );
+    assert!(
+        json["last_sync"].is_null(),
+        "fresh manifest must emit last_sync == null, got: {}",
+        json["last_sync"]
+    );
+}
+
+#[test]
+fn status_json_last_sync_string_after_sync() {
+    // D-LSYNC-3: after a successful sync, JSON last_sync is an RFC-3339 string.
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("skill-a", "local")
+        .build();
+
+    tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+        .assert()
+        .success();
+
+    let output = tome()
+        .args([
+            "--config",
+            &env.config_path.to_string_lossy(),
+            "status",
+            "--json",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("status --json must produce valid JSON");
+    let ts = json["last_sync"].as_str().unwrap_or_else(|| {
+        panic!(
+            "post-sync last_sync must be a String, got: {}",
+            json["last_sync"]
+        )
+    });
+    assert!(
+        ts.ends_with('Z') && ts.len() == 20,
+        "last_sync must be RFC-3339 'YYYY-MM-DDTHH:MM:SSZ' (length 20, trailing Z), got: {ts}"
+    );
+    assert!(
+        ts.starts_with("20"),
+        "last_sync must have a 21st-century year prefix, got: {ts}"
+    );
+}
+
+#[test]
+fn status_skills_column_present_in_text() {
+    // D-DIR-1: the Directories table in text output gains a SKILLS column.
+    let env = TestEnvBuilder::new()
+        .source("local", "directory")
+        .target("test-tool")
+        .skill("skill-a", "local")
+        .build();
+
+    tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "sync"])
+        .assert()
+        .success();
+
+    let output = tome()
+        .args(["--config", &env.config_path.to_string_lossy(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("SKILLS"),
+        "Directories table must include 'SKILLS' column header, got:\n{stdout}"
+    );
+    // The directory `local` was discovered with 1 skill — assert the row count.
+    assert!(
+        stdout.contains("✓ 1") || stdout.contains("local"),
+        "Directories table must render the discovered skill count, got:\n{stdout}"
+    );
+}
+
 #[test]
 fn phase14_status_text_omits_unowned_section_when_empty() {
     let fix = phase14_build_fixture(&[("active-dir", "synced")], &[("alpha", "active-dir")], &[]);

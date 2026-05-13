@@ -60,6 +60,11 @@ pub struct StatusReport {
     pub library_dir: PathBuf,
     /// Number of skills consolidated in the library, or an error message.
     pub library_count: CountOrError,
+    /// RFC-3339 timestamp of last successful sync; `null` if never synced
+    /// or pre-v0.11 manifest. Per D-LSYNC-2 (OBS-07): "never" in text;
+    /// `null` in JSON. No `skip_serializing_if` — emit `"last_sync": null`
+    /// for stable-shape JSON consumers (matches `unowned: []` pattern).
+    pub last_sync: Option<String>,
     pub directories: Vec<DirectoryStatus>,
     /// Skills in the library whose source was removed from `tome.toml`
     /// (Unowned per LIB-04). Surfaces in text rendering between the
@@ -113,26 +118,28 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         Ok(0)
     };
 
-    // Populate the Unowned set per UNOWN-03. Read the manifest from
-    // paths.config_dir() and project entries with source_name.is_none()
-    // through SkillSummary::from_entry. Sorted ascending by name (D-D1
-    // discretion choice — matches the BTreeMap natural order of Manifest).
-    //
-    // Manifest read errors are surfaced via library_count.error / health.error;
-    // the Unowned section degrades gracefully to empty on read failure.
-    let unowned: Vec<crate::summary::SkillSummary> = match manifest::load(paths.config_dir()) {
-        Ok(m) => m
-            .iter()
-            .filter(|(_, entry)| entry.source_name.is_none())
-            .map(|(name, entry)| crate::summary::SkillSummary::from_entry(name, entry))
-            .collect(),
-        Err(_) => Vec::new(),
-    };
+    // Populate the Unowned set per UNOWN-03 AND the `last_sync` header per
+    // D-LSYNC-1/-2 (OBS-07). Both are sourced from the same manifest read.
+    // Read errors degrade gracefully: empty Unowned set + last_sync = None.
+    let (unowned, last_sync): (Vec<crate::summary::SkillSummary>, Option<String>) =
+        match manifest::load(paths.config_dir()) {
+            Ok(m) => {
+                let last = m.last_synced_at().map(String::from);
+                let unowned = m
+                    .iter()
+                    .filter(|(_, entry)| entry.source_name.is_none())
+                    .map(|(name, entry)| crate::summary::SkillSummary::from_entry(name, entry))
+                    .collect();
+                (unowned, last)
+            }
+            Err(_) => (Vec::new(), None),
+        };
 
     Ok(StatusReport {
         configured,
         library_dir: paths.library_dir().to_path_buf(),
         library_count: library_count.into(),
+        last_sync,
         directories,
         unowned,
         health: health.into(),
@@ -226,6 +233,18 @@ fn render_status(report: &StatusReport) {
         "  {} {} skills consolidated",
         lib_indicator,
         style(lib_count).cyan()
+    );
+    // D-LSYNC-2 (OBS-07): Last sync header line. Reads from
+    // StatusReport.last_sync; "never" when manifest doesn't exist or
+    // last_synced_at is None.
+    let last_sync_str = match &report.last_sync {
+        Some(ts) => ts.clone(),
+        None => "never".to_string(),
+    };
+    println!(
+        "  {} {}",
+        style("Last sync:").bold(),
+        style(last_sync_str).cyan()
     );
     println!();
 
@@ -950,6 +969,7 @@ mod tests {
                 count: Some(0),
                 error: None,
             },
+            last_sync: None,
             directories: Vec::new(),
             unowned: Vec::new(),
             health: CountOrError {
@@ -988,6 +1008,7 @@ mod tests {
                 count: Some(1),
                 error: None,
             },
+            last_sync: None,
             directories: Vec::new(),
             unowned: vec![summary],
             health: CountOrError {

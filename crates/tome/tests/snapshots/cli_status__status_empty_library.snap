@@ -4,6 +4,7 @@ expression: stdout
 ---
 Library: [TMPDIR]/library
   ✓ 0 skills consolidated
+  Last sync: never
 
 Directories:
   (none configured)
