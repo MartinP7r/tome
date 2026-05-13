@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: verifying
-stopped_at: Phase 19 context gathered
-last_updated: "2026-05-13T04:34:46.949Z"
-last_activity: 2026-05-12
+status: executing
+stopped_at: Completed 19-02 makefile-release-changelog-stamp plan (FIX-06)
+last_updated: "2026-05-13T07:09:25.781Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 9
   completed_phases: 7
-  total_plans: 36
-  completed_plans: 36
+  total_plans: 43
+  completed_plans: 37
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 Milestone: v0.11 Polish + Observability
 Phase: 19
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-05-12
+Plan: 19-02 complete (FIX-06 Makefile CHANGELOG date-stamp); other Phase 19 plans run in parallel
+Status: In progress (parallel execution wave 1)
+Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**
 
@@ -66,6 +66,7 @@ Historical decisions are archived in:
 - [Phase 18-observability-foundation-sync-diagnostics]: tracing substrate landed via tracing_init::install(LogLevel); TOME_LOG env > LogLevel directive precedence (D-ENV-1); reconcile.rs warnings routed through tracing::warn! as locked proof module (D-SUB-2)
 - [Phase 18]: Plan 18-02: 5 step spans + top-level sync span via lexical info_span!(...).entered() blocks; ChangeCause enum with four locked vocabulary strings; OBS-05 reconcile classification line in render_sync_report; DirectoryNowAllowed false-positive accepted, PreviouslyFailed deferred to v0.12 schema bump.
 - [Phase 18]: Plan 18-03: OBS-03 span emission pinned by sync_verbose_emits_step_spans_on_stderr regression test asserting on the 3 always-firing step span names + time.busy auto-field; CHANGELOG [Unreleased] documents OBS-01..05, D-ENV-1 trade-off, and PreviouslyFailed + DirectoryNowAllowed deferrals.
+- [Phase 19-doctor-status-surface-bugfix-bundle]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
 
 ### v0.11 design context (consume during planning)
 
@@ -98,6 +99,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:34:46.941Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-doctor-status-surface-bugfix-bundle/19-CONTEXT.md
+Last session: 2026-05-13T07:08:45.547Z
+Stopped at: Completed 19-02 makefile-release-changelog-stamp plan (FIX-06)
+Resume file: None

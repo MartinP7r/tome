@@ -232,7 +232,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Plans**: 7 plans
 
 - [ ] 19-01-doctor-substrate-categorization-and-repair-PLAN.md — Wave 1A: doctor.rs substrate (IssueCategory + RepairKind enums, 8 emit sites retrofit, dispatcher rewrite, FIX-03 stale check deletion) — OBS-06 + FIX-01 + FIX-03
-- [ ] 19-02-makefile-release-changelog-stamp-PLAN.md — Wave 1B: Makefile inline sed for CHANGELOG date-stamp + 3 regression tests — FIX-06
+- [x] 19-02-makefile-release-changelog-stamp-PLAN.md — Wave 1B: Makefile inline sed for CHANGELOG date-stamp + 3 regression tests — FIX-06
 - [ ] 19-03-status-last-sync-and-per-directory-counts-PLAN.md — Wave 2A: manifest.last_synced_at additive field + sync() stamp + StatusReport.last_sync + SKILLS column in Directories table — OBS-07
 - [ ] 19-04-flake-bounds-relaxation-PLAN.md — Wave 2B: browse test bound 600ms→2000ms + reproduce-first backup test fix per actual root cause — FIX-02
 - [ ] 19-05-wizard-ansi-aware-width-PLAN.md — Wave 2C: reproduce-first then either strip-ansi-escapes dep + strip call OR administrative close path; snapshot test ships either way — FIX-04
@@ -266,4 +266,4 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
 | 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 0/7 | Not started | - |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 1/7 | In Progress|  |
