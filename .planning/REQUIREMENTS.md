@@ -29,7 +29,7 @@ The v0.10-surfaced bug bundle and the older wizard-polish backlog. Each requirem
 - [x] **FIX-03**: `tome doctor` "N managed symlink(s) tracked in git" check removed or rewritten — v0.10 made managed skills real directory copies, so the check is stale (false-positive count post-migration). Closes [#532](https://github.com/MartinP7r/tome/issues/532).
 - [ ] **FIX-04**: Wizard summary table column misalignment — ANSI bold escapes are miscounted as visible width by `tabled` in interactive TTY mode. Use ANSI-aware width measurement (or strip ANSI before measuring). Closes [#454](https://github.com/MartinP7r/tome/issues/454).
 - [ ] **FIX-05**: Wizard `configure_library` and library-default derivation follow the resolved `tome_home` instead of hardcoding `~/.tome/skills` — when a user customizes `tome_home`, the library default should follow. Single fix closes both linked issues. Closes [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456).
-- [ ] **FIX-06**: `make release` automatically stamps the release date in `CHANGELOG.md` — replaces `[Unreleased]` with `[X.Y.Z] - YYYY-MM-DD` during the version-bump PR. Closes [#533](https://github.com/MartinP7r/tome/issues/533).
+- [x] **FIX-06**: `make release` automatically stamps the release date in `CHANGELOG.md` — replaces `[Unreleased]` with `[X.Y.Z] - YYYY-MM-DD` during the version-bump PR. Closes [#533](https://github.com/MartinP7r/tome/issues/533).
 
 ## Future Requirements
 
@@ -70,7 +70,7 @@ Filled by `gsd-roadmapper` 2026-05-12. 13 requirements mapped across 2 phases (1
 | FIX-03 | Phase 19 | [#532](https://github.com/MartinP7r/tome/issues/532) | Pending |
 | FIX-04 | Phase 19 | [#454](https://github.com/MartinP7r/tome/issues/454) | Pending |
 | FIX-05 | Phase 19 | [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456) | Pending |
-| FIX-06 | Phase 19 | [#533](https://github.com/MartinP7r/tome/issues/533) | Pending |
+| FIX-06 | Phase 19 | [#533](https://github.com/MartinP7r/tome/issues/533) | Done |
 
 **Coverage:**
 - v0.11 requirements: 13 total (7 OBS + 6 FIX)

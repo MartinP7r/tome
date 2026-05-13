@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed 19-01 plan (Doctor substrate categorization + repair-kind discrimination + FIX-03)
+stopped_at: Completed Wave 1 (19-01 doctor substrate + 19-02 makefile changelog stamp)
 last_updated: "2026-05-13T07:11:09.852Z"
 last_activity: 2026-05-13
 progress:
@@ -26,8 +26,8 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 Milestone: v0.11 Polish + Observability
 Phase: 19 (doctor-status-surface-bugfix-bundle) — EXECUTING
-Plan: 2 of 7
-Status: Ready to execute
+Plan: Wave 1 complete (19-01 + 19-02); Wave 2 next (19-03/04/05/06 parallel)
+Status: Ready to execute Wave 2
 Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**
@@ -69,6 +69,7 @@ Historical decisions are archived in:
 - [Phase 19]: Plan 19-01: RepairKind has 3 variants (RemoveStaleManifestEntry, RemoveBrokenLibrarySymlink, RemoveStaleTargetSymlink) — one per real auto-repair handler. Orphan directories stay interactive-only (repair_kind: None).
 - [Phase 19]: Plan 19-01: Per-category DiagnosticIssue constructors (library/library_repairable/directory/directory_repairable/directory_foreign_symlink/config) replace untyped/typed shims; D-CAT-1 ForeignSymlink promotion happens at construction time. Dispatcher matches exhaustively on Option<RepairKind> — substring matching anti-pattern eliminated.
 - [Phase 19]: Plan 19-01 / FIX-03 (#532): 'managed symlink(s) tracked in git' check, render+Confirm flow, and tracked_managed_symlinks helper deleted wholesale — v0.10's library-canonical model made the check incapable of firing on clean libraries. D-FIX03-2 integration test pins the absence of the warning.
+- [Phase 19]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
 
 ### v0.11 design context (consume during planning)
 
@@ -102,5 +103,5 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 ## Session Continuity
 
 Last session: 2026-05-13T07:11:09.847Z
-Stopped at: Completed 19-01 plan (Doctor substrate categorization + repair-kind discrimination + FIX-03)
+Stopped at: Completed Wave 1 (19-01 + 19-02)
 Resume file: None
