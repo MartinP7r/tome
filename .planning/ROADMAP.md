@@ -229,7 +229,16 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
      - [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456) Wizard `configure_library` derives the library default from the resolved `tome_home` (i.e., `<tome_home>/skills`) instead of hardcoding `~/.tome/skills`. A user who sets `tome_home` to `~/dev/coding-agent-files/.tome` sees `~/dev/coding-agent-files/.tome/skills` proposed as the library default. Verified by a wizard integration test driving a custom `tome_home` in `--no-input` mode.
      - [#533](https://github.com/MartinP7r/tome/issues/533) `make release VERSION=X.Y.Z` automatically replaces `[Unreleased]` with `[X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md` during the version-bump PR. Verified by a script-level test (or a documented dry-run) showing the substitution against a fixture changelog.
   4. CI green on all platforms (ubuntu-latest, macos-latest); clippy `-D warnings` clean; test count grows by at least one regression test per FIX item plus the OBS-06/07 JSON/text shape tests (target: ≥1000 tests at v0.11 ship time, was 987 at v0.10.0).
-**Plans**: TBD
+**Plans**: 7 plans
+
+- [ ] 19-01-doctor-substrate-categorization-and-repair-PLAN.md — Wave 1A: doctor.rs substrate (IssueCategory + RepairKind enums, 8 emit sites retrofit, dispatcher rewrite, FIX-03 stale check deletion) — OBS-06 + FIX-01 + FIX-03
+- [ ] 19-02-makefile-release-changelog-stamp-PLAN.md — Wave 1B: Makefile inline sed for CHANGELOG date-stamp + 3 regression tests — FIX-06
+- [ ] 19-03-status-last-sync-and-per-directory-counts-PLAN.md — Wave 2A: manifest.last_synced_at additive field + sync() stamp + StatusReport.last_sync + SKILLS column in Directories table — OBS-07
+- [ ] 19-04-flake-bounds-relaxation-PLAN.md — Wave 2B: browse test bound 600ms→2000ms + reproduce-first backup test fix per actual root cause — FIX-02
+- [ ] 19-05-wizard-ansi-aware-width-PLAN.md — Wave 2C: reproduce-first then either strip-ansi-escapes dep + strip call OR administrative close path; snapshot test ships either way — FIX-04
+- [ ] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
+- [ ] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4
+
 
 ## Progress
 
@@ -257,4 +266,4 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
 | 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 0/TBD | Not started | - |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 0/7 | Not started | - |
