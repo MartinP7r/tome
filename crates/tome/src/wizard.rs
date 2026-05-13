@@ -496,14 +496,58 @@ fn step_divider(label: &str) {
     );
 }
 
+// FIX-04 (#454) reference: this function renders the wizard's directory
+// summary using `tabled` with `Style::rounded()` and ANSI-bold styled
+// header cells. The ANSI-width-miscount bug surfaced in #454 was fixed
+// in commit 0803afb (April 2026) by enabling `tabled = { features =
+// ["ansi"] }` in `Cargo.toml`, which switches tabled's width calc onto
+// `ansi-str`/`ansitok` so escape sequences are not counted as visible
+// columns. Phase 19 (Plan 05) verified during reproduction that the
+// bug no longer manifests in current code; the snapshot test
+// `show_directory_summary_aligns_header_with_body_under_ansi` (below)
+// pins this alignment behaviour as a regression guard — removing the
+// `ansi` feature from `Cargo.toml` would re-introduce the bug and fail
+// the test. #454 closes administratively in the Phase 19 wrap-up.
 fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>) {
     if directories.is_empty() {
         eprintln!("  (no directories configured)");
         return;
     }
 
+    // Detect terminal width; fall back to 80 columns on non-TTY / piped output (D-05).
+    let term_cols: usize = terminal_size()
+        .map(|(TermWidth(w), _)| w as usize)
+        .unwrap_or(80);
+
+    let table = render_directory_summary_table(directories, term_cols);
+    eprintln!("{table}");
+    eprintln!();
+}
+
+/// Renders the wizard's directory-summary table to a `String`.
+///
+/// Extracted from `show_directory_summary` so it can be exercised by
+/// `show_directory_summary_aligns_header_with_body_under_ansi` — the
+/// FIX-04 (#454) regression guard. The caller supplies `term_cols` so
+/// the test can pin a deterministic width independent of the executor's
+/// terminal.
+///
+/// Column order per D-02: NAME / TYPE / ROLE / PATH.
+///
+/// Styling choices preserved from the original inline implementation:
+/// * `Style::rounded()` — deliberate divergence from `status.rs`'s
+///   `Style::blank()`; `tome init` is a one-shot ceremonial summary (D-01).
+/// * `Modify::new(Rows::first()).with(Format::content(...).bold())` —
+///   ANSI-bold header cells. tabled's `ansi` feature (Cargo.toml) makes
+///   this safe under width calc.
+/// * `Width::truncate(...).priority(PriorityMax::right())` — shrinks the
+///   widest column first; in practice the PATH column, which can hold
+///   long git-repo clone paths (D-04).
+fn render_directory_summary_table(
+    directories: &BTreeMap<DirectoryName, DirectoryConfig>,
+    term_cols: usize,
+) -> String {
     // Build rows: header + one row per directory entry.
-    // Column order per D-02: NAME / TYPE / ROLE / PATH.
     let mut rows: Vec<[String; 4]> = Vec::with_capacity(directories.len() + 1);
     rows.push([
         "NAME".to_string(),
@@ -520,22 +564,11 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
         ]);
     }
 
-    // Detect terminal width; fall back to 80 columns on non-TTY / piped output (D-05).
-    let term_cols: usize = terminal_size()
-        .map(|(TermWidth(w), _)| w as usize)
-        .unwrap_or(80);
-
-    // Style::rounded() is a deliberate aesthetic divergence from status.rs's
-    // Style::blank(): tome init is a one-shot ceremonial summary (D-01).
-    // Width::truncate + PriorityMax::right() shrinks the widest column first —
-    // in practice the PATH column, which can hold git-repo clone paths (D-04).
-    let table = Table::from_iter(rows)
+    Table::from_iter(rows)
         .with(Style::rounded())
         .with(Modify::new(Rows::first()).with(Format::content(|s| style(s).bold().to_string())))
         .with(Width::truncate(term_cols).priority(PriorityMax::right()))
-        .to_string();
-    eprintln!("{table}");
-    eprintln!();
+        .to_string()
 }
 
 fn configure_directories(
