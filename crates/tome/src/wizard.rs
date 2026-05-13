@@ -1092,6 +1092,101 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // -------------------------------------------------------------------
+    // FIX-04 (#454): wizard summary table aligns header with body under
+    // ANSI-bold styled headers. The actual width-handling fix shipped in
+    // commit 0803afb (April 2026) via `tabled = { features = ["ansi"] }`
+    // — this snapshot test pins that behaviour as a regression guard, so
+    // a future removal of the `ansi` feature (or other styling drift)
+    // would re-introduce the misalignment and fail this test.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn show_directory_summary_aligns_header_with_body_under_ansi() {
+        use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
+        use std::collections::BTreeMap;
+        use std::path::PathBuf;
+
+        // Force-enable ANSI colors so styled headers actually emit escape
+        // codes — non-TTY mode strips them automatically, which would hide
+        // the underlying width-calc bug we're guarding against.
+        console::set_colors_enabled(true);
+
+        let mut dirs: BTreeMap<DirectoryName, DirectoryConfig> = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-skills").unwrap(),
+            DirectoryConfig {
+                path: PathBuf::from("/home/user/.claude/skills"),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Synced),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+        dirs.insert(
+            DirectoryName::new("codex-skills").unwrap(),
+            DirectoryConfig {
+                path: PathBuf::from("/home/user/.codex/skills"),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+
+        let rendered = render_directory_summary_table(&dirs, 120);
+
+        // Assert: every `│` (vertical-bar) divider in the header row
+        // appears at the same VISIBLE column index as in body rows. We
+        // strip ANSI escapes before computing positions because that's
+        // what visual alignment actually depends on.
+        let lines: Vec<&str> = rendered.lines().collect();
+        // Find first data line containing `│`. With `Style::rounded()` the
+        // top decoration uses `╭─┬─╮`; the first `│`-line is the header.
+        let data_lines: Vec<&str> = lines.iter().filter(|l| l.contains('│')).copied().collect();
+        assert!(
+            data_lines.len() >= 2,
+            "expected at least header + 1 body line containing `│`, got {} lines. Rendered:\n{rendered}",
+            data_lines.len()
+        );
+
+        fn visible_pipe_positions(line: &str) -> Vec<usize> {
+            // Strip CSI ANSI escapes: ESC [ ... letter
+            let mut out = String::with_capacity(line.len());
+            let mut chars = line.chars();
+            while let Some(c) = chars.next() {
+                if c == '\x1b' {
+                    // Consume `[` and everything up to the terminator letter.
+                    if matches!(chars.next(), Some('[')) {
+                        for cc in chars.by_ref() {
+                            if cc.is_ascii_alphabetic() {
+                                break;
+                            }
+                        }
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out.char_indices()
+                .filter(|(_, c)| *c == '│')
+                .map(|(i, _)| i)
+                .collect()
+        }
+
+        let header_pipes = visible_pipe_positions(data_lines[0]);
+        for (i, body_line) in data_lines[1..].iter().enumerate() {
+            let body_pipes = visible_pipe_positions(body_line);
+            assert_eq!(
+                header_pipes, body_pipes,
+                "column dividers must align between header and body row {i}. \
+                 header={header_pipes:?} body={body_pipes:?}\nRendered:\n{rendered}"
+            );
+        }
+    }
+
     #[test]
     fn known_directories_has_no_duplicate_names() {
         let mut names: Vec<&str> = KNOWN_DIRECTORIES.iter().map(|kd| kd.name).collect();
