@@ -3,7 +3,7 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed 19-03-PLAN.md (last-sync header + SKILLS surface for OBS-07)
+stopped_at: Completed 19-03 (OBS-07) + 19-04 (FIX-02 / #511 / HARD-14 carry-over)
 last_updated: "2026-05-13T07:25:43.461Z"
 last_activity: 2026-05-13
 progress:
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 Milestone: v0.11 Polish + Observability
 Phase: 19 (doctor-status-surface-bugfix-bundle) — EXECUTING
-Plan: Wave 1 complete (19-01 + 19-02); Wave 2 next (19-03/04/05/06 parallel)
-Status: Ready to execute Wave 2
-Last activity: 2026-05-13
+Plan: Wave 1 complete (19-01 + 19-02); Wave 2 in flight — 19-04 done; 19-03/05/06 still pending
+Status: Executing Wave 2
+Last activity: 2026-05-13 (19-04 / FIX-02 / #511 + HARD-14 closed)
 
 **v0.11 phase shape (Phases 18–19):**
 
@@ -71,6 +71,7 @@ Historical decisions are archived in:
 - [Phase 19]: Plan 19-01 / FIX-03 (#532): 'managed symlink(s) tracked in git' check, render+Confirm flow, and tracked_managed_symlinks helper deleted wholesale — v0.10's library-canonical model made the check incapable of firing on clean libraries. D-FIX03-2 integration test pins the absence of the warning.
 - [Phase 19]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
 - [Phase 19]: OBS-07: stamp_last_synced_at() placed at lib.rs:1789, inside the !dry_run guard, immediately before manifest::save — D-LSYNC-3 honored. JSON last_sync emits literal null for fresh manifests (no skip_serializing_if), matching the stable-shape pattern used by unowned: [].
+- [Phase 19]: Plan 19-04: Outcome C selected for backup test flake — defensive FLAKE-WATCH comment shipped (50/50 isolated + 10/10 module + 5/5 lib-suite runs all pass locally on M1 macOS); browse-test bound relaxed 600ms→2000ms with arboard-rooted FLAKE-FIX comment (100/100 stability)
 
 ### v0.11 design context (consume during planning)
 
@@ -94,7 +95,7 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 ### Pending Todos / Carry-over
 
 - **Linux UAT (carry-over from v0.8):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime tests). Pending Linux desktop hardware. Carried over for the sixth consecutive milestone — formally deferred to **v1.0** where the Tauri build target forces Linux access.
-- **Pre-existing flake:** `backup::tests::push_and_pull_roundtrip` — historically intermittent. HARD-14 in Phase 15 addressed it via per-test-fixture local git signing config; FIX-02 in Phase 19 targets a different flake (`browse::app::tests::copy_path_retry_helper_returns_within_bound`, [#511](https://github.com/MartinP7r/tome/issues/511)).
+- **Pre-existing flake (RESOLVED via Plan 19-04, Outcome C):** `backup::tests::push_and_pull_roundtrip` — historically intermittent. HARD-14 in Phase 15 addressed signing; Phase 19 Plan 04 / FIX-02 paired this with the browse copy-path flake per D-FLAKE-2 and concluded with Outcome C (flake NOT reproducible locally on M1 macOS; 50/50 isolated + 10/10 module + 5/5 lib-suite runs all clean). Defensive FLAKE-WATCH comment shipped at `backup.rs::push_and_pull_roundtrip` documenting flake history + next-mitigation retry-wrapper pattern for future-phase pickup if it recurs in CI. The browse flake ([#511](https://github.com/MartinP7r/tome/issues/511)) bound was relaxed 600ms→2000ms with the canonical FLAKE-FIX comment (arboard contention root cause).
 
 ### Blockers/Concerns
 
@@ -104,5 +105,5 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 ## Session Continuity
 
 Last session: 2026-05-13T07:25:32.234Z
-Stopped at: Completed 19-03-PLAN.md (last-sync header + SKILLS surface for OBS-07)
+Stopped at: Completed 19-03 (OBS-07) + 19-04 (FIX-02)
 Resume file: None

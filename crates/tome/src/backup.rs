@@ -544,6 +544,47 @@ mod tests {
         assert!(has_remote(&dir));
     }
 
+    // FLAKE-WATCH (HARD-14 / FIX-02 / #511): this test has a historical
+    // intermittent-failure record in full-suite CI runs but passes cleanly in
+    // isolation. Phase 15 HARD-14 added `setup_git_config(&repo_b)` (below) to
+    // disable git signing (closes #500); Phase 19 FIX-02 paired the residual
+    // flake with the browse copy-path timing flake per D-FLAKE-2.
+    //
+    // The test has **no timing assertions** — D-FLAKE-1's relaxed-bound
+    // treatment does NOT apply. The flake mechanism is therefore not a perf
+    // bound; the most likely class is `git push` / `git pull` subprocess
+    // transients (filesystem timestamp resolution on shared tmpfs, file-lock
+    // contention on `.git/refs` from parallel TempDir tests, or fresh-CI
+    // worker identity-config absence).
+    //
+    // Reproduction attempt during Phase 19 (M1 macOS, 2026-05-13):
+    //   - 50× `cargo test push_and_pull_roundtrip -- --test-threads=8`     → 50/50 pass
+    //   - 10× `cargo test backup -- --test-threads=8`                      → 10/10 pass
+    //   - 5×  `cargo test -p tome --lib -- --test-threads=8` (full suite) → 5/5  pass
+    // The flake could not be reproduced locally; the assumption is that it
+    // surfaces only under CI's specific filesystem + scheduler characteristics
+    // (Linux GitHub Actions runner contention, not macOS local).
+    //
+    // If this recurs in CI post-Phase-19, the next mitigation step is a retry
+    // wrapper around the specific failing subprocess call — `git push` /
+    // `git pull` / `git clone` — with 3 attempts and 50ms exponential backoff.
+    // The retry should target the SPECIFIC failing call (do NOT wholesale-wrap
+    // every `git` invocation — risk: hiding a real failure). Pattern:
+    //
+    //     fn git_with_retry(args: &[&str], cwd: &Path, retries: u8) -> Result<()> {
+    //         for attempt in 0..=retries {
+    //             if Command::new("git").args(args).current_dir(cwd).status()?.success() {
+    //                 return Ok(());
+    //             }
+    //             std::thread::sleep(Duration::from_millis(50 * (1 << attempt)));
+    //         }
+    //         bail!("git {} failed after {} attempts", args.join(" "), retries + 1);
+    //     }
+    //
+    // Per D-FLAKE-2 ("If investigation reveals a different root cause class,
+    // planner re-opens this decision") + D-FLAKE-3 (clock injection rejected),
+    // Phase 19 closes #511 via the browse fix alone and ships this defensive
+    // documentation in lieu of a speculative retry wrapper.
     #[test]
     fn push_and_pull_roundtrip() {
         let tmp = TempDir::new().unwrap();
