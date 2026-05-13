@@ -68,6 +68,118 @@ const _: () = {
     assert!(DiagnosticIssueKind::ALL.len() == 1);
 };
 
+/// Category of a [`DiagnosticIssue`]. Derived at construction from the
+/// [`DoctorReport`] field the issue lives in, with `ForeignSymlink`
+/// promoted regardless of source field per D-CAT-1.
+///
+/// JSON serialisation is snake_case (`"library"`, `"directory"`,
+/// `"config"`, `"foreign_symlink"`), matching the project convention.
+///
+/// Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+/// keep every variant pinned. Adding a variant without updating `ALL`
+/// is a `cargo check` failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueCategory {
+    Library,
+    Directory,
+    Config,
+    ForeignSymlink,
+}
+
+impl IssueCategory {
+    /// Compile-time-validated enumeration of every variant. Mirrors
+    /// `DiagnosticIssueKind::ALL` and other POLISH-04 patterns.
+    pub const ALL: [Self; 4] = [
+        Self::Library,
+        Self::Directory,
+        Self::Config,
+        Self::ForeignSymlink,
+    ];
+}
+
+/// Compile-time drift guard for [`IssueCategory::ALL`] (POLISH-04).
+/// Adding a variant without updating `ALL` and this match fails to
+/// compile (`non-exhaustive patterns`) or trips the const-len assert.
+#[allow(dead_code)]
+const fn _issue_category_exhaustiveness_sentinel(c: IssueCategory) {
+    match c {
+        IssueCategory::Library => {}
+        IssueCategory::Directory => {}
+        IssueCategory::Config => {}
+        IssueCategory::ForeignSymlink => {}
+    }
+}
+const _: () = {
+    assert!(IssueCategory::ALL.len() == 4);
+};
+
+/// Categorises the auto-repair available for a [`DiagnosticIssue`]
+/// (D-REPAIR-1).
+///
+/// `Some(kind)` on [`DiagnosticIssue::repair_kind`] ↔ the issue is
+/// auto-fixable and the global repair dispatcher in [`diagnose`] has a
+/// handler arm for `kind`. `None` means the issue requires user
+/// interaction (e.g. orphan directories, which use a per-item Select
+/// prompt) or is informational only.
+///
+/// JSON serialisation is snake_case
+/// (`"remove_stale_manifest_entry"`, `"remove_broken_library_symlink"`,
+/// `"remove_stale_target_symlink"`).
+///
+/// Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+/// pin every variant. The repair dispatcher matches exhaustively on
+/// `Option<RepairKind>` — adding a variant without a handler arm fails
+/// to compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+// Every variant in this enum names a specific "Remove …" action. The
+// shared `Remove` prefix is intentional (one variant per real
+// auto-repair handler) and aids readability at call sites.
+#[allow(clippy::enum_variant_names)]
+pub enum RepairKind {
+    /// Remove a manifest entry whose library directory is missing on
+    /// disk OR whose managed symlink is broken. Emit sites in
+    /// `check_library` (both cases share the action:
+    /// `Manifest::remove(name)` plus `remove_file` if the entry is a
+    /// symlink).
+    RemoveStaleManifestEntry,
+    /// Remove a broken legacy symlink in the library directory (not
+    /// referenced by the manifest). Emit site: `check_library`
+    /// "broken legacy symlink: X -> Y". Action: `remove_file(path)`.
+    RemoveBrokenLibrarySymlink,
+    /// Remove a stale symlink from a distribution directory. Emit
+    /// site: `check_distribution_dir` "stale symlink X". Action:
+    /// `cleanup::cleanup_target` removes broken symlinks pointing into
+    /// the library.
+    RemoveStaleTargetSymlink,
+}
+
+impl RepairKind {
+    /// Compile-time-validated enumeration of every variant. Mirrors
+    /// `DiagnosticIssueKind::ALL` and other POLISH-04 patterns.
+    pub const ALL: [Self; 3] = [
+        Self::RemoveStaleManifestEntry,
+        Self::RemoveBrokenLibrarySymlink,
+        Self::RemoveStaleTargetSymlink,
+    ];
+}
+
+/// Compile-time drift guard for [`RepairKind::ALL`] (POLISH-04).
+/// Adding a variant without updating `ALL` and this match fails to
+/// compile (`non-exhaustive patterns`) or trips the const-len assert.
+#[allow(dead_code)]
+const fn _repair_kind_exhaustiveness_sentinel(k: RepairKind) {
+    match k {
+        RepairKind::RemoveStaleManifestEntry => {}
+        RepairKind::RemoveBrokenLibrarySymlink => {}
+        RepairKind::RemoveStaleTargetSymlink => {}
+    }
+}
+const _: () = {
+    assert!(RepairKind::ALL.len() == 3);
+};
+
 /// A single diagnostic issue found during a health check.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiagnosticIssue {
@@ -1621,6 +1733,67 @@ mod tests {
         assert!(
             json.contains("\"unowned_skills\""),
             "JSON must include 'unowned_skills' key for stable shape: {json}"
+        );
+    }
+
+    // -- OBS-06 / D-CAT-1: IssueCategory enum --
+
+    #[test]
+    fn issue_category_all_len_4() {
+        // POLISH-04 ALL-array contract: every variant enumerated.
+        assert_eq!(IssueCategory::ALL.len(), 4);
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Library));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Directory));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Config));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::ForeignSymlink));
+    }
+
+    #[test]
+    fn issue_category_serializes_snake_case() {
+        // JSON wire-form: snake_case matches project convention
+        // (override_applied, skill_count, source_path, etc).
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Library).unwrap(),
+            "\"library\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Directory).unwrap(),
+            "\"directory\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Config).unwrap(),
+            "\"config\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::ForeignSymlink).unwrap(),
+            "\"foreign_symlink\""
+        );
+    }
+
+    // -- FIX-01 / D-REPAIR-1: RepairKind enum --
+
+    #[test]
+    fn repair_kind_all_len_3() {
+        // POLISH-04 ALL-array contract: every variant enumerated.
+        assert_eq!(RepairKind::ALL.len(), 3);
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleManifestEntry));
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveBrokenLibrarySymlink));
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleTargetSymlink));
+    }
+
+    #[test]
+    fn repair_kind_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveStaleManifestEntry).unwrap(),
+            "\"remove_stale_manifest_entry\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveBrokenLibrarySymlink).unwrap(),
+            "\"remove_broken_library_symlink\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveStaleTargetSymlink).unwrap(),
+            "\"remove_stale_target_symlink\""
         );
     }
 
