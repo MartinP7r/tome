@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: executing
-stopped_at: Completed Wave 2 (19-03 + 19-04 + 19-05 + 19-06)
-last_updated: "2026-05-13T08:00:00.000Z"
+status: ready
+stopped_at: Phase 19 complete (43/43 plans); v0.11 milestone ready for release cut
+last_updated: "2026-05-13T14:26:57.471Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 9
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 43
-  completed_plans: 42
+  completed_plans: 43
 ---
 
 # Project State
@@ -24,10 +24,10 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 ## Current Position
 
-Milestone: v0.11 Polish + Observability
-Phase: 19 (doctor-status-surface-bugfix-bundle) — EXECUTING
-Plan: Waves 1 + 2 complete (19-01 + 19-02 + 19-03 + 19-04 + 19-05 + 19-06); Wave 3 next (19-07)
-Status: Ready to execute Wave 3
+Milestone: v0.11 Polish + Observability — ALL PHASES COMPLETE
+Phase: 19 (doctor-status-surface-bugfix-bundle) — COMPLETED 2026-05-13
+Plan: 7/7 complete (verified 8/8 must-haves passed)
+Status: Ready for v0.11 release cut (`make release VERSION=0.11.0`)
 Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**

@@ -80,7 +80,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Phase Numbering:** Continues from Phase 17 (v0.10). Phase 18 is the first new phase.
 
 - [x] **Phase 18: Observability foundation + sync diagnostics** — Adopt `tracing` + `tracing-subscriber`; wire `--verbose`/`--quiet`/`TOME_LOG` to subscriber filter; per-pipeline-step spans with elapsed-ms; change-cause attribution in `info!`; reconcile classification breakdown in `tome sync` summary (OBS-01..05) (completed 2026-05-12)
-- [ ] **Phase 19: Doctor/status surface + bugfix bundle** — Richer `tome doctor` (per-category counts + JSON `category` field; folds in #530 auto-fixable contradiction fix); richer `tome status` (per-directory counts, last-sync timestamp, JSON parity); plus the v0.11 bugfix backlog: #511 browse copy-path timing flake, #532 stale managed-symlinks-in-git check, #454 wizard summary ANSI width, #453+#456 library-default follows `tome_home`, #533 `make release` CHANGELOG date stamp (OBS-06..07 + FIX-01..06)
+- [x] **Phase 19: Doctor/status surface + bugfix bundle** — Richer `tome doctor` (per-category counts + JSON `category` field; folds in #530 auto-fixable contradiction fix); richer `tome status` (per-directory counts, last-sync timestamp, JSON parity); plus the v0.11 bugfix backlog: #511 browse copy-path timing flake, #532 stale managed-symlinks-in-git check, #454 wizard summary ANSI width, #453+#456 library-default follows `tome_home`, #533 `make release` CHANGELOG date stamp (OBS-06..07 + FIX-01..06) (completed 2026-05-13)
 
 ## Phase Details
 
@@ -266,4 +266,4 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
 | 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 3/7 | In Progress|  |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 3/7 | Complete    | 2026-05-13 |
