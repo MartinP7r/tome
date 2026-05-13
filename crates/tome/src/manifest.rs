@@ -116,11 +116,6 @@ impl Manifest {
     /// Stamps `last_synced_at` with the current UTC time in RFC-3339 form.
     /// Called by `sync()` after distribute + cleanup succeed (D-LSYNC-3).
     /// Crate-visible only — external mutation must go through sync.
-    ///
-    /// `dead_code` allow: Task 1 of phase 19 Plan 03 lands the API; the
-    /// production caller arrives in Task 2 (`lib.rs::sync()` stamp call).
-    /// Drop this attr when Task 2 wires the caller.
-    #[allow(dead_code)]
     pub(crate) fn stamp_last_synced_at(&mut self) {
         self.last_synced_at = Some(now_iso8601());
     }
