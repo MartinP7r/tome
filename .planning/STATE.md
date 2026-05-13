@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed Wave 2 plans 19-03 (OBS-07) + 19-04 (FIX-02) + 19-05 (FIX-04 admin close)
-last_updated: "2026-05-13T07:25:43.461Z"
+stopped_at: Completed Wave 2 (19-03 + 19-04 + 19-05 + 19-06)
+last_updated: "2026-05-13T08:00:00.000Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 43
-  completed_plans: 39
+  completed_plans: 42
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 Milestone: v0.11 Polish + Observability
 Phase: 19 (doctor-status-surface-bugfix-bundle) — EXECUTING
-Plan: Wave 1 complete (19-01 + 19-02); Wave 2 in flight — 19-04 done; 19-03/05/06 still pending
-Status: Executing Wave 2
-Last activity: 2026-05-13 (19-04 / FIX-02 / #511 + HARD-14 closed)
+Plan: Waves 1 + 2 complete (19-01 + 19-02 + 19-03 + 19-04 + 19-05 + 19-06); Wave 3 next (19-07)
+Status: Ready to execute Wave 3
+Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**
 
@@ -73,6 +73,7 @@ Historical decisions are archived in:
 - [Phase 19]: OBS-07: stamp_last_synced_at() placed at lib.rs:1789, inside the !dry_run guard, immediately before manifest::save — D-LSYNC-3 honored. JSON last_sync emits literal null for fresh manifests (no skip_serializing_if), matching the stable-shape pattern used by unowned: [].
 - [Phase 19]: Plan 19-04: Outcome C selected for backup test flake — defensive FLAKE-WATCH comment shipped (50/50 isolated + 10/10 module + 5/5 lib-suite runs all pass locally on M1 macOS); browse-test bound relaxed 600ms→2000ms with arboard-rooted FLAKE-FIX comment (100/100 stability)
 - [Phase 19]: FIX-04 (#454) closes administratively: reproduce-first proved tabled[ansi] fix from 0803afb is sufficient; no strip-ansi-escapes dep added; snapshot test render_directory_summary_table pins header/body alignment as regression guard
+- [Phase 19]: Plan 19-06 / FIX-05 (#453 + #456): Two regression tests in `crates/tome/tests/cli_init.rs` pin the wizard library-default derivation against `TOME_HOME` env (positive D-FIX05-1: library_dir == `<TOME_HOME>/skills`; negative D-FIX05-2: no fallback to `<HOME>/.tome/skills`). `wizard.rs:637` already derived `<resolved_tome_home>/skills` correctly per RESEARCH; this plan is test-only. Sensitivity verified — replacing :637 with hardcoded `~/.tome/skills` makes both tests fail.
 
 ### v0.11 design context (consume during planning)
 
@@ -105,6 +106,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-13T07:25:32.234Z
-Stopped at: Completed Wave 2 plans 19-03 + 19-04 + 19-05
+Last session: 2026-05-13T08:00:00.000Z
+Stopped at: Completed Wave 2 (19-03 + 19-04 + 19-05 + 19-06)
 Resume file: None
