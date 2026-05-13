@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
 status: executing
-stopped_at: Completed Wave 1 (19-01 doctor substrate + 19-02 makefile changelog stamp)
-last_updated: "2026-05-13T07:11:09.852Z"
+stopped_at: Completed 19-05-PLAN.md (Wave 2 — FIX-04 ANSI alignment admin-close + snapshot test)
+last_updated: "2026-05-13T07:22:07.159Z"
 last_activity: 2026-05-13
 progress:
   total_phases: 9
   completed_phases: 7
   total_plans: 43
-  completed_plans: 37
+  completed_plans: 39
 ---
 
 # Project State
@@ -70,6 +70,7 @@ Historical decisions are archived in:
 - [Phase 19]: Plan 19-01: Per-category DiagnosticIssue constructors (library/library_repairable/directory/directory_repairable/directory_foreign_symlink/config) replace untyped/typed shims; D-CAT-1 ForeignSymlink promotion happens at construction time. Dispatcher matches exhaustively on Option<RepairKind> — substring matching anti-pattern eliminated.
 - [Phase 19]: Plan 19-01 / FIX-03 (#532): 'managed symlink(s) tracked in git' check, render+Confirm flow, and tracked_managed_symlinks helper deleted wholesale — v0.10's library-canonical model made the check incapable of firing on clean libraries. D-FIX03-2 integration test pins the absence of the warning.
 - [Phase 19]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
+- [Phase 19]: FIX-04 (#454) closes administratively: reproduce-first proved tabled[ansi] fix from 0803afb is sufficient; no strip-ansi-escapes dep added; snapshot test render_directory_summary_table pins header/body alignment as regression guard
 
 ### v0.11 design context (consume during planning)
 
@@ -102,6 +103,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-13T07:11:09.847Z
-Stopped at: Completed Wave 1 (19-01 + 19-02)
+Last session: 2026-05-13T07:22:07.155Z
+Stopped at: Completed 19-05-PLAN.md (Wave 2 — FIX-04 ANSI alignment admin-close + snapshot test)
 Resume file: None
