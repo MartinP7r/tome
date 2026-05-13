@@ -360,7 +360,9 @@ impl DoctorReport {
     /// handler. D-REPAIR-2: when this is zero, the global
     /// "Apply N auto-fixable repairs?" prompt is skipped entirely.
     pub fn auto_fixable_count(&self) -> usize {
-        self.all_issues().filter(|i| i.repair_kind.is_some()).count()
+        self.all_issues()
+            .filter(|i| i.repair_kind.is_some())
+            .count()
     }
 
     /// Per-category count of issues with [`Self::all_issues`]. Used
@@ -616,73 +618,6 @@ pub fn diagnose(
                     }
                 }
             }
-
-            // Handle git-tracked managed symlinks interactively
-            let has_git_tracked = report
-                .library_issues
-                .iter()
-                .any(|i| i.message.contains("managed symlink(s) tracked in git"));
-            if has_git_tracked {
-                let manifest = manifest::load(paths.config_dir())?;
-                let tracked = tracked_managed_symlinks(paths.library_dir(), &manifest);
-                if !tracked.is_empty() {
-                    println!();
-                    println!(
-                        "{} managed symlink(s) tracked in git:",
-                        style(tracked.len()).bold()
-                    );
-                    println!(
-                        "  These contain absolute paths (e.g. /Users/.../plugins/...) and show as"
-                    );
-                    println!("  broken on GitHub. They are recreated by `tome sync`.");
-                    println!();
-                    for name in &tracked {
-                        println!("    {}/", name);
-                    }
-                    println!();
-                    let confirmed = Confirm::new()
-                        .with_prompt(
-                            "Untrack these from git? (git rm --cached, files stay on disk)",
-                        )
-                        .default(true)
-                        .interact()?;
-
-                    if confirmed {
-                        let mut untracked = 0;
-                        for name in &tracked {
-                            let status = std::process::Command::new("git")
-                                .args(["rm", "--cached", "-r", name])
-                                .current_dir(paths.library_dir())
-                                .env_remove("GIT_DIR")
-                                .env_remove("GIT_WORK_TREE")
-                                .env_remove("GIT_INDEX_FILE")
-                                .output();
-                            match status {
-                                Ok(out) if out.status.success() => {
-                                    untracked += 1;
-                                }
-                                Ok(out) => {
-                                    eprintln!(
-                                        "  warning: git rm --cached {} failed: {}",
-                                        name,
-                                        String::from_utf8_lossy(&out.stderr).trim()
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("  warning: failed to run git: {}", e);
-                                }
-                            }
-                        }
-                        if untracked > 0 {
-                            println!(
-                                "  {} Untracked {} symlink(s). Commit the change to complete cleanup.",
-                                style("fixed").green(),
-                                untracked
-                            );
-                        }
-                    }
-                }
-            }
         } else if !dry_run {
             eprintln!("info: non-interactive mode — skipping repair prompt");
         } else {
@@ -835,11 +770,8 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
             Some(RepairKind::RemoveStaleTargetSymlink) => {
                 if !ran_target_cleanup {
                     for (name, dir_config) in config.distribution_dirs() {
-                        let removed = cleanup::cleanup_target(
-                            &dir_config.path,
-                            paths.library_dir(),
-                            false,
-                        )?;
+                        let removed =
+                            cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
                         if removed > 0 {
                             println!(
                                 "  {} Removed {} stale symlink(s) from {}",
@@ -1062,71 +994,15 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         }
     }
 
-    // Check if managed symlinks are git-tracked (they show as broken paths on GitHub)
-    let git_dir = library_dir.join(".git");
-    if git_dir.exists()
-        || library_dir
-            .parent()
-            .is_some_and(|p| p.join(".git").exists())
-    {
-        let tracked = tracked_managed_symlinks(library_dir, &m);
-        if !tracked.is_empty() {
-            issues.push(DiagnosticIssue::library(
-                IssueSeverity::Warning,
-                format!(
-                    "{} managed symlink(s) tracked in git (machine-specific, should be gitignored)",
-                    tracked.len()
-                ),
-            ));
-        }
-    }
+    // FIX-03 (#532): v0.10 made managed skills real directory copies,
+    // so the pre-v0.10 git-tracking detection check is obsolete
+    // (managed skills cannot be symlinks any more — the detection
+    // criterion can never fire on a clean v0.10 library). The check,
+    // its render/Confirm flow, and the supporting git-shellout
+    // helper are deleted entirely. If a real failure mode emerges, a
+    // new ticket will scope it.
 
     Ok(issues)
-}
-
-/// Find managed skill symlinks that are tracked by git in the library directory.
-///
-/// These contain absolute machine-specific paths and show as broken on GitHub.
-fn tracked_managed_symlinks(
-    library_dir: &Path,
-    manifest: &crate::manifest::Manifest,
-) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["ls-files", "-s"])
-        .current_dir(library_dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output();
-
-    let Ok(output) = output else {
-        return Vec::new(); // git not available or not a repo
-    };
-
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut tracked = Vec::new();
-
-    for line in stdout.lines() {
-        // git ls-files -s output: "120000 <hash> <stage>\t<path>"
-        // 120000 = symlink file mode
-        if !line.starts_with("120000 ") {
-            continue;
-        }
-        let Some(path) = line.split('\t').nth(1) else {
-            continue;
-        };
-        // Check if this is a managed skill (just the name, no subdirectory)
-        let name = path.rsplit('/').next().unwrap_or(path);
-        if manifest.get(name).is_some_and(|e| e.managed) {
-            tracked.push(name.to_string());
-        }
-    }
-
-    tracked
 }
 
 fn check_distribution_dir(
@@ -2367,8 +2243,7 @@ mod tests {
     fn foreign_symlink_serialises_kind_in_json() {
         // JSON shape: typed `kind` field appears for ForeignSymlink
         // emissions; absent for untyped category constructors.
-        let typed =
-            DiagnosticIssue::directory_foreign_symlink(IssueSeverity::Warning, "msg");
+        let typed = DiagnosticIssue::directory_foreign_symlink(IssueSeverity::Warning, "msg");
         let json = serde_json::to_string(&typed).unwrap();
         assert!(
             json.contains("\"kind\":\"ForeignSymlink\""),
