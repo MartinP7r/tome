@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: verifying
-stopped_at: Phase 19 context gathered
-last_updated: "2026-05-13T04:34:46.949Z"
-last_activity: 2026-05-12
+status: executing
+stopped_at: Completed 19-01 plan (Doctor substrate categorization + repair-kind discrimination + FIX-03)
+last_updated: "2026-05-13T07:11:09.852Z"
+last_activity: 2026-05-13
 progress:
   total_phases: 9
   completed_phases: 7
-  total_plans: 36
-  completed_plans: 36
+  total_plans: 43
+  completed_plans: 37
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** Phase 18 — observability-foundation-sync-diagnostics
+**Current focus:** Phase 19 — doctor-status-surface-bugfix-bundle
 
 ## Current Position
 
 Milestone: v0.11 Polish + Observability
-Phase: 19
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-05-12
+Phase: 19 (doctor-status-surface-bugfix-bundle) — EXECUTING
+Plan: 2 of 7
+Status: Ready to execute
+Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**
 
@@ -66,6 +66,9 @@ Historical decisions are archived in:
 - [Phase 18-observability-foundation-sync-diagnostics]: tracing substrate landed via tracing_init::install(LogLevel); TOME_LOG env > LogLevel directive precedence (D-ENV-1); reconcile.rs warnings routed through tracing::warn! as locked proof module (D-SUB-2)
 - [Phase 18]: Plan 18-02: 5 step spans + top-level sync span via lexical info_span!(...).entered() blocks; ChangeCause enum with four locked vocabulary strings; OBS-05 reconcile classification line in render_sync_report; DirectoryNowAllowed false-positive accepted, PreviouslyFailed deferred to v0.12 schema bump.
 - [Phase 18]: Plan 18-03: OBS-03 span emission pinned by sync_verbose_emits_step_spans_on_stderr regression test asserting on the 3 always-firing step span names + time.busy auto-field; CHANGELOG [Unreleased] documents OBS-01..05, D-ENV-1 trade-off, and PreviouslyFailed + DirectoryNowAllowed deferrals.
+- [Phase 19]: Plan 19-01: RepairKind has 3 variants (RemoveStaleManifestEntry, RemoveBrokenLibrarySymlink, RemoveStaleTargetSymlink) — one per real auto-repair handler. Orphan directories stay interactive-only (repair_kind: None).
+- [Phase 19]: Plan 19-01: Per-category DiagnosticIssue constructors (library/library_repairable/directory/directory_repairable/directory_foreign_symlink/config) replace untyped/typed shims; D-CAT-1 ForeignSymlink promotion happens at construction time. Dispatcher matches exhaustively on Option<RepairKind> — substring matching anti-pattern eliminated.
+- [Phase 19]: Plan 19-01 / FIX-03 (#532): 'managed symlink(s) tracked in git' check, render+Confirm flow, and tracked_managed_symlinks helper deleted wholesale — v0.10's library-canonical model made the check incapable of firing on clean libraries. D-FIX03-2 integration test pins the absence of the warning.
 
 ### v0.11 design context (consume during planning)
 
@@ -98,6 +101,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-13T04:34:46.941Z
-Stopped at: Phase 19 context gathered
-Resume file: .planning/phases/19-doctor-status-surface-bugfix-bundle/19-CONTEXT.md
+Last session: 2026-05-13T07:11:09.847Z
+Stopped at: Completed 19-01 plan (Doctor substrate categorization + repair-kind discrimination + FIX-03)
+Resume file: None

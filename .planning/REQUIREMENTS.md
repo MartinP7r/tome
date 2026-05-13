@@ -17,16 +17,16 @@ Adopt structured logging across the codebase so `tome sync`/`doctor`/`status` gi
 - [x] **OBS-03**: `tome sync` emits per-pipeline-step spans (discover, reconcile, consolidate, distribute, cleanup) with elapsed-ms attached. Visible in `--verbose` text output and reachable via `TOME_LOG=tome::sync=debug`.
 - [x] **OBS-04**: Change-cause attribution — when consolidate or distribute re-emits a skill, the reason ("hash changed", "previously failed", "newly added", "directory now allowed") is logged at `info!` for user visibility.
 - [x] **OBS-05**: Reconcile classification breakdown surfaced in `tome sync` summary — show counts of Match / Drift / Vanished / MissingFromMachine in the final summary block (not only the consolidated outcome).
-- [ ] **OBS-06**: `tome doctor` richer surface — categorize issues (Library / Directory / Config / Foreign-symlink) with per-category counts in text output; JSON shape gains `category` field per issue. Implementation overlaps with FIX-01 (#530); single change closes both.
+- [x] **OBS-06**: `tome doctor` richer surface — categorize issues (Library / Directory / Config / Foreign-symlink) with per-category counts in text output; JSON shape gains `category` field per issue. Implementation overlaps with FIX-01 (#530); single change closes both.
 - [ ] **OBS-07**: `tome status` richer surface — surface per-directory skill counts, override status (already present in v0.9), and a "last sync" timestamp; JSON shape parity with text output.
 
 ### Bugfixes (FIX)
 
 The v0.10-surfaced bug bundle and the older wizard-polish backlog. Each requirement closes one or more existing GitHub issues; full mapping in Traceability.
 
-- [ ] **FIX-01**: `tome doctor` "auto-fixable" count and prompt exclude items with no auto-repair available — the current "N auto-fixable issues" then "(no auto-repair available)" UX is a contradiction. Closes [#530](https://github.com/MartinP7r/tome/issues/530).
+- [x] **FIX-01**: `tome doctor` "auto-fixable" count and prompt exclude items with no auto-repair available — the current "N auto-fixable issues" then "(no auto-repair available)" UX is a contradiction. Closes [#530](https://github.com/MartinP7r/tome/issues/530).
 - [ ] **FIX-02**: `browse::app::tests::copy_path_retry_helper_returns_within_bound` timing flake fixed — diagnose root cause (timing-based assertion under parallel contention) and replace with deterministic clock injection or relaxed bound with explicit comment. Closes [#511](https://github.com/MartinP7r/tome/issues/511).
-- [ ] **FIX-03**: `tome doctor` "N managed symlink(s) tracked in git" check removed or rewritten — v0.10 made managed skills real directory copies, so the check is stale (false-positive count post-migration). Closes [#532](https://github.com/MartinP7r/tome/issues/532).
+- [x] **FIX-03**: `tome doctor` "N managed symlink(s) tracked in git" check removed or rewritten — v0.10 made managed skills real directory copies, so the check is stale (false-positive count post-migration). Closes [#532](https://github.com/MartinP7r/tome/issues/532).
 - [ ] **FIX-04**: Wizard summary table column misalignment — ANSI bold escapes are miscounted as visible width by `tabled` in interactive TTY mode. Use ANSI-aware width measurement (or strip ANSI before measuring). Closes [#454](https://github.com/MartinP7r/tome/issues/454).
 - [ ] **FIX-05**: Wizard `configure_library` and library-default derivation follow the resolved `tome_home` instead of hardcoding `~/.tome/skills` — when a user customizes `tome_home`, the library default should follow. Single fix closes both linked issues. Closes [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456).
 - [ ] **FIX-06**: `make release` automatically stamps the release date in `CHANGELOG.md` — replaces `[Unreleased]` with `[X.Y.Z] - YYYY-MM-DD` during the version-bump PR. Closes [#533](https://github.com/MartinP7r/tome/issues/533).
