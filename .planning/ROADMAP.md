@@ -274,6 +274,19 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd:review-backlog when ready)
 
+### Phase 999.4: Generic managed source directory (BACKLOG)
+
+**Goal:** Generalize the `Managed` role beyond `claude-plugins` so external package managers that distribute SKILL.md content via a flat directory can be modeled as Managed sources. Today `validate.rs:36-44` rejects `Directory + Managed` with a Why-line that explicitly cites "only claude-plugins is *known* to behave this way" — pfw (Point-Free Swift tooling, installs to `~/.pfw/skills/`) is the second case. Adds either a relaxed combo (Directory + Managed allowed for flat walkdir-scannable dirs) or a new `DirectoryType::ManagedDirectory` variant. Discover treats as read-only; consolidate uses the existing ClaudePlugins symlink-library→source strategy from `library.rs`; never writes back into the source path.
+
+**Symlink-coexistence policy (D-PFW-1, pre-decided):** Option 1 — assume the upstream package manager can be configured to install-only (skip its own distribution). tome takes over distribution end-to-end. Rejected: option 2 (allow_foreign_symlinks_from whitelist — adds a foreign-symlink classification axis that complicates HARD-09 / D-DIST-2 semantics) and option 3 (eject + replace — would loop against pfw's next install). Open question: how to detect/warn when pfw's distribution mode IS still active and is fighting tome's symlinks.
+
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding (15 `pfw-*` foreign symlinks in `~/.claude/skills/` flagged as `foreign symlink: ... points outside library_dir`), 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
 
 ## Progress
 
