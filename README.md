@@ -35,6 +35,14 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 brew install MartinP7r/tap/tome
 ```
 
+**Shell completions** (optional, recommended):
+```bash
+tome completions fish    # or: bash | zsh | elvish | powershell
+exec fish                 # reload your shell
+```
+
+Re-run after upgrading tome — completion definitions are regenerated, not auto-refreshed.
+
 ## Quick Start
 
 ```bash
