@@ -2004,3 +2004,92 @@ role = "target"
         );
     }
 }
+
+/// Phase 18 OBS-03 regression test: `tome sync --verbose` MUST emit per-step
+/// `tracing` spans on stderr, one for each pipeline step. The `time.busy=`
+/// field is auto-emitted by `tracing_subscriber::fmt::format::FmtSpan::CLOSE`
+/// — the "elapsed_ms" wording in OBS-03's success criterion is conceptual; the
+/// literal emitted field is `time.busy` per RESEARCH §elapsed_ms FINDING and
+/// `tracing-subscriber` 0.3 documentation.
+///
+/// This test pins the span emission so a future migration of the subscriber
+/// (e.g., to a custom `FormatEvent` impl) doesn't silently drop the timing
+/// data the OBS-03 contract relies on.
+///
+/// Which spans are guaranteed: `discover`, `consolidate`, and `cleanup` always
+/// fire for any sync that completes — `reconcile` only fires when at least
+/// one Claude adapter is configured, and `distribute` only emits work when at
+/// least one distribution-role directory is configured. This test uses a
+/// minimal source-only fixture and asserts on the three guaranteed step span
+/// names plus the auto-emitted `time.busy` timing field.
+///
+/// Note: this test does NOT call `tome::tracing_init::install` directly — the
+/// subprocess spawned via `assert_cmd` is naturally isolated per RESEARCH
+/// §Test Isolation Strategy.
+#[test]
+fn sync_verbose_emits_step_spans_on_stderr() {
+    // Reuse the same minimal source-only fixture pattern used by
+    // `sync_copies_skills_to_library` above — single skill, single source
+    // directory, no targets configured.
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "obs-03-skill");
+
+    let config = write_config(
+        tmp.path(),
+        &format!(
+            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            skills_dir.display()
+        ),
+    );
+
+    let output = tome()
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--verbose",
+            "sync",
+            "--no-triage",
+            "--no-install",
+            "--dry-run",
+        ])
+        .env("NO_COLOR", "1")
+        // Unset TOME_LOG explicitly so the test exercises the
+        // flag-derived directive path (`--verbose` → "debug"). If a user's
+        // environment has TOME_LOG=warn (or similar) it would suppress the
+        // INFO-level span CLOSE events and produce a misleading failure.
+        .env_remove("TOME_LOG")
+        .output()
+        .expect("tome sync --verbose --dry-run must execute");
+
+    assert!(
+        output.status.success(),
+        "sync --verbose --dry-run must exit 0; stderr:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // The three step spans that fire on any successful sync, regardless of
+    // whether reconcile / distribute have configured adapters / directories.
+    assert!(
+        stderr.contains("discover"),
+        "stderr must contain 'discover' span name (OBS-03). stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("consolidate"),
+        "stderr must contain 'consolidate' span name (OBS-03). stderr was:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("cleanup"),
+        "stderr must contain 'cleanup' span name (OBS-03). stderr was:\n{stderr}"
+    );
+
+    // The auto-emitted timing field on `FmtSpan::CLOSE`. Pins the
+    // mapping documented in CHANGELOG (`elapsed_ms` conceptual →
+    // `time.busy` literal).
+    assert!(
+        stderr.contains("time.busy"),
+        "stderr must contain 'time.busy' timing field (RESEARCH §elapsed_ms FINDING). stderr was:\n{stderr}"
+    );
+}

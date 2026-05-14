@@ -1801,9 +1801,20 @@ mod tests {
         let start = std::time::Instant::now();
         let _ = super::try_clipboard_set_text_with_retry("test-payload");
         let elapsed = start.elapsed();
+        // FLAKE-FIX (#511 / HARD-14): bound relaxed from 600ms to 2000ms.
+        // arboard clipboard contention under --test-threads=N can pause threads
+        // ≫ 600ms regardless of helper performance — NSPasteboard / X11 clipboard
+        // server / WinClipboard arbitration is opaque to user code. This assertion
+        // guards against actual hangs (an unbounded retry `loop`), NOT perf
+        // regressions. A 2000ms bound catches a 10×-retry regression while
+        // tolerating realistic parallel-test contention.
+        //
+        // Deterministic clock injection (trait Clock in browse::app) was
+        // considered but rejected for v0.11 scope (D-FLAKE-3). If this bound
+        // flakes again post-fix, the abstraction can be introduced.
         assert!(
-            elapsed < std::time::Duration::from_millis(600),
-            "retry helper must complete within 600ms (one fast + one 100ms backoff, even under \
+            elapsed < std::time::Duration::from_millis(2000),
+            "retry helper must complete within 2000ms (one fast + one 100ms backoff, even under \
              parallel-test clipboard contention); took {:?}",
             elapsed
         );

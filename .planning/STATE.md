@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: planning_phase_18
-stopped_at: v0.11 roadmap created 2026-05-12 — Phases 18 + 19 defined, 13/13 requirements mapped, awaiting plan-phase 18
-last_updated: "2026-05-12T23:45:00.000Z"
-last_activity: 2026-05-12
+status: ready
+stopped_at: Phase 19 complete (43/43 plans); v0.11 milestone ready for release cut
+last_updated: "2026-05-13T14:26:57.471Z"
+last_activity: 2026-05-13
 progress:
-  total_phases: 19
-  completed_phases: 17
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 9
+  completed_phases: 8
+  total_plans: 43
+  completed_plans: 43
 ---
 
 # Project State
@@ -20,15 +20,15 @@ progress:
 See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration.
-**Current focus:** v0.11 Polish + Observability — structured logging foundation + v0.10-surfaced bug bundle.
+**Current focus:** Phase 19 — doctor-status-surface-bugfix-bundle
 
 ## Current Position
 
-Milestone: v0.11 Polish + Observability
-Phase: Not started (planning Phase 18)
-Plan: —
-Status: Roadmap ratified — 13/13 requirements mapped across Phases 18-19. Ready to run `/gsd:plan-phase 18`.
-Last activity: 2026-05-12 — Roadmap created for v0.11 (Phases 18 + 19)
+Milestone: v0.11 Polish + Observability — ALL PHASES COMPLETE
+Phase: 19 (doctor-status-surface-bugfix-bundle) — COMPLETED 2026-05-13
+Plan: 7/7 complete (verified 8/8 must-haves passed)
+Status: Ready for v0.11 release cut (`make release VERSION=0.11.0`)
+Last activity: 2026-05-13
 
 **v0.11 phase shape (Phases 18–19):**
 
@@ -63,6 +63,17 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.7-ROADMAP.md` — per-phase decisions for v0.7
 - `.planning/milestones/v0.6-ROADMAP.md` — per-phase decisions for v0.6
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — Tauri GUI milestone (drafted, deferred to after v0.11 ships)
+- [Phase 18-observability-foundation-sync-diagnostics]: tracing substrate landed via tracing_init::install(LogLevel); TOME_LOG env > LogLevel directive precedence (D-ENV-1); reconcile.rs warnings routed through tracing::warn! as locked proof module (D-SUB-2)
+- [Phase 18]: Plan 18-02: 5 step spans + top-level sync span via lexical info_span!(...).entered() blocks; ChangeCause enum with four locked vocabulary strings; OBS-05 reconcile classification line in render_sync_report; DirectoryNowAllowed false-positive accepted, PreviouslyFailed deferred to v0.12 schema bump.
+- [Phase 18]: Plan 18-03: OBS-03 span emission pinned by sync_verbose_emits_step_spans_on_stderr regression test asserting on the 3 always-firing step span names + time.busy auto-field; CHANGELOG [Unreleased] documents OBS-01..05, D-ENV-1 trade-off, and PreviouslyFailed + DirectoryNowAllowed deferrals.
+- [Phase 19]: Plan 19-01: RepairKind has 3 variants (RemoveStaleManifestEntry, RemoveBrokenLibrarySymlink, RemoveStaleTargetSymlink) — one per real auto-repair handler. Orphan directories stay interactive-only (repair_kind: None).
+- [Phase 19]: Plan 19-01: Per-category DiagnosticIssue constructors (library/library_repairable/directory/directory_repairable/directory_foreign_symlink/config) replace untyped/typed shims; D-CAT-1 ForeignSymlink promotion happens at construction time. Dispatcher matches exhaustively on Option<RepairKind> — substring matching anti-pattern eliminated.
+- [Phase 19]: Plan 19-01 / FIX-03 (#532): 'managed symlink(s) tracked in git' check, render+Confirm flow, and tracked_managed_symlinks helper deleted wholesale — v0.10's library-canonical model made the check incapable of firing on clean libraries. D-FIX03-2 integration test pins the absence of the warning.
+- [Phase 19]: Plan 19-02 / FIX-06 (#533): Makefile `release` recipe now stamps CHANGELOG release date via inline `sed -i ''` between `cargo check` and branch creation; CHANGELOG.md added to the version-bump `git add`; 3 regression tests in `crates/tome/tests/cli_make_release.rs` pin sed substitution + idempotency + silent-noop. Inline shell comments inside `\`-continuation recipe blocks rejected (Make joins lines before shell parsing — `#` would comment out trailing commands); all docs live above the `release:` target.
+- [Phase 19]: OBS-07: stamp_last_synced_at() placed at lib.rs:1789, inside the !dry_run guard, immediately before manifest::save — D-LSYNC-3 honored. JSON last_sync emits literal null for fresh manifests (no skip_serializing_if), matching the stable-shape pattern used by unowned: [].
+- [Phase 19]: Plan 19-04: Outcome C selected for backup test flake — defensive FLAKE-WATCH comment shipped (50/50 isolated + 10/10 module + 5/5 lib-suite runs all pass locally on M1 macOS); browse-test bound relaxed 600ms→2000ms with arboard-rooted FLAKE-FIX comment (100/100 stability)
+- [Phase 19]: FIX-04 (#454) closes administratively: reproduce-first proved tabled[ansi] fix from 0803afb is sufficient; no strip-ansi-escapes dep added; snapshot test render_directory_summary_table pins header/body alignment as regression guard
+- [Phase 19]: Plan 19-06 / FIX-05 (#453 + #456): Two regression tests in `crates/tome/tests/cli_init.rs` pin the wizard library-default derivation against `TOME_HOME` env (positive D-FIX05-1: library_dir == `<TOME_HOME>/skills`; negative D-FIX05-2: no fallback to `<HOME>/.tome/skills`). `wizard.rs:637` already derived `<resolved_tome_home>/skills` correctly per RESEARCH; this plan is test-only. Sensitivity verified — replacing :637 with hardcoded `~/.tome/skills` makes both tests fail.
 
 ### v0.11 design context (consume during planning)
 
@@ -86,7 +97,7 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 ### Pending Todos / Carry-over
 
 - **Linux UAT (carry-over from v0.8):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime tests). Pending Linux desktop hardware. Carried over for the sixth consecutive milestone — formally deferred to **v1.0** where the Tauri build target forces Linux access.
-- **Pre-existing flake:** `backup::tests::push_and_pull_roundtrip` — historically intermittent. HARD-14 in Phase 15 addressed it via per-test-fixture local git signing config; FIX-02 in Phase 19 targets a different flake (`browse::app::tests::copy_path_retry_helper_returns_within_bound`, [#511](https://github.com/MartinP7r/tome/issues/511)).
+- **Pre-existing flake (RESOLVED via Plan 19-04, Outcome C):** `backup::tests::push_and_pull_roundtrip` — historically intermittent. HARD-14 in Phase 15 addressed signing; Phase 19 Plan 04 / FIX-02 paired this with the browse copy-path flake per D-FLAKE-2 and concluded with Outcome C (flake NOT reproducible locally on M1 macOS; 50/50 isolated + 10/10 module + 5/5 lib-suite runs all clean). Defensive FLAKE-WATCH comment shipped at `backup.rs::push_and_pull_roundtrip` documenting flake history + next-mitigation retry-wrapper pattern for future-phase pickup if it recurs in CI. The browse flake ([#511](https://github.com/MartinP7r/tome/issues/511)) bound was relaxed 600ms→2000ms with the canonical FLAKE-FIX comment (arboard contention root cause).
 
 ### Blockers/Concerns
 
@@ -95,6 +106,6 @@ Phase 19 depends on Phase 18 for the logging substrate (doctor/status warnings r
 
 ## Session Continuity
 
-Last session: 2026-05-12T23:45:00.000Z
-Stopped at: v0.11 roadmap created — Phases 18 + 19 defined, 13/13 requirements mapped
-Resume file: None — run `/gsd:plan-phase 18` to begin execution
+Last session: 2026-05-13T08:00:00.000Z
+Stopped at: Completed Wave 2 (19-03 + 19-04 + 19-05 + 19-06)
+Resume file: None

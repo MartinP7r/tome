@@ -228,6 +228,97 @@ fn machine_override_validation_failure_blames_machine_toml() {
     );
 }
 
+/// FIX-03 (#532) regression: a clean v0.10-shape library (real
+/// directory copy under a git repo, with a managed manifest entry)
+/// MUST NOT emit a "tracked in git" warning. The pre-FIX-03 check
+/// scanned for `120000` symlink entries via `git ls-files -s`; v0.10
+/// made managed skills real directory copies, so the check could
+/// only false-positive going forward.
+///
+/// D-FIX03-2: the test pins zero occurrences of "tracked in git" in
+/// `tome doctor` stdout+stderr combined output. The fixture
+/// approximates what would have made the pre-fix check fire
+/// (library inside a git repo, managed manifest entry) so a
+/// regression that reintroduces the check would be caught.
+#[test]
+fn doctor_clean_v010_library_emits_no_tracked_in_git_warning() {
+    use std::process::Command as StdCommand;
+
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path();
+    let library = tome_home.join("library");
+    let skill_dir = library.join("my-managed-skill");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    // Real SKILL.md inside the skill dir (v0.10 shape — real copy,
+    // not a symlink).
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: my-managed-skill\ndescription: test skill\n---\n# Test\n",
+    )
+    .unwrap();
+
+    // Initialise a git repo at tome_home so the pre-FIX-03 check's
+    // `.git`-detection precondition is satisfied. If a regression
+    // re-introduced the check, the failing assertion below would
+    // catch it on this fixture.
+    let git_init = StdCommand::new("git")
+        .args(["init", "-q", "-b", "main"])
+        .current_dir(tome_home)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .status();
+    if !git_init.map(|s| s.success()).unwrap_or(false) {
+        // git unavailable — the check could not have fired in the
+        // first place; skip rather than fail.
+        eprintln!("skipping: git not available in test env");
+        return;
+    }
+
+    // Minimal manifest with a managed entry — a regression that
+    // reintroduced the check would scan for `120000` symlinks here.
+    let manifest_json = serde_json::json!({
+        "skills": {
+            "my-managed-skill": {
+                "source_path": "/dev/null",
+                "source_name": "test-marketplace",
+                "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                "synced_at": "2026-05-13T00:00:00Z",
+                "managed": true
+            }
+        }
+    });
+    std::fs::write(
+        tome_home.join(".tome-manifest.json"),
+        serde_json::to_string_pretty(&manifest_json).unwrap(),
+    )
+    .unwrap();
+
+    // Minimal tome.toml (empty directories table; only library_dir
+    // matters for `doctor`).
+    std::fs::write(
+        tome_home.join("tome.toml"),
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
+
+    let output = tome()
+        .args(["--tome-home", tome_home.to_str().unwrap(), "doctor"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stderr),
+        String::from_utf8_lossy(&output.stdout)
+    );
+
+    assert!(
+        !combined.contains("tracked in git"),
+        "v0.10-shape library must not emit stale 'tracked in git' warning. Output:\n{combined}"
+    );
+}
+
 #[test]
 fn phase14_doctor_informational_unowned_does_not_affect_exit_code() {
     let fix = phase14_build_fixture(

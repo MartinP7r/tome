@@ -79,8 +79,8 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Phase Numbering:** Continues from Phase 17 (v0.10). Phase 18 is the first new phase.
 
-- [ ] **Phase 18: Observability foundation + sync diagnostics** — Adopt `tracing` + `tracing-subscriber`; wire `--verbose`/`--quiet`/`TOME_LOG` to subscriber filter; per-pipeline-step spans with elapsed-ms; change-cause attribution in `info!`; reconcile classification breakdown in `tome sync` summary (OBS-01..05)
-- [ ] **Phase 19: Doctor/status surface + bugfix bundle** — Richer `tome doctor` (per-category counts + JSON `category` field; folds in #530 auto-fixable contradiction fix); richer `tome status` (per-directory counts, last-sync timestamp, JSON parity); plus the v0.11 bugfix backlog: #511 browse copy-path timing flake, #532 stale managed-symlinks-in-git check, #454 wizard summary ANSI width, #453+#456 library-default follows `tome_home`, #533 `make release` CHANGELOG date stamp (OBS-06..07 + FIX-01..06)
+- [x] **Phase 18: Observability foundation + sync diagnostics** — Adopt `tracing` + `tracing-subscriber`; wire `--verbose`/`--quiet`/`TOME_LOG` to subscriber filter; per-pipeline-step spans with elapsed-ms; change-cause attribution in `info!`; reconcile classification breakdown in `tome sync` summary (OBS-01..05) (completed 2026-05-12)
+- [x] **Phase 19: Doctor/status surface + bugfix bundle** — Richer `tome doctor` (per-category counts + JSON `category` field; folds in #530 auto-fixable contradiction fix); richer `tome status` (per-directory counts, last-sync timestamp, JSON parity); plus the v0.11 bugfix backlog: #511 browse copy-path timing flake, #532 stale managed-symlinks-in-git check, #454 wizard summary ANSI width, #453+#456 library-default follows `tome_home`, #533 `make release` CHANGELOG date stamp (OBS-06..07 + FIX-01..06) (completed 2026-05-13)
 
 ## Phase Details
 
@@ -210,7 +210,10 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   3. `tome sync --verbose` emits one span per pipeline step (`discover`, `reconcile`, `consolidate`, `distribute`, `cleanup`) with an `elapsed_ms` field on span close. The same spans are reachable in `info`-level output via `TOME_LOG=tome::sync=debug`. Spans nest correctly under a top-level `sync` span so a single end-to-end run produces a hierarchical trace.
   4. When `consolidate` or `distribute` re-emits a skill, the log line names the cause at `info!` level — one of `hash changed`, `previously failed`, `newly added`, or `directory now allowed` — with the skill name + directory name as structured fields. A user running `tome sync --verbose` can grep the output for `cause=` to see exactly why each re-emit happened.
   5. The `tome sync` final summary block (printed at `info` level — visible by default) includes a reconcile classification breakdown line: `reconcile: N match · M drift · K vanished · L missing-from-machine` immediately above the existing per-bucket cleanup summary. Counts come from `ReconcileReport` (already populated in Phase 13); no new computation, just surfacing.
-**Plans**: TBD
+**Plans**: 3 plans
+- [x] 18-01-tracing-substrate-and-reconcile-proof-PLAN.md — Substrate (Cargo.toml deps, `tracing_init.rs`, `LogLevel::directive`, main.rs wiring) + reconcile.rs proof migration (OBS-01 substrate, OBS-02)
+- [x] 18-02-migration-sweep-spans-cause-and-reconcile-line-PLAN.md — Sweep `lib.rs::sync` + `library.rs` + `distribute.rs` + `cleanup.rs`; add `change_cause.rs`; emit OBS-04 events; wrap 5 step spans; relocate OBS-05 reconcile line into `render_sync_report` (OBS-01 sweep, OBS-03, OBS-04, OBS-05)
+- [x] 18-03-verification-and-changelog-PLAN.md — Integration test pinning OBS-03 span emission + CHANGELOG.md entry under `[Unreleased]` (OBS-01..OBS-05 verification anchor)
 
 ### Phase 19: Doctor/status surface + bugfix bundle
 **Goal**: Land the richer `tome doctor` / `tome status` surface and clear the v0.10-surfaced bug backlog in a single pass. `tome doctor` gains issue categorization (closing the #530 "auto-fixable" contradiction in the same change); `tome status` gains per-directory counts and a last-sync timestamp. Five independent bugfixes ship alongside.
@@ -226,7 +229,16 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
      - [#453](https://github.com/MartinP7r/tome/issues/453) + [#456](https://github.com/MartinP7r/tome/issues/456) Wizard `configure_library` derives the library default from the resolved `tome_home` (i.e., `<tome_home>/skills`) instead of hardcoding `~/.tome/skills`. A user who sets `tome_home` to `~/dev/coding-agent-files/.tome` sees `~/dev/coding-agent-files/.tome/skills` proposed as the library default. Verified by a wizard integration test driving a custom `tome_home` in `--no-input` mode.
      - [#533](https://github.com/MartinP7r/tome/issues/533) `make release VERSION=X.Y.Z` automatically replaces `[Unreleased]` with `[X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md` during the version-bump PR. Verified by a script-level test (or a documented dry-run) showing the substitution against a fixture changelog.
   4. CI green on all platforms (ubuntu-latest, macos-latest); clippy `-D warnings` clean; test count grows by at least one regression test per FIX item plus the OBS-06/07 JSON/text shape tests (target: ≥1000 tests at v0.11 ship time, was 987 at v0.10.0).
-**Plans**: TBD
+**Plans**: 7 plans
+
+- [x] 19-01-doctor-substrate-categorization-and-repair-PLAN.md — Wave 1A: doctor.rs substrate (IssueCategory + RepairKind enums, 8 emit sites retrofit, dispatcher rewrite, FIX-03 stale check deletion) — OBS-06 + FIX-01 + FIX-03
+- [x] 19-02-makefile-release-changelog-stamp-PLAN.md — Wave 1B: Makefile inline sed for CHANGELOG date-stamp + 3 regression tests — FIX-06
+- [x] 19-03-status-last-sync-and-per-directory-counts-PLAN.md — Wave 2A: manifest.last_synced_at additive field + sync() stamp + StatusReport.last_sync + SKILLS column in Directories table — OBS-07
+- [x] 19-04-flake-bounds-relaxation-PLAN.md — Wave 2B: browse test bound 600ms→2000ms + reproduce-first backup test fix per actual root cause — FIX-02
+- [x] 19-05-wizard-ansi-aware-width-PLAN.md — Wave 2C: reproduce-first then either strip-ansi-escapes dep + strip call OR administrative close path; snapshot test ships either way — FIX-04
+- [x] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
+- [ ] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4
+
 
 ## Progress
 
@@ -253,5 +265,5 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 15. CLI hardening (beta) | v0.10 | 6/6 | Complete    | 2026-05-08 |
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
-| 18. Observability foundation + sync diagnostics | v0.11 | 0/TBD | Not started | - |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 0/TBD | Not started | - |
+| 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 3/7 | Complete    | 2026-05-13 |

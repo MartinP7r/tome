@@ -35,6 +35,7 @@ pub(crate) mod backup;
 pub mod browse;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod browse;
+pub(crate) mod change_cause;
 pub(crate) mod cleanup;
 pub mod cli;
 pub mod config;
@@ -65,6 +66,7 @@ pub(crate) mod remove;
 pub(crate) mod skill;
 pub(crate) mod status;
 pub(crate) mod summary;
+pub mod tracing_init;
 pub(crate) mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
@@ -77,6 +79,7 @@ use std::process::Command as GitCommand;
 use anyhow::{Context, Result};
 use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
+use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
 use cli::{Cli, Command};
@@ -104,6 +107,10 @@ pub struct SyncReport {
     pub distributions: Vec<DistributeResult>,
     pub cleanup: CleanupResult,
     pub removed_from_targets: usize,
+    /// Phase 18 OBS-05: per-classification reconcile counts surfaced in
+    /// the final summary block. `None` when the sync didn't invoke a
+    /// reconcile pass (no Claude adapter configured).
+    pub reconcile: Option<reconcile::ReconcileReport>,
 }
 
 /// Create a spinner with a consistent style.
@@ -1237,8 +1244,6 @@ fn resolve_git_directories(
     config: &Config,
     paths: &TomePaths,
     dry_run: bool,
-    quiet: bool,
-    verbose: bool,
 ) -> BTreeMap<DirectoryName, (PathBuf, Option<String>)> {
     let mut resolved = BTreeMap::new();
     let repos_dir = paths.repos_dir();
@@ -1253,9 +1258,7 @@ fn resolve_git_directories(
     }
 
     if !git::is_git_available() {
-        if !quiet {
-            eprintln!("warning: git is not available — skipping all git-type directories");
-        }
+        warn!("git is not available — skipping all git-type directories");
         return resolved;
     }
 
@@ -1266,13 +1269,11 @@ fn resolve_git_directories(
         match git::read_head_sha(cache_dir) {
             Ok(sha) => Some(sha),
             Err(e) => {
-                if !quiet {
-                    eprintln!(
-                        "warning: could not read HEAD sha for '{}' cache at {}: {e}",
-                        name,
-                        cache_dir.display()
-                    );
-                }
+                warn!(
+                    "could not read HEAD sha for '{}' cache at {}: {e}",
+                    name,
+                    cache_dir.display()
+                );
                 None
             }
         }
@@ -1299,20 +1300,16 @@ fn resolve_git_directories(
 
         // Create repos dir if needed
         if let Err(e) = std::fs::create_dir_all(&repos_dir) {
-            if !quiet {
-                eprintln!(
-                    "warning: failed to create repos directory {}: {e}",
-                    repos_dir.display()
-                );
-            }
+            warn!(
+                "failed to create repos directory {}: {e}",
+                repos_dir.display()
+            );
             continue;
         }
 
         let result = if already_cloned {
             // Update existing clone (GIT-03)
-            if verbose {
-                eprintln!("  Updating git directory '{}'...", name);
-            }
+            debug!("Updating git directory '{}'...", name);
             git::update_repo(
                 &cache_dir,
                 dir_config.git_ref.as_ref().and_then(|r| r.branch()),
@@ -1321,9 +1318,7 @@ fn resolve_git_directories(
             )
         } else {
             // Fresh clone (GIT-02)
-            if verbose {
-                eprintln!("  Cloning git directory '{}'...", name);
-            }
+            debug!("Cloning git directory '{}'...", name);
             git::clone_repo(
                 &url,
                 &cache_dir,
@@ -1342,18 +1337,13 @@ fn resolve_git_directories(
             Err(e) => {
                 // D-09, D-10: Distinct messages for never-cloned vs update-failed
                 if already_cloned {
-                    if !quiet {
-                        eprintln!(
-                            "warning: could not update '{}' — using cached state: {e}",
-                            name
-                        );
-                    }
+                    warn!("could not update '{}' — using cached state: {e}", name);
                     let effective = git::effective_path(&cache_dir, dir_config.subdir.as_deref());
                     let sha = read_sha_or_warn(&cache_dir, name);
                     resolved.insert(name.clone(), (effective, sha));
-                } else if !quiet {
-                    eprintln!(
-                        "warning: could not clone '{}' — skipping (no cached state): {e}",
+                } else {
+                    warn!(
+                        "could not clone '{}' — skipping (no cached state): {e}",
                         name
                     );
                 }
@@ -1452,14 +1442,6 @@ fn apply_edit_decisions(
     Ok(())
 }
 
-/// Move install_failures out of a ReconcileReport so the caller can hold
-/// them across the rest of the sync flow without keeping the report alive.
-fn take_install_failures(
-    mut report: reconcile::ReconcileReport,
-) -> Vec<marketplace::InstallFailure> {
-    std::mem::take(&mut report.install_failures)
-}
-
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
 fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
     let SyncOptions {
@@ -1473,6 +1455,12 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         machine_path,
         machine_prefs: prefs_in,
     } = opts;
+
+    // OBS-03 D-SPAN-1: top-level sync span. RAII via `.entered()`; the
+    // returned guard `_sync_span` drops at function exit, emitting a
+    // FmtSpan::CLOSE event with `time.busy` / `time.idle` on stderr.
+    let _sync_span = info_span!("sync", dry_run = dry_run, force = force).entered();
+
     if dry_run && !quiet {
         eprintln!(
             "{}",
@@ -1503,7 +1491,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 }
             }
             Ok(false) => {} // up to date
-            Err(e) => eprintln!("warning: remote pull failed: {e}"),
+            Err(e) => warn!("remote pull failed: {e}"),
         }
     }
 
@@ -1511,12 +1499,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     if !dry_run && config.backup.enabled && config.backup.auto_snapshot && has_backup_repo {
         match backup::snapshot(paths.tome_home(), Some("pre-sync auto-snapshot"), false) {
             Ok(true) => {
-                if !quiet {
-                    eprintln!("info: pre-sync snapshot created");
-                }
+                info!("pre-sync snapshot created");
             }
             Ok(false) => {} // nothing to snapshot
-            Err(e) => eprintln!("warning: auto-snapshot failed: {e}"),
+            Err(e) => warn!("auto-snapshot failed: {e}"),
         }
     }
 
@@ -1535,75 +1521,95 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // v0.10 RECON-01..05: replaces the v0.9 reconcile_managed_plugins flow.
     // Adapter dispatch by DirectoryType (D-11); git stays separate (D-21).
-    if let Some(claude_adapter) = build_claude_adapter(config)? {
-        let report = reconcile::reconcile_lockfile(
-            old_lockfile.as_ref(),
-            &manifest_for_reconcile,
-            paths.library_dir(),
-            &claude_adapter,
-            &mut machine_prefs,
-            machine_path,
-            paths,
-            reconcile::ReconcileOpts {
-                dry_run,
-                no_input,
-                no_install,
-                quiet,
-                verbose,
-            },
-        )?;
+    //
+    // OBS-03: `reconcile` step span. Even though it runs BEFORE discover in
+    // code order, the span name reflects the pipeline step it represents.
+    //
+    // OBS-05 (D-ENV-4): the previous inline `reconcile::render_summary(...)`
+    // call at this site is REMOVED. The classification line is now emitted
+    // from `render_sync_report` (final summary block, immediately above the
+    // per-bucket cleanup output). The report is threaded into the eventual
+    // `SyncReport` via `reconcile_report`.
+    let mut reconcile_report: Option<reconcile::ReconcileReport> = None;
+    {
+        let _span = info_span!("reconcile").entered();
+        if let Some(claude_adapter) = build_claude_adapter(config)? {
+            let mut report = reconcile::reconcile_lockfile(
+                old_lockfile.as_ref(),
+                &manifest_for_reconcile,
+                paths.library_dir(),
+                &claude_adapter,
+                &mut machine_prefs,
+                machine_path,
+                paths,
+                reconcile::ReconcileOpts {
+                    dry_run,
+                    no_input,
+                    no_install,
+                    quiet,
+                    verbose,
+                },
+            )?;
 
-        if !quiet {
-            reconcile::render_summary(&report, quiet);
-        }
+            // Apply edit-in-library decisions to the manifest. The manifest is
+            // owned by sync(); reconcile_lockfile only proposed the user's
+            // choice (RECON-05 D-13).
+            apply_edit_decisions(&report, paths, dry_run)?;
 
-        // Apply edit-in-library decisions to the manifest. The manifest is
-        // owned by sync(); reconcile_lockfile only proposed the user's
-        // choice (RECON-05 D-13).
-        apply_edit_decisions(&report, paths, dry_run)?;
-
-        // ADP-04: render grouped install failures. Sync exits non-zero at end
-        // when this Vec is non-empty (RESEARCH OQ-6).
-        if !report.install_failures.is_empty() {
-            marketplace::render_install_failures(&report.install_failures);
-            reconcile_install_failures = take_install_failures(report);
+            // ADP-04: render grouped install failures. Sync exits non-zero at end
+            // when this Vec is non-empty (RESEARCH OQ-6). Drain install_failures
+            // in-place (instead of via the consuming `take_install_failures`)
+            // so the rest of the report (matches/drift/vanished/missing) can
+            // still be threaded into SyncReport for OBS-05.
+            if !report.install_failures.is_empty() {
+                marketplace::render_install_failures(&report.install_failures);
+                reconcile_install_failures = std::mem::take(&mut report.install_failures);
+            }
+            reconcile_report = Some(report);
         }
     }
 
     // Safety guard: warn and skip cleanup when no directories are configured (CFG-06)
     if config.directories.is_empty() {
-        if !quiet {
-            eprintln!("warning: no directories configured. Run `tome init` to set up directories.");
-        }
+        warn!("no directories configured. Run `tome init` to set up directories.");
         return Ok(());
     }
 
-    // 0. Resolve git directories (clone/update to local cache)
-    let sp = show_progress.then(|| spinner("Resolving git sources..."));
-    if verbose {
-        eprintln!("{}", style("Resolving git sources...").dim());
-    }
-    let resolved_git_paths = resolve_git_directories(config, paths, dry_run, quiet, verbose);
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
+    // OBS-03: `discover` step span. Wraps both git resolution AND discovery.
+    // Span guard drops on the closing brace of this lexical block (RAII).
+    // Per RESEARCH §Pitfall 4: `?` early-returns inside this block still
+    // emit the span CLOSE event because the top-level `_sync_span` guard
+    // drops at function exit, which also drops the entered child span.
+    let skills = {
+        let _span = info_span!("discover").entered();
 
-    // 1. Discover
-    let sp = show_progress.then(|| spinner("Discovering skills..."));
-    if verbose {
-        eprintln!("{}", style("Discovering skills...").dim());
-    }
-    let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &resolved_git_paths, &mut warnings)?;
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
-
-    if !quiet {
-        for w in &warnings {
-            eprintln!("warning: {}", w);
+        // 0. Resolve git directories (clone/update to local cache). Verbose
+        //    step banners deleted per D-OUT-3 — span CLOSE supplies the
+        //    "step name + time.busy" event.
+        let sp = show_progress.then(|| spinner("Resolving git sources..."));
+        let resolved = resolve_git_directories(config, paths, dry_run);
+        if let Some(sp) = sp {
+            sp.finish_and_clear();
         }
-    }
+
+        // 1. Discover
+        let sp = show_progress.then(|| spinner("Discovering skills..."));
+        let mut warnings = Vec::new();
+        let discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        if let Some(sp) = sp {
+            sp.finish_and_clear();
+        }
+
+        // Discover-warnings emission. EnvFilter handles the quiet vs warn
+        // discipline globally (LogLevel::Quiet → "warn" directive still
+        // fires warn-level events, matching the previous always-show
+        // semantics).
+        for w in &warnings {
+            warn!("{}", w);
+        }
+
+        discovered
+    };
 
     if skills.is_empty() {
         if !quiet {
@@ -1612,9 +1618,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         return Ok(());
     }
 
-    if verbose {
-        eprintln!("  Found {} skills", skills.len());
-    }
+    debug!("Found {} skills", skills.len());
 
     // v0.10 D-02: refuse to sync against a v0.9-shape library. Detection is an
     // isolated check; the entire migration_v010 module deletes cleanly with
@@ -1632,15 +1636,16 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
-    // 2. Consolidate into library (copy)
-    let sp = show_progress.then(|| spinner("Consolidating to library..."));
-    if verbose {
-        eprintln!("{}", style("Consolidating to library...").dim());
-    }
-    let (consolidate_result, mut manifest) = library::consolidate(&skills, paths, dry_run, force)?;
-    if let Some(sp) = sp {
-        sp.finish_and_clear();
-    }
+    // 2. Consolidate into library (copy). OBS-03: `consolidate` step span.
+    let (consolidate_result, mut manifest) = {
+        let _span = info_span!("consolidate").entered();
+        let sp = show_progress.then(|| spinner("Consolidating to library..."));
+        let result = library::consolidate(&skills, paths, dry_run, force)?;
+        if let Some(sp) = sp {
+            sp.finish_and_clear();
+        }
+        result
+    };
 
     // 3. Diff lockfile and triage changes (pre-cleanup snapshot for diffing)
     let pre_cleanup_lockfile = lockfile::generate(&manifest, &skills);
@@ -1678,11 +1683,14 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     }
 
     // 4. Cleanup stale library entries (before distribute so counts are accurate)
-    // Clear the spinner before cleanup_library runs: cleanup may show interactive
-    // dialoguer prompts, and a live spinner overwrites them, causing an apparent hang.
-    if verbose {
-        eprintln!("{}", style("Cleaning up stale entries...").dim());
-    }
+    //    Clear the spinner before cleanup_library runs: cleanup may show
+    //    interactive dialoguer prompts, and a live spinner overwrites them,
+    //    causing an apparent hang. The cleanup-LIBRARY step is intentionally
+    //    pre-distribute (so distribute sees the post-cleanup library state).
+    //    Both this step AND the post-distribute target cleanup are observed
+    //    by the single `cleanup` step span at the end of the pipeline; the
+    //    library-cleanup portion happens outside of any step span (small,
+    //    fast, and naming-collision-free under the OBS-03 grep contract).
     let cleanup_result = cleanup::cleanup_library(
         paths.library_dir(),
         &discovered_names,
@@ -1696,89 +1704,89 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Regenerate lockfile after cleanup so it reflects removals
     let new_lockfile = lockfile::generate(&manifest, &skills);
 
-    // 5. Distribute to directories with distribution roles
-    let mut distribute_results = Vec::new();
-    for (name, dir_config) in config.distribution_dirs() {
-        if machine_prefs.is_directory_disabled(name.as_str()) {
-            if verbose {
-                eprintln!(
-                    "{}",
-                    style(format!(
-                        "Skipping directory '{}' (disabled in machine preferences)",
-                        name
-                    ))
-                    .dim()
+    // 5. Distribute to directories with distribution roles. OBS-03:
+    //    `distribute` step span.
+    let distribute_results = {
+        let _span = info_span!("distribute").entered();
+        let mut results = Vec::new();
+        for (name, dir_config) in config.distribution_dirs() {
+            if machine_prefs.is_directory_disabled(name.as_str()) {
+                debug!(
+                    "Skipping directory '{}' (disabled in machine preferences)",
+                    name
                 );
+                continue;
             }
-            continue;
+            let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
+            let result = distribute::distribute_to_directory(
+                paths.library_dir(),
+                name,
+                dir_config,
+                &manifest,
+                &machine_prefs,
+                dry_run,
+                force,
+            )?;
+            results.push(result);
+            if let Some(sp) = sp {
+                sp.finish_and_clear();
+            }
         }
-        let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
-        if verbose {
-            eprintln!("{}", style(format!("Distributing to {}...", name)).dim());
-        }
-        let result = distribute::distribute_to_directory(
-            paths.library_dir(),
-            name,
-            dir_config,
-            &manifest,
-            &machine_prefs,
-            dry_run,
-            force,
-        )?;
-        distribute_results.push(result);
-        if let Some(sp) = sp {
-            sp.finish_and_clear();
-        }
-    }
+        results
+    };
 
     // 6. Cleanup stale symlinks from distribution directories. Per-symlink
-    // I/O failures aggregate into `distribution_cleanup_failures` (SAFE-01
-    // pattern) so one stale ENOENT/EACCES does not erase the user-facing
-    // Bucket A/B/C summary; sync exits non-zero at end if the slice is
-    // non-empty.
-    let mut removed_from_targets = 0usize;
-    let mut excluded_skills: Vec<cleanup::ExcludedSkill> = Vec::new();
-    let mut distribution_cleanup_failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
-    for (name, dir_config) in config.distribution_dirs() {
-        let skills_dir = &dir_config.path;
-        removed_from_targets += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
-        // Also clean up symlinks for disabled skills (global + per-directory).
-        // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
-        // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
-        let (n, excluded, dir_failures) = cleanup_disabled_from_target(
-            skills_dir,
-            paths.library_dir(),
-            name,
-            &machine_prefs,
-            dry_run,
-        )?;
-        removed_from_targets += n;
-        excluded_skills.extend(excluded);
-        distribution_cleanup_failures.extend(dir_failures);
-    }
-
-    // 6b. Render the unified three-bucket cleanup output + any aggregated
-    // distribution-cleanup failures (UX-01 D-UX01-2 / D-UX01-4 stderr
-    // discipline). Empty buckets and empty failure list both produce no
-    // output, so syncs that touched nothing stay quiet.
-    if !quiet {
-        let mut stderr = std::io::stderr().lock();
-        // Best-effort: failure to write to stderr is non-fatal for sync
-        // (matches existing eprintln! semantics that ignore I/O errors).
-        let _ = cleanup::render_cleanup_buckets(
-            &mut stderr,
-            &cleanup_result.bucket_a_removed_from_config,
-            &cleanup_result.bucket_b_missing_from_disk,
-            &excluded_skills,
-        );
-        let _ = cleanup::render_distribution_cleanup_failures(
-            &mut stderr,
-            &distribution_cleanup_failures,
-        );
-    }
+    //    I/O failures aggregate into `distribution_cleanup_failures` (SAFE-01
+    //    pattern) so one stale ENOENT/EACCES does not erase the user-facing
+    //    Bucket A/B/C summary; sync exits non-zero at end if the slice is
+    //    non-empty.
+    //    OBS-03: `cleanup` step span. Wraps target cleanup loop + the
+    //    unified bucket render so the user-facing cleanup output is
+    //    attributed to this step in the trace.
+    //
+    //    OBS-05 ordering (D-ENV-4): the per-bucket cleanup output must
+    //    appear immediately AFTER the reconcile classification line in
+    //    `render_sync_report`. The cleanup span here only performs the
+    //    *work* (target cleanup); the user-facing bucket render is moved
+    //    OUT of the span and runs AFTER `render_sync_report` below
+    //    (Option 1 per Plan 18-02 Step 6 — smaller diff than widening
+    //    `render_sync_report`'s signature to accept a stderr writer).
+    let (removed_from_targets, distribution_cleanup_failures, excluded_skills) = {
+        let _span = info_span!("cleanup").entered();
+        let mut removed: usize = 0;
+        let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
+        let mut failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
+        for (name, dir_config) in config.distribution_dirs() {
+            let skills_dir = &dir_config.path;
+            removed += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
+            // Also clean up symlinks for disabled skills (global + per-directory).
+            // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
+            // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
+            let (n, dir_excluded, dir_failures) = cleanup_disabled_from_target(
+                skills_dir,
+                paths.library_dir(),
+                name,
+                &machine_prefs,
+                dry_run,
+            )?;
+            removed += n;
+            excluded.extend(dir_excluded);
+            failures.extend(dir_failures);
+        }
+        (removed, failures, excluded)
+    };
 
     // 7. Save manifest, gitignore, and lockfile
     if !dry_run && paths.config_dir().is_dir() {
+        // D-LSYNC-3 (OBS-07): stamp after distribute + cleanup succeed,
+        // before persist. The stamp is INSIDE the `!dry_run` guard so
+        // dry-run does NOT update last_synced_at — honest reporting.
+        //
+        // Note: a subsequent reconcile-install-failure bail (`bail!` at
+        // the end of sync()) still treats `last_synced_at` as stamped —
+        // the user-facing semantics are "cleanup completed; install-
+        // failure exit is downstream." Per RESEARCH OQ-3.
+        manifest.stamp_last_synced_at();
         manifest::save(&manifest, paths.config_dir())?;
     }
     if !dry_run && paths.library_dir().is_dir() {
@@ -1795,18 +1803,42 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         distributions: distribute_results,
         cleanup: cleanup_result,
         removed_from_targets,
+        reconcile: reconcile_report,
     };
 
     if !quiet {
         render_sync_report(&report);
     }
 
+    // 6b. Render the unified three-bucket cleanup output + any aggregated
+    //     distribution-cleanup failures (UX-01 D-UX01-2 / D-UX01-4 stderr
+    //     discipline). Empty buckets and empty failure list both produce
+    //     no output, so syncs that touched nothing stay quiet.
+    //     OBS-05 (D-ENV-4): runs AFTER `render_sync_report` so the
+    //     reconcile classification line sits visually ABOVE the cleanup
+    //     buckets in the user's terminal.
+    if !quiet {
+        let mut stderr = std::io::stderr().lock();
+        // Best-effort: failure to write to stderr is non-fatal for sync
+        // (matches existing eprintln! semantics that ignore I/O errors).
+        let _ = cleanup::render_cleanup_buckets(
+            &mut stderr,
+            &report.cleanup.bucket_a_removed_from_config,
+            &report.cleanup.bucket_b_missing_from_disk,
+            &excluded_skills,
+        );
+        let _ = cleanup::render_distribution_cleanup_failures(
+            &mut stderr,
+            &distribution_cleanup_failures,
+        );
+    }
+
     // Post-sync health check
     if !dry_run && !quiet {
         let doctor_report = doctor::check(config, paths)?;
         if doctor_report.total_issues() > 0 {
-            eprintln!(
-                "warning: {} issue(s) detected after sync — run `tome doctor` for details",
+            warn!(
+                "{} issue(s) detected after sync — run `tome doctor` for details",
                 doctor_report.total_issues()
             );
         }
@@ -1832,7 +1864,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                     println!("  {} Pushed to remote", console::style("↑").cyan());
                 }
             }
-            Err(e) => eprintln!("warning: remote push failed: {e}"),
+            Err(e) => warn!("remote push failed: {e}"),
         }
     }
 
@@ -1910,8 +1942,8 @@ fn cleanup_disabled_from_target(
     }
 
     let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        eprintln!(
-            "warning: could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
+        warn!(
+            "could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
             library_dir.display(),
             e
         );
@@ -2033,6 +2065,32 @@ fn render_sync_report(report: &SyncReport) {
             "  Cleaned {} stale target link(s)",
             style(report.removed_from_targets).yellow()
         );
+    }
+
+    // Phase 18 OBS-05 (D-ENV-4): reconcile classification line, emitted
+    // immediately above the per-bucket cleanup summary block (rendered
+    // separately to stderr by the caller AFTER this function returns).
+    // The line only prints when reconcile actually fired (Some); syncs
+    // without a Claude adapter produce no line.
+    if let Some(rr) = &report.reconcile {
+        println!(
+            "  reconcile: {} {} match · {} {} drift · {} {} vanished · {} {} missing-from-machine",
+            style("✓").green(),
+            rr.matches,
+            style("⚠").yellow(),
+            rr.drift.len(),
+            style("⚠").yellow(),
+            rr.vanished.len(),
+            style("⚠").yellow(),
+            rr.missing.len(),
+        );
+
+        // Per-drift detail + per-vanished warnings relocated from the
+        // deleted inline `reconcile::render_summary` call site.
+        let detail = reconcile::format_classification_detail(rr);
+        if !detail.is_empty() {
+            print!("{}", detail);
+        }
     }
 }
 

@@ -7,6 +7,185 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OBS-01 / OBS-02 — Structured logging substrate (`tracing`).** Adopted
+  `tracing` + `tracing-subscriber` as the application logging substrate.
+  Internal `eprintln!` / `println!` chatter in the sync, reconcile, consolidate,
+  distribute, and cleanup paths now routes through `tracing::{info,warn,debug}!`.
+  Wizard prompts, TUI browse output, and user-facing summary tables
+  (`tome status` / `list` / `doctor` tables, the `tome sync` final summary
+  block) remain on direct stdout — output discipline unchanged for byte-identical
+  stdout in `tome status` and `tome init --dry-run`. (Phase 18 plans 18-01,
+  18-02.)
+- **OBS-02 — `TOME_LOG` environment variable.** New `TOME_LOG` env var
+  configures the subscriber filter using `tracing_subscriber::EnvFilter`
+  directive syntax. Examples:
+
+  ```bash
+  TOME_LOG=debug tome sync                                # verbose globally
+  TOME_LOG=tome::sync=debug,tome::reconcile=info tome sync # scoped to sync
+  TOME_LOG=warn,tome::library=debug tome sync             # warn globally, debug consolidate
+  ```
+
+  When `TOME_LOG` is set, it fully replaces the flag-derived level. Malformed
+  directives silently fall back to the flag-derived level (matches the
+  `RUST_LOG` UX users bring from cargo / tokio).
+- **OBS-03 — Per-pipeline-step spans with timing.** `tome sync --verbose`
+  (or `TOME_LOG=tome::sync=debug`) now emits one `tracing` span per pipeline
+  step (`discover`, `reconcile`, `consolidate`, `distribute`, `cleanup`)
+  nested under a top-level `sync` span. Each span records `time.busy` and
+  `time.idle` timing fields on close — useful for diagnosing slow phases.
+  Note: the literal field name is `time.busy` (auto-emitted by
+  `FmtSpan::CLOSE`), NOT `elapsed_ms`. The OBS-03 success-criterion wording
+  said "elapsed_ms" conceptually; grep accordingly.
+- **OBS-04 — Change-cause attribution.** When `consolidate` or `distribute`
+  re-emits a skill, the log line names the cause at `info!` level via a typed
+  `ChangeCause` field. Three of four causes wire up in this release:
+  `cause=hash changed`, `cause=newly added`, `cause=directory now allowed`.
+  A user running `tome sync --verbose` can grep stderr for `cause=` to see
+  exactly why each re-emit happened.
+- **OBS-05 — Reconcile classification breakdown.** The `tome sync` final
+  summary block now includes a per-classification reconcile line:
+
+  ```
+    reconcile: ✓ N match · ⚠ M drift · ⚠ K vanished · ⚠ L missing-from-machine
+  ```
+
+  immediately above the per-bucket cleanup summary. Counts come from the
+  existing `ReconcileReport` populated since v0.10's Phase 13; no new
+  computation. Only emits when reconcile actually fires (i.e. when at least
+  one Claude adapter directory is configured).
+- **OBS-06 — `tome doctor` issue categorization.** Each `DiagnosticIssue`
+  carries an `IssueCategory` (`Library` / `Directory` / `Config` /
+  `ForeignSymlink`) derived at construction from the `DoctorReport` field +
+  `DiagnosticIssueKind` (`ForeignSymlink` promotes regardless of source
+  field). Text summary line now includes a per-category auto-fixable
+  breakdown (e.g. `(3 auto-fixable: Library 2, Foreign-symlink 1)`). JSON
+  shape gains a `category` field per issue plus `summary.by_category` and
+  `summary.auto_fixable_by_category` maps. Replaces the message-substring
+  classification anti-pattern with typed `RepairKind` discrimination; built
+  on the POLISH-04 enum-exhaustiveness sentinel pattern so adding a variant
+  without a dispatcher arm fails to compile. (Phase 19 plan 19-01.)
+- **OBS-07 — `tome status` richer surface.** Top-line `Last sync: <RFC-3339
+  timestamp>` (or `Last sync: never` when no manifest exists). Per-directory
+  `SKILLS` column in the Directories table (the existing `(override)`
+  annotation from PORT-05 is preserved). JSON shape gains a top-level
+  `last_sync: Option<String>` field. Manifest schema additive lift —
+  pre-v0.11 manifests deserialize cleanly with `last_synced_at: None`. The
+  stamp fires after distribute + cleanup succeed and before `lockfile.save`
+  (D-LSYNC-3). (Phase 19 plan 19-03.)
+
+### Changed
+
+- **Logging output now routes to stderr by default** for all migrated diagnostic
+  chatter. Stdout remains reserved for user-facing summary tables and version
+  output (consistent with Unix convention; matches `tome sync`'s cleanup-bucket
+  output discipline from v0.10's Phase 16).
+- **`--quiet` and `--verbose` flags map to subscriber levels** through the new
+  `LogLevel::directive` accessor: `--quiet` → `warn`, default → `info`,
+  `--verbose` → `debug`. Behavior preserved for users who only use the flags;
+  no lines silently disappear. Warnings that were previously gated on
+  `if !quiet { eprintln!(\"warning: ...\") }` now always fire — the global
+  subscriber's `EnvFilter` is the single discipline point. If any of these
+  warnings turn out to be noise that should be silent under `--quiet`, a
+  future PR can demote individual ones to `debug!`.
+
+### Deferred (tracked in `.planning/phases/18-observability-foundation-sync-diagnostics/18-deferred-items.md`)
+
+- **`ChangeCause::PreviouslyFailed` cause not emitted.** The enum variant +
+  `Display` impl ship in this release (so the grep vocabulary `cause=previously
+  failed` is reachable if/when an emission site fires), but the emission site
+  requires a manifest-schema bump to track per-skill last-sync failure state.
+  Deferred to v0.12 or a later polish phase.
+- **`ChangeCause::DirectoryNowAllowed` inference false positive on fresh
+  skills.** `consolidate` inserts the manifest entry BEFORE `distribute`
+  iterates, so on the very first sync after a fresh `tome init` every new
+  skill emits `cause=directory now allowed` where the strict-correct cause
+  would be `cause=newly added`. Accepted for v0.11 (false-positive rate is
+  bounded; user-visible meaning is close enough). Strict fix requires
+  per-directory-per-skill "has been distributed before" state — same
+  schema-bump trade-off as `PreviouslyFailed`. Deferred to v0.12 or later.
+
+### Fixed
+
+- **FIX-01 / [#530](https://github.com/MartinP7r/tome/issues/530)** —
+  `tome doctor` no longer prints "N auto-fixable issues" followed by
+  "(no auto-repair available)". The dispatcher uses typed `RepairKind`
+  discrimination (`RemoveStaleManifestEntry`, `RemoveBrokenLibrarySymlink`,
+  `RemoveStaleTargetSymlink`) instead of message substring matching. When
+  `auto_fixable_count == 0`, the global "Apply N auto-fixable repairs?
+  [Y/n]" prompt is skipped entirely. Adding a `RepairKind` variant without
+  a dispatcher handler now fails to compile (POLISH-04 sentinel + exhaustive
+  match). (Phase 19 plan 19-01.)
+- **FIX-02 / [#511](https://github.com/MartinP7r/tome/issues/511) +
+  HARD-14 carry-over** — Browse copy-path timing flake. Upper bound on
+  `browse::app::tests::copy_path_retry_helper_returns_within_bound` relaxed
+  from 600ms to 2000ms with a multi-line `FLAKE-FIX` comment naming
+  `arboard` clipboard contention under `--test-threads=N` as the root
+  cause (and the rejected clock-injection alternative as out-of-scope for
+  v0.11 polish). 100/100 consecutive runs pass locally. The paired backup
+  test (`backup::tests::push_and_pull_roundtrip`) did not reproduce on M1
+  macOS (50/50 isolated + 10/10 module + 5/5 lib-suite runs all clean); a
+  defensive `FLAKE-WATCH` comment ships in place describing flake history
+  and a retry-wrapper mitigation pattern for future-phase pickup if it
+  recurs in CI. (Phase 19 plan 19-04.)
+- **FIX-03 / [#532](https://github.com/MartinP7r/tome/issues/532)** —
+  `tome doctor` no longer reports `N managed symlink(s) tracked in git`
+  warnings on v0.10-shape libraries. The stale check was deleted wholesale
+  (v0.10 made managed skills real directory copies, so the original
+  concern no longer applies): the `check_library` emit block, the
+  `tracked_managed_symlinks` helper, and the interactive git-tracked
+  render/confirm path were all removed. A regression test
+  (`doctor_clean_v010_library_emits_no_tracked_in_git_warning`) pins the
+  clean-library behavior. (Phase 19 plan 19-01.)
+- **FIX-04 / [#454](https://github.com/MartinP7r/tome/issues/454)** —
+  Wizard summary table column alignment under ANSI-bold styled headers.
+  Reproduce-first investigation confirmed the existing
+  `tabled = { features = ["ansi"] }` feature (added in commit `0803afb`,
+  April 2026) already produces aligned output — divider positions are
+  byte-identical at `[0, 17, 34, 59, 79]` even with ANSI escapes around
+  header cells. No `strip-ansi-escapes` dep was added. A snapshot test
+  (`wizard::tests::show_directory_summary_aligns_header_with_body_under_ansi`)
+  ships as a regression guard — it fails immediately if anyone drops the
+  `tabled[ansi]` feature. (Phase 19 plan 19-05 — administrative-close
+  path 2B.)
+- **FIX-05 / [#453](https://github.com/MartinP7r/tome/issues/453) +
+  [#456](https://github.com/MartinP7r/tome/issues/456)** — Wizard library
+  default follows `tome_home`. The implementation at `wizard.rs:637` was
+  already correct (derived `<resolved_tome_home>/skills` from the resolved
+  `TOME_HOME`); the bug filed was actually a test-coverage gap. Two new
+  pinning integration tests in `cli_init.rs` lock the behavior: positive
+  (library default == `<TOME_HOME>/skills`) + negative (no fallback to
+  `~/.tome/skills` when `TOME_HOME` is customized). Sensitivity verified —
+  replacing `wizard.rs:637` with a hardcoded path makes both tests fail.
+  (Phase 19 plan 19-06.)
+- **FIX-06 / [#533](https://github.com/MartinP7r/tome/issues/533)** —
+  `make release VERSION=X.Y.Z` now automatically replaces `## [Unreleased]`
+  with `## [X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md` during the version-bump
+  commit. Inline `sed -i ''` in the Makefile recipe, style-matched with
+  the existing Cargo.toml version-bump sed line; portable across BSD
+  (macOS) and GNU (Linux) sed. Idempotent — silent no-op if no
+  `[Unreleased]` section is present. `CHANGELOG.md` is staged alongside
+  `Cargo.toml` + `Cargo.lock` in the version-bump commit. Three regression
+  tests in `cli_make_release.rs` pin sed substitution + idempotency +
+  silent-noop. (Phase 19 plan 19-02.)
+
+### Trade-offs (release-noted; no migration shim)
+
+- `--quiet` becomes a no-op when `TOME_LOG` is set in the environment. Matches
+  the `RUST_LOG` precedence mental model users bring from cargo / tokio. Per
+  the project's documented policy (Backward compat: None), this is not gated
+  on a shim.
+- The OBS-03 timing field is named `time.busy` (auto-emitted by
+  `tracing-subscriber`'s `FmtSpan::CLOSE` event), NOT `elapsed_ms`. The OBS-03
+  success-criterion wording said "elapsed_ms" conceptually; `time.busy` is the
+  literal field name — grep accordingly.
+- `tracing-error` and `tracing-appender` enter `Cargo.toml` as scaffolded deps
+  with no runtime wiring. They light up in a future phase (Phase 19's OBS-06
+  may wire `tracing-error::ErrorLayer` for `tome doctor`; v1.0 Tauri IPC wires
+  `tracing-appender` for log-file capture).
+
 ## [0.10.0] - 2026-05-11
 
 The **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation**

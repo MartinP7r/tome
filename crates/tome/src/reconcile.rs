@@ -21,6 +21,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use console::style;
+use tracing::warn;
 
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
@@ -537,8 +538,8 @@ fn apply_drift_and_missing(
                     // makes content_hash mismatch the drift trigger).
                     match manifest::hash_directory(&library_dir.join(c.name.as_str())) {
                         Ok(h) => entry.content_hash = h,
-                        Err(e) => eprintln!(
-                            "warning: post-update hash_directory({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-update hash_directory({}) failed: {e:#} — \
                              leaving lockfile content_hash unchanged",
                             c.name.as_str()
                         ),
@@ -548,8 +549,8 @@ fn apply_drift_and_missing(
                     // lockfile version after a successful apply.
                     match adapter.current_version(&c.registry_id) {
                         Ok(v) => entry.version = v,
-                        Err(e) => eprintln!(
-                            "warning: post-update current_version({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-update current_version({}) failed: {e:#} — \
                              leaving lockfile version field unchanged",
                             c.registry_id
                         ),
@@ -581,8 +582,8 @@ fn apply_drift_and_missing(
                     // records the correct hash once consolidation has run.
                     match adapter.current_version(&c.registry_id) {
                         Ok(v) => entry.version = v,
-                        Err(e) => eprintln!(
-                            "warning: post-install current_version({}) failed: {e:#} — \
+                        Err(e) => warn!(
+                            "post-install current_version({}) failed: {e:#} — \
                              leaving lockfile version field unchanged",
                             c.registry_id
                         ),
@@ -641,8 +642,8 @@ fn handle_edited(
     // D-16: --no-input or non-TTY → skip-with-warning per skill, exit zero.
     if opts.no_input || !std::io::stdin().is_terminal() {
         for e in edited {
-            eprintln!(
-                "warning: {} has local edits; skipping reconcile this sync (run interactively to fork/revert)",
+            warn!(
+                "{} has local edits; skipping reconcile this sync (run interactively to fork/revert)",
                 e.name.as_str()
             );
             report.edit_decisions.push(EditDecision::Skip);
@@ -690,6 +691,9 @@ fn handle_edited(
 /// vanished`) — predictable output is greppable across runs. Per D-03: when
 /// drift+vanished are zero AND matches > 0, prepends a positive `✓ N plugins
 /// in sync` line.
+#[allow(dead_code)] // Phase 18 OBS-05: inline call site moved into
+// `lib.rs::render_sync_report`; this helper is kept for tests and
+// downstream callers per Plan 18-02 plan-text (stays callable).
 pub fn format_summary(report: &ReconcileReport) -> String {
     let total = report.matches + report.drift.len() + report.vanished.len();
     if total == 0 {
@@ -742,6 +746,8 @@ pub fn format_summary(report: &ReconcileReport) -> String {
 }
 
 /// Print the summary string to stdout. Suppressed under `--quiet`.
+#[allow(dead_code)] // Phase 18 OBS-05: relocated into `render_sync_report`;
+// retained for symmetry with `format_summary` and downstream callers.
 pub fn render_summary(report: &ReconcileReport, quiet: bool) {
     if quiet {
         return;
@@ -750,6 +756,44 @@ pub fn render_summary(report: &ReconcileReport, quiet: bool) {
     if !s.is_empty() {
         print!("{s}");
     }
+}
+
+/// Return ONLY the per-drift detail lines and per-vanished warning lines
+/// for the OBS-05 final-summary relocation (Phase 18 D-ENV-4).
+///
+/// The classification line itself (`reconcile: N match · M drift · ...`)
+/// is rendered by `lib.rs::render_sync_report` so it sits above the
+/// cleanup buckets; this helper returns the detail block that goes BELOW
+/// the classification line. Returns an empty string if nothing to detail.
+///
+/// Format strings mirror `format_summary` lines 718-741 verbatim (per-drift
+/// bullet + per-vanished warning), MINUS the classification line and the
+/// optional "✓ N plugins in sync" positive-evidence line — both are owned
+/// by `render_sync_report`.
+pub fn format_classification_detail(report: &ReconcileReport) -> String {
+    let mut out = String::new();
+    for c in &report.drift {
+        if let ReconcileClass::Drift {
+            old_version,
+            new_version,
+        } = &c.class
+        {
+            out.push_str(&format!(
+                "  • {}: {} → {}\n",
+                c.name.as_str(),
+                old_version.as_deref().unwrap_or("unknown"),
+                new_version.as_deref().unwrap_or("unknown"),
+            ));
+        }
+    }
+    for c in &report.vanished {
+        out.push_str(&format!(
+            "warning: plugin {} vanished from marketplace {}; using preserved library copy\n",
+            c.name.as_str(),
+            c.source_name.as_str(),
+        ));
+    }
+    out
 }
 
 #[cfg(test)]
@@ -1680,6 +1724,48 @@ mod tests {
             stripped.contains("7 plugins in sync"),
             "missing in-sync line: {stripped}"
         );
+    }
+
+    #[test]
+    fn format_classification_detail_omits_header() {
+        // Phase 18 OBS-05: the detail helper must NOT include the
+        // classification header (that's owned by `render_sync_report`).
+        let report = ReconcileReport {
+            matches: 3,
+            drift: vec![fake_drift("alpha", "1.0", "2.0")],
+            vanished: vec![fake_vanished("ghost", "claude-plugins")],
+            ..Default::default()
+        };
+        let out = format_classification_detail(&report);
+        let stripped = strip_ansi(&out);
+        assert!(
+            !stripped.contains("match · "),
+            "must NOT include classification header: {stripped}"
+        );
+        assert!(
+            !stripped.contains("plugins in sync"),
+            "must NOT include positive-evidence header: {stripped}"
+        );
+        // Detail entries must still be present.
+        assert!(
+            stripped.contains("• alpha: 1.0 → 2.0"),
+            "missing per-drift line: {stripped}"
+        );
+        assert!(
+            stripped.contains("plugin ghost vanished from marketplace claude-plugins"),
+            "missing per-vanished warning: {stripped}"
+        );
+    }
+
+    #[test]
+    fn format_classification_detail_empty_when_nothing_to_show() {
+        let report = ReconcileReport {
+            matches: 5,
+            drift: vec![],
+            vanished: vec![],
+            ..Default::default()
+        };
+        assert_eq!(format_classification_detail(&report), "");
     }
 
     #[test]

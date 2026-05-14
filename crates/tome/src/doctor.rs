@@ -6,6 +6,7 @@ use console::style;
 use dialoguer::Confirm;
 use std::io::IsTerminal;
 use std::path::Path;
+use tracing::debug;
 
 use crate::cleanup;
 use crate::config::Config;
@@ -68,6 +69,118 @@ const _: () = {
     assert!(DiagnosticIssueKind::ALL.len() == 1);
 };
 
+/// Category of a [`DiagnosticIssue`]. Derived at construction from the
+/// [`DoctorReport`] field the issue lives in, with `ForeignSymlink`
+/// promoted regardless of source field per D-CAT-1.
+///
+/// JSON serialisation is snake_case (`"library"`, `"directory"`,
+/// `"config"`, `"foreign_symlink"`), matching the project convention.
+///
+/// Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+/// keep every variant pinned. Adding a variant without updating `ALL`
+/// is a `cargo check` failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IssueCategory {
+    Library,
+    Directory,
+    Config,
+    ForeignSymlink,
+}
+
+impl IssueCategory {
+    /// Compile-time-validated enumeration of every variant. Mirrors
+    /// `DiagnosticIssueKind::ALL` and other POLISH-04 patterns.
+    pub const ALL: [Self; 4] = [
+        Self::Library,
+        Self::Directory,
+        Self::Config,
+        Self::ForeignSymlink,
+    ];
+}
+
+/// Compile-time drift guard for [`IssueCategory::ALL`] (POLISH-04).
+/// Adding a variant without updating `ALL` and this match fails to
+/// compile (`non-exhaustive patterns`) or trips the const-len assert.
+#[allow(dead_code)]
+const fn _issue_category_exhaustiveness_sentinel(c: IssueCategory) {
+    match c {
+        IssueCategory::Library => {}
+        IssueCategory::Directory => {}
+        IssueCategory::Config => {}
+        IssueCategory::ForeignSymlink => {}
+    }
+}
+const _: () = {
+    assert!(IssueCategory::ALL.len() == 4);
+};
+
+/// Categorises the auto-repair available for a [`DiagnosticIssue`]
+/// (D-REPAIR-1).
+///
+/// `Some(kind)` on [`DiagnosticIssue::repair_kind`] ↔ the issue is
+/// auto-fixable and the global repair dispatcher in [`diagnose`] has a
+/// handler arm for `kind`. `None` means the issue requires user
+/// interaction (e.g. orphan directories, which use a per-item Select
+/// prompt) or is informational only.
+///
+/// JSON serialisation is snake_case
+/// (`"remove_stale_manifest_entry"`, `"remove_broken_library_symlink"`,
+/// `"remove_stale_target_symlink"`).
+///
+/// Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+/// pin every variant. The repair dispatcher matches exhaustively on
+/// `Option<RepairKind>` — adding a variant without a handler arm fails
+/// to compile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+// Every variant in this enum names a specific "Remove …" action. The
+// shared `Remove` prefix is intentional (one variant per real
+// auto-repair handler) and aids readability at call sites.
+#[allow(clippy::enum_variant_names)]
+pub enum RepairKind {
+    /// Remove a manifest entry whose library directory is missing on
+    /// disk OR whose managed symlink is broken. Emit sites in
+    /// `check_library` (both cases share the action:
+    /// `Manifest::remove(name)` plus `remove_file` if the entry is a
+    /// symlink).
+    RemoveStaleManifestEntry,
+    /// Remove a broken legacy symlink in the library directory (not
+    /// referenced by the manifest). Emit site: `check_library`
+    /// "broken legacy symlink: X -> Y". Action: `remove_file(path)`.
+    RemoveBrokenLibrarySymlink,
+    /// Remove a stale symlink from a distribution directory. Emit
+    /// site: `check_distribution_dir` "stale symlink X". Action:
+    /// `cleanup::cleanup_target` removes broken symlinks pointing into
+    /// the library.
+    RemoveStaleTargetSymlink,
+}
+
+impl RepairKind {
+    /// Compile-time-validated enumeration of every variant. Mirrors
+    /// `DiagnosticIssueKind::ALL` and other POLISH-04 patterns.
+    pub const ALL: [Self; 3] = [
+        Self::RemoveStaleManifestEntry,
+        Self::RemoveBrokenLibrarySymlink,
+        Self::RemoveStaleTargetSymlink,
+    ];
+}
+
+/// Compile-time drift guard for [`RepairKind::ALL`] (POLISH-04).
+/// Adding a variant without updating `ALL` and this match fails to
+/// compile (`non-exhaustive patterns`) or trips the const-len assert.
+#[allow(dead_code)]
+const fn _repair_kind_exhaustiveness_sentinel(k: RepairKind) {
+    match k {
+        RepairKind::RemoveStaleManifestEntry => {}
+        RepairKind::RemoveBrokenLibrarySymlink => {}
+        RepairKind::RemoveStaleTargetSymlink => {}
+    }
+}
+const _: () = {
+    assert!(RepairKind::ALL.len() == 3);
+};
+
 /// A single diagnostic issue found during a health check.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiagnosticIssue {
@@ -79,31 +192,113 @@ pub struct DiagnosticIssue {
     /// Serialised JSON shape: omitted when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<DiagnosticIssueKind>,
+    /// Category bucket for the OBS-06 categorised summary line and
+    /// `tome doctor --json` per-issue category field. Computed at
+    /// construction from the [`DoctorReport`] field the issue lives
+    /// in, with `ForeignSymlink` promoted regardless of source field
+    /// per D-CAT-1. Always emits in JSON.
+    pub category: IssueCategory,
+    /// Auto-repair classifier (D-REPAIR-1). `Some(kind)` ↔ the
+    /// repair dispatcher in [`diagnose`] has a handler arm for `kind`
+    /// and the issue contributes to `auto_fixable_count`. `None`
+    /// means interactive-only (orphan directories) or informational.
+    /// Omitted from JSON when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repair_kind: Option<RepairKind>,
 }
 
 impl DiagnosticIssue {
-    /// Build a free-form (untyped) diagnostic issue. The `kind` field
-    /// stays `None`. Used by every legacy emit site that surfaces a
-    /// detail through the human-readable message string only.
-    pub(crate) fn untyped(severity: IssueSeverity, message: impl Into<String>) -> Self {
+    /// Build a Library-category issue with no auto-repair handler.
+    /// Used by `check_library` for non-repairable findings (e.g.
+    /// orphan directories — interactive-only) and the "library dir
+    /// missing" warning.
+    ///
+    /// The pre-OBS-06 `untyped`/`typed` constructors are deleted; all
+    /// emit sites now use one of the category-specific constructors
+    /// (`library`/`library_repairable`/`directory`/`directory_repairable`
+    /// /`directory_foreign_symlink`/`config`) so `category` and
+    /// `repair_kind` are set at construction time.
+    pub(crate) fn library(severity: IssueSeverity, message: impl Into<String>) -> Self {
         Self {
             severity,
             message: message.into(),
             kind: None,
+            category: IssueCategory::Library,
+            repair_kind: None,
         }
     }
 
-    /// Build a typed diagnostic issue. Currently the only caller is
-    /// the HARD-09 / D-DIST-2 ForeignSymlink check.
-    pub(crate) fn typed(
+    /// Build a Library-category issue that the dispatcher can
+    /// auto-repair. The supplied [`RepairKind`] must correspond to a
+    /// match arm in the dispatcher (exhaustive match enforces this at
+    /// compile time).
+    pub(crate) fn library_repairable(
         severity: IssueSeverity,
-        kind: DiagnosticIssueKind,
+        message: impl Into<String>,
+        repair_kind: RepairKind,
+    ) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: None,
+            category: IssueCategory::Library,
+            repair_kind: Some(repair_kind),
+        }
+    }
+
+    /// Build a Directory-category issue with no auto-repair handler.
+    pub(crate) fn directory(severity: IssueSeverity, message: impl Into<String>) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: None,
+            category: IssueCategory::Directory,
+            repair_kind: None,
+        }
+    }
+
+    /// Build a Directory-category issue that the dispatcher can
+    /// auto-repair.
+    pub(crate) fn directory_repairable(
+        severity: IssueSeverity,
+        message: impl Into<String>,
+        repair_kind: RepairKind,
+    ) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: None,
+            category: IssueCategory::Directory,
+            repair_kind: Some(repair_kind),
+        }
+    }
+
+    /// Build a Directory-emitted ForeignSymlink issue.
+    /// Category is promoted to `ForeignSymlink` regardless of source
+    /// field (D-CAT-1). `kind` is set so the existing
+    /// `DiagnosticIssueKind` JSON surface stays consistent.
+    pub(crate) fn directory_foreign_symlink(
+        severity: IssueSeverity,
         message: impl Into<String>,
     ) -> Self {
         Self {
             severity,
             message: message.into(),
-            kind: Some(kind),
+            kind: Some(DiagnosticIssueKind::ForeignSymlink),
+            category: IssueCategory::ForeignSymlink,
+            repair_kind: None,
+        }
+    }
+
+    /// Build a Config-category issue. Config issues are not
+    /// auto-repairable (config edits require user action).
+    pub(crate) fn config(severity: IssueSeverity, message: impl Into<String>) -> Self {
+        Self {
+            severity,
+            message: message.into(),
+            kind: None,
+            category: IssueCategory::Config,
+            repair_kind: None,
         }
     }
 }
@@ -149,6 +344,41 @@ impl DoctorReport {
                 .map(|d| d.issues.len())
                 .sum::<usize>()
             + self.config_issues.len()
+    }
+
+    /// Flatten the three issue buckets into a single iterator.
+    /// Used by the OBS-06 categorised summary and the FIX-01 repair
+    /// dispatcher (D-REPAIR-3 — replaces substring matching).
+    pub fn all_issues(&self) -> impl Iterator<Item = &DiagnosticIssue> {
+        self.library_issues
+            .iter()
+            .chain(self.directory_issues.iter().flat_map(|d| d.issues.iter()))
+            .chain(self.config_issues.iter())
+    }
+
+    /// Number of issues for which the dispatcher has an auto-repair
+    /// handler. D-REPAIR-2: when this is zero, the global
+    /// "Apply N auto-fixable repairs?" prompt is skipped entirely.
+    pub fn auto_fixable_count(&self) -> usize {
+        self.all_issues()
+            .filter(|i| i.repair_kind.is_some())
+            .count()
+    }
+
+    /// Per-category count of issues with [`Self::all_issues`]. Used
+    /// by the OBS-06 categorised summary and the JSON `summary`
+    /// object.
+    pub fn count_by_category(&self, category: IssueCategory) -> usize {
+        self.all_issues().filter(|i| i.category == category).count()
+    }
+
+    /// Per-category count of auto-fixable issues. Used by the D-CAT-3
+    /// breakdown line and the JSON `summary.auto_fixable_by_category`
+    /// map.
+    pub fn auto_fixable_count_by_category(&self, category: IssueCategory) -> usize {
+        self.all_issues()
+            .filter(|i| i.category == category && i.repair_kind.is_some())
+            .count()
     }
 }
 
@@ -217,7 +447,20 @@ pub fn diagnose(
     let report = check(config, paths)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        // OBS-06: emit the report alongside a `summary` object that
+        // exposes total + per-category + auto-fixable counts. Helper
+        // builds a JSON `Value` so the per-issue `category` /
+        // `repair_kind` fields (struct-derived) compose with the
+        // computed summary in one document.
+        let payload = serde_json::json!({
+            "configured": report.configured,
+            "library_issues": report.library_issues,
+            "directory_issues": report.directory_issues,
+            "config_issues": report.config_issues,
+            "unowned_skills": report.unowned_skills,
+            "summary": render_summary_json(&report),
+        });
+        println!("{}", serde_json::to_string_pretty(&payload)?);
         return Ok(());
     }
 
@@ -251,35 +494,34 @@ pub fn diagnose(
     render_unowned_skills(&report.unowned_skills);
 
     let total = report.total_issues();
+    let auto_fixable = report.auto_fixable_count();
 
     println!();
     if total == 0 {
         println!("{}", style("No issues found.").green().bold());
     } else {
-        println!(
-            "{}",
-            style(format!("Found {} issue(s).", total)).yellow().bold()
-        );
+        // D-CAT-3: render the summary line with per-category breakdown
+        // of auto-fixable issues. Only categories with >0 auto-fixable
+        // issues appear in the breakdown.
+        println!("{}", render_summary_line(&report));
 
         let interactive = !no_input && std::io::stdin().is_terminal();
 
         if !dry_run && interactive {
-            // Separate interactive issues (orphans, git-tracked) from auto-fixable ones
+            // Collect orphan-directory issues (interactive-only, no
+            // repair_kind). Routed through the per-item Select prompt
+            // below.
             let orphan_dirs: Vec<&DiagnosticIssue> = report
                 .library_issues
                 .iter()
-                .filter(|i| i.message.contains("orphan directory"))
+                .filter(|i| i.repair_kind.is_none() && is_orphan_directory(i))
                 .collect();
-            let interactive_count = report
-                .library_issues
-                .iter()
-                .filter(|i| {
-                    i.message.contains("orphan directory") || i.message.contains("tracked in git")
-                })
-                .count();
-            let auto_fixable = report.total_issues() - interactive_count;
 
-            // Auto-repair safe things (stale manifest entries, broken symlinks, stale target symlinks)
+            // D-REPAIR-2: skip the global "Apply N auto-fixable
+            // repairs?" prompt entirely when there is nothing to
+            // auto-repair. The pre-FIX-01 code printed
+            // "(no auto-repair available)" lines under a non-zero
+            // count — gone. See GitHub #530.
             if auto_fixable > 0 {
                 println!();
                 println!("{} auto-fixable issue(s):", style(auto_fixable).bold());
@@ -292,20 +534,17 @@ pub fn diagnose(
 
                 if confirmed {
                     println!();
-                    repair_library(paths)?;
-
-                    for (name, dir_config) in config.distribution_dirs() {
-                        let removed =
-                            cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
-                        if removed > 0 {
-                            println!(
-                                "  {} Removed {} stale symlink(s) from {}",
-                                style("fixed").green(),
-                                removed,
-                                name
-                            );
-                        }
-                    }
+                    dispatch_repairs(&report, config, paths)?;
+                } else {
+                    // D-REPAIR-3 / OBS-01-shaped tracing: user
+                    // declined. Logged so `tome doctor --verbose`
+                    // surfaces why repairs were skipped.
+                    debug!(
+                        target: "doctor::repair",
+                        fixable = auto_fixable,
+                        reason = "user_declined",
+                        "skipped repair"
+                    );
                 }
             }
 
@@ -379,73 +618,6 @@ pub fn diagnose(
                     }
                 }
             }
-
-            // Handle git-tracked managed symlinks interactively
-            let has_git_tracked = report
-                .library_issues
-                .iter()
-                .any(|i| i.message.contains("managed symlink(s) tracked in git"));
-            if has_git_tracked {
-                let manifest = manifest::load(paths.config_dir())?;
-                let tracked = tracked_managed_symlinks(paths.library_dir(), &manifest);
-                if !tracked.is_empty() {
-                    println!();
-                    println!(
-                        "{} managed symlink(s) tracked in git:",
-                        style(tracked.len()).bold()
-                    );
-                    println!(
-                        "  These contain absolute paths (e.g. /Users/.../plugins/...) and show as"
-                    );
-                    println!("  broken on GitHub. They are recreated by `tome sync`.");
-                    println!();
-                    for name in &tracked {
-                        println!("    {}/", name);
-                    }
-                    println!();
-                    let confirmed = Confirm::new()
-                        .with_prompt(
-                            "Untrack these from git? (git rm --cached, files stay on disk)",
-                        )
-                        .default(true)
-                        .interact()?;
-
-                    if confirmed {
-                        let mut untracked = 0;
-                        for name in &tracked {
-                            let status = std::process::Command::new("git")
-                                .args(["rm", "--cached", "-r", name])
-                                .current_dir(paths.library_dir())
-                                .env_remove("GIT_DIR")
-                                .env_remove("GIT_WORK_TREE")
-                                .env_remove("GIT_INDEX_FILE")
-                                .output();
-                            match status {
-                                Ok(out) if out.status.success() => {
-                                    untracked += 1;
-                                }
-                                Ok(out) => {
-                                    eprintln!(
-                                        "  warning: git rm --cached {} failed: {}",
-                                        name,
-                                        String::from_utf8_lossy(&out.stderr).trim()
-                                    );
-                                }
-                                Err(e) => {
-                                    eprintln!("  warning: failed to run git: {}", e);
-                                }
-                            }
-                        }
-                        if untracked > 0 {
-                            println!(
-                                "  {} Untracked {} symlink(s). Commit the change to complete cleanup.",
-                                style("fixed").green(),
-                                untracked
-                            );
-                        }
-                    }
-                }
-            }
         } else if !dry_run {
             eprintln!("info: non-interactive mode — skipping repair prompt");
         } else {
@@ -456,42 +628,192 @@ pub fn diagnose(
     Ok(())
 }
 
-/// Show auto-fixable repair actions (excludes orphan directories which are handled interactively).
-fn render_repair_plan_auto(report: &DoctorReport) {
-    for issue in &report.library_issues {
-        let action = if issue.message.contains("orphan directory")
-            || issue.message.contains("tracked in git")
-        {
-            continue; // handled separately in interactive flow
-        } else if issue.message.contains("no directory on disk") {
-            "will remove entry from manifest file"
-        } else if issue.message.contains("broken") {
-            "will delete broken symlink and remove manifest entry"
-        } else {
-            "requires manual investigation"
-        };
-        println!("  → {} ({})", issue.message, style(action).cyan());
+/// Human-readable label for a category, used in the D-CAT-3 summary
+/// breakdown (`"Foreign-symlink"` uses a hyphen even though JSON wire
+/// form is `"foreign_symlink"`).
+fn category_display_name(c: IssueCategory) -> &'static str {
+    match c {
+        IssueCategory::Library => "Library",
+        IssueCategory::Directory => "Directory",
+        IssueCategory::Config => "Config",
+        IssueCategory::ForeignSymlink => "Foreign-symlink",
     }
-    for d in &report.directory_issues {
-        for issue in &d.issues {
-            let action = if issue.message.contains("stale symlink") {
-                "will delete stale symlink from disk"
-            } else {
-                "no auto-repair available"
-            };
-            println!(
-                "  → {}: {} ({})",
-                d.name,
-                issue.message,
-                style(action).cyan()
-            );
+}
+
+/// Action description for a repair kind. Used by
+/// `render_repair_plan_auto` so each auto-fixable issue gets a typed
+/// description (no substring matching). New `RepairKind` variants get
+/// a new arm here automatically via the exhaustive match.
+fn repair_kind_action_label(k: RepairKind) -> &'static str {
+    match k {
+        RepairKind::RemoveStaleManifestEntry => {
+            "will remove entry from manifest file (and broken symlink, if any)"
+        }
+        RepairKind::RemoveBrokenLibrarySymlink => "will delete broken symlink",
+        RepairKind::RemoveStaleTargetSymlink => "will delete stale symlink from distribution dir",
+    }
+}
+
+/// Identify orphan-directory issues for the interactive Select prompt.
+///
+/// Orphan directories live in `library_issues` with `repair_kind:
+/// None` and a message prefix of `"orphan directory:"`. Carrying a
+/// message-prefix check inside the orphan-only handler is acceptable
+/// per the D-REPAIR-3 contract — the bug class #530 was about
+/// substring matching at the DISPATCHER level (replaced above by
+/// `repair_kind`-based discrimination). The orphan-only matcher
+/// stays scoped to one render path.
+fn is_orphan_directory(issue: &DiagnosticIssue) -> bool {
+    issue.category == IssueCategory::Library
+        && issue.repair_kind.is_none()
+        && issue.message.starts_with("orphan directory:")
+}
+
+/// Build the OBS-06 `summary` JSON object exposed in
+/// `tome doctor --json` output. Shape:
+///
+/// ```json
+/// {
+///   "total_issues": 5,
+///   "by_category": { "library": 2, "directory": 1, "config": 1, "foreign_symlink": 1 },
+///   "auto_fixable_count": 3,
+///   "auto_fixable_by_category": { "library": 2, "directory": 1 }
+/// }
+/// ```
+///
+/// Every `IssueCategory` variant appears in `by_category` (zero
+/// values included so consumers can iterate without per-variant
+/// nil-checks). `auto_fixable_by_category` is sparse — only
+/// categories with at least one auto-fixable issue.
+fn render_summary_json(report: &DoctorReport) -> serde_json::Value {
+    use serde_json::{Map, Value, json};
+
+    let mut by_category = Map::new();
+    let mut auto_fixable_by_category = Map::new();
+    for c in IssueCategory::ALL {
+        let n = report.count_by_category(c);
+        let key = serde_json::to_value(c)
+            .ok()
+            .and_then(|v| v.as_str().map(str::to_string))
+            .unwrap_or_default();
+        by_category.insert(key.clone(), Value::from(n));
+        let nf = report.auto_fixable_count_by_category(c);
+        if nf > 0 {
+            auto_fixable_by_category.insert(key, Value::from(nf));
         }
     }
-    for issue in &report.config_issues {
+
+    json!({
+        "total_issues": report.total_issues(),
+        "by_category": Value::Object(by_category),
+        "auto_fixable_count": report.auto_fixable_count(),
+        "auto_fixable_by_category": Value::Object(auto_fixable_by_category),
+    })
+}
+
+/// Render the D-CAT-3 summary line, e.g.:
+///
+/// ```text
+/// Found 5 issue(s). (3 auto-fixable: Library 2, Foreign-symlink 1)
+/// ```
+///
+/// Only categories with non-zero auto-fixable counts appear. When
+/// `auto_fixable_count == 0`, the trailing parenthetical is omitted.
+fn render_summary_line(report: &DoctorReport) -> String {
+    let total = report.total_issues();
+    let auto_fixable = report.auto_fixable_count();
+
+    let head = style(format!("Found {total} issue(s).")).yellow().bold();
+
+    if auto_fixable == 0 {
+        return head.to_string();
+    }
+
+    let breakdown = IssueCategory::ALL
+        .iter()
+        .filter_map(|c| {
+            let n = report.auto_fixable_count_by_category(*c);
+            if n > 0 {
+                Some(format!("{} {n}", category_display_name(*c)))
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    format!("{head} ({auto_fixable} auto-fixable: {breakdown})")
+}
+
+/// Dispatch auto-repairs via exhaustive match on `Option<RepairKind>`.
+///
+/// D-REPAIR-3: substring matching is gone. Adding a `RepairKind`
+/// variant without an arm here is a compile-time error.
+fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -> Result<()> {
+    // Track which kinds we've seen so we only call the
+    // batch-repair helpers once per kind. The handlers operate over
+    // the whole report (e.g. `repair_library` processes every stale
+    // manifest entry in one pass) so we don't re-enter them per
+    // issue.
+    let mut ran_library_repair = false;
+    let mut ran_target_cleanup = false;
+
+    for issue in report.all_issues() {
+        match issue.repair_kind {
+            Some(RepairKind::RemoveStaleManifestEntry)
+            | Some(RepairKind::RemoveBrokenLibrarySymlink) => {
+                if !ran_library_repair {
+                    repair_library(paths)?;
+                    ran_library_repair = true;
+                }
+            }
+            Some(RepairKind::RemoveStaleTargetSymlink) => {
+                if !ran_target_cleanup {
+                    for (name, dir_config) in config.distribution_dirs() {
+                        let removed =
+                            cleanup::cleanup_target(&dir_config.path, paths.library_dir(), false)?;
+                        if removed > 0 {
+                            println!(
+                                "  {} Removed {} stale symlink(s) from {}",
+                                style("fixed").green(),
+                                removed,
+                                name
+                            );
+                        }
+                    }
+                    ran_target_cleanup = true;
+                }
+            }
+            None => {
+                // Interactive-only or informational. The orphan-dir
+                // and (still-present, deleted in Task 3) git-tracked
+                // paths handle these elsewhere.
+                debug!(
+                    target: "doctor::repair",
+                    category = ?issue.category,
+                    reason = "no_repair_kind",
+                    "skipped repair"
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Show auto-fixable repair actions. Each auto-fixable issue prints
+/// its repair-kind action label (typed dispatch; no substring
+/// matching). Non-auto-fixable issues are skipped (they're rendered
+/// in interactive prompts elsewhere).
+fn render_repair_plan_auto(report: &DoctorReport) {
+    for issue in report.all_issues() {
+        let Some(kind) = issue.repair_kind else {
+            continue;
+        };
         println!(
             "  → {} ({})",
             issue.message,
-            style("no auto-repair available").cyan()
+            style(repair_kind_action_label(kind)).cyan()
         );
     }
 }
@@ -586,7 +908,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
 
     if !library_dir.is_dir() {
-        issues.push(DiagnosticIssue::untyped(
+        issues.push(DiagnosticIssue::library(
             IssueSeverity::Warning,
             "library directory does not exist",
         ));
@@ -596,7 +918,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     let m = match manifest::load(config_dir) {
         Ok(m) => m,
         Err(e) => {
-            issues.push(DiagnosticIssue::untyped(
+            issues.push(DiagnosticIssue::library(
                 IssueSeverity::Error,
                 format!("manifest is corrupted or unreadable: {}", e),
             ));
@@ -611,17 +933,22 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             let entry = m.get(name.as_str());
             let is_managed = entry.is_some_and(|e| e.managed);
             if is_managed && entry_path.is_symlink() {
-                issues.push(DiagnosticIssue::untyped(
+                // Broken managed symlink — same action as "missing
+                // directory" (remove manifest entry + delete symlink),
+                // so it shares the RemoveStaleManifestEntry handler.
+                issues.push(DiagnosticIssue::library_repairable(
                     IssueSeverity::Error,
                     format!(
                         "managed skill '{}' has a broken symlink (source may have been uninstalled)",
                         name
                     ),
+                    RepairKind::RemoveStaleManifestEntry,
                 ));
             } else {
-                issues.push(DiagnosticIssue::untyped(
+                issues.push(DiagnosticIssue::library_repairable(
                     IssueSeverity::Error,
                     format!("manifest entry '{}' has no directory on disk", name),
+                    RepairKind::RemoveStaleManifestEntry,
                 ));
             }
         }
@@ -638,7 +965,11 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         let name = entry.file_name().to_string_lossy().to_string();
 
         if path.is_dir() && !name.starts_with('.') && !m.contains_key(&name) {
-            issues.push(DiagnosticIssue::untyped(
+            // Orphan directories are interactive-only — the user
+            // decides keep/delete/skip per item. No `repair_kind` so
+            // the global "Apply N auto-fixable repairs?" prompt does
+            // not include orphan directories.
+            issues.push(DiagnosticIssue::library(
                 IssueSeverity::Warning,
                 format!("orphan directory: {} (not in manifest)", path.display()),
             ));
@@ -650,83 +981,28 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             if !is_managed {
                 let raw_target = std::fs::read_link(&path)
                     .with_context(|| format!("failed to read symlink {}", path.display()))?;
-                issues.push(DiagnosticIssue::untyped(
+                issues.push(DiagnosticIssue::library_repairable(
                     IssueSeverity::Error,
                     format!(
                         "broken legacy symlink: {} -> {}",
                         path.display(),
                         raw_target.display()
                     ),
+                    RepairKind::RemoveBrokenLibrarySymlink,
                 ));
             }
         }
     }
 
-    // Check if managed symlinks are git-tracked (they show as broken paths on GitHub)
-    let git_dir = library_dir.join(".git");
-    if git_dir.exists()
-        || library_dir
-            .parent()
-            .is_some_and(|p| p.join(".git").exists())
-    {
-        let tracked = tracked_managed_symlinks(library_dir, &m);
-        if !tracked.is_empty() {
-            issues.push(DiagnosticIssue::untyped(
-                IssueSeverity::Warning,
-                format!(
-                    "{} managed symlink(s) tracked in git (machine-specific, should be gitignored)",
-                    tracked.len()
-                ),
-            ));
-        }
-    }
+    // FIX-03 (#532): v0.10 made managed skills real directory copies,
+    // so the pre-v0.10 git-tracking detection check is obsolete
+    // (managed skills cannot be symlinks any more — the detection
+    // criterion can never fire on a clean v0.10 library). The check,
+    // its render/Confirm flow, and the supporting git-shellout
+    // helper are deleted entirely. If a real failure mode emerges, a
+    // new ticket will scope it.
 
     Ok(issues)
-}
-
-/// Find managed skill symlinks that are tracked by git in the library directory.
-///
-/// These contain absolute machine-specific paths and show as broken on GitHub.
-fn tracked_managed_symlinks(
-    library_dir: &Path,
-    manifest: &crate::manifest::Manifest,
-) -> Vec<String> {
-    let output = std::process::Command::new("git")
-        .args(["ls-files", "-s"])
-        .current_dir(library_dir)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output();
-
-    let Ok(output) = output else {
-        return Vec::new(); // git not available or not a repo
-    };
-
-    if !output.status.success() {
-        return Vec::new();
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut tracked = Vec::new();
-
-    for line in stdout.lines() {
-        // git ls-files -s output: "120000 <hash> <stage>\t<path>"
-        // 120000 = symlink file mode
-        if !line.starts_with("120000 ") {
-            continue;
-        }
-        let Some(path) = line.split('\t').nth(1) else {
-            continue;
-        };
-        // Check if this is a managed skill (just the name, no subdirectory)
-        let name = path.rsplit('/').next().unwrap_or(path);
-        if manifest.get(name).is_some_and(|e| e.managed) {
-            tracked.push(name.to_string());
-        }
-    }
-
-    tracked
 }
 
 fn check_distribution_dir(
@@ -737,7 +1013,7 @@ fn check_distribution_dir(
     let mut issues = Vec::new();
 
     if !skills_dir.is_dir() {
-        issues.push(DiagnosticIssue::untyped(
+        issues.push(DiagnosticIssue::directory(
             IssueSeverity::Warning,
             format!("directory path does not exist ({})", skills_dir.display()),
         ));
@@ -770,9 +1046,10 @@ fn check_distribution_dir(
             let points_into_library =
                 target.starts_with(library_dir) || target.starts_with(&canonical_library);
             if points_into_library && !target.exists() {
-                issues.push(DiagnosticIssue::untyped(
+                issues.push(DiagnosticIssue::directory_repairable(
                     IssueSeverity::Error,
                     format!("stale symlink {}", path.display()),
+                    RepairKind::RemoveStaleTargetSymlink,
                 ));
             }
             // HARD-09 / D-DIST-2: surface foreign symlinks so they show
@@ -782,10 +1059,10 @@ fn check_distribution_dir(
             // semantics stay in lockstep across the two emit sites.
             // Renders as Warning per D-DIST-2; contributes to
             // `total_issues` via the existing summing logic.
+            // Category is promoted to ForeignSymlink (D-CAT-1).
             if crate::distribute::is_foreign_symlink(&path, library_dir) {
-                issues.push(DiagnosticIssue::typed(
+                issues.push(DiagnosticIssue::directory_foreign_symlink(
                     IssueSeverity::Warning,
-                    DiagnosticIssueKind::ForeignSymlink,
                     format!(
                         "foreign symlink: {} -> {} (points outside library_dir; tome will skip on sync unless --force)",
                         path.display(),
@@ -804,7 +1081,7 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
 
     for (name, dir_config) in &config.directories {
         if !dir_config.path.exists() {
-            issues.push(DiagnosticIssue::untyped(
+            issues.push(DiagnosticIssue::config(
                 IssueSeverity::Warning,
                 format!(
                     "directory '{}' path does not exist: {}",
@@ -1464,23 +1741,23 @@ mod tests {
     fn total_issues_unchanged_by_directory_diagnostic_shape() {
         let report = DoctorReport {
             configured: true,
-            library_issues: vec![DiagnosticIssue::untyped(IssueSeverity::Warning, "lib")],
+            library_issues: vec![DiagnosticIssue::library(IssueSeverity::Warning, "lib")],
             directory_issues: vec![
                 DirectoryDiagnostic {
                     name: "a".to_string(),
-                    issues: vec![DiagnosticIssue::untyped(IssueSeverity::Error, "x")],
+                    issues: vec![DiagnosticIssue::directory(IssueSeverity::Error, "x")],
                     override_applied: true,
                 },
                 DirectoryDiagnostic {
                     name: "b".to_string(),
                     issues: vec![
-                        DiagnosticIssue::untyped(IssueSeverity::Error, "y"),
-                        DiagnosticIssue::untyped(IssueSeverity::Warning, "z"),
+                        DiagnosticIssue::directory(IssueSeverity::Error, "y"),
+                        DiagnosticIssue::directory(IssueSeverity::Warning, "z"),
                     ],
                     override_applied: false,
                 },
             ],
-            config_issues: vec![DiagnosticIssue::untyped(IssueSeverity::Warning, "cfg")],
+            config_issues: vec![DiagnosticIssue::config(IssueSeverity::Warning, "cfg")],
             unowned_skills: Vec::new(),
         };
         // 1 (lib) + 1 (a) + 2 (b) + 1 (cfg) = 5
@@ -1624,6 +1901,298 @@ mod tests {
         );
     }
 
+    // -- OBS-06 / D-CAT-1: IssueCategory enum --
+
+    #[test]
+    fn issue_category_all_len_4() {
+        // POLISH-04 ALL-array contract: every variant enumerated.
+        assert_eq!(IssueCategory::ALL.len(), 4);
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Library));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Directory));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::Config));
+        assert!(IssueCategory::ALL.contains(&IssueCategory::ForeignSymlink));
+    }
+
+    #[test]
+    fn issue_category_serializes_snake_case() {
+        // JSON wire-form: snake_case matches project convention
+        // (override_applied, skill_count, source_path, etc).
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Library).unwrap(),
+            "\"library\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Directory).unwrap(),
+            "\"directory\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::Config).unwrap(),
+            "\"config\""
+        );
+        assert_eq!(
+            serde_json::to_string(&IssueCategory::ForeignSymlink).unwrap(),
+            "\"foreign_symlink\""
+        );
+    }
+
+    // -- FIX-01 / D-REPAIR-1: RepairKind enum --
+
+    #[test]
+    fn repair_kind_all_len_3() {
+        // POLISH-04 ALL-array contract: every variant enumerated.
+        assert_eq!(RepairKind::ALL.len(), 3);
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleManifestEntry));
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveBrokenLibrarySymlink));
+        assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleTargetSymlink));
+    }
+
+    #[test]
+    fn repair_kind_serializes_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveStaleManifestEntry).unwrap(),
+            "\"remove_stale_manifest_entry\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveBrokenLibrarySymlink).unwrap(),
+            "\"remove_broken_library_symlink\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RepairKind::RemoveStaleTargetSymlink).unwrap(),
+            "\"remove_stale_target_symlink\""
+        );
+    }
+
+    // -- D-CAT-2: category-count invariant --
+
+    #[test]
+    fn category_counts_sum_to_total_issues() {
+        // D-CAT-2: every DiagnosticIssue belongs to exactly one
+        // category. Sum of per-category counts MUST equal
+        // report.total_issues(). The ForeignSymlink issue (which
+        // lives in directory_issues by container) counts ONLY in
+        // the ForeignSymlink bucket — the promotion in D-CAT-1
+        // shifts it out of Directory.
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue::library_repairable(
+                IssueSeverity::Error,
+                "lib repairable",
+                RepairKind::RemoveStaleManifestEntry,
+            )],
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "claude".to_string(),
+                issues: vec![
+                    DiagnosticIssue::directory_repairable(
+                        IssueSeverity::Error,
+                        "dir repairable",
+                        RepairKind::RemoveStaleTargetSymlink,
+                    ),
+                    DiagnosticIssue::directory_foreign_symlink(
+                        IssueSeverity::Warning,
+                        "foreign symlink",
+                    ),
+                ],
+                override_applied: false,
+            }],
+            config_issues: vec![DiagnosticIssue::config(IssueSeverity::Warning, "cfg")],
+            unowned_skills: Vec::new(),
+        };
+
+        let total = report.total_issues();
+        let sum: usize = IssueCategory::ALL
+            .iter()
+            .map(|c| report.count_by_category(*c))
+            .sum();
+        assert_eq!(sum, total, "category counts must sum to total_issues");
+        assert_eq!(total, 4);
+
+        // ForeignSymlink bucket contains the foreign symlink and only
+        // the foreign symlink.
+        assert_eq!(report.count_by_category(IssueCategory::ForeignSymlink), 1);
+        // Directory bucket holds the directory_repairable but NOT the
+        // foreign symlink (promoted).
+        assert_eq!(report.count_by_category(IssueCategory::Directory), 1);
+        assert_eq!(report.count_by_category(IssueCategory::Library), 1);
+        assert_eq!(report.count_by_category(IssueCategory::Config), 1);
+    }
+
+    // -- D-REPAIR-2: zero-prompt skip --
+
+    #[test]
+    fn auto_fixable_count_is_zero_when_no_repair_kind() {
+        // D-REPAIR-2: when the report has issues but none carry a
+        // repair_kind, the dispatcher's global "Apply N auto-fixable
+        // repairs?" prompt is skipped. The easiest contract pin is
+        // auto_fixable_count == 0 in this state. (#530 — the
+        // pre-FIX-01 code printed
+        // "(no auto-repair available)" lines under a non-zero
+        // count; that contradiction is fixed by skipping the prompt
+        // at zero entirely.)
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue::library(
+                IssueSeverity::Warning,
+                "orphan directory: /tmp/foo (not in manifest)",
+            )],
+            directory_issues: Vec::new(),
+            config_issues: vec![DiagnosticIssue::config(
+                IssueSeverity::Warning,
+                "directory 'x' path does not exist",
+            )],
+            unowned_skills: Vec::new(),
+        };
+        assert!(report.total_issues() > 0, "fixture sanity");
+        assert_eq!(report.auto_fixable_count(), 0);
+    }
+
+    #[test]
+    fn auto_fixable_count_matches_repairable_issues() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![
+                DiagnosticIssue::library_repairable(
+                    IssueSeverity::Error,
+                    "stale a",
+                    RepairKind::RemoveStaleManifestEntry,
+                ),
+                DiagnosticIssue::library(IssueSeverity::Warning, "orphan directory: /tmp/x"),
+            ],
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "claude".to_string(),
+                issues: vec![DiagnosticIssue::directory_repairable(
+                    IssueSeverity::Error,
+                    "stale symlink /tmp/x",
+                    RepairKind::RemoveStaleTargetSymlink,
+                )],
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        assert_eq!(report.auto_fixable_count(), 2);
+    }
+
+    // -- D-CAT-3: summary breakdown rendering --
+
+    #[test]
+    fn summary_line_omits_breakdown_when_no_auto_fixable() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue::library(
+                IssueSeverity::Warning,
+                "orphan directory: /tmp/foo",
+            )],
+            directory_issues: Vec::new(),
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let line = render_summary_line(&report);
+        assert!(line.contains("Found 1 issue(s)."), "{line}");
+        assert!(
+            !line.contains("auto-fixable"),
+            "no auto-fixable issues → no breakdown: {line}"
+        );
+    }
+
+    #[test]
+    fn summary_line_renders_per_category_breakdown() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![
+                DiagnosticIssue::library_repairable(
+                    IssueSeverity::Error,
+                    "a",
+                    RepairKind::RemoveStaleManifestEntry,
+                ),
+                DiagnosticIssue::library_repairable(
+                    IssueSeverity::Error,
+                    "b",
+                    RepairKind::RemoveBrokenLibrarySymlink,
+                ),
+            ],
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "claude".to_string(),
+                issues: vec![DiagnosticIssue::directory_foreign_symlink(
+                    IssueSeverity::Warning,
+                    "foreign",
+                )],
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let line = render_summary_line(&report);
+        // Only categories with non-zero auto-fixable counts appear.
+        // Library has 2 auto-fixable; ForeignSymlink has 0 (foreign
+        // symlinks aren't auto-repairable). Directory has 0.
+        assert!(line.contains("Library 2"), "missing 'Library 2': {line}");
+        assert!(
+            !line.contains("Foreign-symlink"),
+            "ForeignSymlink not auto-fixable, must be omitted from breakdown: {line}"
+        );
+        assert!(
+            line.contains("(2 auto-fixable"),
+            "auto_fixable_count must equal 2: {line}"
+        );
+    }
+
+    #[test]
+    fn summary_json_includes_categories_and_auto_fixable_breakdown() {
+        let report = DoctorReport {
+            configured: true,
+            library_issues: vec![DiagnosticIssue::library_repairable(
+                IssueSeverity::Error,
+                "x",
+                RepairKind::RemoveStaleManifestEntry,
+            )],
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "claude".to_string(),
+                issues: vec![DiagnosticIssue::directory_foreign_symlink(
+                    IssueSeverity::Warning,
+                    "foreign",
+                )],
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let summary = render_summary_json(&report);
+        assert_eq!(summary["total_issues"], 2);
+        assert_eq!(summary["auto_fixable_count"], 1);
+        assert_eq!(summary["by_category"]["library"], 1);
+        assert_eq!(summary["by_category"]["foreign_symlink"], 1);
+        assert_eq!(summary["by_category"]["directory"], 0);
+        assert_eq!(summary["by_category"]["config"], 0);
+        // Sparse map: only categories with auto-fixable > 0 appear.
+        assert_eq!(summary["auto_fixable_by_category"]["library"], 1);
+        assert!(
+            summary["auto_fixable_by_category"]
+                .get("foreign_symlink")
+                .is_none(),
+            "foreign_symlink has zero auto-fixable; must be absent from sparse map"
+        );
+    }
+
+    // -- D-CAT-1: per-issue JSON category field --
+
+    #[test]
+    fn diagnostic_issue_serialises_category_in_json() {
+        let issue = DiagnosticIssue::library(IssueSeverity::Warning, "x");
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(
+            json.contains("\"category\":\"library\""),
+            "per-issue category must always be present: {json}"
+        );
+    }
+
+    #[test]
+    fn foreign_symlink_issue_has_promoted_category() {
+        let issue = DiagnosticIssue::directory_foreign_symlink(IssueSeverity::Warning, "x");
+        assert_eq!(issue.category, IssueCategory::ForeignSymlink);
+        let json = serde_json::to_string(&issue).unwrap();
+        assert!(json.contains("\"category\":\"foreign_symlink\""), "{json}");
+    }
+
     // -- HARD-09 / D-DIST-2: DiagnosticIssueKind::ForeignSymlink --
 
     #[test]
@@ -1639,13 +2208,13 @@ mod tests {
         // D-DIST-2: the ForeignSymlink variant always emits as Warning
         // (NOT Error) — the user has a healthy alternative tome install
         // sharing the directory; this is informational, not a fault.
-        let issue = DiagnosticIssue::typed(
+        let issue = DiagnosticIssue::directory_foreign_symlink(
             IssueSeverity::Warning,
-            DiagnosticIssueKind::ForeignSymlink,
             "foreign symlink: ~/.claude/skills/foo -> /other/library/foo",
         );
         assert_eq!(issue.severity, IssueSeverity::Warning);
         assert_eq!(issue.kind, Some(DiagnosticIssueKind::ForeignSymlink));
+        assert_eq!(issue.category, IssueCategory::ForeignSymlink);
     }
 
     #[test]
@@ -1658,9 +2227,8 @@ mod tests {
             library_issues: Vec::new(),
             directory_issues: vec![DirectoryDiagnostic {
                 name: "claude".to_string(),
-                issues: vec![DiagnosticIssue::typed(
+                issues: vec![DiagnosticIssue::directory_foreign_symlink(
                     IssueSeverity::Warning,
-                    DiagnosticIssueKind::ForeignSymlink,
                     "foreign symlink",
                 )],
                 override_applied: false,
@@ -1674,22 +2242,18 @@ mod tests {
     #[test]
     fn foreign_symlink_serialises_kind_in_json() {
         // JSON shape: typed `kind` field appears for ForeignSymlink
-        // emissions; absent for legacy untyped issues.
-        let typed = DiagnosticIssue::typed(
-            IssueSeverity::Warning,
-            DiagnosticIssueKind::ForeignSymlink,
-            "msg",
-        );
+        // emissions; absent for untyped category constructors.
+        let typed = DiagnosticIssue::directory_foreign_symlink(IssueSeverity::Warning, "msg");
         let json = serde_json::to_string(&typed).unwrap();
         assert!(
             json.contains("\"kind\":\"ForeignSymlink\""),
             "typed issue must serialise kind: {json}"
         );
 
-        let untyped = DiagnosticIssue::untyped(IssueSeverity::Warning, "msg");
+        let untyped = DiagnosticIssue::library(IssueSeverity::Warning, "msg");
         let json = serde_json::to_string(&untyped).unwrap();
         assert!(
-            !json.contains("kind"),
+            !json.contains("\"kind\""),
             "untyped issue must omit kind via skip_serializing_if: {json}"
         );
     }

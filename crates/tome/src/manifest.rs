@@ -22,6 +22,11 @@ pub(crate) const MANIFEST_FILENAME: &str = ".tome-manifest.json";
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
     skills: BTreeMap<SkillName, SkillEntry>,
+    /// Timestamp of last successful `tome sync` completion (post-cleanup).
+    /// Stamped by `sync()` after distribute + cleanup succeed (D-LSYNC-3).
+    /// `None` for pre-v0.11 manifests; renders as "never" in `tome status`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_synced_at: Option<String>,
 }
 
 impl Manifest {
@@ -100,6 +105,19 @@ impl Manifest {
     /// helpers like `update_source_name`.
     pub(crate) fn skills_get_mut(&mut self, name: &str) -> Option<&mut SkillEntry> {
         self.skills.get_mut(name)
+    }
+
+    /// RFC-3339 timestamp of last successful sync; `None` for pre-v0.11
+    /// manifests or before any sync has completed (D-LSYNC-2).
+    pub fn last_synced_at(&self) -> Option<&str> {
+        self.last_synced_at.as_deref()
+    }
+
+    /// Stamps `last_synced_at` with the current UTC time in RFC-3339 form.
+    /// Called by `sync()` after distribute + cleanup succeed (D-LSYNC-3).
+    /// Crate-visible only — external mutation must go through sync.
+    pub(crate) fn stamp_last_synced_at(&mut self) {
+        self.last_synced_at = Some(now_iso8601());
     }
 }
 
@@ -876,6 +894,77 @@ mod tests {
         assert!(
             reloaded.get("beta").is_none(),
             "post-fail manifest must NOT hold the new (beta) entry"
+        );
+    }
+
+    // ---- OBS-07 last_synced_at header field (D-LSYNC-1) -------------------
+    // Additive-compat manifest header: pre-v0.11 manifests deserialize cleanly
+    // with `last_synced_at: None`. A fresh stamp survives serde round-trip.
+    // Default manifests omit the key on serialize (`skip_serializing_if`).
+
+    #[test]
+    fn manifest_pre_v011_json_deserializes_with_none_last_synced_at() {
+        // Pre-v0.11 manifest shape: `{"skills": {}}` with no header field.
+        // Must round-trip to a Manifest with last_synced_at == None.
+        let json = r#"{"skills": {}}"#;
+        let manifest: Manifest =
+            serde_json::from_str(json).expect("pre-v0.11 manifest must deserialize cleanly");
+        assert_eq!(
+            manifest.last_synced_at(),
+            None,
+            "pre-v0.11 manifest must produce last_synced_at == None"
+        );
+    }
+
+    #[test]
+    fn manifest_stamp_round_trip_preserves_timestamp() {
+        let mut m = Manifest::default();
+        m.stamp_last_synced_at();
+        let stamped = m
+            .last_synced_at()
+            .expect("stamp must populate last_synced_at")
+            .to_string();
+        let s = serde_json::to_string(&m).expect("stamped manifest must serialize");
+        let m2: Manifest = serde_json::from_str(&s).expect("stamped manifest must deserialize");
+        let round_tripped = m2
+            .last_synced_at()
+            .expect("round-tripped manifest must still have last_synced_at");
+        assert_eq!(
+            round_tripped, stamped,
+            "round-trip must preserve last_synced_at byte-for-byte"
+        );
+        // The stamp is produced via now_iso8601(); shape is "YYYY-MM-DDTHH:MM:SSZ".
+        assert!(
+            round_tripped.ends_with('Z') && round_tripped.len() == 20,
+            "stamp must be RFC-3339 'YYYY-MM-DDTHH:MM:SSZ', got: {round_tripped}"
+        );
+    }
+
+    #[test]
+    fn manifest_default_skips_last_synced_at_in_json() {
+        let m = Manifest::default();
+        let json = serde_json::to_string(&m).unwrap();
+        assert!(
+            !json.contains("last_synced_at"),
+            "default manifest must NOT serialize last_synced_at key, got: {json}"
+        );
+    }
+
+    #[test]
+    fn manifest_last_synced_at_accessor_shape() {
+        let mut m = Manifest::default();
+        assert_eq!(
+            m.last_synced_at(),
+            None,
+            "default manifest must report None"
+        );
+        m.stamp_last_synced_at();
+        let stamped = m
+            .last_synced_at()
+            .expect("after stamp, accessor must return Some(&str)");
+        assert!(
+            !stamped.is_empty(),
+            "stamped value must be non-empty, got: {stamped:?}"
         );
     }
 
