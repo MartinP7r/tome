@@ -240,6 +240,41 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [ ] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4
 
 
+## Backlog
+
+Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
+
+### Phase 999.1: Loosen frontmatter cascade (BACKLOG)
+
+**Goal:** Skills with a `SKILL.md` file but unparseable YAML frontmatter should still be discoverable and distributable. Today `discover.rs:541-563` sets `frontmatter: None` on parse failure but a downstream filter drops the skill from the manifest (cv-ats-audit reproduces this — discovered from `claude-skills` source, never lands in library manifest, then orphans the library copy). Surface as a frontmatter-lint diagnostic in `tome doctor` instead of a discovery dead-zone — let the consuming tool decide if it can use the file.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding, 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 999.2: Doctor repair — claim orphan into manifest (BACKLOG)
+
+**Goal:** Add a `tome doctor` repair option that registers an orphan library directory (`exists but is not in the manifest`) into the manifest, instead of only offering "delete" or "skip with sync hint". Current orphan flow (`doctor.rs:551-619`) is stuck when the source can't be re-discovered (e.g. broken frontmatter in 999.1) — sync can't re-register, so "keep" is a dead end and only "delete" actually progresses. A direct claim-into-manifest repair closes the loop without losing data.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding, 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 999.3: Doctor repair — consolidate target real-dir into symlink (BACKLOG)
+
+**Goal:** Add a `tome doctor` repair option that detects real directories in a distribution target whose contents are byte-identical to a library skill, and offers to replace the real directory with a symlink into the library. `check_distribution_dir` (`doctor.rs:1008-1077`) currently only iterates symlinks — non-symlink entries are ignored, so the "real-dir collision" warnings from `tome sync` (`exists in target and is not a symlink, skipping`) have no follow-up surface. Hash-compare against `library_dir/<name>` (or compare manifest timestamps) and, if matched, offer to delete the real dir so next sync symlinks. Effectively de-duplicates pre-tome content drift across targets.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding (`~/.agents/skills/asc-*` real dirs reproducing), 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+
 ## Progress
 
 **Execution Order:**
