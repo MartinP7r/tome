@@ -5,6 +5,54 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`make release` recipe + FIX-06 regression tests** — Cross-platform `sed`.
+  The Makefile's `release` recipe and the three `cli_make_release.rs`
+  regression tests both used `sed -i ''` (BSD-only syntax) which fails on
+  GNU sed (Linux) with `can't read s/...: No such file or directory` —
+  GNU sed treats the empty `''` as the filename rather than a no-backup
+  sentinel. Switched both to `sed -i.bak <expr> <file> && rm -f file.bak`,
+  which works on BSD (macOS) and GNU (Linux). `make release` is now
+  Linux-portable; the v0.11.0 release was cut from macOS where the bug
+  didn't surface. (PR #537.)
+
+### Changed
+
+- **CLI help text — "sources and targets" → "directories".** Three
+  command doc-comments (`tome init`, `tome status`, `tome list`) still
+  used the pre-v0.6 mental model in their `--help` output. Updated to
+  the v0.6 unified directory vocabulary. `tome status` description now
+  also mentions the v0.11 last-sync line. (PR #537.)
+- **README + docs/src sweep for v0.10/v0.11 drift.** The README
+  Configuration example used the pre-v0.6 `[[sources]]` / `[targets.*]`
+  schema (which has been failing to parse since v0.6 shipped on
+  2026-04-16) — replaced with `[directories.<name>]` + role schema. The
+  "managed = symlink" claim was corrected to v0.10's library-canonical
+  model. Six missing commands added to the command table.
+  `docs/src/architecture.md` gained a v0.11 Observability section
+  documenting the `tracing` substrate + `TOME_LOG` envvar + per-step
+  spans. `docs/src/test-setup.md` got corrected counts
+  (214 unit / 32 integration → ~825 / ~197) and HARD-13 `cli_*.rs`
+  split documentation. Closes [#446](https://github.com/MartinP7r/tome/issues/446).
+  (PR #537.)
+- **Planning artifacts synced post-shipment.** Phase 19 closure metadata
+  brought back into alignment with the shipped v0.11.0 surface
+  (`ROADMAP.md` milestone status, `STATE.md`, `19-07-SUMMARY.md`).
+  (PR #537.)
+
+### Removed
+
+- **Unused `tracing-error` and `tracing-appender` workspace deps.** Both
+  were added speculatively during Phase 18 (observability foundation)
+  for features that never shipped (file-log rotation and `SpanTrace`
+  error-spanning). `cargo machete` flagged them; verified unused via
+  source grep. Their transitive deps (`crossbeam-channel`, `symlink`)
+  also drop out of `Cargo.lock`. If/when those features are added back,
+  the deps can come back. (PRs #537 + #538.)
+
 ## [0.11.0] - 2026-05-14
 
 ### Added
