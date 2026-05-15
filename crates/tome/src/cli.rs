@@ -161,7 +161,7 @@ pub enum Command {
         rev: Option<String>,
     },
 
-    /// Interactive wizard to configure sources and targets
+    /// Interactive wizard to configure directories
     #[command(
         after_help = "Examples:\n  tome init\n  tome init --dry-run\n  tome init --no-input\n  tome init --dry-run --no-input"
     )]
@@ -192,7 +192,7 @@ pub enum Command {
         no_install: bool,
     },
 
-    /// Show library, sources, targets, and health summary
+    /// Show library, directories, last-sync, and health summary
     #[command(after_help = "Examples:\n  tome status\n  tome status --json")]
     Status {
         /// Output as JSON
@@ -210,7 +210,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// List all discovered skills with their sources
+    /// List all discovered skills with their directory
     #[command(
         alias = "ls",
         after_help = "Examples:\n  tome list\n  tome list --json"

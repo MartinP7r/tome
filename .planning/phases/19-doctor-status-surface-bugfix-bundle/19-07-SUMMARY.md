@@ -1,8 +1,9 @@
 ---
 phase: 19-doctor-status-surface-bugfix-bundle
 plan: 07
-status: complete (pending human approval)
+status: complete
 date: 2026-05-13
+approved: 2026-05-15 (retrospective — v0.11 shipped 2026-05-14 via PR #534 + PR #535 before the human checkpoint was formally lifted)
 requirements_closed: [OBS-06, OBS-07, FIX-01, FIX-02, FIX-03, FIX-04, FIX-05, FIX-06]
 ---
 
@@ -50,4 +51,5 @@ Final wave of Phase 19. CHANGELOG.md `[Unreleased]` block now carries all 8 Phas
 ## Notes
 
 - `[Unreleased]` header is intentionally NOT renamed — the release cut via `make release VERSION=0.11.0` will trigger FIX-06's sed line to perform the rename automatically.
-- This SUMMARY is filed before the human checkpoint approval. Once the user types "approved", the phase is verified and ready for cutover.
+- Human checkpoint approved retrospectively on 2026-05-15 against the shipped v0.11 surface. Live evidence: `tome --version` → `tome 0.11.0`; `tome doctor --json` exposes `summary.by_category` + `summary.auto_fixable_by_category`; `tome status --json` exposes top-level `last_sync`; `rg "no auto-repair available" crates/tome/src/doctor.rs` returns 0 emit sites; `rg "tracked in git" crates/tome/src/doctor.rs` → 0 matches.
+- `[Unreleased]` header was renamed to `[0.11.0] - 2026-05-14` during the actual release cut (PR #534/#535); FIX-06's automated sed in `make release` did its job.

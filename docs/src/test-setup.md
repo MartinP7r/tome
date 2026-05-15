@@ -15,8 +15,8 @@ graph TB
     end
 
     subgraph TEST_SUITE["cargo test --all"]
-        UNIT["Unit Tests<br/><i>214 tests across 15 modules</i>"]
-        INTEG["Integration Tests<br/><i>32 tests in tests/cli.rs</i>"]
+        UNIT["Unit Tests<br/><i>~825 across 25+ modules (v0.11)</i>"]
+        INTEG["Integration Tests<br/><i>~197 across cli_*.rs files (v0.11)</i>"]
     end
 
     TEST --> TEST_SUITE
@@ -28,9 +28,9 @@ graph TB
 
 Each module has a `mod tests` block that tests its public functions in isolation. These tests create temporary directories with `tempfile::TempDir` and never touch the real filesystem.
 
-### Integration Tests (`tests/cli.rs`)
+### Integration Tests (`crates/tome/tests/cli_*.rs`)
 
-These compile the `tome` binary and run it as a subprocess using `assert_cmd`. They verify the full CLI flow: argument parsing, config loading, pipeline execution, and output formatting.
+These compile the `tome` binary and run it as a subprocess using `assert_cmd`. They verify the full CLI flow: argument parsing, config loading, pipeline execution, and output formatting. Post-HARD-13 (v0.10), the original `tests/cli.rs` was split into per-domain files (`cli_sync.rs`, `cli_doctor.rs`, `cli_status.rs`, `cli_init.rs`, `cli_make_release.rs`, etc.) with shared helpers under `tests/common/` — the module-level tables below are a point-in-time snapshot from pre-split and will drift; run `cargo test -p tome -- --list` for the live breakdown.
 
 ```mermaid
 graph LR
@@ -55,7 +55,7 @@ graph LR
 
 ```mermaid
 graph TB
-    subgraph unit_tests["Unit Tests (214)"]
+    subgraph unit_tests["Unit Tests (~825 — counts drift, run cargo test --list)"]
         CONFIG["config.rs<br/>─────────<br/>25 tests"]
         DISCOVER["discover.rs<br/>─────────<br/>17 tests"]
         LIBRARY["library.rs<br/>─────────<br/>31 tests"]
@@ -73,8 +73,8 @@ graph TB
         LIB["lib.rs<br/>─────────<br/>12 tests"]
     end
 
-    subgraph integration_tests["Integration Tests (32)"]
-        CLI["tests/cli.rs<br/>─────────<br/>32 tests"]
+    subgraph integration_tests["Integration Tests (~197 across cli_*.rs)"]
+        CLI["tests/cli_*.rs<br/>─────────<br/>18 files post-HARD-13"]
     end
 
     style CONFIG fill:#e8f4e8
@@ -372,9 +372,9 @@ Tests orchestration-level functions (disabled skill cleanup, commit message gene
 | `resolve_tome_home_relative_path_returns_error` | Relative path rejected |
 | `resolve_tome_home_bare_filename_returns_error` | Bare filename rejected |
 
-### `tests/cli.rs` — 32 integration tests
+### `tests/cli_*.rs` — ~197 integration tests across 18 files
 
-Each test compiles and runs the `tome` binary in a temp directory with a custom config.
+Each test compiles and runs the `tome` binary in a temp directory with a custom config. The table below is a pre-HARD-13 snapshot from when all integration tests lived in a single `tests/cli.rs` (32 tests); post-v0.10 they're split across `cli_sync.rs`, `cli_doctor.rs`, `cli_status.rs`, `cli_init.rs`, `cli_make_release.rs`, `cli_migrate_library.rs`, `cli_overrides.rs`, `cli_reassign.rs`, `cli_remove.rs`, `cli_browse.rs`, `cli_backup.rs`, `cli_add.rs`, `cli_config.rs`, `cli_eject.rs`, `cli_lint.rs`, `cli_list.rs`, `cli_misc.rs`, and `cli_sync_reconcile.rs` with shared helpers under `tests/common/`.
 
 | Test | Command | What it verifies |
 |------|---------|-----------------|

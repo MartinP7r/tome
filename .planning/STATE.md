@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v0.11
 milestone_name: Polish + Observability
-status: ready
-stopped_at: Phase 19 complete (43/43 plans); v0.11 milestone ready for release cut
-last_updated: "2026-05-13T14:26:57.471Z"
-last_activity: 2026-05-13
+status: shipped
+stopped_at: v0.11.0 released 2026-05-14 (PR #534 Phase 19 + PR #535 version bump); next milestone v1.0 Tauri GUI drafted
+last_updated: "2026-05-15T00:00:00.000Z"
+last_activity: 2026-05-15
 progress:
   total_phases: 9
   completed_phases: 8
@@ -24,11 +24,11 @@ See: .planning/PROJECT.md (updated after v0.10; v0.11 milestone now active)
 
 ## Current Position
 
-Milestone: v0.11 Polish + Observability — ALL PHASES COMPLETE
-Phase: 19 (doctor-status-surface-bugfix-bundle) — COMPLETED 2026-05-13
+Milestone: v0.11 Polish + Observability — SHIPPED 2026-05-14
+Phase: 19 (doctor-status-surface-bugfix-bundle) — COMPLETED 2026-05-13, verified retrospectively 2026-05-15
 Plan: 7/7 complete (verified 8/8 must-haves passed)
-Status: Ready for v0.11 release cut (`make release VERSION=0.11.0`)
-Last activity: 2026-05-13
+Status: v0.11.0 released; Cargo.toml = 0.11.0; CHANGELOG.md = [0.11.0] - 2026-05-14
+Last activity: 2026-05-15
 
 **v0.11 phase shape (Phases 18–19):**
 

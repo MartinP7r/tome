@@ -2,8 +2,15 @@
 //! date in CHANGELOG.md by replacing `## [Unreleased]` with
 //! `## [X.Y.Z] - YYYY-MM-DD`. This test exercises the exact `sed` command
 //! the Makefile recipe runs.
+//!
+//! Cross-platform note: the original tests used `sed -i ''` (BSD-only form)
+//! which broke CI on Linux ("can't read s/...: No such file or directory"
+//! — GNU sed interprets the empty `''` as a filename). The Makefile and
+//! these tests both now use `sed -i.bak ... && rm -f file.bak`, which
+//! works on both BSD (macOS) and GNU (Linux) sed.
 
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -21,6 +28,22 @@ fn today_utc() -> String {
         .to_string()
 }
 
+/// Runs `sed -i.bak <expr> <file>` and deletes the resulting `.bak` file.
+/// `-i.bak` is the BSD/GNU-portable form of in-place edit; the explicit
+/// suffix is required by BSD and accepted by GNU.
+fn sed_in_place(expr: &str, file: &Path) {
+    let status = Command::new("sed")
+        .args(["-i.bak", expr, file.to_str().unwrap()])
+        .status()
+        .unwrap();
+    assert!(status.success(), "sed exited non-zero");
+    let bak = file.with_extension(format!(
+        "{}.bak",
+        file.extension().unwrap().to_str().unwrap()
+    ));
+    let _ = fs::remove_file(&bak);
+}
+
 #[test]
 fn make_release_sed_replaces_unreleased_section() {
     let tmp = TempDir::new().unwrap();
@@ -33,11 +56,7 @@ fn make_release_sed_replaces_unreleased_section() {
 
     let date = today_utc();
     let sed_expr = format!("s/^## \\[Unreleased\\]/## [0.99.0] - {date}/");
-    let status = Command::new("sed")
-        .args(["-i", "", &sed_expr, changelog.to_str().unwrap()])
-        .status()
-        .unwrap();
-    assert!(status.success(), "sed exited non-zero");
+    sed_in_place(&sed_expr, &changelog);
 
     let content = fs::read_to_string(&changelog).unwrap();
     let expected_line = format!("## [0.99.0] - {date}");
@@ -59,20 +78,13 @@ fn make_release_sed_is_idempotent() {
 
     let date = today_utc();
     let sed_expr = format!("s/^## \\[Unreleased\\]/## [0.99.0] - {date}/");
-    Command::new("sed")
-        .args(["-i", "", &sed_expr, changelog.to_str().unwrap()])
-        .status()
-        .unwrap();
+    sed_in_place(&sed_expr, &changelog);
     let first_pass = fs::read_to_string(&changelog).unwrap();
 
     // Second pass with a DIFFERENT version — must NOT find [Unreleased]
     // to replace (it's already gone), so the file is byte-identical.
     let sed_expr2 = format!("s/^## \\[Unreleased\\]/## [1.0.0] - {date}/");
-    let status2 = Command::new("sed")
-        .args(["-i", "", &sed_expr2, changelog.to_str().unwrap()])
-        .status()
-        .unwrap();
-    assert!(status2.success(), "second sed exited non-zero");
+    sed_in_place(&sed_expr2, &changelog);
     let second_pass = fs::read_to_string(&changelog).unwrap();
     assert_eq!(
         first_pass, second_pass,
@@ -89,11 +101,7 @@ fn make_release_sed_silent_noop_when_no_unreleased_section() {
 
     let date = today_utc();
     let sed_expr = format!("s/^## \\[Unreleased\\]/## [0.99.0] - {date}/");
-    let status = Command::new("sed")
-        .args(["-i", "", &sed_expr, changelog.to_str().unwrap()])
-        .status()
-        .unwrap();
-    assert!(status.success(), "sed exited non-zero on no-match input");
+    sed_in_place(&sed_expr, &changelog);
 
     let content = fs::read_to_string(&changelog).unwrap();
     assert_eq!(

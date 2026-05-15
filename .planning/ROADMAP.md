@@ -7,8 +7,8 @@
 - ✅ **v0.8 Wizard UX & Safety Hardening** — Phases 7-8 + 8.1 hotfix (shipped 2026-04-27) — [archive](milestones/v0.8-ROADMAP.md)
 - ✅ **v0.9 Cross-Machine Config Portability & Polish** — Phases 9-10 (shipped 2026-04-29) — [archive](milestones/v0.9-ROADMAP.md)
 - ✅ **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation** — Phases 11-17 (shipped 2026-05-11) — closes epic [#459](https://github.com/MartinP7r/tome/issues/459) — [archive](milestones/v0.10-ROADMAP.md)
-- 🚧 **v0.11 Polish + Observability** — Phases 18-19 (in progress, started 2026-05-12)
-- 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, deferred to after v0.11 ships — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
+- ✅ **v0.11 Polish + Observability** — Phases 18-19 (shipped 2026-05-14)
+- 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
 
@@ -73,7 +73,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 </details>
 
-### 🚧 v0.11 Polish + Observability (In Progress)
+### ✅ v0.11 Polish + Observability (Shipped 2026-05-14)
 
 **Milestone Goal:** Ship the v0.10-surfaced bug bundle and adopt structured logging across the codebase so `tome sync`/`doctor`/`status` give clearer signal — laying groundwork for the v1.0 GUI's IPC + log-capture needs. Scope discipline: instrument existing output, not redesign it.
 
@@ -237,7 +237,55 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 19-04-flake-bounds-relaxation-PLAN.md — Wave 2B: browse test bound 600ms→2000ms + reproduce-first backup test fix per actual root cause — FIX-02
 - [x] 19-05-wizard-ansi-aware-width-PLAN.md — Wave 2C: reproduce-first then either strip-ansi-escapes dep + strip call OR administrative close path; snapshot test ships either way — FIX-04
 - [x] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
-- [ ] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4
+- [x] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4 (approved 2026-05-15, retrospective — v0.11 shipped 2026-05-14 via PR #534 + #535)
+
+
+## Backlog
+
+Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
+
+### Phase 999.1: Loosen frontmatter cascade (BACKLOG)
+
+**Goal:** Skills with a `SKILL.md` file but unparseable YAML frontmatter should still be discoverable and distributable. Today `discover.rs:541-563` sets `frontmatter: None` on parse failure but a downstream filter drops the skill from the manifest (cv-ats-audit reproduces this — discovered from `claude-skills` source, never lands in library manifest, then orphans the library copy). Surface as a frontmatter-lint diagnostic in `tome doctor` instead of a discovery dead-zone — let the consuming tool decide if it can use the file.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding, 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 999.2: Doctor repair — claim orphan into manifest (BACKLOG)
+
+**Goal:** Add a `tome doctor` repair option that registers an orphan library directory (`exists but is not in the manifest`) into the manifest, instead of only offering "delete" or "skip with sync hint". Current orphan flow (`doctor.rs:551-619`) is stuck when the source can't be re-discovered (e.g. broken frontmatter in 999.1) — sync can't re-register, so "keep" is a dead end and only "delete" actually progresses. A direct claim-into-manifest repair closes the loop without losing data.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding, 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 999.3: Doctor repair — consolidate target real-dir into symlink (BACKLOG)
+
+**Goal:** Add a `tome doctor` repair option that detects real directories in a distribution target whose contents are byte-identical to a library skill, and offers to replace the real directory with a symlink into the library. `check_distribution_dir` (`doctor.rs:1008-1077`) currently only iterates symlinks — non-symlink entries are ignored, so the "real-dir collision" warnings from `tome sync` (`exists in target and is not a symlink, skipping`) have no follow-up surface. Hash-compare against `library_dir/<name>` (or compare manifest timestamps) and, if matched, offer to delete the real dir so next sync symlinks. Effectively de-duplicates pre-tome content drift across targets.
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding (`~/.agents/skills/asc-*` real dirs reproducing), 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
+### Phase 999.4: Generic managed source directory (BACKLOG)
+
+**Goal:** Generalize the `Managed` role beyond `claude-plugins` so external package managers that distribute SKILL.md content via a flat directory can be modeled as Managed sources. Today `validate.rs:36-44` rejects `Directory + Managed` with a Why-line that explicitly cites "only claude-plugins is *known* to behave this way" — pfw (Point-Free Swift tooling, installs to `~/.pfw/skills/`) is the second case. Adds either a relaxed combo (Directory + Managed allowed for flat walkdir-scannable dirs) or a new `DirectoryType::ManagedDirectory` variant. Discover treats as read-only; consolidate uses the existing ClaudePlugins symlink-library→source strategy from `library.rs`; never writes back into the source path.
+
+**Symlink-coexistence policy (D-PFW-1, pre-decided):** Option 1 — assume the upstream package manager can be configured to install-only (skip its own distribution). tome takes over distribution end-to-end. Rejected: option 2 (allow_foreign_symlinks_from whitelist — adds a foreign-symlink classification axis that complicates HARD-09 / D-DIST-2 semantics) and option 3 (eject + replace — would loop against pfw's next install). Open question: how to detect/warn when pfw's distribution mode IS still active and is fighting tome's symlinks.
+
+**Requirements:** TBD
+**Origin:** Phase 19 dogfooding (15 `pfw-*` foreign symlinks in `~/.claude/skills/` flagged as `foreign symlink: ... points outside library_dir`), 2026-05-14
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
 
 
 ## Progress
@@ -266,4 +314,4 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
 | 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 3/7 | Complete    | 2026-05-13 |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 7/7 | Complete    | 2026-05-13 |
