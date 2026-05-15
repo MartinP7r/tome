@@ -7,8 +7,8 @@
 - ✅ **v0.8 Wizard UX & Safety Hardening** — Phases 7-8 + 8.1 hotfix (shipped 2026-04-27) — [archive](milestones/v0.8-ROADMAP.md)
 - ✅ **v0.9 Cross-Machine Config Portability & Polish** — Phases 9-10 (shipped 2026-04-29) — [archive](milestones/v0.9-ROADMAP.md)
 - ✅ **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation** — Phases 11-17 (shipped 2026-05-11) — closes epic [#459](https://github.com/MartinP7r/tome/issues/459) — [archive](milestones/v0.10-ROADMAP.md)
-- 🚧 **v0.11 Polish + Observability** — Phases 18-19 (in progress, started 2026-05-12)
-- 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, deferred to after v0.11 ships — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
+- ✅ **v0.11 Polish + Observability** — Phases 18-19 (shipped 2026-05-14)
+- 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
 
@@ -73,7 +73,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 </details>
 
-### 🚧 v0.11 Polish + Observability (In Progress)
+### ✅ v0.11 Polish + Observability (Shipped 2026-05-14)
 
 **Milestone Goal:** Ship the v0.10-surfaced bug bundle and adopt structured logging across the codebase so `tome sync`/`doctor`/`status` give clearer signal — laying groundwork for the v1.0 GUI's IPC + log-capture needs. Scope discipline: instrument existing output, not redesign it.
 
@@ -237,7 +237,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 19-04-flake-bounds-relaxation-PLAN.md — Wave 2B: browse test bound 600ms→2000ms + reproduce-first backup test fix per actual root cause — FIX-02
 - [x] 19-05-wizard-ansi-aware-width-PLAN.md — Wave 2C: reproduce-first then either strip-ansi-escapes dep + strip call OR administrative close path; snapshot test ships either way — FIX-04
 - [x] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
-- [ ] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4
+- [x] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4 (approved 2026-05-15, retrospective — v0.11 shipped 2026-05-14 via PR #534 + #535)
 
 
 ## Backlog
@@ -314,4 +314,4 @@ Phases execute in numeric order: 11 → 12 → 13 (alpha) → 14 → 15 (beta) �
 | 16. Cleanup-message UX + docs (rc) | v0.10 | 5/5 | Complete    | 2026-05-08 |
 | 17. Migration polish + UAT + release (v0.10 final) | v0.10 | 5/5 | Complete    | 2026-05-12 |
 | 18. Observability foundation + sync diagnostics | v0.11 | 3/3 | Complete    | 2026-05-12 |
-| 19. Doctor/status surface + bugfix bundle | v0.11 | 3/7 | Complete    | 2026-05-13 |
+| 19. Doctor/status surface + bugfix bundle | v0.11 | 7/7 | Complete    | 2026-05-13 |
