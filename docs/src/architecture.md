@@ -30,7 +30,7 @@ Listed roughly in alphabetical order:
 - `config/` — TOML config at `~/.tome/tome.toml`, split into `mod.rs` (load/save), `types.rs` (`DirectoryName`, `DirectoryType` = `ClaudePlugins`/`Directory`/`Git`, `DirectoryRole` = `Managed`/`Synced`/`Source`/`Target`, `DirectoryConfig`), `overrides.rs` (`apply_machine_overrides` merges `[directory_overrides.<name>]` from `machine.toml` after tilde expansion and before validation, PORT-01..04), and `validate.rs`. `Config::save_checked` round-trips `~/`-shaped paths via `paths::unexpand_tilde` so dotfile-committed configs stay portable (HARD-22).
 - `discover.rs` — Skill discovery from all configured directories. `ScanMode::{Local, ManagedNoProvenance, ManagedWith}` replaces the v0.9 `Option<Option<SkillProvenance>>` (HARD-05).
 - `distribute.rs` — Distribution to `synced` / `target` directories via Unix symlinks. HARD-09 foreign-symlink detection uses a 2x2 canonicalize-vs-lexical-prefix matrix to handle macOS `/var → /private/var`-style middle symlinks without false positives.
-- `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks, missing directory paths) and surfaces the unowned set in a NAME / LAST-KNOWN SOURCE / SYNCED tabled section. Per Phase 14 D-D3, the unowned set is informational and does NOT contribute to `total_issues()`. Annotates `(override)` for paths sourced from `machine.toml` (PORT-05).
+- `doctor.rs` — Diagnoses library issues (orphan directories, missing manifest entries, broken legacy symlinks, missing directory paths) and surfaces the unowned set in a NAME / LAST-KNOWN SOURCE / SYNCED tabled section. Per Phase 14 D-D3, the unowned set is informational and does NOT contribute to `total_issues()`. Annotates `(override)` for paths sourced from `machine.toml` (PORT-05). v0.11 adds issue categorization (`IssueCategory` = Library / Directory / Config / Foreign-symlink, OBS-06) with per-category counts in the text summary and `summary.by_category` + `summary.auto_fixable_by_category` maps in JSON output. Auto-repair dispatch uses typed `RepairKind` enum discrimination (POLISH-04 sentinel pattern); adding a new repair without a handler fails to compile. The pre-v0.11 "N auto-fixable issues / (no auto-repair available)" contradiction is closed (FIX-01 / #530).
 - `eject.rs` — Remove all of tome's distribution symlinks (reversible via `tome sync`).
 - `git.rs` — Git clone / pull for `type = "git"` directories. Shallow clones to `~/.tome/repos/<sha256>/`, with `branch`/`tag`/`rev` ref pinning and SHA captured in the lockfile.
 - `install.rs` — Shell completion installation. (The v0.9 reconcile-managed-plugins logic that used to live here moved to `reconcile.rs` in Phase 13.)
@@ -38,7 +38,7 @@ Listed roughly in alphabetical order:
 - `lint.rs` — Validates SKILL.md frontmatter; downcastable `LintFailed` error mapped to exit code 1 by `main.rs` (HARD-04).
 - `lockfile.rs` — Generates and loads `tome.lock` files. Each `LockEntry` carries `name`, `content_hash`, `source_name: Option<DirectoryName>` (None = Unowned), `previous_source: Option<DirectoryName>` (Phase 14 D-C1 cross-machine breadcrumb), `version`, `registry_id`, and `git_commit_sha`. Top-level fields are `pub(crate)` with read-accessors (HARD-06). The lockfile is now authoritative for managed-skill drift detection (RECON-01..05) — `reconcile.rs` reads it on every sync. Atomic temp+rename writes.
 - `machine.rs` — Per-machine preferences (`~/.config/tome/machine.toml`). Tracks `disabled` skill set, `disabled_directories` set, per-directory `disabled`/`enabled` skill filtering (`DirectoryPrefs`, MACH-04), `[directory_overrides.<name>]` path remapping (PORT-01), and `auto_install_plugins: AutoInstall { Always, Ask, Never }` (RECON-02). Hostile-input rejection in `apply_machine_overrides` covers `..` traversal, NUL bytes, broken/looping symlinks, and duplicate target paths. Atomic temp+rename writes.
-- `manifest.rs` — Library manifest (`.tome-manifest.json`). Each `SkillEntry` records `source_name: Option<DirectoryName>` (None = Unowned per LIB-03) and `previous_source: Option<DirectoryName>` (the last directory that owned the entry — Phase 14 D-C1, also closes Phase 13 D-13 fork-in-place lossy-trace gap). Twin-constructor pattern: `SkillEntry::new` for owned entries, `SkillEntry::new_unowned` for entries materialised directly into the unowned state. Provides `hash_directory()` for deterministic SHA-256 of directory contents. Atomic temp+rename writes.
+- `manifest.rs` — Library manifest (`.tome-manifest.json`). Each `SkillEntry` records `source_name: Option<DirectoryName>` (None = Unowned per LIB-03) and `previous_source: Option<DirectoryName>` (the last directory that owned the entry — Phase 14 D-C1, also closes Phase 13 D-13 fork-in-place lossy-trace gap). Twin-constructor pattern: `SkillEntry::new` for owned entries, `SkillEntry::new_unowned` for entries materialised directly into the unowned state. Provides `hash_directory()` for deterministic SHA-256 of directory contents. v0.11 adds `last_synced_at: Option<String>` (RFC-3339) at the manifest level, stamped inside the `!dry_run` guard immediately before `manifest::save` so `tome status` can surface the last-sync timestamp (OBS-07 / D-LSYNC-3). Schema lift is additive — pre-v0.11 manifests deserialize cleanly with `last_synced_at: None`. Atomic temp+rename writes.
 - `marketplace.rs` — `MarketplaceAdapter` trait (six methods: `id`, `current_version`, `install`, `update`, `list_installed`, `available`) plus `ClaudeMarketplaceAdapter` (subprocess to `claude plugin install/update`, parses `claude plugin list --json`, `RefCell` cache that auto-invalidates on `Ok` install/update) and `GitAdapter` (thin shim over `git.rs`). Failure aggregation via `InstallFailure` / `InstallOp` / `InstallFailureKind` mirrors the `RemoveFailure` pattern; `InstallFailureKind::ALL` plus a const-fn drift guard pin compile-time exhaustiveness (POLISH-04). Test mock `MockMarketplaceAdapter` lives in `marketplace::testing` behind the `test-support` feature.
 - `migration_v010.rs` — One-shot `tome migrate-library` command for converting v0.9-shape libraries (managed = symlink) to v0.10 shape (managed = real-directory copy). Idempotent; broken symlinks preserved per Phase 11 D-04. Confirm-or-abort gate via `dialoguer::Confirm::default(false)` with `--yes`/`-y` bypass (UX-02 / Phase 14 D-B3); `--no-input` without `--yes` bails with a Conflict/Why/Suggestion message. Migration plan summary uses `tabled::Style::rounded()` with NAME / SOURCE / SIZE / STATUS columns; per-skill disk size is computed via `walkdir` + `metadata().len()` (`follow_links(false)`). Slated for removal in v0.11+ once all known users have migrated.
 - `paths.rs` — `TomePaths` struct bundling `tome_home`/`library_dir`/`config_dir` to prevent parameter swaps. `expand_tilde` / `unexpand_tilde` round-trip pair (HARD-22). Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination. `collapse_home` for display.
@@ -46,7 +46,7 @@ Listed roughly in alphabetical order:
 - `reconcile.rs` — `tome sync` reconciliation core. Classifies each managed skill in the lockfile as Match / Drift / Vanished (`ReconcileClass`); resolves `auto_install_plugins` consent; renders per-skill diff before applying installs/updates; verifies post-install content_hash; surfaces edit-in-library detection with the fork/revert/skip 3-way prompt (RECON-01..05). Drift detection is content_hash-based, not version-based (Phase 11 D-08).
 - `relocate.rs` — Move the skill library to a new path with full safety guarantees: detects cross-filesystem moves with a Phase 7 D-10 Conflict/Why/Suggestion recovery hint (HARD-18), re-anchors all distribution symlinks, calls `warn_if_unreadable_symlink` (intent-first naming per HARD-16) on unreadable managed-skill symlinks instead of silently dropping provenance.
 - `remove.rs` — `tome remove dir <name>` and `tome remove skill <name>` (Phase 14 D-API-2 subcommand split). `tome remove dir` transitions every owned manifest entry to Unowned and preserves library content (Phase 11 D-10). `tome remove skill` deletes an Unowned skill entry, its library directory, downstream distribution symlinks, lockfile entry, and `machine.toml` memberships (D-B1); refuses Owned skills with a hint to use `tome remove dir` first (D-B2). Confirms via interactive prompt unless `--yes`/`-y` (D-B3). Failure aggregation via `Vec<RemoveFailure>` + `FailureKind::ALL` POLISH-04 sentinel. The originally-proposed `tome forget` verb was folded into the `skill` subcommand (vocabulary supersession; see [Unowned lifecycle](#unowned-lifecycle)).
-- `status.rs` — Read-only summary of library, directories (with type/role + override annotations), and health. Renders an Unowned skills section (NAME / LAST-KNOWN SOURCE / SYNCED) when any entries have `source_name = None` (UNOWN-03). Single-pass directory scan for efficiency.
+- `status.rs` — Read-only summary of library, directories (with type/role + override annotations), and health. Renders an Unowned skills section (NAME / LAST-KNOWN SOURCE / SYNCED) when any entries have `source_name = None` (UNOWN-03). v0.11 adds a top-line `Last sync: <RFC-3339>` (or `never`) line and a `SKILLS` column on the Directories table (OBS-07); JSON shape gains top-level `last_sync: Option<String>` and per-directory `skill_count`. Single-pass directory scan for efficiency.
 - `summary.rs` — `SkillSummary` shared type (NAME / LAST-KNOWN SOURCE / SYNCED columns) consumed by `status.rs` and `doctor.rs` Unowned sections. JSON-stable (`previous_source` serialises explicit `null` rather than being skipped).
 - `update.rs` — Lockfile diffing and interactive triage logic, invoked by `tome sync` to surface added/changed/removed skills and offer to disable unwanted new skills. (Per-managed-skill version reconciliation moved to `reconcile.rs` in Phase 13; this module retains only the pre-cleanup user-presented diff.)
 - `wizard.rs` — Interactive `tome init` setup using `dialoguer` (MultiSelect, Input, Confirm, Select). Uses the merged `KNOWN_DIRECTORIES` registry (WIZ-01, hardened in v0.7) to auto-discover common tool locations (`~/.claude/plugins/cache`, `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity/skills`, etc.). Detects pre-v0.6 legacy configs and offers cleanup (WUX-03). All diagnostic chrome routes to stderr (HARD-15).
@@ -245,9 +245,42 @@ columns. JSON output includes the new `unowned` (status) /
 informational and does NOT contribute to `tome doctor`'s `total_issues()`;
 exit code is unaffected.
 
+## Observability (v0.11)
+
+Sync/reconcile/consolidate/distribute/cleanup chatter routes through
+`tracing::{info,warn,debug}!` (OBS-01). Wizard prompts (`dialoguer`), TUI
+browse output, and user-facing summary tables (`tome status`/`list`/`doctor`
+tables, `tome sync` final summary) stay on direct stdout — `tracing` is for
+log-like output only.
+
+The `LogLevel` enum (HARD-07) maps to a `tracing_subscriber::EnvFilter`
+(OBS-02):
+
+- Default level: `info`.
+- `--verbose` raises to `debug`.
+- `--quiet` lowers to `warn`.
+- `TOME_LOG=tome::sync=debug,tome::reconcile=info` (or any `EnvFilter`
+  string) overrides the flag-derived level (D-ENV-1).
+
+`tome sync --verbose` emits one span per pipeline step (`discover`,
+`reconcile`, `consolidate`, `distribute`, `cleanup`) with an `elapsed_ms`
+field on span close (OBS-03). Spans nest under a top-level `sync` span so
+a single run produces a hierarchical trace.
+
+When `consolidate` / `distribute` re-emits a skill, the `cause` field on
+the `info!` event names *why* — one of `hash changed`, `previously
+failed`, `newly added`, or `directory now allowed` (OBS-04). The final
+sync summary block includes a reconcile classification line
+(`reconcile: N match · M drift · K vanished · L missing-from-machine`,
+OBS-05) above the cleanup buckets.
+
+`PreviouslyFailed` and `DirectoryNowAllowed` causes are documented but
+deferred to a future schema bump — the substrate is in place, the emit
+sites need a per-skill failure-history field on `SkillEntry`.
+
 ## Testing
 
-Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integration tests in `crates/tome/tests/cli.rs` exercise the binary via `assert_cmd`. Snapshot tests use `insta` (filtered for tmpdir paths). Tests use `tempfile::TempDir` and `assert_fs::TempDir` for filesystem isolation — no cleanup needed.
+Unit tests are co-located with each module (`#[cfg(test)] mod tests`). Integration tests live in `crates/tome/tests/` and exercise the binary via `assert_cmd` — post-HARD-13 (v0.10) the original `cli.rs` was split into per-domain files (`cli_sync.rs`, `cli_doctor.rs`, `cli_status.rs`, `cli_init.rs`, `cli_make_release.rs`, etc.) with shared helpers under `tests/common/`. Snapshot tests use `insta` (filtered for tmpdir paths). Tests use `tempfile::TempDir` and `assert_fs::TempDir` for filesystem isolation — no cleanup needed.
 
 ## CI
 
