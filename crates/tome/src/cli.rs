@@ -140,11 +140,21 @@ pub enum LintFormat {
 #[derive(Subcommand)]
 pub enum Command {
     /// Add a git skill repository
-    #[command(
-        after_help = "Examples:\n  tome add https://github.com/user/skills.git\n  tome add https://github.com/user/skills.git --name my-skills\n  tome add git@github.com:user/skills.git --branch main"
-    )]
+    #[command(after_help = "Examples:\n  \
+                      tome add https://github.com/user/skills.git\n  \
+                      tome add user/skills                                 # bare slug → github.com\n  \
+                      tome add user/skills/tree/main/skills                # /tree/<ref>/<subdir> shortcut\n  \
+                      tome add user/skills --subdir skills                 # explicit --subdir flag\n  \
+                      tome add user/skills --name my-skills                # custom directory name\n  \
+                      tome add git@github.com:user/skills.git --branch main")]
     Add {
-        /// Git repository URL (HTTPS or SSH)
+        /// Git repository URL (HTTPS or SSH) or `owner/repo` slug.
+        ///
+        /// Supports a GitHub `/tree/<ref>/<subdir>` suffix — the URL form
+        /// the browser shows when navigating into a subdir on github.com.
+        /// The `<ref>` becomes the default branch and `<subdir>` becomes
+        /// the discovery subdir. Explicit `--branch` / `--subdir` flags
+        /// override the URL-embedded values (with a warning).
         #[arg(value_name = "URL")]
         url: String,
         /// Custom directory name (default: extracted from URL)
@@ -159,6 +169,13 @@ pub enum Command {
         /// Pin to a specific commit SHA
         #[arg(long, conflicts_with_all = ["branch", "tag"])]
         rev: Option<String>,
+        /// Restrict discovery to a subdirectory of the clone.
+        ///
+        /// When set, discovery scans `<clone>/<SUBDIR>/*/SKILL.md` instead
+        /// of `<clone>/*/SKILL.md`. Common for Claude Code plugin repos
+        /// that keep skills under `skills/` (try `--subdir skills`).
+        #[arg(long, value_name = "PATH")]
+        subdir: Option<String>,
     },
 
     /// Interactive wizard to configure directories

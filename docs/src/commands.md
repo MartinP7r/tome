@@ -49,13 +49,32 @@ Runs the full pipeline: discover skills from configured directories, consolidate
 
 Register a git skill repository in `tome.toml`. Accepts either a full git URL (`https://github.com/owner/repo`, `git@github.com:owner/repo.git`) or a bare GitHub slug (`owner/repo`), which is expanded to `https://github.com/owner/repo` (v0.8.2+). The clone is shallow and lives in `~/.tome/repos/<sha256>/`.
 
+#### URL forms
+
+```bash
+tome add https://github.com/user/skills           # full HTTPS URL
+tome add user/skills                              # bare slug → github.com
+tome add git@github.com:user/skills.git           # SSH URL
+tome add user/skills/tree/main/skills             # /tree/<ref>/<subdir> shortcut (v0.13+)
+tome add user/skills --subdir skills              # explicit --subdir flag (v0.13+)
+```
+
+The `/tree/<ref>/<subdir>` URL form mimics how GitHub renders navigation into a subdirectory in your browser — copy-paste from `github.com/owner/repo/tree/main/skills` and it just works. Extracted `<ref>` becomes the default branch; `<subdir>` becomes the discovery subdirectory. Explicit `--branch` / `--subdir` flags override URL-embedded values (with a warning).
+
+#### Auto-detection of common subdirs (v0.13+)
+
+If `tome sync` finds zero skills at a directory's root AND no `subdir` is configured, it probes common Claude Code plugin layouts (`skills/`, `.claude-plugin/skills/`) and emits a `subdir = "..."` hint if any candidate has skills inside. Catches the "I added a Claude plugin repo and got zero skills" case without forcing the user to know the convention up front.
+
+#### Flags
+
 | Flag | Description |
 |------|-------------|
-| `URL` | Git repository URL or `owner/repo` slug |
+| `URL` | Git repository URL or `owner/repo` slug (optionally with `/tree/<ref>/<subdir>` suffix) |
 | `--name <name>` | Custom directory name (default: extracted from URL) |
-| `--branch <branch>` | Track a specific branch |
+| `--branch <branch>` | Track a specific branch (overrides URL-embedded `/tree/<ref>/...`) |
 | `--tag <tag>` | Pin to a specific tag |
 | `--rev <sha>` | Pin to a specific commit SHA |
+| `--subdir <path>` | Restrict discovery to `<clone>/<path>/*/SKILL.md` (v0.13+, overrides URL-embedded subdir) |
 
 `--branch`, `--tag`, `--rev` are mutually exclusive.
 
