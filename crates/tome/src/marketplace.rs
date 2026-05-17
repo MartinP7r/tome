@@ -29,8 +29,6 @@ use crate::paths::TomePaths;
 // dead_code allow: Phase 12 ships the trait + adapters + tests. The first
 // non-test consumer is Phase 13's sync dispatcher (RECON-*), which calls
 // `list_installed()` and stores `InstalledPlugin` values for drift detection.
-// Drop this attr when Phase 13 wires the call from `lib.rs::sync`.
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InstalledPlugin {
     /// Stable plugin identifier from the marketplace.
@@ -79,7 +77,6 @@ pub struct InstalledPlugin {
 // `GitAdapter` (Plan 12-03) and `MockMarketplaceAdapter` (Plan 12-01 tests),
 // but neither has a non-test caller yet. Drop when Phase 13's sync dispatcher
 // constructs `Box<dyn MarketplaceAdapter>` for each `DirectoryConfig`.
-#[allow(dead_code)]
 pub trait MarketplaceAdapter {
     /// Stable identifier for this adapter instance (e.g. git URL, or
     /// `"claude-plugins"` for the singleton Claude adapter).
@@ -121,8 +118,6 @@ pub trait MarketplaceAdapter {
 // dead_code allow: variants are constructed by Task 2's renderer tests in this
 // same plan; the production renderer formats them via `{:?}` (Debug derive).
 // First non-test producer arrives in Plan 12-04 (ClaudeMarketplaceAdapter).
-// Drop this attr when the first non-test caller lands.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallOp {
     Install,
@@ -146,7 +141,6 @@ pub enum InstallOp {
 // from production code in Task 2. First non-test producer arrives in Plan
 // 12-04 (ClaudeMarketplaceAdapter heuristic stderr -> kind mapper). Drop this
 // attr when the first non-test caller lands.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallFailureKind {
     /// Plugin / URL not in marketplace or not reachable.
@@ -178,7 +172,6 @@ impl InstallFailureKind {
     // dead_code allow: Task 2 of this plan adds the production renderer that
     // calls `kind.label()`; once that lands, this attr is dropped. The method
     // is also exercised by the `install_failure_kind_label_coverage` test.
-    #[allow(dead_code)]
     pub fn label(self) -> &'static str {
         match self {
             InstallFailureKind::NotFound => "Not found",
@@ -200,7 +193,6 @@ impl InstallFailureKind {
 /// exhaustiveness check. The `const _: () = ...` block below additionally
 /// pins `ALL.len() == 4` at compile time so a hand-edit that adds a match
 /// arm here without growing `ALL` (or vice versa) also fails.
-#[allow(dead_code)]
 const fn _ensure_install_failure_kind_all_exhaustive(k: InstallFailureKind) -> usize {
     match k {
         InstallFailureKind::NotFound => 0,
@@ -237,7 +229,6 @@ const _: () = {
 // constructs `InstallFailure` from upstream stderr); Phase 13 aggregates the
 // `Vec<InstallFailure>` across adapter calls. Drop this attr when the first
 // non-test caller lands.
-#[allow(dead_code)]
 #[derive(Debug)]
 pub struct InstallFailure {
     /// Adapter that produced the failure — typically the adapter's
@@ -274,7 +265,6 @@ pub struct InstallFailure {
 // Plan 12-02 ships only the renderer + tests; the wrapper [`render_install_failures`]
 // and the renderer tests in this file exercise both functions. Drop this attr
 // when Phase 13 wires the call from `lib.rs::sync`.
-#[allow(dead_code)]
 pub(crate) fn format_install_failures(failures: &[InstallFailure]) -> String {
     if failures.is_empty() {
         return String::new();
@@ -332,14 +322,12 @@ pub fn render_install_failures(failures: &[InstallFailure]) {
 // `GitAdapter::for_directory(...)` for each `DirectoryType::Git` entry. Drop
 // this attr (and the `#[allow]`s on the inherent methods below) when Phase 13
 // wires the dispatch.
-#[allow(dead_code)]
 pub struct GitAdapter {
     url: String,
     cache_dir: PathBuf,
     git_ref: Option<GitRef>,
 }
 
-#[allow(dead_code)]
 impl GitAdapter {
     /// Construct a `GitAdapter` from a git-type [`DirectoryConfig`].
     ///
@@ -501,10 +489,11 @@ pub(crate) fn parse_claude_plugin_list_json(input: &str) -> Result<Vec<Installed
 /// once empirical evidence surfaces; they exist in the enum so the renderer's
 /// grouped output is forward-compatible.
 //
-// dead_code allow: only producer is `ClaudeMarketplaceAdapter::build_install_failure`,
-// which is itself only consumed from tests until Phase 13's sync flow wraps
-// adapter `install`/`update` errors into `Vec<InstallFailure>`. Drop this
-// attr when Phase 13's first non-test caller lands.
+// Currently exercised only via tests; production callers will land when
+// `lib.rs::sync` wraps adapter `install`/`update` errors into
+// `Vec<InstallFailure>` (tracked separately — see #518 ClaudeMarketplaceAdapter
+// error-chain capture). The `_coverage` and `_basic` unit tests pin the
+// behavior so callers can rely on it when they come online.
 #[allow(dead_code)]
 pub(crate) fn classify_claude_install_stderr(stderr: &str) -> InstallFailureKind {
     // Both "not found in marketplace" and bare "not found" map to NotFound,
@@ -533,7 +522,6 @@ pub(crate) fn classify_claude_install_stderr(stderr: &str) -> InstallFailureKind
 // itself has no non-test consumer until Phase 13's D-11 dispatcher constructs
 // the adapter. Smoke tests in this module also call this directly. Drop this
 // attr when the dispatcher lands.
-#[allow(dead_code)]
 pub fn is_claude_available() -> bool {
     std::process::Command::new("claude")
         .arg("--version")
@@ -592,12 +580,10 @@ fn run_claude_subcommand(args: &[&str]) -> Result<std::process::Output> {
 // directories. Drop this attr (and the `#[allow]` on the inherent impl block
 // below) when the dispatcher lands. The trait impl block follows the trait's
 // reachability and does not need its own attr.
-#[allow(dead_code)]
 pub struct ClaudeMarketplaceAdapter {
     cache: RefCell<Option<Vec<InstalledPlugin>>>,
 }
 
-#[allow(dead_code)]
 impl ClaudeMarketplaceAdapter {
     /// Construct a `ClaudeMarketplaceAdapter`, probing `claude --version` to
     /// fail fast if the binary is missing.
@@ -669,9 +655,10 @@ impl ClaudeMarketplaceAdapter {
     ///
     /// Pulled out as a testable `pub(crate)` helper so the stderr-to-failure
     /// conversion can be exercised in unit tests without spawning a
-    /// subprocess. Phase 13's sync flow may also call this helper directly
+    /// subprocess. The production sync flow may call this helper directly
     /// when it wraps adapter `install`/`update` errors into
-    /// `Vec<InstallFailure>` for the grouped renderer.
+    /// `Vec<InstallFailure>` for the grouped renderer (tracked separately).
+    #[allow(dead_code)]
     pub(crate) fn build_install_failure(
         adapter_id: &str,
         plugin_id: &str,

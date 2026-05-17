@@ -692,10 +692,15 @@ fn render_summary_json(report: &DoctorReport) -> serde_json::Value {
     let mut auto_fixable_by_category = Map::new();
     for c in IssueCategory::ALL {
         let n = report.count_by_category(c);
+        // `IssueCategory` derives `Serialize` and renders as a JSON string —
+        // any failure here is a programming error (e.g. a new variant added
+        // without `#[serde(rename_all = "snake_case")]`), not a runtime
+        // condition we should silently mask. Panicking with a clear message
+        // beats emitting `"": <count>` and corrupting machine-readable output.
         let key = serde_json::to_value(c)
             .ok()
             .and_then(|v| v.as_str().map(str::to_string))
-            .unwrap_or_default();
+            .expect("IssueCategory serializes to a JSON string");
         by_category.insert(key.clone(), Value::from(n));
         let nf = report.auto_fixable_count_by_category(c);
         if nf > 0 {

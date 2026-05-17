@@ -19,7 +19,7 @@ use crate::validation::ContentHash;
 pub(crate) const LOCKFILE_NAME: &str = "tome.lock";
 
 /// Top-level lockfile structure.
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Lockfile {
     /// Schema version (currently 1).
     pub(crate) version: u32,

@@ -225,7 +225,7 @@ pub fn reconcile_lockfile(
     };
 
     // 5. Apply if consent allows.
-    let mut working_lockfile = clone_lockfile(lockfile);
+    let mut working_lockfile = lockfile.clone();
     let apply_should_run = matches!(consent, ConsentDecision::Apply) && !opts.no_install;
     if apply_should_run {
         apply_drift_and_missing(
@@ -256,21 +256,6 @@ pub fn reconcile_lockfile(
     }
 
     Ok(report)
-}
-
-/// Clone a `Lockfile` field-by-field. `Lockfile` does not derive `Clone`
-/// (touching its derives is out of scope for Phase 13 — see HARD-06), but
-/// `LockEntry` does, so this helper rebuilds the BTreeMap manually.
-fn clone_lockfile(src: &Lockfile) -> Lockfile {
-    let skills = src
-        .skills
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
-    Lockfile {
-        version: src.version,
-        skills,
-    }
 }
 
 /// Classify every managed lockfile entry against the live marketplace.
