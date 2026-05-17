@@ -7,7 +7,8 @@
 - ✅ **v0.8 Wizard UX & Safety Hardening** — Phases 7-8 + 8.1 hotfix (shipped 2026-04-27) — [archive](milestones/v0.8-ROADMAP.md)
 - ✅ **v0.9 Cross-Machine Config Portability & Polish** — Phases 9-10 (shipped 2026-04-29) — [archive](milestones/v0.9-ROADMAP.md)
 - ✅ **v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation** — Phases 11-17 (shipped 2026-05-11) — closes epic [#459](https://github.com/MartinP7r/tome/issues/459) — [archive](milestones/v0.10-ROADMAP.md)
-- ✅ **v0.11 Polish + Observability** — Phases 18-19 (shipped 2026-05-14)
+- ✅ **v0.11 Polish + Observability** — Phases 18-19 (shipped 2026-05-14, v0.11.1 patch 2026-05-15)
+- ✅ **v0.12 Pre-v1.0 Review Polish** — whole-codebase audit fix bundle (shipped 2026-05-17 as v0.12.0; trivial version-bump-only patch v0.12.1 same day). Deferred items tracked in [#542](https://github.com/MartinP7r/tome/issues/542) for v1.0 Phase 10 absorption.
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases

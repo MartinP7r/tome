@@ -3,12 +3,14 @@
 | Command | Description |
 |---------|-------------|
 | `tome init` | Interactive wizard to configure directories |
-| `tome sync` | Discover, consolidate, triage changes, and distribute skills |
+| `tome sync` | Reconcile, discover, consolidate, distribute, and clean up skills |
 | `tome add <url\|slug>` | Register a git skill repository in `tome.toml` |
-| `tome remove <name>` | Remove a directory entry and clean up its artifacts |
-| `tome reassign <skill> <directory>` | Reassign a skill to a different directory |
-| `tome fork <skill> <local-directory>` | Fork a managed skill to a local directory for customization |
-| `tome status` | Show library, directories, and health summary |
+| `tome remove dir <name>` | Remove a directory entry (manifest entries transition to Unowned per LIB-04) |
+| `tome remove skill <name>` | Delete an Unowned skill from the library (manifest + library + distribution + lockfile + machine.toml cleanup) |
+| `tome reassign <skill> --to <directory>` | Reassign a skill to a different directory (accepts Owned + Unowned input per UNOWN-01) |
+| `tome fork <skill> --to <local-directory>` | Fork a managed skill to a local directory for customization |
+| `tome migrate-library` | Convert a v0.9-shape library (managed skills as symlinks) to v0.10 real-directory copies (idempotent on re-run) |
+| `tome status` | Show library, directories, last-sync, and health summary |
 | `tome list` (alias: `ls`) | List all discovered skills with their directories (supports `--json`) |
 | `tome browse` | Interactively browse discovered skills with fuzzy search |
 | `tome doctor` | Diagnose and repair broken symlinks or config issues |
@@ -59,16 +61,35 @@ Register a git skill repository in `tome.toml`. Accepts either a full git URL (`
 
 ### `tome remove`
 
-Remove a directory entry and clean up all its artifacts: distribution symlinks, library entries, library symlinks, and (for git directories) the cached clone. Aggregates partial-cleanup failures and exits non-zero with a `⚠ N operations failed` summary if any cleanup step fails (the directory's config entry and manifest entries are preserved on partial failure so the command can be re-run after fixing the underlying cause).
+Split into two subcommands since v0.10 (Phase 14, D-API-2):
+
+#### `tome remove dir <name>`
+
+Remove a configured directory entry from `tome.toml`. Manifest entries owned by that directory transition to **Unowned** (per LIB-04) — library content is preserved on disk; only the `source_name` linkage is cleared. Aggregates partial-cleanup failures and exits non-zero with a `⚠ N operations failed` summary if any cleanup step fails. For git directories, the cached clone in `~/.tome/repos/<sha256>/` is removed.
 
 | Flag | Description |
 |------|-------------|
 | `NAME` | Directory name to remove (as shown in `tome status`) |
-| `--yes` | Skip confirmation prompt |
+| `--yes` / `-y` | Skip confirmation prompt |
+
+#### `tome remove skill <name>`
+
+Delete an **Unowned** skill from the library entirely — clears the manifest entry, removes the library directory, removes downstream distribution symlinks, removes the lockfile entry, and removes any `machine.toml` memberships. Refuses to operate on Owned skills with a hint to run `tome remove dir` first (per D-B2).
+
+| Flag | Description |
+|------|-------------|
+| `NAME` | Skill name to delete |
+| `--yes` / `-y` | Skip confirmation prompt (default: no) |
 
 ### `tome reassign`
 
-Reassign a skill to a different directory — useful when the same skill appears under multiple sources and you want to pin which directory owns it.
+Reassign a skill to a different directory — useful when the same skill appears under multiple sources and you want to pin which directory owns it. Accepts both **Owned** skills (re-anchor between configured directories) and **Unowned** skills (re-anchor a previously-stranded skill back to a configured directory, per UNOWN-01 / D-API-1).
+
+| Flag | Description |
+|------|-------------|
+| `SKILL` | Skill name to reassign |
+| `--to <directory>` | Target directory name (required) |
+| `--force` | Overwrite if the target already has a different-content skill of the same name (per D-A1) |
 
 ### `tome fork`
 
@@ -76,7 +97,20 @@ Fork a managed (read-only) skill into a local directory so it can be edited. The
 
 | Flag | Description |
 |------|-------------|
+| `SKILL` | Skill name to fork |
+| `--to <local-directory>` | Target local directory name (required) |
 | `--yes` | Skip confirmation prompt |
+
+### `tome migrate-library`
+
+One-shot migration: convert a **v0.9-shape library** (where managed skills lived as symlinks pointing into the package manager's cache) to the **v0.10 library-canonical model** (real-directory copies). Run once after upgrading from v0.9.x; idempotent on re-run.
+
+Shows a plan summary (skill count + per-skill disk estimate via `walkdir` + `metadata().len()`) before any conversion, then prompts for confirmation. Broken symlinks are preserved in place per Phase 11 D-04.
+
+| Flag | Description |
+|------|-------------|
+| `--yes` / `-y` | Skip the confirmation prompt (bypasses the UX-02 confirm gate) |
+| `--dry-run` | Render the plan; make no filesystem changes |
 
 ### `tome list`
 
