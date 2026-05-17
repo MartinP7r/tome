@@ -260,13 +260,13 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
     ) {
         // Explicit --branch always wins; warn if it disagrees with URL.
         (Some(b), None, None, url_b) => {
-            if let Some(u) = url_b {
-                if u != b {
-                    warn!(
-                        "URL-embedded branch '/tree/{}/...' overridden by explicit --branch '{}'",
-                        u, b
-                    );
-                }
+            if let Some(u) = url_b
+                && u != b
+            {
+                warn!(
+                    "URL-embedded branch '/tree/{}/...' overridden by explicit --branch '{}'",
+                    u, b
+                );
             }
             Some(GitRef::Branch(b))
         }
@@ -478,8 +478,12 @@ mod tests {
 
     #[test]
     fn parse_tree_suffix_extracts_branch_and_subdir_from_https_url() {
-        let parsed = parse_tree_suffix("https://github.com/signerlabs/shipswift-skills/tree/main/skills");
-        assert_eq!(parsed.base, "https://github.com/signerlabs/shipswift-skills");
+        let parsed =
+            parse_tree_suffix("https://github.com/signerlabs/shipswift-skills/tree/main/skills");
+        assert_eq!(
+            parsed.base,
+            "https://github.com/signerlabs/shipswift-skills"
+        );
         assert_eq!(parsed.branch.as_deref(), Some("main"));
         assert_eq!(parsed.subdir.as_deref(), Some("skills"));
     }
@@ -545,9 +549,8 @@ mod tests {
     fn parse_tree_suffix_strips_query_and_fragment() {
         // Copy-pasting a GitHub URL with `?foo=bar` or `#fragment` should
         // still find the tree segment.
-        let parsed = parse_tree_suffix(
-            "https://github.com/owner/repo/tree/main/skills?ref=foo#readme",
-        );
+        let parsed =
+            parse_tree_suffix("https://github.com/owner/repo/tree/main/skills?ref=foo#readme");
         assert_eq!(parsed.base, "https://github.com/owner/repo");
         assert_eq!(parsed.branch.as_deref(), Some("main"));
         assert_eq!(parsed.subdir.as_deref(), Some("skills"));

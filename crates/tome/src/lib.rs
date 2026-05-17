@@ -401,7 +401,17 @@ pub fn run(cli: Cli) -> Result<()> {
             tag,
             rev,
             subdir,
-        } => cmd_add(url, name, branch, tag, rev, subdir, config, &paths, cli.dry_run),
+        } => cmd_add(
+            url,
+            name,
+            branch,
+            tag,
+            rev,
+            subdir,
+            config,
+            &paths,
+            cli.dry_run,
+        ),
         Command::Sync {
             force,
             no_triage,

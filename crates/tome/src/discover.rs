@@ -230,6 +230,41 @@ pub fn discover_all(
             discover_directory_entry(dir_name, dir_config, warnings)?
         };
 
+        // Layer 3 (v0.13+): zero-skills warn + auto-detect hint. When a
+        // configured directory yields zero SKILL.md subdirectories AND no
+        // `subdir` override is set, probe common subdir layouts (`skills`,
+        // `.claude-plugin/skills`) for skills one level deeper. Surface a
+        // concrete `--subdir <foo>` hint when a match is found.
+        //
+        // Skipped for ClaudePlugins (has its own discovery flow — empty
+        // result there means "no plugins installed", not "wrong path").
+        if dir_skills.is_empty()
+            && dir_config.subdir.is_none()
+            && dir_config.directory_type != DirectoryType::ClaudePlugins
+        {
+            let probe_path = resolved_paths
+                .get(dir_name)
+                .map(|(p, _)| p.clone())
+                .unwrap_or_else(|| dir_config.path.clone());
+            if probe_path.is_dir() {
+                match suggest_subdir_for_zero_skill_dir(&probe_path) {
+                    Some(suggested) => warnings.push(format!(
+                        "directory '{}' has 0 SKILL.md subdirectories at its root, \
+                         but skills appear under '{}/' — set `subdir = \"{}\"` in \
+                         tome.toml (or re-add via `tome add <url>/tree/<branch>/{}` or \
+                         `tome add <url> --subdir {}`)",
+                        dir_name, suggested, suggested, suggested, suggested
+                    )),
+                    None => warnings.push(format!(
+                        "directory '{}' found 0 SKILL.md subdirectories. \
+                         Verify the path is correct, or if skills live under \
+                         a subdir, set `subdir = \"<path>\"` in tome.toml.",
+                        dir_name
+                    )),
+                }
+            }
+        }
+
         // Attach git_commit_sha to skills from git directories
         let git_sha = resolved_paths
             .get(dir_name)
@@ -304,6 +339,44 @@ pub fn discover_all(
     }
 
     Ok(skills)
+}
+
+/// Probe a directory for likely-skill-containing subdirectories when the
+/// top-level scan found nothing.
+///
+/// Returns the first subdir (relative to `dir_path`) that contains at
+/// least one `<entry>/SKILL.md`, or `None` if no candidate matched.
+/// Used by [`discover_all`] to emit an actionable hint when a configured
+/// directory yields zero skills (Layer 3 from the v0.13 `tome add`
+/// improvements).
+///
+/// Common conventions checked:
+/// - `skills` — Claude Code plugin layout (e.g. signerlabs/shipswift-skills)
+/// - `.claude-plugin/skills` — alternate Claude Code convention
+///
+/// Returns `None` if `dir_path` itself doesn't exist or no candidate has
+/// at least one valid skill directory inside.
+fn suggest_subdir_for_zero_skill_dir(dir_path: &Path) -> Option<String> {
+    const CANDIDATES: &[&str] = &["skills", ".claude-plugin/skills"];
+    for candidate in CANDIDATES {
+        let candidate_path = dir_path.join(candidate);
+        if !candidate_path.is_dir() {
+            continue;
+        }
+        let has_skill_md = std::fs::read_dir(&candidate_path)
+            .ok()
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .any(|entry| {
+                let p = entry.path();
+                p.is_dir() && p.join("SKILL.md").is_file()
+            });
+        if has_skill_md {
+            return Some((*candidate).to_string());
+        }
+    }
+    None
 }
 
 /// Discover skills from a single configured directory.
@@ -1165,5 +1238,165 @@ mod tests {
             }
             other => panic!("expected Managed{{provenance:Some}}, got {other:?}"),
         }
+    }
+
+    // -- Layer 3: suggest_subdir_for_zero_skill_dir + warn-on-zero --
+
+    #[test]
+    fn suggest_subdir_finds_skills_under_skills_subdir() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        create_skill(&skills_dir, "first");
+
+        assert_eq!(
+            suggest_subdir_for_zero_skill_dir(tmp.path()),
+            Some("skills".to_string())
+        );
+    }
+
+    #[test]
+    fn suggest_subdir_finds_skills_under_claude_plugin_marker() {
+        let tmp = TempDir::new().unwrap();
+        let nested = tmp.path().join(".claude-plugin").join("skills");
+        std::fs::create_dir_all(&nested).unwrap();
+        create_skill(&nested, "alt");
+
+        assert_eq!(
+            suggest_subdir_for_zero_skill_dir(tmp.path()),
+            Some(".claude-plugin/skills".to_string())
+        );
+    }
+
+    #[test]
+    fn suggest_subdir_returns_none_when_no_candidate_matches() {
+        let tmp = TempDir::new().unwrap();
+        // Empty directory — no skills anywhere
+        assert_eq!(suggest_subdir_for_zero_skill_dir(tmp.path()), None);
+    }
+
+    #[test]
+    fn suggest_subdir_returns_none_when_candidate_dir_has_no_skill_md() {
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        // skills/ exists but contains a regular file, not a skill dir
+        std::fs::write(skills_dir.join("not-a-skill.txt"), "data").unwrap();
+
+        assert_eq!(suggest_subdir_for_zero_skill_dir(tmp.path()), None);
+    }
+
+    #[test]
+    fn discover_all_warns_with_subdir_hint_when_zero_skills_at_root() {
+        // Simulate a repo where skills are under `skills/` and no subdir is
+        // configured — discover_all should find zero skills AND emit a hint
+        // pointing at the `skills` subdir.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        create_skill(&skills_dir, "real-skill");
+
+        let config = config_with_dirs(vec![(
+            "shipswift-skills",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
+
+        let mut warnings = Vec::new();
+        let skills = discover_all(&config, &BTreeMap::new(), &mut warnings).unwrap();
+
+        assert!(
+            skills.is_empty(),
+            "skills under skills/ should NOT be discovered without subdir override"
+        );
+        assert_eq!(
+            warnings.len(),
+            1,
+            "expected exactly one hint warning, got {warnings:?}"
+        );
+        let warning = &warnings[0];
+        assert!(
+            warning.contains("shipswift-skills"),
+            "warning should name the directory"
+        );
+        assert!(
+            warning.contains("skills"),
+            "warning should mention the suggested subdir"
+        );
+        assert!(
+            warning.contains("subdir"),
+            "warning should mention the subdir field"
+        );
+    }
+
+    #[test]
+    fn discover_all_warns_generically_when_zero_skills_and_no_known_layout() {
+        // No subdir candidate matches — fall back to a generic warning
+        // telling the user to verify the path or try setting subdir.
+        let tmp = TempDir::new().unwrap();
+        // No skills anywhere — completely empty directory.
+
+        let config = config_with_dirs(vec![(
+            "empty-repo",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
+
+        let mut warnings = Vec::new();
+        let _ = discover_all(&config, &BTreeMap::new(), &mut warnings).unwrap();
+
+        assert_eq!(warnings.len(), 1);
+        let warning = &warnings[0];
+        assert!(
+            warning.contains("empty-repo"),
+            "warning should name the directory"
+        );
+        assert!(
+            warning.contains("Verify the path") || warning.contains("verify the path"),
+            "generic warning should suggest verifying the path"
+        );
+    }
+
+    #[test]
+    fn discover_all_no_zero_warn_when_subdir_already_set() {
+        // If `subdir` is already configured, the user has indicated where
+        // to look — no auto-detect / warn-on-zero should fire even if the
+        // configured subdir happens to be empty.
+        let tmp = TempDir::new().unwrap();
+        let skills_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+        // skills/ is empty — discovery from the configured subdir yields 0.
+
+        let mut directories = std::collections::BTreeMap::new();
+        directories.insert(
+            DirectoryName::new("explicit-subdir").unwrap(),
+            DirectoryConfig {
+                path: tmp.path().to_path_buf(),
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: Some("skills".to_string()),
+                override_applied: false,
+            },
+        );
+        let config = Config {
+            directories,
+            ..Config::default()
+        };
+
+        let mut warnings = Vec::new();
+        let _ = discover_all(&config, &BTreeMap::new(), &mut warnings).unwrap();
+
+        // No hint warning — user explicitly chose subdir.
+        let zero_skill_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.contains("0 SKILL.md") || w.contains("found 0"))
+            .collect();
+        assert!(
+            zero_skill_warnings.is_empty(),
+            "no zero-skill hint when subdir is set: {warnings:?}"
+        );
     }
 }

@@ -140,15 +140,13 @@ pub enum LintFormat {
 #[derive(Subcommand)]
 pub enum Command {
     /// Add a git skill repository
-    #[command(
-        after_help = "Examples:\n  \
+    #[command(after_help = "Examples:\n  \
                       tome add https://github.com/user/skills.git\n  \
                       tome add user/skills                                 # bare slug → github.com\n  \
                       tome add user/skills/tree/main/skills                # /tree/<ref>/<subdir> shortcut\n  \
                       tome add user/skills --subdir skills                 # explicit --subdir flag\n  \
                       tome add user/skills --name my-skills                # custom directory name\n  \
-                      tome add git@github.com:user/skills.git --branch main"
-    )]
+                      tome add git@github.com:user/skills.git --branch main")]
     Add {
         /// Git repository URL (HTTPS or SSH) or `owner/repo` slug.
         ///

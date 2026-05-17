@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`tome add` Vercel-style `/tree/<ref>/<subdir>` URL parsing.** Paste
+  a GitHub tree URL (the form your browser shows when navigating into
+  a subdir, e.g. `signerlabs/shipswift-skills/tree/main/skills`) and
+  `tome add` extracts `<ref>` as the default branch + `<subdir>` as
+  the discovery subdir. Works on both full HTTPS URLs and bare
+  `owner/repo` slugs. SSH URLs (`git@github.com:...`) pass through
+  unchanged.
+- **`tome add --subdir <PATH>` flag.** Explicit subdirectory override
+  for skill discovery. Sets `DirectoryConfig.subdir` directly. Wins
+  over a URL-embedded subdir from `/tree/<ref>/<subdir>` (warning
+  surfaces the conflict). Useful when adding a non-GitHub git URL
+  where the `/tree/` syntax doesn't apply.
+- **`tome sync` auto-detect + warn-on-zero hint.** When a configured
+  directory yields zero `SKILL.md` subdirectories AND no `subdir`
+  override is set, sync probes common Claude Code plugin layouts
+  (`skills/`, `.claude-plugin/skills/`) and emits an actionable
+  warning naming the suggested subdir if a candidate has skills
+  inside, or a generic "verify the path or set subdir" warning
+  otherwise. Closes the silent-failure mode where `tome add
+  user/claude-plugin-repo` left a useless directory entry with zero
+  skills and no signal.
+
 ## [0.12.1] - 2026-05-17
 
 ### Notes
