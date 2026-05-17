@@ -100,7 +100,9 @@ pub struct StaleSkill {
 /// Result of cleanup operation. Fields are `pub(crate)` because the renderer
 /// owns the user-facing surface — external callers should not mutate the
 /// bucket vecs directly (would break the "renderer reflects what cleanup
-/// detected" invariant).
+/// detected" invariant). For read-only access (e.g. the v1.0 Tauri GUI),
+/// use the accessor methods on `CleanupResult` instead — same shape as
+/// `Lockfile::skills()` / `Manifest::skills()`.
 #[derive(Debug, Default)]
 pub struct CleanupResult {
     pub(crate) removed_from_library: usize,
@@ -116,6 +118,36 @@ pub struct CleanupResult {
     /// three-bucket renderer (UX-01 D-UX01-1). Each carries the skill name
     /// and the **currently configured** source the file vanished from.
     pub(crate) bucket_b_missing_from_disk: Vec<StaleSkill>,
+}
+
+impl CleanupResult {
+    /// Total skill directories removed from the library this cleanup pass.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn removed_from_library(&self) -> usize {
+        self.removed_from_library
+    }
+
+    /// Skills transitioned from owned -> Unowned (Bucket A semantics).
+    /// Library content for these skills was preserved per LIB-04.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn transitioned_to_unowned(&self) -> usize {
+        self.transitioned_to_unowned
+    }
+
+    /// Bucket A entries — skills whose source directory was removed from
+    /// `tome.toml` between the previous sync and this one. Manifest entries
+    /// transitioned to Unowned; library content preserved.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn bucket_a_removed_from_config(&self) -> &[StaleSkill] {
+        &self.bucket_a_removed_from_config
+    }
+
+    /// Bucket B entries — skills whose source directory is still configured
+    /// but the on-disk content vanished. Library copy removed.
+    #[allow(dead_code)] // External-facing accessor for v1.0 GUI consumers
+    pub fn bucket_b_missing_from_disk(&self) -> &[StaleSkill] {
+        &self.bucket_b_missing_from_disk
+    }
 }
 
 /// Render the three cleanup buckets to a writer. Used by `lib.rs::sync`
@@ -405,6 +437,24 @@ pub fn cleanup_library(
             Vec::new()
         }
     } else if !case2_delete.is_empty() {
+        // Non-interactive mode auto-removes Case 2 entries (no TTY, --quiet,
+        // or --no-input). The architecture doc promises an "auto-removes
+        // with warning" semantic — the post-fact bucket renderer surfaces
+        // WHAT was deleted, but only if no stderr error fires before it
+        // reaches that point. A `warn!` here ensures the action is visible
+        // in `--verbose` / `TOME_LOG=warn` traces even if the renderer
+        // later errors out, so CI logs always show *something* before silent
+        // deletions in flaky-mount or transient-FS scenarios.
+        tracing::warn!(
+            "auto-removing {} library entry(s) whose source file vanished \
+             from disk (non-interactive mode): {}",
+            case2_delete.len(),
+            case2_delete
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         case2_delete.iter().map(|e| e.name.clone()).collect()
     } else {
         Vec::new()

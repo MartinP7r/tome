@@ -87,6 +87,62 @@ fn doctor_with_no_input_skips_repair() {
 }
 
 #[test]
+fn doctor_dry_run_reports_issues_without_filesystem_mutation() {
+    // Pre-v1.0 review pass Important #14: pin the dry-run + no-input behavior
+    // of the doctor auto-fix path at the binary level.
+    //
+    // Setup:
+    //   - Plant a broken symlink in the library (auto-fixable issue
+    //     surfaces as RemoveBrokenLibrarySymlink repair).
+    //
+    // Assertions:
+    //   1. `tome doctor --dry-run` reports issues to stdout and exits
+    //      successfully.
+    //   2. The broken symlink is STILL present after the dry-run pass
+    //      (no filesystem mutation).
+    //   3. `tome doctor --no-input` (without --dry-run) exits successfully
+    //      and ALSO leaves the symlink in place (the global repair prompt
+    //      requires a TTY; --no-input suppresses it).
+    use std::os::unix::fs as unix_fs;
+
+    let tmp = TempDir::new().unwrap();
+    let library = tmp.path().join("library");
+    std::fs::create_dir_all(&library).unwrap();
+    let broken_link = library.join("broken-skill");
+    unix_fs::symlink("/nonexistent/path/that/does/not/exist", &broken_link).unwrap();
+
+    let config = write_config(tmp.path(), "");
+
+    // Step 1: --dry-run reports issues without mutation
+    tome()
+        .args(["--config", config.to_str().unwrap(), "--dry-run", "doctor"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("issue(s)"));
+
+    assert!(
+        broken_link.is_symlink(),
+        "dry-run must NOT remove the broken symlink \
+         (filesystem mutation in --dry-run is a contract violation)"
+    );
+
+    // Step 2: --no-input (no --dry-run) suppresses the repair prompt;
+    // the symlink survives because the auto-fix path requires interactive
+    // confirmation.
+    tome()
+        .args(["--config", config.to_str().unwrap(), "--no-input", "doctor"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("issue(s)"));
+
+    assert!(
+        broken_link.is_symlink(),
+        "--no-input must skip the interactive repair prompt; \
+         the broken symlink should still be present after the doctor run"
+    );
+}
+
+#[test]
 fn doctor_json_output() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")

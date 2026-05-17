@@ -7,12 +7,21 @@
 //!
 //! The `sync` function drives the main workflow:
 //!
-//! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — copy or symlink discovered skills into the library
-//! 3. **Triage** — diff lockfile, surface changes, let user disable new skills
+//! 1. **Reconcile** — lockfile-authoritative drift detection for managed
+//!    skills via [`MarketplaceAdapter`](marketplace::MarketplaceAdapter)
+//!    (Phase 13: classify each managed skill as Match / Drift / Vanished,
+//!    apply updates per `auto_install_plugins` consent).
+//! 2. **Discover** — scan configured directories (role `managed`/`source`/
+//!    `synced`) for `*/SKILL.md` directories.
+//! 3. **Consolidate** — copy every discovered skill (managed AND local)
+//!    into the library as a real directory (v0.10 library-canonical model;
+//!    no symlinks).
 //! 4. **Distribute** — push library skills to target tools via symlinks
-//! 5. **Cleanup** — remove stale entries no longer in any source
-//! 6. **Save** — persist manifest, lockfile, and `.gitignore`
+//!    into `target` / `synced` directories.
+//! 5. **Cleanup** — three-bucket stale-skill report
+//!    (removed-from-config / missing-from-disk / now-in-exclude-list);
+//!    orphan transitions preserve library content per LIB-04.
+//! 6. **Save** — persist manifest, lockfile, and `.gitignore`.
 //!
 //! # Public API
 //!
@@ -101,7 +110,29 @@ pub use manifest::hash_directory;
 pub use lint::LintFailed;
 pub use migration_v010::MigrationPartialOrFailed;
 
-/// Summary of a complete sync operation.
+/// Summary of a complete sync operation — the return-shape of the full
+/// `sync()` pipeline (reconcile → discover → consolidate → distribute →
+/// cleanup → save). This is the primary data source for any consumer that
+/// wants to surface "what happened this sync" (the CLI's stdout summary
+/// block today; the v1.0 Tauri GUI's sync-result view tomorrow).
+///
+/// # Field ownership
+///
+/// - [`consolidate`](Self::consolidate) — always populated; counts skills
+///   created / unchanged / updated in the library this run.
+/// - [`distributions`](Self::distributions) — one entry per configured
+///   `target` / `synced` directory. Empty when no directories are
+///   configured (a config error surfaced separately).
+/// - [`cleanup`](Self::cleanup) — always populated; reflects the three
+///   stale-skill buckets (A: removed-from-config / B: missing-from-disk /
+///   C: now-in-exclude-list). Use the public accessors on
+///   [`CleanupResult`] for read-only access.
+/// - [`removed_from_targets`](Self::removed_from_targets) — total stale
+///   distribution symlinks pruned across all targets.
+/// - [`reconcile`](Self::reconcile) — `None` when sync ran without a
+///   `MarketplaceAdapter` (no `claude-plugins` directory configured).
+///   `Some(_)` when reconcile ran; counts may all be zero on a clean
+///   match. See [`reconcile::ReconcileReport`] for the inner shape.
 pub struct SyncReport {
     pub consolidate: ConsolidateResult,
     pub distributions: Vec<DistributeResult>,
@@ -1013,10 +1044,17 @@ pub(crate) fn cmd_migrate_library(
     let manifest = manifest::load(paths.config_dir())?;
     let plan = migration_v010::plan(paths.library_dir(), &manifest)?;
     // HARD-15 stderr discipline: render directly to a locked stderr handle.
-    // Best-effort write — failure to render is non-fatal for the migration.
+    // Best-effort write — failure to render is non-fatal for the migration,
+    // but we route the I/O failure through `tracing::warn!` instead of
+    // dropping it silently so a broken stderr (broken pipe, /dev/full) is
+    // diagnosable in `--verbose` / `TOME_LOG=warn` runs. Without this, the
+    // user could land in the confirmation prompt below having seen no plan,
+    // and silently approve an unknown migration.
     {
         let mut stderr = std::io::stderr().lock();
-        let _ = migration_v010::render_plan_to(&plan, &mut stderr);
+        if let Err(e) = migration_v010::render_plan_to(&plan, &mut stderr) {
+            tracing::warn!("could not write migration plan to stderr: {e}");
+        }
     }
 
     // Empty plan — render_plan_to already printed the already-in-v0.10-shape
@@ -1038,7 +1076,9 @@ pub(crate) fn cmd_migrate_library(
     let result = migration_v010::execute(&plan, dry_run)?;
     {
         let mut stderr = std::io::stderr().lock();
-        let _ = migration_v010::render_result_to(&result, dry_run, &mut stderr);
+        if let Err(e) = migration_v010::render_result_to(&result, dry_run, &mut stderr) {
+            tracing::warn!("could not write migration result to stderr: {e}");
+        }
     }
 
     // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
@@ -1382,32 +1422,43 @@ fn build_claude_adapter(config: &Config) -> Result<Option<marketplace::ClaudeMar
     Ok(Some(adapter))
 }
 
-/// Apply the user's edit-in-library decisions to the on-disk manifest.
+/// Apply the user's edit-in-library decisions to the manifest in-memory.
+///
+/// Returns `true` if any Fork mutation was applied (sync() should save the
+/// manifest in that case). Revert and Skip emit user-facing output but do
+/// not mutate.
 ///
 /// Per RECON-05 D-13:
-/// - Fork: `managed: true → false`, `source_name: Some → None`. Library
-///   content stays in place. Provenance history is dropped (one-time UX gap;
-///   Phase 14 may add fields retroactively).
-/// - Revert: leave the manifest untouched here — the apply_drift loop in
-///   reconcile_lockfile would have applied an `adapter.update()` (revert
-///   degenerates to "force a drift apply"); if the user picked revert here,
-///   they're saying "I want the upstream copy" — emit a warning that revert
-///   is not yet wired (deferred to a follow-up; D-16's safety guarantee is
-///   "never silently overwrite", and revert is opt-in so a warn-and-skip is
-///   acceptable for v0.10).
-/// - Skip: emit nothing additional (the per-skill warning already fired in
-///   `handle_edited`).
+///
+/// - **Fork**: `managed: true → false`, `source_name: Some → None`. Library
+///   content stays in place. `previous_source` captures the old
+///   `source_name` per D-C1 (Phase 14, transition site 3).
+/// - **Revert**: emits a warning that revert is not yet wired (deferred to a
+///   follow-up; D-16's safety guarantee is "never silently overwrite", and
+///   revert is opt-in so a warn-and-skip is acceptable for v0.10). No
+///   mutation.
+/// - **Skip**: emits nothing additional (the per-skill warning already fired
+///   in `handle_edited`). No mutation.
+///
+/// Pre-refactor (v0.11.1 and earlier), this function did its own `manifest::
+/// load` + `manifest::save` round-trip, then `consolidate` did its own
+/// independent `manifest::load`. That double-disk-touch worked today (the
+/// operations were sequential and same-path) but the data flow had two
+/// readers and two writers of the same file with no shared in-memory
+/// state. Any future refactor that changed `consolidate` to skip the
+/// reload would silently lose Fork mutations. Now sync() owns the
+/// `Manifest` variable end-to-end through reconcile, so the mutation is
+/// visible in-memory and the save is centralized.
 fn apply_edit_decisions(
     report: &reconcile::ReconcileReport,
-    paths: &TomePaths,
+    manifest: &mut manifest::Manifest,
     dry_run: bool,
-) -> Result<()> {
+) -> bool {
     if report.edited.is_empty() || dry_run {
-        return Ok(());
+        return false;
     }
     debug_assert_eq!(report.edit_decisions.len(), report.edited.len());
 
-    let mut manifest = manifest::load(paths.config_dir())?;
     let mut mutated = false;
 
     for (edit, decision) in report.edited.iter().zip(report.edit_decisions.iter()) {
@@ -1423,6 +1474,12 @@ fn apply_edit_decisions(
                 }
             }
             reconcile::EditDecision::Revert => {
+                // v0.10 deferred stub: the Revert decision is a no-op — we
+                // warn the user that their choice was not applied and leave
+                // both the manifest and the library content untouched. Per
+                // D-16's "never silently overwrite" guarantee, opt-in revert
+                // gets a warn-and-skip until a future phase wires the
+                // actual upstream-copy restore path.
                 eprintln!(
                     "warning: revert chosen for {} but is not wired in v0.10 — \
                      left as-is. Re-run with `tome sync` after manually \
@@ -1435,11 +1492,7 @@ fn apply_edit_decisions(
         }
     }
 
-    if mutated {
-        manifest::save(&manifest, paths.config_dir())
-            .context("failed to save manifest after edit-in-library fork-in-place flip")?;
-    }
-    Ok(())
+    mutated
 }
 
 /// The core sync pipeline: discover → consolidate → distribute → cleanup.
@@ -1514,10 +1567,13 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // Load existing lockfile for diffing and reconciliation
     let old_lockfile = lockfile::load(paths.config_dir())?;
-    // Load manifest once for reconcile's edit-in-library detection. (sync()
-    // reloads it later post-consolidate; reading it twice is cheap and keeps
-    // reconcile's signature simple.)
-    let manifest_for_reconcile = manifest::load(paths.config_dir())?;
+    // Load manifest once for reconcile's edit-in-library detection. Held as
+    // `mut` so apply_edit_decisions can mutate it in-memory after reconcile
+    // returns — see Critical #1 refactor in the v0.11 review pass. The
+    // post-consolidate manifest reload happens inside `library::consolidate`;
+    // sync() is responsible for saving the fork-flipped state to disk here
+    // BEFORE consolidate's load, so the two stay coherent.
+    let mut manifest_for_reconcile = manifest::load(paths.config_dir())?;
 
     // v0.10 RECON-01..05: replaces the v0.9 reconcile_managed_plugins flow.
     // Adapter dispatch by DirectoryType (D-11); git stays separate (D-21).
@@ -1551,10 +1607,20 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 },
             )?;
 
-            // Apply edit-in-library decisions to the manifest. The manifest is
-            // owned by sync(); reconcile_lockfile only proposed the user's
-            // choice (RECON-05 D-13).
-            apply_edit_decisions(&report, paths, dry_run)?;
+            // Apply edit-in-library decisions to the manifest. The manifest
+            // is owned by sync(); reconcile_lockfile only proposed the user's
+            // choice (RECON-05 D-13). apply_edit_decisions mutates the
+            // in-memory `manifest_for_reconcile` and returns whether any Fork
+            // mutation landed; sync() saves the manifest to disk here so
+            // `library::consolidate` (which loads its own copy) observes the
+            // post-fork state. Centralizing the save here eliminates the
+            // pre-refactor "two writers, two readers, no shared state"
+            // pattern that risked silently losing Fork mutations under
+            // future consolidate refactors.
+            if apply_edit_decisions(&report, &mut manifest_for_reconcile, dry_run) {
+                manifest::save(&manifest_for_reconcile, paths.config_dir())
+                    .context("failed to save manifest after edit-in-library fork-in-place flip")?;
+            }
 
             // ADP-04: render grouped install failures. Sync exits non-zero at end
             // when this Vec is non-empty (RESEARCH OQ-6). Drain install_failures
@@ -1819,18 +1885,26 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     //     buckets in the user's terminal.
     if !quiet {
         let mut stderr = std::io::stderr().lock();
-        // Best-effort: failure to write to stderr is non-fatal for sync
-        // (matches existing eprintln! semantics that ignore I/O errors).
-        let _ = cleanup::render_cleanup_buckets(
+        // Best-effort writes — failure to render is non-fatal for sync. The
+        // bucket renderer is the ONLY user notification for cleanup actions
+        // (stale-skill removals, foreign-symlink failures), so silently
+        // dropping I/O errors here would hide critical information; route
+        // through `tracing::warn!` so the failure is at least discoverable
+        // in `--verbose` / `TOME_LOG=warn` traces.
+        if let Err(e) = cleanup::render_cleanup_buckets(
             &mut stderr,
             &report.cleanup.bucket_a_removed_from_config,
             &report.cleanup.bucket_b_missing_from_disk,
             &excluded_skills,
-        );
-        let _ = cleanup::render_distribution_cleanup_failures(
+        ) {
+            tracing::warn!("could not render cleanup buckets to stderr: {e}");
+        }
+        if let Err(e) = cleanup::render_distribution_cleanup_failures(
             &mut stderr,
             &distribution_cleanup_failures,
-        );
+        ) {
+            tracing::warn!("could not render distribution cleanup failures to stderr: {e}");
+        }
     }
 
     // Post-sync health check
@@ -2772,18 +2846,8 @@ mod tests {
 
     // -- apply_edit_decisions tests (Phase 14 / D-C1 transition site 3) --
 
-    #[test]
-    fn apply_edit_decisions_fork_records_previous_source() {
-        // Build a minimal manifest with one Owned managed skill and exercise
-        // apply_edit_decisions with EditDecision::Fork — verify the manifest
-        // entry transitions to Unowned (managed=false, source_name=None) AND
-        // captures previous_source per D-C1 / Phase 13 D-13 closure.
-        let tmp = TempDir::new().unwrap();
-        let library = tmp.path().join("library");
-        std::fs::create_dir_all(&library).unwrap();
-        let paths = TomePaths::new(tmp.path().to_path_buf(), library).unwrap();
-        std::fs::create_dir_all(paths.config_dir()).unwrap();
-
+    /// Build a one-skill managed manifest for the apply_edit_decisions tests.
+    fn fork_test_manifest() -> manifest::Manifest {
         let mut manifest = manifest::Manifest::default();
         manifest.insert(
             discover::SkillName::new("plug").unwrap(),
@@ -2794,29 +2858,111 @@ mod tests {
                 true, // managed
             ),
         );
-        manifest::save(&manifest, paths.config_dir()).unwrap();
+        manifest
+    }
 
-        // Build a ReconcileReport with one Edited entry and Fork decision.
-        let report = reconcile::ReconcileReport {
+    /// Build a one-skill ReconcileReport with the given decision.
+    fn fork_test_report(decision: reconcile::EditDecision) -> reconcile::ReconcileReport {
+        reconcile::ReconcileReport {
             edited: vec![reconcile::Edited {
                 name: discover::SkillName::new("plug").unwrap(),
                 old_source: config::DirectoryName::new("claude-plugins").unwrap(),
                 old_version: Some("1.0.0".to_string()),
             }],
-            edit_decisions: vec![reconcile::EditDecision::Fork],
+            edit_decisions: vec![decision],
             ..Default::default()
-        };
+        }
+    }
 
-        apply_edit_decisions(&report, &paths, false).unwrap();
+    #[test]
+    fn apply_edit_decisions_fork_records_previous_source() {
+        // EditDecision::Fork transitions the manifest entry to Unowned
+        // (managed=false, source_name=None) AND captures previous_source
+        // per D-C1 / Phase 13 D-13 closure.
+        let mut manifest = fork_test_manifest();
+        let report = fork_test_report(reconcile::EditDecision::Fork);
 
-        let reloaded = manifest::load(paths.config_dir()).unwrap();
-        let entry = reloaded.get("plug").unwrap();
+        let mutated = apply_edit_decisions(&report, &mut manifest, false);
+
+        assert!(mutated, "Fork must report mutated=true");
+        let entry = manifest.get("plug").unwrap();
         assert_eq!(entry.source_name, None, "fork-in-place clears source_name");
         assert!(!entry.managed, "fork-in-place clears managed");
         assert_eq!(
             entry.previous_source,
             Some(config::DirectoryName::new("claude-plugins").unwrap()),
             "fork-in-place must record previous_source per D-C1 / Phase 13 D-13 closure"
+        );
+    }
+
+    #[test]
+    fn apply_edit_decisions_revert_leaves_manifest_byte_for_byte_unchanged() {
+        // EditDecision::Revert is an explicit v0.10 deferred stub: emits a
+        // warning, mutates NOTHING. This regression test pins the no-op
+        // semantic so a future "completion" of the revert path that
+        // accidentally adds library-overwrite logic (data-loss class) fails
+        // here first. Closes the critical test gap surfaced in the v0.11
+        // codebase review.
+        let mut manifest = fork_test_manifest();
+        let serialized_before = serde_json::to_string(&manifest).unwrap();
+        let report = fork_test_report(reconcile::EditDecision::Revert);
+
+        let mutated = apply_edit_decisions(&report, &mut manifest, false);
+
+        assert!(!mutated, "Revert must not mutate the manifest");
+        let serialized_after = serde_json::to_string(&manifest).unwrap();
+        assert_eq!(
+            serialized_before, serialized_after,
+            "Revert is a stub — manifest must be byte-for-byte unchanged"
+        );
+        // Field-level assertions as belt-and-suspenders against future
+        // serialization changes that round-trip the bytes but mutate
+        // semantically. The entry's owned state must be preserved.
+        let entry = manifest.get("plug").unwrap();
+        assert_eq!(
+            entry.source_name,
+            Some(config::DirectoryName::new("claude-plugins").unwrap()),
+            "Revert must preserve source_name"
+        );
+        assert!(entry.managed, "Revert must preserve managed flag");
+        assert_eq!(
+            entry.previous_source, None,
+            "Revert must not set previous_source"
+        );
+    }
+
+    #[test]
+    fn apply_edit_decisions_skip_leaves_manifest_byte_for_byte_unchanged() {
+        // EditDecision::Skip emits nothing additional (handle_edited already
+        // warned during reconcile) and mutates nothing.
+        let mut manifest = fork_test_manifest();
+        let serialized_before = serde_json::to_string(&manifest).unwrap();
+        let report = fork_test_report(reconcile::EditDecision::Skip);
+
+        let mutated = apply_edit_decisions(&report, &mut manifest, false);
+
+        assert!(!mutated, "Skip must not mutate the manifest");
+        let serialized_after = serde_json::to_string(&manifest).unwrap();
+        assert_eq!(
+            serialized_before, serialized_after,
+            "Skip is a no-op — manifest must be byte-for-byte unchanged"
+        );
+    }
+
+    #[test]
+    fn apply_edit_decisions_dry_run_returns_false_without_mutating() {
+        // dry_run short-circuits before any mutation, even for Fork.
+        let mut manifest = fork_test_manifest();
+        let serialized_before = serde_json::to_string(&manifest).unwrap();
+        let report = fork_test_report(reconcile::EditDecision::Fork);
+
+        let mutated = apply_edit_decisions(&report, &mut manifest, true);
+
+        assert!(!mutated, "dry_run must not report mutated=true");
+        let serialized_after = serde_json::to_string(&manifest).unwrap();
+        assert_eq!(
+            serialized_before, serialized_after,
+            "dry_run must not mutate the manifest"
         );
     }
 

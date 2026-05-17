@@ -120,9 +120,16 @@ pub struct SkillProvenance {
 /// How a skill was sourced — determines consolidation strategy.
 #[derive(Debug, Clone)]
 pub enum SkillOrigin {
-    /// Managed by a package manager; library entry is a symlink to source dir.
+    /// Managed by a package manager (v0.10+: stored as a real-directory
+    /// copy in the library, NOT a symlink). The `managed: true` manifest
+    /// flag marks the update channel — upstream sync feeds the copy via
+    /// `MarketplaceAdapter`. Pre-v0.10 stored managed skills as symlinks
+    /// into the source dir; that shape is now refused at the sync gate
+    /// (see `library::consolidate_managed` and `migration_v010`).
     Managed { provenance: Option<SkillProvenance> },
-    /// Local skill; library entry is a copy of the source.
+    /// Local skill; library entry is a real-directory copy of the source.
+    /// The library copy is editable in-place; `tome sync` detects drift
+    /// via content_hash comparison.
     Local,
 }
 

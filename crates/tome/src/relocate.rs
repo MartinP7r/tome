@@ -32,9 +32,11 @@ pub(crate) struct RelocatePlan {
 #[derive(Debug)]
 pub(crate) struct SkillMoveEntry {
     pub name: SkillName,
-    /// True for managed skills (library symlink → external source dir).
-    /// Used by `copy_library` to preserve the symlink shape during the
-    /// move (lines ~419–424).
+    /// `true` for managed skills (v0.10+: real directory copy with
+    /// `manifest.managed == true`). The pre-v0.10 "library symlink → external
+    /// source dir" shape is no longer expected; if `copy_library` encounters
+    /// a symlink during the move, it warns via `warn_if_unreadable_symlink`
+    /// rather than preserving the symlink (HARD-16).
     pub is_managed: bool,
 }
 
