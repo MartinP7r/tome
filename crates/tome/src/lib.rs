@@ -1013,10 +1013,17 @@ pub(crate) fn cmd_migrate_library(
     let manifest = manifest::load(paths.config_dir())?;
     let plan = migration_v010::plan(paths.library_dir(), &manifest)?;
     // HARD-15 stderr discipline: render directly to a locked stderr handle.
-    // Best-effort write — failure to render is non-fatal for the migration.
+    // Best-effort write — failure to render is non-fatal for the migration,
+    // but we route the I/O failure through `tracing::warn!` instead of
+    // dropping it silently so a broken stderr (broken pipe, /dev/full) is
+    // diagnosable in `--verbose` / `TOME_LOG=warn` runs. Without this, the
+    // user could land in the confirmation prompt below having seen no plan,
+    // and silently approve an unknown migration.
     {
         let mut stderr = std::io::stderr().lock();
-        let _ = migration_v010::render_plan_to(&plan, &mut stderr);
+        if let Err(e) = migration_v010::render_plan_to(&plan, &mut stderr) {
+            tracing::warn!("could not write migration plan to stderr: {e}");
+        }
     }
 
     // Empty plan — render_plan_to already printed the already-in-v0.10-shape
@@ -1038,7 +1045,9 @@ pub(crate) fn cmd_migrate_library(
     let result = migration_v010::execute(&plan, dry_run)?;
     {
         let mut stderr = std::io::stderr().lock();
-        let _ = migration_v010::render_result_to(&result, dry_run, &mut stderr);
+        if let Err(e) = migration_v010::render_result_to(&result, dry_run, &mut stderr) {
+            tracing::warn!("could not write migration result to stderr: {e}");
+        }
     }
 
     // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
@@ -1819,18 +1828,28 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     //     buckets in the user's terminal.
     if !quiet {
         let mut stderr = std::io::stderr().lock();
-        // Best-effort: failure to write to stderr is non-fatal for sync
-        // (matches existing eprintln! semantics that ignore I/O errors).
-        let _ = cleanup::render_cleanup_buckets(
+        // Best-effort writes — failure to render is non-fatal for sync. The
+        // bucket renderer is the ONLY user notification for cleanup actions
+        // (stale-skill removals, foreign-symlink failures), so silently
+        // dropping I/O errors here would hide critical information; route
+        // through `tracing::warn!` so the failure is at least discoverable
+        // in `--verbose` / `TOME_LOG=warn` traces.
+        if let Err(e) = cleanup::render_cleanup_buckets(
             &mut stderr,
             &report.cleanup.bucket_a_removed_from_config,
             &report.cleanup.bucket_b_missing_from_disk,
             &excluded_skills,
-        );
-        let _ = cleanup::render_distribution_cleanup_failures(
+        ) {
+            tracing::warn!("could not render cleanup buckets to stderr: {e}");
+        }
+        if let Err(e) = cleanup::render_distribution_cleanup_failures(
             &mut stderr,
             &distribution_cleanup_failures,
-        );
+        ) {
+            tracing::warn!(
+                "could not render distribution cleanup failures to stderr: {e}"
+            );
+        }
     }
 
     // Post-sync health check

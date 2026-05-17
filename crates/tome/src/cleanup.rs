@@ -437,6 +437,24 @@ pub fn cleanup_library(
             Vec::new()
         }
     } else if !case2_delete.is_empty() {
+        // Non-interactive mode auto-removes Case 2 entries (no TTY, --quiet,
+        // or --no-input). The architecture doc promises an "auto-removes
+        // with warning" semantic — the post-fact bucket renderer surfaces
+        // WHAT was deleted, but only if no stderr error fires before it
+        // reaches that point. A `warn!` here ensures the action is visible
+        // in `--verbose` / `TOME_LOG=warn` traces even if the renderer
+        // later errors out, so CI logs always show *something* before silent
+        // deletions in flaky-mount or transient-FS scenarios.
+        tracing::warn!(
+            "auto-removing {} library entry(s) whose source file vanished \
+             from disk (non-interactive mode): {}",
+            case2_delete.len(),
+            case2_delete
+                .iter()
+                .map(|e| e.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         case2_delete.iter().map(|e| e.name.clone()).collect()
     } else {
         Vec::new()

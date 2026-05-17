@@ -714,7 +714,23 @@ impl MarketplaceAdapter for ClaudeMarketplaceAdapter {
 
     fn list_installed(&self) -> Result<Vec<InstalledPlugin>> {
         self.populate_cache()?;
-        Ok(self.cache.borrow().clone().unwrap_or_default())
+        let cache = self.cache.borrow();
+        // populate_cache()? returning Ok() should always leave cache as
+        // Some(_) — if it doesn't, a downstream caller (reconcile) would
+        // treat empty as "no plugins installed" and silently skip every
+        // managed update. Per #514 we don't panic from trait methods, but
+        // we DO surface the invariant violation as a warn-level event so
+        // it's visible in `--verbose` / `TOME_LOG=warn` runs instead of
+        // disappearing entirely.
+        if cache.is_none() {
+            tracing::warn!(
+                "ClaudeMarketplaceAdapter::list_installed: populate_cache() \
+                 succeeded but cache is None — returning empty list. This is \
+                 a programming-error invariant violation; reconcile may skip \
+                 managed-plugin updates this sync."
+            );
+        }
+        Ok(cache.clone().unwrap_or_default())
     }
 
     fn available(&self, plugin_id: &str) -> Result<bool> {
