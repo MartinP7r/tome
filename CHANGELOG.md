@@ -5,6 +5,125 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-05-17
+
+### Notes
+
+Version-bump-only patch. **No code delta from v0.12.0.** Cargo.toml +
+Cargo.lock workspace-version line are the only changes. Tagged to
+resolve a release-flow state where Homebrew had already propagated
+v0.12.0 before the local `make release` invocation completed; v0.12.1
+gave the publisher a clean tag to ship from.
+
+## [0.12.0] - 2026-05-17
+
+Pre-v1.0 review polish — bundles 15 of 16 findings from a whole-codebase
+audit (5 specialist review agents, scope: entire `crates/tome/src/`)
+plus a dependabot dependency bump. The one held finding (Owned/Unowned
+enum migration) is tracked in issue #542 for v1.0 Phase 10 absorption.
+
+### Breaking
+
+- **`tome status --json` `role` field shape change.**
+  `DirectoryStatus.role` is now the typed `DirectoryRole` enum
+  (serializes as `"managed"` / `"synced"` / `"source"` / `"target"`)
+  instead of a human-readable description string. The previous prose
+  description is now in a new `role_description` field. JSON consumers
+  reading `role` as a description string need to switch to
+  `role_description` or branch on the enum. Per the project's
+  `Backward compat: None` policy, no shim is provided. (PR #541,
+  Important #10.)
+
+### Fixed
+
+- **Critical — `apply_edit_decisions` manifest reload race.** Refactored
+  `apply_edit_decisions` to take `&mut Manifest`; `sync()` now owns the
+  manifest variable end-to-end through reconcile. Eliminates the
+  pre-refactor double-disk-touch pattern (separate load → mutate → save
+  followed by a separate consolidate load) that risked silently losing
+  Fork mutations under future `consolidate` refactors. (PR #541,
+  Critical #1.)
+- **Critical — `Lockfile` missing `Clone` derive.** Derived `Clone`;
+  deleted the brittle manual `clone_lockfile` helper in `reconcile.rs`
+  that would have silently dropped any new field added to `Lockfile`.
+  (PR #541, Critical #2.)
+- **Critical — `ClaudeMarketplaceAdapter::list_installed` silent
+  cache-miss.** Added `tracing::warn!` for the
+  "`populate_cache()? Ok` but cache is `None`" invariant-violation
+  case so reconcile-silently-skipping-every-managed-update is at least
+  diagnosable in `--verbose` / `TOME_LOG=warn` traces. (PR #541,
+  Critical #4.)
+- **Critical — Migration render errors silently dropped.** The
+  `tome migrate-library` flow's `let _ = render_plan_to(...)` and
+  `render_result_to(...)` discarded I/O errors, allowing a user to land
+  in the migration confirmation prompt having seen no plan. Now logged
+  at `warn!` so a broken stderr is diagnosable. (PR #541, Critical #6.)
+- **Non-interactive Case 2 cleanup deletes now warn before action.**
+  In non-TTY / `--quiet` / `--no-input` mode, library entries whose
+  source file vanished from disk were auto-removed with no log line
+  before the deletion. CI scenarios where an NFS mount dropped would
+  silently wipe every skill from that source. Added a `tracing::warn!`
+  listing every skill name + count before the deletion proceeds.
+  (PR #541, Important #9.)
+- **Cleanup render errors silently dropped.** Same pattern as Critical
+  #6 — `render_cleanup_buckets` and `render_distribution_cleanup_failures`
+  I/O errors are the only user notification for stale-skill action,
+  and they were discarded via `let _ = ...`. Now routed through
+  `tracing::warn!`. (PR #541, Important #12.)
+- **Doctor JSON empty-string fallback.** Replaced
+  `.ok().unwrap_or_default()` on `IssueCategory` serialization with
+  `.expect("IssueCategory serializes to a JSON string")` so a future
+  `Serialize` break is surfaced as a programming error instead of
+  emitting corrupt `"": <count>` keys to `tome doctor --json`.
+  (PR #541, Important #13.)
+
+### Added
+
+- **`apply_edit_decisions` Revert + Skip + dry_run regression tests.**
+  Pins the v0.10 deferred `Revert` stub semantic — emits a warning,
+  mutates nothing — with byte-level (`serde_json::to_string` equality)
+  + field-level assertions. Closes a data-loss-class test gap: a future
+  "completion" of the revert path that accidentally added library-
+  overwrite logic would now fail this test first. (PR #541,
+  Critical #5.)
+- **`CleanupResult` public accessors.** Added `removed_from_library()`,
+  `transitioned_to_unowned()`, `bucket_a_removed_from_config()`, and
+  `bucket_b_missing_from_disk()` matching the `Lockfile::skills()`
+  pattern. Lets v1.0 GUI consumers read bucket counts without mutating
+  the internal vec state. (PR #541, Important #11.)
+- **`MarketplaceAdapter` trait docstring with `# Example`.** Worked
+  example showing how to implement a new adapter (npm adapter shape);
+  documents cache-invariant rules, sealing-status, and known
+  implementations. (PR #541, Important #16.)
+- **`SyncReport` + `ReconcileReport` lifecycle docstrings.** Document
+  field ownership, the `edited` / `edit_decisions` parallel-vec
+  invariant (with forward-reference to the #519 single-Vec follow-up),
+  and the OBS-05 summary line origin. (PR #541, Important #16.)
+- **Doctor auto-fix integration test.**
+  `doctor_dry_run_reports_issues_without_filesystem_mutation` pins
+  the `--dry-run` + `--no-input` filesystem-invariants at the CLI
+  boundary (previously only unit-level coverage existed). (PR #541,
+  Important #14.)
+
+### Changed
+
+- **Stderr discipline: per-skill drift/missing diff lines moved from
+  stdout to stderr.** The two `println!` calls in
+  `apply_drift_and_missing` were the only stdout writers in the entire
+  sync pipeline. Now `eprintln!` matches the cleanup buckets / dry-run
+  banner / warnings convention. (PR #541, Important #7.)
+- **Stale `#[allow(dead_code)]` suppressions cleanup.** Stripped 13 of
+  15 suppressions in `marketplace.rs` (Phase 13 shipped; the "drop
+  when Phase 13 wires" comments were stale). The remaining two
+  (`classify_claude_install_stderr`, `build_install_failure`) carry
+  updated comments referencing #518 follow-up. (PR #541, Important #8.)
+- **Comment drift fixes in 5 files** — pre-v0.10 "managed = symlink"
+  wording updated to v0.10 library-canonical real-dir-copy semantics
+  in `discover.rs`, `distribute.rs`, `status.rs`, `relocate.rs`, and
+  the crate-root `lib.rs` pipeline doc. (PR #541, Important #15.)
+- **Dependency bumps**: `clap_complete` 4.6.4 → 4.6.5,
+  `assert_cmd` patch bump. (PR #543.)
+
 ## [0.11.1] - 2026-05-15
 
 ### Fixed
