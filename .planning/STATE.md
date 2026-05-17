@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.11
-milestone_name: Polish + Observability
+milestone: v0.12
+milestone_name: Pre-v1.0 Review Polish + Patch
 status: shipped
-stopped_at: v0.11.0 released 2026-05-14 (PR #534 Phase 19 + PR #535 version bump); next milestone v1.0 Tauri GUI drafted
-last_updated: "2026-05-15T00:00:00.000Z"
-last_activity: 2026-05-15
+stopped_at: v0.12.1 patch released 2026-05-17 (no code delta from v0.12.0; tag-only); v0.12.0 released 2026-05-17 with the pre-v1.0 review-pass bundle (PR #541 — 15 of 16 review findings) and dependabot bump (PR #543). v0.11.1 released 2026-05-15; v0.11.0 released 2026-05-14. Next milestone v1.0 Tauri GUI drafted — pending /gsd:new-milestone ratification. Open follow-up #542 tracks deferred items (Critical #3 owned/unowned enum + 6 Suggestions).
+last_updated: "2026-05-17T00:00:00.000Z"
+last_activity: 2026-05-17
 progress:
   total_phases: 9
   completed_phases: 8
