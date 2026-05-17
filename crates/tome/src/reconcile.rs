@@ -522,14 +522,26 @@ fn apply_drift_and_missing(
     dry_run: bool,
 ) -> Result<()> {
     // Render diff lines (D-05) before applying so the user sees what's about
-    // to happen — applies even when consent was Always (silently).
+    // to happen — applies even when consent was Always (silently). Routed
+    // through stderr (not stdout) to match the rest of the sync pipeline's
+    // output discipline: cleanup buckets, dry-run banner, and warnings all
+    // emit on stderr. Stdout stays reserved for the structured summary
+    // block (`render_sync_report`) that GUI consumers will parse.
+    //
+    // NOTE: A future v1.0 Phase 10 (CORE extraction) pass should surface
+    // these per-skill events through `ReconcileReport.drift` /
+    // `ReconcileReport.missing` fields and let the GUI render them from
+    // structured data instead of intercepting stderr. The data is already
+    // captured in those vecs; what's missing is a post-apply outcome
+    // marker (success vs install-failure) so the renderer can show
+    // accurate "updated" vs "attempted" status.
     for c in drift {
         if let ReconcileClass::Drift {
             old_version,
             new_version,
         } = &c.class
         {
-            println!(
+            eprintln!(
                 "  • {}: {} → {}",
                 c.name.as_str(),
                 old_version.as_deref().unwrap_or("unknown"),
@@ -538,7 +550,7 @@ fn apply_drift_and_missing(
         }
     }
     for c in missing {
-        println!("  • {} (missing — installing)", c.name.as_str());
+        eprintln!("  • {} (missing — installing)", c.name.as_str());
     }
 
     if dry_run {
