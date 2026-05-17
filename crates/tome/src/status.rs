@@ -35,11 +35,25 @@ impl From<Result<usize, String>> for CountOrError {
 }
 
 /// Status of a single configured directory.
+///
+/// **JSON shape change (v0.11+):** `role` is now the typed
+/// `DirectoryRole` enum (serializes as `"managed"` / `"synced"` /
+/// `"source"` / `"target"`) so GUI consumers can branch on the role
+/// without parsing prose. The human-readable description previously
+/// in `role` (e.g. `"Synced (skills discovered here AND distributed
+/// here)"`) moved to `role_description`. Per the project's
+/// `Backward compat: None` policy, JSON consumers that read `role` as
+/// a description string need to switch to `role_description` or to the
+/// enum-aware reader.
 #[derive(serde::Serialize)]
 pub struct DirectoryStatus {
     pub name: String,
     pub directory_type: String,
-    pub role: String,
+    pub role: crate::config::DirectoryRole,
+    /// Human-readable description of the role (e.g. `"Synced (skills
+    /// discovered here AND distributed here)"`). Display-only — GUI
+    /// consumers should branch on [`role`](Self::role) instead.
+    pub role_description: String,
     pub path: String,
     /// Number of skills discovered (for discovery dirs) or symlinks present (for target dirs),
     /// or an error message if counting failed.
@@ -103,7 +117,8 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
             DirectoryStatus {
                 name: name.as_str().to_string(),
                 directory_type: dir_config.directory_type.to_string(),
-                role: role.description().to_string(),
+                role_description: role.description().to_string(),
+                role,
                 path: dir_config.path.display().to_string(),
                 skill_count: skill_count.into(),
                 warnings,
@@ -273,7 +288,7 @@ fn render_status(report: &StatusReport) {
             rows.push([
                 dir.name.clone(),
                 dir.directory_type.clone(),
-                dir.role.clone(),
+                dir.role_description.clone(),
                 format_dir_path_column(&dir.path, dir.override_applied),
                 count,
             ]);
@@ -519,7 +534,8 @@ mod tests {
         .unwrap();
         assert_eq!(report.directories.len(), 1);
         assert_eq!(report.directories[0].name, "claude");
-        assert!(report.directories[0].role.contains("Target"));
+        assert_eq!(report.directories[0].role, DirectoryRole::Target);
+        assert!(report.directories[0].role_description.contains("Target"));
     }
 
     #[test]
@@ -549,17 +565,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.directories.len(), 1);
+        assert_eq!(
+            report.directories[0].role,
+            DirectoryRole::Synced,
+            "typed role field must be Synced"
+        );
         assert!(
-            report.directories[0].role.contains("Synced"),
-            "role should contain Synced, got: {}",
-            report.directories[0].role
+            report.directories[0].role_description.contains("Synced"),
+            "role_description should contain Synced, got: {}",
+            report.directories[0].role_description
         );
         assert!(
             report.directories[0]
-                .role
+                .role_description
                 .contains("discovered here AND distributed here"),
-            "role should include description, got: {}",
-            report.directories[0].role
+            "role_description should include human-readable expansion, got: {}",
+            report.directories[0].role_description
         );
     }
 
@@ -864,7 +885,8 @@ mod tests {
         let ds = DirectoryStatus {
             name: "work".to_string(),
             directory_type: "directory".to_string(),
-            role: "Source".to_string(),
+            role: DirectoryRole::Source,
+            role_description: "Source (discovery only)".to_string(),
             path: "/some/path".to_string(),
             skill_count: CountOrError {
                 count: Some(0),
