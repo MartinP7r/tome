@@ -95,14 +95,13 @@ pub struct Edited {
     pub old_version: Option<String>,
 }
 
-/// Aggregate report returned to `lib.rs::sync` for stdout/stderr rendering
-/// + exit-code decisions. The summary line `✓ N match · ⚠ N drift · ⚠ N
 /// Outcome of one reconcile pass over the lockfile (Phase 13 / RECON-01..05).
 ///
-/// Produced by [`reconcile_lockfile`] and threaded into [`crate::SyncReport`].
-/// Surfaces both the **classification** of every managed lockfile entry
-/// (Match / Drift / Vanished / Missing) and the **user-decision artifacts**
-/// for skills detected as edit-in-library.
+/// Aggregate report returned to `lib.rs::sync` for stdout/stderr rendering
+/// and exit-code decisions. Produced by [`reconcile_lockfile`] and threaded
+/// into [`crate::SyncReport`]. Surfaces both the **classification** of every
+/// managed lockfile entry (Match / Drift / Vanished / Missing) and the
+/// **user-decision artifacts** for skills detected as edit-in-library.
 ///
 /// # Lifecycle
 ///

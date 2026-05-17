@@ -1422,26 +1422,23 @@ fn build_claude_adapter(config: &Config) -> Result<Option<marketplace::ClaudeMar
     Ok(Some(adapter))
 }
 
-/// Apply the user's edit-in-library decisions to the on-disk manifest.
-///
-/// Per RECON-05 D-13:
-/// - Fork: `managed: true → false`, `source_name: Some → None`. Library
-///   content stays in place. Provenance history is dropped (one-time UX gap;
-///   Phase 14 may add fields retroactively).
-/// - Revert: leave the manifest untouched here — the apply_drift loop in
-///   reconcile_lockfile would have applied an `adapter.update()` (revert
-///   degenerates to "force a drift apply"); if the user picked revert here,
-///   they're saying "I want the upstream copy" — emit a warning that revert
-///   is not yet wired (deferred to a follow-up; D-16's safety guarantee is
-///   "never silently overwrite", and revert is opt-in so a warn-and-skip is
-///   acceptable for v0.10).
-/// - Skip: emit nothing additional (the per-skill warning already fired in
-///   `handle_edited`).
-/// Apply edit-in-library decisions to a manifest in-memory.
+/// Apply the user's edit-in-library decisions to the manifest in-memory.
 ///
 /// Returns `true` if any Fork mutation was applied (sync() should save the
 /// manifest in that case). Revert and Skip emit user-facing output but do
 /// not mutate.
+///
+/// Per RECON-05 D-13:
+///
+/// - **Fork**: `managed: true → false`, `source_name: Some → None`. Library
+///   content stays in place. `previous_source` captures the old
+///   `source_name` per D-C1 (Phase 14, transition site 3).
+/// - **Revert**: emits a warning that revert is not yet wired (deferred to a
+///   follow-up; D-16's safety guarantee is "never silently overwrite", and
+///   revert is opt-in so a warn-and-skip is acceptable for v0.10). No
+///   mutation.
+/// - **Skip**: emits nothing additional (the per-skill warning already fired
+///   in `handle_edited`). No mutation.
 ///
 /// Pre-refactor (v0.11.1 and earlier), this function did its own `manifest::
 /// load` + `manifest::save` round-trip, then `consolidate` did its own
@@ -1906,9 +1903,7 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             &mut stderr,
             &distribution_cleanup_failures,
         ) {
-            tracing::warn!(
-                "could not render distribution cleanup failures to stderr: {e}"
-            );
+            tracing::warn!("could not render distribution cleanup failures to stderr: {e}");
         }
     }
 
@@ -2930,7 +2925,10 @@ mod tests {
             "Revert must preserve source_name"
         );
         assert!(entry.managed, "Revert must preserve managed flag");
-        assert_eq!(entry.previous_source, None, "Revert must not set previous_source");
+        assert_eq!(
+            entry.previous_source, None,
+            "Revert must not set previous_source"
+        );
     }
 
     #[test]
