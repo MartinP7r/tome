@@ -97,7 +97,41 @@ pub struct Edited {
 
 /// Aggregate report returned to `lib.rs::sync` for stdout/stderr rendering
 /// + exit-code decisions. The summary line `✓ N match · ⚠ N drift · ⚠ N
-/// vanished` is computed from the counts here (D-02/D-04).
+/// Outcome of one reconcile pass over the lockfile (Phase 13 / RECON-01..05).
+///
+/// Produced by [`reconcile_lockfile`] and threaded into [`crate::SyncReport`].
+/// Surfaces both the **classification** of every managed lockfile entry
+/// (Match / Drift / Vanished / Missing) and the **user-decision artifacts**
+/// for skills detected as edit-in-library.
+///
+/// # Lifecycle
+///
+/// - On a sync with no [`crate::marketplace::MarketplaceAdapter`]
+///   configured (no `claude-plugins` directory), this struct is never
+///   created — `SyncReport.reconcile` is `None`.
+/// - On a sync with an adapter, all vec fields are `Vec::default()` and
+///   `matches` starts at `0`; they're populated as `reconcile_lockfile`
+///   walks the lockfile.
+/// - `vanished` is computed from the count returned by
+///   `adapter.available() == false` (D-02 / D-04).
+/// - `drift` entries may have an `install_failures` corresponding entry
+///   appended if the apply step's `adapter.install`/`update` call failed.
+///
+/// # Vec lengths
+///
+/// `edited` and `edit_decisions` are parallel vectors in the same order
+/// (one decision per edited skill). The invariant is asserted in
+/// [`reconcile_lockfile`]'s final `debug_assert_eq!`. Consumers must NOT
+/// re-order or filter one without the other. **Note:** tracked as a
+/// type-design improvement in issue #519 — a single `Vec<EditOutcome>`
+/// would make the lockstep relationship structural.
+///
+/// # OBS-05 summary line
+///
+/// The `reconcile: ✓ N match · ⚠ M drift · ⚠ K vanished · ⚠ L
+/// missing-from-machine` summary line emitted by
+/// `render_sync_report` is computed from `matches`, `drift.len()`,
+/// `vanished.len()`, and `missing.len()`.
 #[derive(Debug, Default)]
 pub struct ReconcileReport {
     pub matches: usize,

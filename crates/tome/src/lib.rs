@@ -7,12 +7,21 @@
 //!
 //! The `sync` function drives the main workflow:
 //!
-//! 1. **Discover** — scan configured sources for `*/SKILL.md` directories
-//! 2. **Consolidate** — copy or symlink discovered skills into the library
-//! 3. **Triage** — diff lockfile, surface changes, let user disable new skills
+//! 1. **Reconcile** — lockfile-authoritative drift detection for managed
+//!    skills via [`MarketplaceAdapter`](marketplace::MarketplaceAdapter)
+//!    (Phase 13: classify each managed skill as Match / Drift / Vanished,
+//!    apply updates per `auto_install_plugins` consent).
+//! 2. **Discover** — scan configured directories (role `managed`/`source`/
+//!    `synced`) for `*/SKILL.md` directories.
+//! 3. **Consolidate** — copy every discovered skill (managed AND local)
+//!    into the library as a real directory (v0.10 library-canonical model;
+//!    no symlinks).
 //! 4. **Distribute** — push library skills to target tools via symlinks
-//! 5. **Cleanup** — remove stale entries no longer in any source
-//! 6. **Save** — persist manifest, lockfile, and `.gitignore`
+//!    into `target` / `synced` directories.
+//! 5. **Cleanup** — three-bucket stale-skill report
+//!    (removed-from-config / missing-from-disk / now-in-exclude-list);
+//!    orphan transitions preserve library content per LIB-04.
+//! 6. **Save** — persist manifest, lockfile, and `.gitignore`.
 //!
 //! # Public API
 //!
@@ -101,7 +110,29 @@ pub use manifest::hash_directory;
 pub use lint::LintFailed;
 pub use migration_v010::MigrationPartialOrFailed;
 
-/// Summary of a complete sync operation.
+/// Summary of a complete sync operation — the return-shape of the full
+/// `sync()` pipeline (reconcile → discover → consolidate → distribute →
+/// cleanup → save). This is the primary data source for any consumer that
+/// wants to surface "what happened this sync" (the CLI's stdout summary
+/// block today; the v1.0 Tauri GUI's sync-result view tomorrow).
+///
+/// # Field ownership
+///
+/// - [`consolidate`](Self::consolidate) — always populated; counts skills
+///   created / unchanged / updated in the library this run.
+/// - [`distributions`](Self::distributions) — one entry per configured
+///   `target` / `synced` directory. Empty when no directories are
+///   configured (a config error surfaced separately).
+/// - [`cleanup`](Self::cleanup) — always populated; reflects the three
+///   stale-skill buckets (A: removed-from-config / B: missing-from-disk /
+///   C: now-in-exclude-list). Use the public accessors on
+///   [`CleanupResult`] for read-only access.
+/// - [`removed_from_targets`](Self::removed_from_targets) — total stale
+///   distribution symlinks pruned across all targets.
+/// - [`reconcile`](Self::reconcile) — `None` when sync ran without a
+///   `MarketplaceAdapter` (no `claude-plugins` directory configured).
+///   `Some(_)` when reconcile ran; counts may all be zero on a clean
+///   match. See [`reconcile::ReconcileReport`] for the inner shape.
 pub struct SyncReport {
     pub consolidate: ConsolidateResult,
     pub distributions: Vec<DistributeResult>,

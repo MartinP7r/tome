@@ -61,7 +61,10 @@ pub fn distribute_to_directory(
         return Ok(result);
     }
 
-    // Read all entries in library (may be real directories for local skills or symlinks for managed skills)
+    // Read all entries in library — all are real directory copies since
+    // v0.10 (LIB-01). A symlink here indicates an un-migrated v0.9-shape
+    // library that should have been refused at the sync gate; see
+    // `library::consolidate_managed` for the refusal logic.
     let entries = std::fs::read_dir(library_dir)
         .with_context(|| format!("failed to read library dir {}", library_dir.display()))?;
 

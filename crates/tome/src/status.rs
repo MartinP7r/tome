@@ -318,7 +318,10 @@ fn render_status(report: &StatusReport) {
     println!("{} {}", style("Health:").bold(), health);
 }
 
-/// Count skill entries in the library (directories or symlinks-to-dirs), excluding hidden entries.
+/// Count skill directory entries in the library, excluding hidden entries.
+/// Since v0.10 (LIB-01) all library entries are real directory copies;
+/// symlinks-to-dirs are still counted via `path.is_dir()` to support
+/// reading un-migrated v0.9-shape libraries from `tome status`.
 fn count_entries(dir: &Path) -> Result<usize> {
     let mut count = 0;
     for entry in std::fs::read_dir(dir)
@@ -330,7 +333,9 @@ fn count_entries(dir: &Path) -> Result<usize> {
             continue;
         }
         let path = entry.path();
-        // Count real directories (local skills) and symlinks-to-dirs (managed skills)
+        // `is_dir()` follows symlinks, so it counts both real directories
+        // (the v0.10+ canonical shape) and symlinks-to-dirs (v0.9-shape
+        // libraries that haven't run `tome migrate-library` yet).
         if path.is_dir() {
             count += 1;
         }

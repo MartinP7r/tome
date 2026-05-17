@@ -72,11 +72,64 @@ pub struct InstalledPlugin {
 /// All methods return `anyhow::Result`. `plugin_id` is `&str` (not a newtype)
 /// because marketplace identifiers carry an `@marketplace` suffix that's
 /// incompatible with `SkillName` validation (e.g. `"axiom@axiom-marketplace"`).
-//
-// dead_code allow: see InstalledPlugin above. The trait is implemented by
-// `GitAdapter` (Plan 12-03) and `MockMarketplaceAdapter` (Plan 12-01 tests),
-// but neither has a non-test caller yet. Drop when Phase 13's sync dispatcher
-// constructs `Box<dyn MarketplaceAdapter>` for each `DirectoryConfig`.
+/// Marketplace-specific install / update / availability operations for
+/// managed skills. Implemented per marketplace; reconcile picks the right
+/// implementation by `DirectoryType` (D-11).
+///
+/// # Implementations
+///
+/// Two production adapters ship with tome:
+/// - [`ClaudeMarketplaceAdapter`] — shells out to the `claude plugin`
+///   subcommands and parses `claude plugin list --json`.
+/// - [`GitAdapter`] — thin shim over [`crate::git`] for `type = "git"`
+///   directories. Behavior preserved byte-for-byte from v0.9.
+///
+/// A test mock [`testing::MockMarketplaceAdapter`] lives behind the
+/// `test-support` feature for unit tests; production code never sees it.
+///
+/// # Example: implementing a new adapter
+///
+/// ```ignore
+/// use anyhow::Result;
+/// use tome::marketplace::{InstalledPlugin, InstallOp, MarketplaceAdapter};
+///
+/// struct NpmAdapter;
+///
+/// impl MarketplaceAdapter for NpmAdapter {
+///     fn id(&self) -> &str { "npm" }
+///     fn current_version(&self, plugin_id: &str) -> Result<Option<String>> {
+///         // Query the npm registry; return version or None
+///         Ok(None)
+///     }
+///     fn install(&self, plugin_id: &str) -> Result<()> {
+///         // Shell out to `npm install -g ...`
+///         Ok(())
+///     }
+///     fn update(&self, plugin_id: &str) -> Result<()> {
+///         // Shell out to `npm update -g ...`
+///         Ok(())
+///     }
+///     fn list_installed(&self) -> Result<Vec<InstalledPlugin>> {
+///         // Parse `npm list -g --json`
+///         Ok(vec![])
+///     }
+///     fn available(&self, plugin_id: &str) -> Result<bool> {
+///         Ok(true)
+///     }
+/// }
+/// ```
+///
+/// # Cache invariants
+///
+/// Adapters that cache `list_installed()` output MUST auto-invalidate
+/// the cache on `Ok` from `install()` / `update()` (D-04). The
+/// [`ClaudeMarketplaceAdapter`] implementation does this via
+/// `*self.cache.borrow_mut() = None` on success.
+///
+/// # Sealing
+///
+/// The trait is currently not sealed — third-party crates can implement
+/// it. Sealing it is tracked as a v1.0 prep item (#518).
 pub trait MarketplaceAdapter {
     /// Stable identifier for this adapter instance (e.g. git URL, or
     /// `"claude-plugins"` for the singleton Claude adapter).
