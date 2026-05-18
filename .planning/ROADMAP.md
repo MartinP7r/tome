@@ -288,6 +288,29 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd:review-backlog when ready)
 
+### Phase 999.5: Directory type + role explanation in `tome add` and other touchpoints (BACKLOG)
+
+**Goal:** Surface what `type` and `role` mean (and what defaults apply) at the moments where users are choosing them — primarily `tome add` and `tome init`. Today the user has to read `docs/src/configuration.md` to understand that omitting `role` defaults to `DirectoryType`'s default (`Managed` / `Synced` / `Source`), and that the wrong default can cause real side effects (e.g., a `directory` source defaulted to `synced` causes tome to write distribution symlinks INTO the source dir).
+
+**Concrete cases captured during pfw dogfooding (2026-05-18):**
+- `tome add` accepts `--branch`, `--tag`, `--rev`, `--subdir`, `--name` flags but no `--role` flag. The user can't express role at add time; they have to hand-edit `tome.toml` afterward.
+- When role is implicit, `tome status` shows the resolved role text but `tome add`'s own success output doesn't ("Added directory 'pfw' (git: ...)" — no role mentioned).
+- `tome doctor` doesn't flag "directory has role X but maybe you meant Y" — there's no signal that the role default surprised the user.
+
+**Possible surfaces to address:**
+1. **`tome add --role <managed|synced|source|target>` flag** — explicit at add time, with a default-explanation snippet in `--help`.
+2. **`tome add` success message** — append `(role: synced — discovery + distribution)` so the user sees what they got.
+3. **`tome init` wizard** — already prompts for direction; could add a one-line "what this role means" hint per option.
+4. **`tome status` Directories table** — the description column already says "Synced (skills discovered here AND distributed here)" which is good; could be replicated everywhere role is surfaced.
+5. **Docs `commands.md` `tome add` section** — add an explicit "Choosing the right role" subsection citing the pfw-style trap (synced default writes BACK into your source dir).
+
+**Requirements:** TBD
+**Origin:** pfw integration dogfooding — user added `[directories.pfw] type = "directory"` without `role`, defaulted to `synced`, tome wrote 171 stale symlinks into `~/.pfw/skills/` before being caught (2026-05-18)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd:review-backlog when ready)
+
 
 ## Progress
 
