@@ -22,7 +22,7 @@ use anyhow::{Result, bail};
 use console::style;
 use tracing::warn;
 
-use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryType, GitRef};
+use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, GitRef};
 
 /// Result of parsing a GitHub `/tree/<ref>/<subdir>` suffix off the input URL.
 ///
@@ -209,6 +209,15 @@ pub(crate) struct AddOptions<'a> {
     /// Overrides any subdir parsed from a `/tree/<ref>/<subdir>` URL
     /// suffix (with a warning surfacing the conflict).
     pub subdir: Option<&'a str>,
+    /// Explicit `--role <ROLE>` flag (Phase 20 / v0.14). When `None`, the
+    /// directory's `role` falls back to `DirectoryType::default_role()` —
+    /// the same default `Config::load` applies. When `Some`, the choice
+    /// is validated against `DirectoryType::valid_roles()` for this
+    /// type; an incompatible combination bails with a clear error
+    /// naming the valid roles. Setting `role` explicitly lets the user
+    /// avoid the `directory → synced` default-write-back trap (the pfw
+    /// dogfooding pain that surfaced this phase).
+    pub role: Option<DirectoryRole>,
     pub dry_run: bool,
     pub config_path: &'a Path,
 }
@@ -311,30 +320,59 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
         (None, url_sub) => url_sub,
     };
 
+    // Phase 20 (v0.14): explicit --role flag wins over the type-default.
+    // Validate against valid_roles() to fail fast on incompatible combos
+    // (e.g. `--role target` for a git type — git is discovery-only).
+    if let Some(r) = opts.role {
+        let valid = DirectoryType::Git.valid_roles();
+        if !valid.contains(&r) {
+            let valid_str: Vec<String> = valid.iter().map(|r| r.kebab_case().to_string()).collect();
+            bail!(
+                "role '{}' is not valid for type 'git' — valid roles: {}",
+                r.kebab_case(),
+                valid_str.join(", ")
+            );
+        }
+    }
     let dir_config = DirectoryConfig {
         path: PathBuf::from(&resolved_url),
         directory_type: DirectoryType::Git,
-        role: None,
+        role: opts.role,
         git_ref,
         subdir: final_subdir,
         override_applied: false,
     };
 
+    // Echo the resolved role in the success message (Phase 20). Falls back
+    // to the type-default when --role wasn't passed so the user sees the
+    // value tome will actually use, not just "None". Closes the gap where
+    // a synced-default surprise (writing into the source dir) had no
+    // signal at add time.
+    let resolved_role = opts
+        .role
+        .unwrap_or_else(|| DirectoryType::Git.default_role());
+
     if opts.dry_run {
         println!(
-            "{} add directory '{}' (git: {})",
+            "{} add directory '{}' (git: {}, role: {})",
             style("Would").yellow(),
             style(&dir_name_str).cyan(),
             resolved_url,
+            style(resolved_role.kebab_case()).yellow(),
         );
     } else {
         config.directories.insert(dir_name, dir_config);
         config.save(opts.config_path)?;
         println!(
-            "{} directory '{}' (git: {})",
+            "{} directory '{}' (git: {}, role: {})",
             style("Added").green(),
             style(&dir_name_str).cyan(),
             resolved_url,
+            style(resolved_role.kebab_case()).cyan(),
+        );
+        println!(
+            "  {}",
+            style(format!("→ {}", resolved_role.description())).dim(),
         );
     }
 
@@ -587,6 +625,7 @@ mod tests {
             tag: None,
             rev: None,
             subdir: None,
+            role: None,
             dry_run: false,
             config_path: &config_path,
         };
@@ -620,6 +659,7 @@ mod tests {
             tag: None,
             rev: None,
             subdir: Some("packages"),
+            role: None,
             dry_run: false,
             config_path: &config_path,
         };
@@ -651,6 +691,7 @@ mod tests {
             tag: None,
             rev: None,
             subdir: Some("packages"),
+            role: None,
             dry_run: false,
             config_path: &config_path,
         };
@@ -682,6 +723,7 @@ mod tests {
             tag: None,
             rev: None,
             subdir: None,
+            role: None,
             dry_run: false,
             config_path: &config_path,
         };
@@ -692,5 +734,111 @@ mod tests {
         assert!(matches!(entry.git_ref, Some(GitRef::Branch(ref b)) if b == "dev"));
         // URL subdir still applies since --subdir wasn't set.
         assert_eq!(entry.subdir.as_deref(), Some("skills"));
+    }
+
+    // -- Phase 20 (v0.14): --role flag tests --
+
+    #[test]
+    fn add_with_explicit_role_writes_role_to_config() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let mut config = Config {
+            library_dir: lib_dir,
+            ..Config::default()
+        };
+        let opts = AddOptions {
+            url: "owner/repo",
+            name: None,
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+            role: Some(DirectoryRole::Source),
+            dry_run: false,
+            config_path: &config_path,
+        };
+        add(&mut config, opts).unwrap();
+        let dir_name = DirectoryName::new("repo").unwrap();
+        let entry = config.directories.get(&dir_name).expect("directory added");
+        assert_eq!(entry.role, Some(DirectoryRole::Source));
+    }
+
+    #[test]
+    fn add_with_no_role_leaves_role_none_for_type_default() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let mut config = Config {
+            library_dir: lib_dir,
+            ..Config::default()
+        };
+        let opts = AddOptions {
+            url: "owner/repo",
+            name: None,
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+            role: None,
+            dry_run: false,
+            config_path: &config_path,
+        };
+        add(&mut config, opts).unwrap();
+        let dir_name = DirectoryName::new("repo").unwrap();
+        let entry = config.directories.get(&dir_name).expect("directory added");
+        assert_eq!(
+            entry.role, None,
+            "no --role should leave role unset for type-default"
+        );
+        assert_eq!(entry.role(), DirectoryRole::Source);
+    }
+
+    #[test]
+    fn add_with_invalid_role_for_git_type_bails() {
+        // Git directories can only be Source. --role target is invalid;
+        // expect a clear error naming the invalid role + the valid roles.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("tome.toml");
+        let lib_dir = tmp.path().join("library");
+        std::fs::create_dir_all(&lib_dir).unwrap();
+        let mut config = Config {
+            library_dir: lib_dir,
+            ..Config::default()
+        };
+        let opts = AddOptions {
+            url: "owner/repo",
+            name: None,
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+            role: Some(DirectoryRole::Target),
+            dry_run: false,
+            config_path: &config_path,
+        };
+        let err = add(&mut config, opts).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("target") && msg.contains("not valid"),
+            "error should name the invalid role + 'not valid'; got: {msg}"
+        );
+        assert!(
+            msg.contains("source"),
+            "error should list valid roles; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn directory_role_kebab_case_matches_serde_wire_format() {
+        // The accessor used in success-message echo + error messages must
+        // match what serde reads from tome.toml AND what clap parses from
+        // --role on the CLI. Compile-time exhaustiveness via match arms.
+        assert_eq!(DirectoryRole::Managed.kebab_case(), "managed");
+        assert_eq!(DirectoryRole::Synced.kebab_case(), "synced");
+        assert_eq!(DirectoryRole::Source.kebab_case(), "source");
+        assert_eq!(DirectoryRole::Target.kebab_case(), "target");
     }
 }

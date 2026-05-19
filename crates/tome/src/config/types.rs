@@ -138,8 +138,12 @@ impl DirectoryType {
 }
 
 /// The role a directory plays in the sync pipeline.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The `clap::ValueEnum` derive lets `tome add --role <ROLE>` accept these
+/// variants in their kebab-case form (matching the `tome.toml` wire format).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
 pub enum DirectoryRole {
     /// Read-only, owned by package manager (e.g. Claude plugins cache)
     Managed,
@@ -152,6 +156,17 @@ pub enum DirectoryRole {
 }
 
 impl DirectoryRole {
+    /// Kebab-case string matching the serde wire format (also the form clap
+    /// uses to parse `--role <ROLE>` and the form used in `tome.toml`).
+    pub fn kebab_case(&self) -> &'static str {
+        match self {
+            DirectoryRole::Managed => "managed",
+            DirectoryRole::Synced => "synced",
+            DirectoryRole::Source => "source",
+            DirectoryRole::Target => "target",
+        }
+    }
+
     /// Human-readable description used in validation error messages.
     ///
     /// The parenthetical ("Managed (read-only, owned by package manager)") is
@@ -275,7 +290,6 @@ impl DirectoryConfig {
     /// Returns the effective role, defaulting from directory_type if not explicitly set.
     pub fn role(&self) -> DirectoryRole {
         self.role
-            .clone()
             .unwrap_or_else(|| self.directory_type.default_role())
     }
 }
