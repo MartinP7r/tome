@@ -10,6 +10,7 @@
 - ✅ **v0.11 Polish + Observability** — Phases 18-19 (shipped 2026-05-14, v0.11.1 patch 2026-05-15)
 - ✅ **v0.12 Pre-v1.0 Review Polish** — whole-codebase audit fix bundle (shipped 2026-05-17 as v0.12.0; trivial version-bump-only patch v0.12.1 same day). Deferred items tracked in [#542](https://github.com/MartinP7r/tome/issues/542) for v1.0 Phase 10 absorption.
 - ✅ **v0.13 `tome add` UX** — 3-layer `tome add` improvement (PR #547): GitHub `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint (shipped 2026-05-19). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap surfaced during dogfooding.
+- 🚧 **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (promoted from backlog 999.5 + 999.2 on 2026-05-19)
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
@@ -241,6 +242,13 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
 - [x] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4 (approved 2026-05-15, retrospective — v0.11 shipped 2026-05-14 via PR #534 + #535)
 
+### 🚧 v0.14 Polish: type+role UX + doctor claim-orphan (In Progress)
+
+**Milestone Goal:** Speedrun two backlog items surfaced by post-v0.13 dogfooding. Both are small, well-scoped UX fixes that close real user-friction surfaces — neither needs the v1.0 Phase 10 IPC redesign context. Promoted from backlog (999.5 + 999.2) on 2026-05-19.
+
+- [ ] **Phase 20: Type+role explanation in `tome add`** (promoted from 999.5) — Surface what `type` and `role` mean + their defaults at the moments users are choosing them. Five candidate surfaces (CLI `--role` flag, `tome add` success message echoing role, `tome init` wizard hint, `tome status` table already-good, `commands.md` "Choosing the right role" section). Speedrun: ship CLI flag + success message + docs section.
+- [ ] **Phase 21: Doctor repair — claim orphan into manifest** (promoted from 999.2) — Add a `tome doctor` repair option that registers an orphan library directory into the manifest as Unowned, instead of only offering "delete" or "skip with sync hint". Closes the dead-end where sync can't re-discover orphans.
+
 
 ## Backlog
 
@@ -249,16 +257,6 @@ Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog
 ### Phase 999.1: Loosen frontmatter cascade (BACKLOG)
 
 **Goal:** Skills with a `SKILL.md` file but unparseable YAML frontmatter should still be discoverable and distributable. Today `discover.rs:541-563` sets `frontmatter: None` on parse failure but a downstream filter drops the skill from the manifest (cv-ats-audit reproduces this — discovered from `claude-skills` source, never lands in library manifest, then orphans the library copy). Surface as a frontmatter-lint diagnostic in `tome doctor` instead of a discovery dead-zone — let the consuming tool decide if it can use the file.
-**Requirements:** TBD
-**Origin:** Phase 19 dogfooding, 2026-05-14
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
-
-### Phase 999.2: Doctor repair — claim orphan into manifest (BACKLOG)
-
-**Goal:** Add a `tome doctor` repair option that registers an orphan library directory (`exists but is not in the manifest`) into the manifest, instead of only offering "delete" or "skip with sync hint". Current orphan flow (`doctor.rs:551-619`) is stuck when the source can't be re-discovered (e.g. broken frontmatter in 999.1) — sync can't re-register, so "keep" is a dead end and only "delete" actually progresses. A direct claim-into-manifest repair closes the loop without losing data.
 **Requirements:** TBD
 **Origin:** Phase 19 dogfooding, 2026-05-14
 **Plans:** 0 plans
@@ -288,30 +286,6 @@ Plans:
 
 Plans:
 - [ ] TBD (promote with /gsd:review-backlog when ready)
-
-### Phase 999.5: Directory type + role explanation in `tome add` and other touchpoints (BACKLOG)
-
-**Goal:** Surface what `type` and `role` mean (and what defaults apply) at the moments where users are choosing them — primarily `tome add` and `tome init`. Today the user has to read `docs/src/configuration.md` to understand that omitting `role` defaults to `DirectoryType`'s default (`Managed` / `Synced` / `Source`), and that the wrong default can cause real side effects (e.g., a `directory` source defaulted to `synced` causes tome to write distribution symlinks INTO the source dir).
-
-**Concrete cases captured during pfw dogfooding (2026-05-18):**
-- `tome add` accepts `--branch`, `--tag`, `--rev`, `--subdir`, `--name` flags but no `--role` flag. The user can't express role at add time; they have to hand-edit `tome.toml` afterward.
-- When role is implicit, `tome status` shows the resolved role text but `tome add`'s own success output doesn't ("Added directory 'pfw' (git: ...)" — no role mentioned).
-- `tome doctor` doesn't flag "directory has role X but maybe you meant Y" — there's no signal that the role default surprised the user.
-
-**Possible surfaces to address:**
-1. **`tome add --role <managed|synced|source|target>` flag** — explicit at add time, with a default-explanation snippet in `--help`.
-2. **`tome add` success message** — append `(role: synced — discovery + distribution)` so the user sees what they got.
-3. **`tome init` wizard** — already prompts for direction; could add a one-line "what this role means" hint per option.
-4. **`tome status` Directories table** — the description column already says "Synced (skills discovered here AND distributed here)" which is good; could be replicated everywhere role is surfaced.
-5. **Docs `commands.md` `tome add` section** — add an explicit "Choosing the right role" subsection citing the pfw-style trap (synced default writes BACK into your source dir).
-
-**Requirements:** TBD
-**Origin:** pfw integration dogfooding — user added `[directories.pfw] type = "directory"` without `role`, defaulted to `synced`, tome wrote 171 stale symlinks into `~/.pfw/skills/` before being caught (2026-05-18)
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
-
 
 ## Progress
 
