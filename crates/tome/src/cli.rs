@@ -176,6 +176,21 @@ pub enum Command {
         /// that keep skills under `skills/` (try `--subdir skills`).
         #[arg(long, value_name = "PATH")]
         subdir: Option<String>,
+        /// Role this directory plays in the sync pipeline.
+        ///
+        /// - `managed`: read-only upstream (package manager owns content)
+        /// - `synced`: skills discovered here AND distributed here (both)
+        /// - `source`: skills discovered here, NOT distributed here
+        /// - `target`: skills distributed here, NOT discovered here
+        ///
+        /// If omitted, defaults based on `type`: `claude-plugins` → managed,
+        /// `directory` → synced, `git` → source. **The `directory` →
+        /// `synced` default writes distribution symlinks BACK into the
+        /// source dir, which is the wrong choice for read-only package
+        /// manager dirs like `~/.pfw/skills` — use `--role source` for
+        /// those.** Validated against `valid_roles()` for the chosen type.
+        #[arg(long, value_name = "ROLE")]
+        role: Option<crate::config::DirectoryRole>,
     },
 
     /// Interactive wizard to configure directories

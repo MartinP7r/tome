@@ -304,7 +304,7 @@ pub(crate) fn run(
             .interact()?;
 
         if let Some(entry) = directories.get_mut(name) {
-            entry.role = Some(valid[role_idx].clone());
+            entry.role = Some(valid[role_idx]);
         }
 
         show_directory_summary(&directories);
@@ -349,7 +349,7 @@ pub(crate) fn run(
         // Role picker (filtered by type)
         let valid = directory_type.valid_roles();
         let role = if valid.len() == 1 {
-            valid[0].clone()
+            valid[0]
         } else {
             let role_labels: Vec<&str> = valid.iter().map(|r| r.description()).collect();
             let role_idx = Select::new()
@@ -357,7 +357,7 @@ pub(crate) fn run(
                 .items(&role_labels)
                 .default(0)
                 .interact()?;
-            valid[role_idx].clone()
+            valid[role_idx]
         };
 
         directories.insert(
@@ -632,7 +632,7 @@ fn configure_directories(
                 DirectoryConfig {
                     path: PathBuf::from("~").join(kd.default_path),
                     directory_type: kd.directory_type.clone(),
-                    role: Some(kd.default_role.clone()),
+                    role: Some(kd.default_role),
                     git_ref: None,
                     subdir: None,
                     override_applied: false,

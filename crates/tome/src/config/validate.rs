@@ -581,7 +581,7 @@ mod tests {
 
         for dir_type in &ALL_TYPES_FOR_MATRIX {
             for role in &ALL_ROLES_FOR_MATRIX {
-                let combo = (dir_type.clone(), role.clone());
+                let combo = (dir_type.clone(), *role);
                 tested.push(combo.clone());
                 // Derive pass/fail from valid_roles() at runtime — no hand-written table.
                 let should_pass = dir_type.valid_roles().contains(role);
@@ -591,8 +591,7 @@ mod tests {
                     // and confirm the entry's type + role survived the round-trip.
                     let tmp = tempfile::TempDir::new().unwrap();
                     let path = tmp.path().join("tome.toml");
-                    let config =
-                        build_single_entry_config(tmp.path(), dir_type.clone(), role.clone());
+                    let config = build_single_entry_config(tmp.path(), dir_type.clone(), *role);
 
                     config.save_checked(&path).unwrap_or_else(|e| {
                         panic!(
@@ -624,7 +623,7 @@ mod tests {
                     );
                     assert_eq!(
                         entry.role(),
-                        role.clone(),
+                        *role,
                         "reloaded role drifted for combo ({:?}, {:?})",
                         dir_type,
                         role,
@@ -640,8 +639,7 @@ mod tests {
                     // trait. The std idiom reads cleanly and matches existing style.
                     let tmp_unused =
                         std::path::PathBuf::from(format!("/tmp/combo-{:?}-{:?}", dir_type, role));
-                    let config =
-                        build_single_entry_config(&tmp_unused, dir_type.clone(), role.clone());
+                    let config = build_single_entry_config(&tmp_unused, dir_type.clone(), *role);
                     let _err = config.validate().err().unwrap_or_else(|| {
                         panic!(
                             "expected INVALID combo ({:?}, {:?}) to fail validate(), but it succeeded",
@@ -682,7 +680,7 @@ mod tests {
                     continue;
                 }
 
-                let config = build_single_entry_config(&tmp_unused, dir_type.clone(), role.clone());
+                let config = build_single_entry_config(&tmp_unused, dir_type.clone(), *role);
                 let err = config.validate().err().unwrap_or_else(|| {
                     panic!(
                         "INVALID combo ({:?}, {:?}) passed validate() — validator bug",
