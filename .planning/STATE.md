@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.12
-milestone_name: Pre-v1.0 Review Polish + Patch
+milestone: v0.13
+milestone_name: tome add UX — subdir + Vercel-style URL parsing
 status: shipped
-stopped_at: v0.12.1 patch released 2026-05-17 (no code delta from v0.12.0; tag-only); v0.12.0 released 2026-05-17 with the pre-v1.0 review-pass bundle (PR #541 — 15 of 16 review findings) and dependabot bump (PR #543). v0.11.1 released 2026-05-15; v0.11.0 released 2026-05-14. Next milestone v1.0 Tauri GUI drafted — pending /gsd:new-milestone ratification. Open follow-up #542 tracks deferred items (Critical #3 owned/unowned enum + 6 Suggestions).
-last_updated: "2026-05-17T00:00:00.000Z"
-last_activity: 2026-05-17
+stopped_at: v0.13.0 released 2026-05-19 (PR #547 — 3-layer `tome add` improvement: `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint). v0.12.1 patch 2026-05-17. v0.12.0 2026-05-17 (pre-v1.0 review polish bundle). Backlog: 999.1-999.5 captured during dogfooding. Open follow-up #542 (v1.0 Phase 10 deferred items) and #548 (role-transition cleanup gap). Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
+last_updated: "2026-05-19T00:00:00.000Z"
+last_activity: 2026-05-19
 progress:
   total_phases: 9
   completed_phases: 8
