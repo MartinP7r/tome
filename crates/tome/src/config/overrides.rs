@@ -409,9 +409,16 @@ mod tests {
 
     #[test]
     fn load_with_overrides_validate_failure_propagates() {
-        // Build a config with an invalid role/type combo (Managed on a
-        // Directory type — only ClaudePlugins permits Managed).
+        // Build a config with an invalid role/type combo (Target on a Git
+        // type — git directories can only be Source per valid_roles()).
         // load_with_overrides must run validate() and surface the error.
+        //
+        // Phase 22 / v0.15 note: this test previously used
+        // `Directory + Managed` as the invalid combo, but that pairing is
+        // now valid (generalized for pfw-style flat-directory package
+        // managers). Switched to `Git + Target` which remains
+        // structurally invalid (git is a remote-clone source — tome
+        // cannot write distribution symlinks into a working tree).
         let tmp = tempfile::TempDir::new().unwrap();
         let cfg_path = tmp.path().join("tome.toml");
         let lib_dir = tmp.path().join("library");
@@ -421,9 +428,9 @@ mod tests {
                 "library_dir = \"{}\"\n\
                  \n\
                  [directories.x]\n\
-                 path = \"/some/path\"\n\
-                 type = \"directory\"\n\
-                 role = \"managed\"\n",
+                 path = \"https://github.com/owner/repo\"\n\
+                 type = \"git\"\n\
+                 role = \"target\"\n",
                 lib_dir.display(),
             ),
         )

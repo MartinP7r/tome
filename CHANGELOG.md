@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Generic managed source directory** (Phase 22 / v0.15). The
+  `Managed` role is no longer restricted to `claude-plugins` type
+  directories — `[directories.<name>] type = "directory" role =
+  "managed"` is now valid, opening up flat-directory package managers
+  (pfw and successors) as first-class managed sources instead of the
+  v0.14 `--role source` workaround. Discovery + consolidate already
+  routed `role() == Managed` end-to-end, so library entries from a
+  Directory + Managed source now correctly carry `managed: true` in
+  the manifest. Use case: `tome add ~/.pfw/skills --role managed`.
+
+### Changed
+
+- **`validate.rs` reject rule for `Directory + Managed` removed.** The
+  catch-all `valid_roles()` check still rejects `Git + Managed`
+  (Managed not in Git's valid_roles set) with the generic role/type-
+  conflict message.
+- **`DirectoryType::Directory::valid_roles()` includes `Managed`.**
+  The wizard's role-picker now offers `Managed` as a fourth option
+  for `directory`-type entries.
+
+### Docs
+
+- **`docs/src/commands.md` "source vs managed" comparison table.**
+  Spells out the subtle-but-material differences for flat-directory
+  package managers: both keep the source dir clean, but `managed`
+  carries the package-manager-owned semantic forward (manifest
+  `managed: true`, future MarketplaceAdapter integration eligibility,
+  future foreign-symlink legitimate-origin recognition).
+
+### Out of scope (deferred)
+
+Two follow-ups intentionally not in v0.15:
+
+- `is_foreign_symlink` refinement to recognize managed-source paths
+  as legitimate-origin. Today, configuring pfw as `--role managed`
+  still leaves the 18 `pfw-*` symlinks in `~/.claude/skills/`
+  flagged as foreign by `tome doctor` (because they point to
+  `~/.pfw/skills/` which is outside `library_dir`). Closing this
+  requires teaching `is_foreign_symlink` about configured
+  managed-source paths.
+- Detect-and-warn for "upstream package manager's own distribution
+  is fighting tome's" (the open question from the original 999.4
+  backlog entry — pfw shouldn't be configured to distribute its own
+  symlinks if tome is taking over).
+
 ## [0.14.0] - 2026-05-20
 
 ### Added

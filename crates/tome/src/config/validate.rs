@@ -33,20 +33,12 @@ impl Config {
         for (name, dir) in &self.directories {
             let role = dir.role();
 
-            // Managed role only valid with ClaudePlugins type
-            if role == DirectoryRole::Managed && dir.directory_type != DirectoryType::ClaudePlugins
-            {
-                anyhow::bail!(
-                    "directory '{name}': role/type conflict\n\
-                     Conflict: role is {} but type is '{}'\n\
-                     Why: the Managed role means skills are owned by a package manager; only the claude-plugins type is known to behave this way, so any other type with Managed would be sync'd incorrectly.\n\
-                     hint: either change type to 'claude-plugins', or change role to {} or {}.",
-                    DirectoryRole::Managed.description(),
-                    dir.directory_type,
-                    DirectoryRole::Synced.description(),
-                    DirectoryRole::Source.description(),
-                );
-            }
+            // Phase 22 / v0.15: the explicit Managed-with-non-ClaudePlugins
+            // reject rule is gone. `Directory + Managed` is now valid (pfw
+            // and other flat-directory package managers). The catch-all
+            // `valid_roles()` check below still catches `Git + Managed`
+            // (Managed is not in Git's valid_roles set) with a generic
+            // role/type-conflict message.
 
             // Target role invalid with Git type
             if role == DirectoryRole::Target && dir.directory_type == DirectoryType::Git {
@@ -198,10 +190,15 @@ mod tests {
     // --- Config validation tests ---
 
     #[test]
-    fn validate_rejects_managed_with_directory_type() {
+    fn validate_accepts_managed_with_directory_type() {
+        // Phase 22 / v0.15: Directory + Managed is now valid. This test
+        // replaces the prior `validate_rejects_managed_with_directory_type`
+        // which pinned the old reject behavior. Generalizing the Managed
+        // role to flat-directory package managers (pfw, etc.) is the whole
+        // point of Phase 22.
         let config = Config {
             directories: BTreeMap::from([(
-                DirectoryName::new("bad").unwrap(),
+                DirectoryName::new("pfw").unwrap(),
                 DirectoryConfig {
                     path: PathBuf::from("/tmp"),
                     directory_type: DirectoryType::Directory,
@@ -213,14 +210,37 @@ mod tests {
             )]),
             ..Default::default()
         };
+        config
+            .validate()
+            .expect("Directory + Managed must validate (Phase 22)");
+    }
+
+    #[test]
+    fn validate_still_rejects_managed_with_git_type() {
+        // Phase 22 / v0.15 doesn't open Managed to Git type — Git is a
+        // remote-clone source, not a package-manager-managed dir. The
+        // catch-all valid_roles() check should bail with the generic
+        // role/type-conflict message.
+        let config = Config {
+            directories: BTreeMap::from([(
+                DirectoryName::new("bad-git").unwrap(),
+                DirectoryConfig {
+                    path: PathBuf::from("https://github.com/owner/repo"),
+                    directory_type: DirectoryType::Git,
+                    role: Some(DirectoryRole::Managed),
+                    git_ref: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Default::default()
+        };
         let err = config.validate().unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("Managed (read-only, owned by package manager)"),
-            "missing role description: {msg}"
+            msg.contains("Managed") && msg.contains("git"),
+            "error should name both the role and the rejected type: {msg}"
         );
-        assert!(msg.contains("directory"), "missing type name: {msg}");
-        assert!(msg.contains("hint:"), "missing hint line: {msg}");
     }
 
     #[test]

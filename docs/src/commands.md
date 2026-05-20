@@ -96,15 +96,35 @@ The `role` field decides what tome does with a configured directory:
 - `directory` → `synced`
 - `git` → `source`
 
-The `directory → synced` default is the one that surprises people. If you `tome add` a local directory owned by a package manager (e.g. `~/.pfw/skills/`), the `synced` default writes ~170 distribution symlinks INTO that source directory — polluting it with content tome propagated from other configured directories. **Use `--role source` for read-only package manager directories** to keep them clean.
+The `directory → synced` default is the one that surprises people. If you `tome add` a local directory owned by a package manager (e.g. `~/.pfw/skills/`), the `synced` default writes ~170 distribution symlinks INTO that source directory — polluting it with content tome propagated from other configured directories. **Use `--role source` or `--role managed` for read-only package manager directories** to keep them clean.
 
 ```bash
 # WRONG (default role = synced; tome writes BACK into ~/.pfw/skills/)
 tome add ~/.pfw/skills
 
-# RIGHT (explicit source; tome only reads from ~/.pfw/skills/)
+# OK — discovery only, no write-back, but library entries get
+# `managed: false` (treated as a generic local source).
 tome add ~/.pfw/skills --role source
+
+# BEST (v0.15+) — Managed semantic: library entries get `managed: true`,
+# so reconcile + foreign-symlink protection recognize this as an
+# external-package-manager-owned source.
+tome add ~/.pfw/skills --role managed
 ```
+
+#### `source` vs `managed` for flat-directory package managers (v0.15+)
+
+Both refuse to write back into the source dir, so either keeps `~/.pfw/skills/` clean. The differences are subtle but material if you care about upstream-update semantics down the line:
+
+| Aspect | `source` | `managed` |
+|---|---|---|
+| tome writes to the source dir | Never | Never |
+| Manifest `managed: bool` flag | `false` (local skill) | `true` (package-manager-owned) |
+| Future reconcile / `MarketplaceAdapter` integration | Not eligible | Eligible (when adapters are added per upstream) |
+| Foreign-symlink protection treats source path as legitimate-origin | Not yet | Not yet (separate follow-up) |
+| Semantic accuracy for pfw / npm / etc. | "It's just a local source" | "It's owned by a specific package manager" |
+
+For today's needs (just propagating pfw skills to your other tools), both work equivalently. For longer-term integration with pfw's own update lifecycle, prefer `managed`.
 
 The success message now echoes the resolved role so you see what you got:
 
