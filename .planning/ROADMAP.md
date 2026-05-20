@@ -11,6 +11,7 @@
 - ✅ **v0.12 Pre-v1.0 Review Polish** — whole-codebase audit fix bundle (shipped 2026-05-17 as v0.12.0; trivial version-bump-only patch v0.12.1 same day). Deferred items tracked in [#542](https://github.com/MartinP7r/tome/issues/542) for v1.0 Phase 10 absorption.
 - ✅ **v0.13 `tome add` UX** — 3-layer `tome add` improvement (PR #547): GitHub `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint (shipped 2026-05-19). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap surfaced during dogfooding.
 - ✅ **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (shipped 2026-05-20; promoted from backlog 999.5 + 999.2 on 2026-05-19; PR #550 + PR #551)
+- 🚧 **v0.15 Generic managed source directory** — Phase 22 (promoted from backlog 999.4 on 2026-05-20). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers can be first-class instead of foreign-symlink noise.
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
@@ -249,6 +250,12 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [ ] **Phase 20: Type+role explanation in `tome add`** (promoted from 999.5) — Surface what `type` and `role` mean + their defaults at the moments users are choosing them. Five candidate surfaces (CLI `--role` flag, `tome add` success message echoing role, `tome init` wizard hint, `tome status` table already-good, `commands.md` "Choosing the right role" section). Speedrun: ship CLI flag + success message + docs section.
 - [ ] **Phase 21: Doctor repair — claim orphan into manifest** (promoted from 999.2) — Add a `tome doctor` repair option that registers an orphan library directory into the manifest as Unowned, instead of only offering "delete" or "skip with sync hint". Closes the dead-end where sync can't re-discover orphans.
 
+### 🚧 v0.15 Generic managed source directory (In Progress)
+
+**Milestone Goal:** Make the `Managed` role first-class for any flat-directory package manager (pfw, etc.), not just `claude-plugins`. Today `validate.rs` rejects `Directory + Managed` outright; this phase relaxes that to let pfw-style upstreams be modeled correctly instead of falling back to `Source` (the v0.14 workaround) which leaves foreign-symlink doctor noise.
+
+- [ ] **Phase 22: Generic managed source directory** (promoted from 999.4) — Relax `valid_roles()` for `DirectoryType::Directory` to include `Managed`. Drop the `validate.rs` reject rule. Discovery + consolidate already key on `role() == Managed` end-to-end (the `is_managed` flag flows through), so the change is small: validation surface + tests + docs. **Out of scope (deferred):** (a) `is_foreign_symlink` refinement to recognize managed-source paths as legitimate-origin (the 18 pfw-* symlinks in claude-skills would still flag as foreign — separate follow-up); (b) detect-and-warn for "pfw's own distribution is fighting tome" (the open question from the 999.4 entry).
+
 
 ## Backlog
 
@@ -269,19 +276,6 @@ Plans:
 **Goal:** Add a `tome doctor` repair option that detects real directories in a distribution target whose contents are byte-identical to a library skill, and offers to replace the real directory with a symlink into the library. `check_distribution_dir` (`doctor.rs:1008-1077`) currently only iterates symlinks — non-symlink entries are ignored, so the "real-dir collision" warnings from `tome sync` (`exists in target and is not a symlink, skipping`) have no follow-up surface. Hash-compare against `library_dir/<name>` (or compare manifest timestamps) and, if matched, offer to delete the real dir so next sync symlinks. Effectively de-duplicates pre-tome content drift across targets.
 **Requirements:** TBD
 **Origin:** Phase 19 dogfooding (`~/.agents/skills/asc-*` real dirs reproducing), 2026-05-14
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
-
-### Phase 999.4: Generic managed source directory (BACKLOG)
-
-**Goal:** Generalize the `Managed` role beyond `claude-plugins` so external package managers that distribute SKILL.md content via a flat directory can be modeled as Managed sources. Today `validate.rs:36-44` rejects `Directory + Managed` with a Why-line that explicitly cites "only claude-plugins is *known* to behave this way" — pfw (Point-Free Swift tooling, installs to `~/.pfw/skills/`) is the second case. Adds either a relaxed combo (Directory + Managed allowed for flat walkdir-scannable dirs) or a new `DirectoryType::ManagedDirectory` variant. Discover treats as read-only; consolidate uses the existing ClaudePlugins symlink-library→source strategy from `library.rs`; never writes back into the source path.
-
-**Symlink-coexistence policy (D-PFW-1, pre-decided):** Option 1 — assume the upstream package manager can be configured to install-only (skip its own distribution). tome takes over distribution end-to-end. Rejected: option 2 (allow_foreign_symlinks_from whitelist — adds a foreign-symlink classification axis that complicates HARD-09 / D-DIST-2 semantics) and option 3 (eject + replace — would loop against pfw's next install). Open question: how to detect/warn when pfw's distribution mode IS still active and is fighting tome's symlinks.
-
-**Requirements:** TBD
-**Origin:** Phase 19 dogfooding (15 `pfw-*` foreign symlinks in `~/.claude/skills/` flagged as `foreign symlink: ... points outside library_dir`), 2026-05-14
 **Plans:** 0 plans
 
 Plans:
