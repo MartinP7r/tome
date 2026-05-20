@@ -11,7 +11,7 @@
 - ✅ **v0.12 Pre-v1.0 Review Polish** — whole-codebase audit fix bundle (shipped 2026-05-17 as v0.12.0; trivial version-bump-only patch v0.12.1 same day). Deferred items tracked in [#542](https://github.com/MartinP7r/tome/issues/542) for v1.0 Phase 10 absorption.
 - ✅ **v0.13 `tome add` UX** — 3-layer `tome add` improvement (PR #547): GitHub `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint (shipped 2026-05-19). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap surfaced during dogfooding.
 - ✅ **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (shipped 2026-05-20; promoted from backlog 999.5 + 999.2 on 2026-05-19; PR #550 + PR #551)
-- 🚧 **v0.15 Generic managed source directory** — Phase 22 (promoted from backlog 999.4 on 2026-05-20). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers can be first-class instead of foreign-symlink noise.
+- ✅ **v0.15 Generic managed source directory** — Phase 22 (shipped 2026-05-20; promoted from backlog 999.4 on 2026-05-20; PR #553). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers are first-class. Two deferred follow-ups: `is_foreign_symlink` managed-source recognition + detect-and-warn for upstream-own-distribution conflict.
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases

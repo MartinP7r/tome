@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.14
-milestone_name: Polish — type+role UX + doctor claim-orphan
+milestone: v0.15
+milestone_name: Generic managed source directory
 status: shipped
-stopped_at: v0.14.0 released 2026-05-20 (Phases 20-21 — PR #550 `tome add --role` flag + success-message echo, PR #551 `tome doctor` claim-orphan repair option). Closes 999.5 + 999.2 backlog items. v0.13.0 released 2026-05-19 (PR #547 tome add UX). v0.12.x released 2026-05-17. Backlog: 999.1, 999.3, 999.4 remain. Open follow-up #542 (v1.0 Phase 10 deferred items) and #548 (role-transition cleanup gap). Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
+stopped_at: v0.15.0 released 2026-05-20 (Phase 22 — PR #553 generalized Managed role beyond claude-plugins; Directory + Managed combo now valid for flat-directory package managers like pfw). Closes 999.4 backlog item. v0.14.0 same day (Phases 20-21; 999.5 + 999.2). v0.13.0 2026-05-19 (PR #547). v0.12.x 2026-05-17. Backlog: 999.1 (frontmatter cascade), 999.3 (doctor real-dir→symlink) remain. Open follow-ups #542 (v1.0 Phase 10 deferred), #548 (role-transition cleanup), plus two new in-flight from Phase 22 deferral: is_foreign_symlink managed-source recognition + detect-and-warn for upstream's own distribution fighting tome's. Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
 last_updated: "2026-05-20T00:00:00.000Z"
 last_activity: 2026-05-20
 progress:
