@@ -209,6 +209,25 @@ When `tome doctor` finds a directory in the library that has no matching manifes
 - **`delete`** — Remove the directory from disk permanently.
 - **`skip`** — Leave the orphan as-is; doctor will surface it again on the next run.
 
+#### Broken-frontmatter skills (v0.16+)
+
+`tome doctor` walks every manifest-tracked skill and parses its `SKILL.md` frontmatter. Failures surface as Library Warnings — for example:
+
+```text
+! 'my-skill' has unparsable SKILL.md frontmatter: invalid YAML frontmatter
+! 'other-skill' has no SKILL.md file
+```
+
+These are **not auto-repairable** — the user must edit the SKILL.md file (or remove the skill) by hand. Without this check, the failure was only visible as a one-line stderr warning during `tome sync`; it now persists in the doctor surface so broken skills get triaged. Use `tome lint <PATH>` for a deeper per-field frontmatter audit.
+
+#### Real-dir-in-target repair (v0.16+)
+
+If a distribution directory contains a real directory (not a symlink) whose name matches a library skill, `tome doctor` hash-compares the two:
+
+- **Identical content** — Surfaces as an auto-fixable Warning (`real directory in target matches library content (should be a symlink)`). The auto-repair pass deletes the real directory and replaces it with a symlink into the library. Typical cause: skills copied into the target dir manually before adopting tome, or by hand after the fact.
+- **Diverging content** — Surfaces as a no-repair Warning (`real directory in target diverges from library content — reconcile manually`). The user must decide whether to overwrite the local edits, fold them back into the library, or remove the target copy.
+- **No matching library skill** — Left alone; tome does not own un-paired directories in target dirs.
+
 ### `tome lint`
 
 | Flag | Description |
