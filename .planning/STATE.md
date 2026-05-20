@@ -1,9 +1,9 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.15
-milestone_name: Generic managed source directory
+milestone: v0.16
+milestone_name: Doctor diagnostics expansion
 status: shipped
-stopped_at: v0.15.0 released 2026-05-20 (Phase 22 — PR #553 generalized Managed role beyond claude-plugins; Directory + Managed combo now valid for flat-directory package managers like pfw). Closes 999.4 backlog item. v0.14.0 same day (Phases 20-21; 999.5 + 999.2). v0.13.0 2026-05-19 (PR #547). v0.12.x 2026-05-17. Backlog: 999.1 (frontmatter cascade), 999.3 (doctor real-dir→symlink) remain. Open follow-ups #542 (v1.0 Phase 10 deferred), #548 (role-transition cleanup), plus two new in-flight from Phase 22 deferral: is_foreign_symlink managed-source recognition + detect-and-warn for upstream's own distribution fighting tome's. Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
+stopped_at: v0.16.0 released 2026-05-20 (Phases 23+24 — PR #555 added two `tome doctor` diagnostics: broken-frontmatter cascade (backlog 999.1, Library Warning, no auto-fix) and real-dir-in-target repair (backlog 999.3, auto-fixable when target content matches library byte-for-byte; no-repair Warning when diverging). New `RepairKind::ConsolidateTargetRealDirToSymlink` variant. Single-day double-ship after v0.15.0 same morning. v0.14.0 + v0.13.0 + v0.12.x in the preceding three days. Backlog parking lot now empty of v0.12-dogfooding items (999.1–999.5 all promoted + shipped). Open follow-ups #542 (v1.0 Phase 10 deferred), #548 (role-transition cleanup), plus two new in-flight from Phase 22 deferral: is_foreign_symlink managed-source recognition + detect-and-warn for upstream's own distribution fighting tome's. Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
 last_updated: "2026-05-20T00:00:00.000Z"
 last_activity: 2026-05-20
 progress:

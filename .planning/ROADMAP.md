@@ -12,7 +12,7 @@
 - ✅ **v0.13 `tome add` UX** — 3-layer `tome add` improvement (PR #547): GitHub `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint (shipped 2026-05-19). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap surfaced during dogfooding.
 - ✅ **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (shipped 2026-05-20; promoted from backlog 999.5 + 999.2 on 2026-05-19; PR #550 + PR #551)
 - ✅ **v0.15 Generic managed source directory** — Phase 22 (shipped 2026-05-20; promoted from backlog 999.4 on 2026-05-20; PR #553). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers are first-class. Two deferred follow-ups: `is_foreign_symlink` managed-source recognition + detect-and-warn for upstream-own-distribution conflict.
-- 🚧 **v0.16 Doctor diagnostics expansion** — Phases 23-24 (promoted from backlog 999.1 + 999.3 on 2026-05-20). Phase 23: `tome doctor` surfaces skills with unparseable SKILL.md frontmatter. Phase 24: `tome doctor` offers a repair to consolidate target real-dirs into symlinks when content matches the library copy.
+- ✅ **v0.16 Doctor diagnostics expansion** — Phases 23-24 (shipped 2026-05-20; promoted from backlog 999.1 + 999.3 on 2026-05-20; PR #555). Phase 23: `tome doctor` surfaces skills with unparsable SKILL.md frontmatter as Library Warnings (no auto-fix). Phase 24: `tome doctor` consolidates target real-dirs into symlinks when content matches the library byte-for-byte; diverging content surfaces as no-repair Warning. New `RepairKind::ConsolidateTargetRealDirToSymlink` variant.
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
@@ -255,12 +255,12 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Milestone Goal:** Make the `Managed` role first-class for any flat-directory package manager (pfw, etc.), not just `claude-plugins`. Shipped via PR #553.
 
-### 🚧 v0.16 Doctor diagnostics expansion (In Progress)
+### ✅ v0.16 Doctor diagnostics expansion (SHIPPED 2026-05-20)
 
-**Milestone Goal:** Two doctor improvements promoted from backlog. Phase 23 surfaces skills with broken SKILL.md frontmatter (the original 999.1 framing about "discover drops them" was wrong — they pass through; the real gap is doctor doesn't surface them post-sync). Phase 24 turns the existing `sync` real-dir-collision warning into an actionable doctor repair.
+**Milestone Goal:** Two doctor improvements promoted from backlog. Phase 23 surfaces skills with broken SKILL.md frontmatter (the original 999.1 framing about "discover drops them" was wrong — they pass through; the real gap was doctor didn't surface them post-sync). Phase 24 turns the existing `sync` real-dir-collision warning into an actionable doctor repair. Shipped via PR #555.
 
-- [ ] **Phase 23: Loosen frontmatter cascade** (promoted from 999.1) — Add `tome doctor` diagnostic for library skills whose SKILL.md has unparseable YAML frontmatter. The "loosen" framing was based on a misread of `discover.rs`: skills with broken frontmatter ALREADY pass through to library + distribution today (no filter drops them). The actionable bit is the doctor diagnostic.
-- [ ] **Phase 24: Doctor repair — consolidate target real-dir into symlink** (promoted from 999.3) — Extend `check_distribution_dir` to detect non-symlink entries whose contents are byte-identical to a library skill, and offer a repair to delete the real dir (next sync creates symlink).
+- [x] **Phase 23: Loosen frontmatter cascade** (promoted from 999.1) — `tome doctor` now walks every manifest-tracked library skill and parses its SKILL.md. YAML/delimiter errors and missing files surface as Library Warnings (`'<skill>' has unparseable SKILL.md frontmatter: …`). Not auto-repairable — the user must edit the file. The "loosen" framing was based on a misread of `discover.rs`: skills with broken frontmatter ALREADY pass through to library + distribution today (no filter drops them). The actionable bit is the doctor diagnostic.
+- [x] **Phase 24: Doctor repair — consolidate target real-dir into symlink** (promoted from 999.3) — Extended `check_distribution_dir` to detect non-symlink entries whose contents are byte-identical to a library skill, and offers an auto-repair (`RepairKind::ConsolidateTargetRealDirToSymlink`) to delete the real dir + replace with a symlink. Diverging-content real dirs surface as a no-repair Warning so the user can reconcile manually.
 
 - [ ] **Phase 22: Generic managed source directory** (promoted from 999.4) — Relax `valid_roles()` for `DirectoryType::Directory` to include `Managed`. Drop the `validate.rs` reject rule. Discovery + consolidate already key on `role() == Managed` end-to-end (the `is_managed` flag flows through), so the change is small: validation surface + tests + docs. **Out of scope (deferred):** (a) `is_foreign_symlink` refinement to recognize managed-source paths as legitimate-origin (the 18 pfw-* symlinks in claude-skills would still flag as foreign — separate follow-up); (b) detect-and-warn for "pfw's own distribution is fighting tome" (the open question from the 999.4 entry).
 
@@ -269,25 +269,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
 
-### Phase 999.1: Loosen frontmatter cascade (BACKLOG)
-
-**Goal:** Skills with a `SKILL.md` file but unparseable YAML frontmatter should still be discoverable and distributable. Today `discover.rs:541-563` sets `frontmatter: None` on parse failure but a downstream filter drops the skill from the manifest (cv-ats-audit reproduces this — discovered from `claude-skills` source, never lands in library manifest, then orphans the library copy). Surface as a frontmatter-lint diagnostic in `tome doctor` instead of a discovery dead-zone — let the consuming tool decide if it can use the file.
-**Requirements:** TBD
-**Origin:** Phase 19 dogfooding, 2026-05-14
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
-
-### Phase 999.3: Doctor repair — consolidate target real-dir into symlink (BACKLOG)
-
-**Goal:** Add a `tome doctor` repair option that detects real directories in a distribution target whose contents are byte-identical to a library skill, and offers to replace the real directory with a symlink into the library. `check_distribution_dir` (`doctor.rs:1008-1077`) currently only iterates symlinks — non-symlink entries are ignored, so the "real-dir collision" warnings from `tome sync` (`exists in target and is not a symlink, skipping`) have no follow-up surface. Hash-compare against `library_dir/<name>` (or compare manifest timestamps) and, if matched, offer to delete the real dir so next sync symlinks. Effectively de-duplicates pre-tome content drift across targets.
-**Requirements:** TBD
-**Origin:** Phase 19 dogfooding (`~/.agents/skills/asc-*` real dirs reproducing), 2026-05-14
-**Plans:** 0 plans
-
-Plans:
-- [ ] TBD (promote with /gsd:review-backlog when ready)
+_(Empty — v0.12 dogfooding backlog 999.1-999.5 all promoted and shipped in v0.14-v0.16.)_
 
 ## Progress
 
