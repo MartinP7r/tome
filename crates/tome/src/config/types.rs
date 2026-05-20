@@ -126,7 +126,15 @@ impl DirectoryType {
         match self {
             DirectoryType::ClaudePlugins => vec![DirectoryRole::Managed],
             DirectoryType::Directory => {
+                // Phase 22 / v0.15: Managed is now valid for `directory`
+                // type, opening up flat-directory package managers
+                // (pfw, etc.) as first-class. Discovery + consolidate
+                // already key on `role() == Managed` end-to-end (the
+                // `is_managed: bool` flag flows through to manifest
+                // entries), so allowing the combo here lets the rest
+                // of the pipeline do the right thing.
                 vec![
+                    DirectoryRole::Managed,
                     DirectoryRole::Synced,
                     DirectoryRole::Source,
                     DirectoryRole::Target,
@@ -502,6 +510,10 @@ mod tests {
         assert_eq!(
             DirectoryType::Directory.valid_roles(),
             vec![
+                // Phase 22 / v0.15 added Managed (pfw and other flat-
+                // directory package managers — generalized from
+                // ClaudePlugins-only).
+                DirectoryRole::Managed,
                 DirectoryRole::Synced,
                 DirectoryRole::Source,
                 DirectoryRole::Target,
