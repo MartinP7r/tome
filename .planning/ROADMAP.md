@@ -12,6 +12,7 @@
 - ✅ **v0.13 `tome add` UX** — 3-layer `tome add` improvement (PR #547): GitHub `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint (shipped 2026-05-19). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap surfaced during dogfooding.
 - ✅ **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (shipped 2026-05-20; promoted from backlog 999.5 + 999.2 on 2026-05-19; PR #550 + PR #551)
 - ✅ **v0.15 Generic managed source directory** — Phase 22 (shipped 2026-05-20; promoted from backlog 999.4 on 2026-05-20; PR #553). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers are first-class. Two deferred follow-ups: `is_foreign_symlink` managed-source recognition + detect-and-warn for upstream-own-distribution conflict.
+- 🚧 **v0.16 Doctor diagnostics expansion** — Phases 23-24 (promoted from backlog 999.1 + 999.3 on 2026-05-20). Phase 23: `tome doctor` surfaces skills with unparseable SKILL.md frontmatter. Phase 24: `tome doctor` offers a repair to consolidate target real-dirs into symlinks when content matches the library copy.
 - 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
 
 ## Phases
@@ -250,9 +251,16 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [ ] **Phase 20: Type+role explanation in `tome add`** (promoted from 999.5) — Surface what `type` and `role` mean + their defaults at the moments users are choosing them. Five candidate surfaces (CLI `--role` flag, `tome add` success message echoing role, `tome init` wizard hint, `tome status` table already-good, `commands.md` "Choosing the right role" section). Speedrun: ship CLI flag + success message + docs section.
 - [ ] **Phase 21: Doctor repair — claim orphan into manifest** (promoted from 999.2) — Add a `tome doctor` repair option that registers an orphan library directory into the manifest as Unowned, instead of only offering "delete" or "skip with sync hint". Closes the dead-end where sync can't re-discover orphans.
 
-### 🚧 v0.15 Generic managed source directory (In Progress)
+### ✅ v0.15 Generic managed source directory (Shipped 2026-05-20)
 
-**Milestone Goal:** Make the `Managed` role first-class for any flat-directory package manager (pfw, etc.), not just `claude-plugins`. Today `validate.rs` rejects `Directory + Managed` outright; this phase relaxes that to let pfw-style upstreams be modeled correctly instead of falling back to `Source` (the v0.14 workaround) which leaves foreign-symlink doctor noise.
+**Milestone Goal:** Make the `Managed` role first-class for any flat-directory package manager (pfw, etc.), not just `claude-plugins`. Shipped via PR #553.
+
+### 🚧 v0.16 Doctor diagnostics expansion (In Progress)
+
+**Milestone Goal:** Two doctor improvements promoted from backlog. Phase 23 surfaces skills with broken SKILL.md frontmatter (the original 999.1 framing about "discover drops them" was wrong — they pass through; the real gap is doctor doesn't surface them post-sync). Phase 24 turns the existing `sync` real-dir-collision warning into an actionable doctor repair.
+
+- [ ] **Phase 23: Loosen frontmatter cascade** (promoted from 999.1) — Add `tome doctor` diagnostic for library skills whose SKILL.md has unparseable YAML frontmatter. The "loosen" framing was based on a misread of `discover.rs`: skills with broken frontmatter ALREADY pass through to library + distribution today (no filter drops them). The actionable bit is the doctor diagnostic.
+- [ ] **Phase 24: Doctor repair — consolidate target real-dir into symlink** (promoted from 999.3) — Extend `check_distribution_dir` to detect non-symlink entries whose contents are byte-identical to a library skill, and offer a repair to delete the real dir (next sync creates symlink).
 
 - [ ] **Phase 22: Generic managed source directory** (promoted from 999.4) — Relax `valid_roles()` for `DirectoryType::Directory` to include `Managed`. Drop the `validate.rs` reject rule. Discovery + consolidate already key on `role() == Managed` end-to-end (the `is_managed` flag flows through), so the change is small: validation surface + tests + docs. **Out of scope (deferred):** (a) `is_foreign_symlink` refinement to recognize managed-source paths as legitimate-origin (the 18 pfw-* symlinks in claude-skills would still flag as foreign — separate follow-up); (b) detect-and-warn for "pfw's own distribution is fighting tome" (the open question from the 999.4 entry).
 
