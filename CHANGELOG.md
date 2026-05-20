@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`tome doctor` orphan-directory `claim` repair option** (Phase 21 /
+  v0.14). Adds a 4th choice to the orphan-directory interactive prompt
+  (`claim` / `keep` / `delete` / `skip`). `claim` hashes the orphan
+  directory and writes a `SkillEntry::new_unowned` to the manifest,
+  closing the dead-end where library-canonical orphans (no upstream
+  source) had no CLI recovery path — the user previously had to
+  hand-edit `.tome-manifest.json`. After claim, the entry distributes
+  on next `tome sync` like any other Unowned skill (LIB-04 lifecycle).
+  Closes the v0.12 dogfooding gap surfaced by the cv-ats-audit
+  orphan-orbit pattern.
 - **`tome add --role <managed|synced|source|target>` flag** (Phase 20 /
   v0.14). Explicit role override at add time, with `clap::ValueEnum`
   parsing and `DirectoryType::valid_roles()` validation. Closes the
