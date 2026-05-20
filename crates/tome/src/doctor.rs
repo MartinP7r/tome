@@ -567,7 +567,13 @@ pub fn diagnose(
                 }
                 println!();
                 println!(
-                    "  {} — run {} to re-register them in the manifest",
+                    "  {} — hash the dir + register it in the manifest as Unowned (proper fix; \
+                     v0.14+)",
+                    style("claim").cyan(),
+                );
+                println!(
+                    "  {} — run {} to re-register them in the manifest (only works if a configured \
+                     source contains them)",
                     style("keep").cyan(),
                     style("tome sync").bold()
                 );
@@ -585,25 +591,38 @@ pub fn diagnose(
                         .unwrap_or(&issue.message);
 
                     let items = [
-                        "keep (re-register on next sync)",
+                        "claim (register in manifest as Unowned)",
+                        "keep (try to re-register on next sync)",
                         "delete from disk",
                         "skip",
                     ];
                     let selection = dialoguer::Select::new()
                         .with_prompt(path_str)
                         .items(items)
-                        .default(2)
+                        .default(3)
                         .interact()?;
 
                     match selection {
                         0 => {
+                            // Phase 21 (v0.14): claim the orphan into the
+                            // manifest as Unowned. Hashes the directory,
+                            // writes a SkillEntry with source_name=None.
+                            // Subsequent `tome sync` will distribute it to
+                            // configured target dirs like any other Unowned
+                            // skill (LIB-04 lifecycle). Closes the dead-end
+                            // where "keep" was a no-op when no source could
+                            // re-discover the orphan (v0.12 dogfooding).
+                            let path = std::path::Path::new(path_str);
+                            claim_orphan_directory(path, paths)?;
+                        }
+                        1 => {
                             println!(
                                 "  {} Keeping — run {} to re-register",
                                 style("ok").green(),
                                 style("tome sync").bold()
                             );
                         }
-                        1 => {
+                        2 => {
                             let path = std::path::Path::new(path_str);
                             if path.is_dir() {
                                 std::fs::remove_dir_all(path).with_context(|| {
@@ -667,6 +686,84 @@ fn is_orphan_directory(issue: &DiagnosticIssue) -> bool {
     issue.category == IssueCategory::Library
         && issue.repair_kind.is_none()
         && issue.message.starts_with("orphan directory:")
+}
+
+/// Claim an orphan library directory into the manifest as an Unowned skill
+/// (Phase 21 / v0.14).
+///
+/// Closes the dead-end where a library entry existed on disk but had no
+/// manifest registration — and the "keep" option's "run `tome sync` to
+/// re-register" hint was misleading because sync can only re-register
+/// orphans whose content gets re-discovered from a configured source.
+/// Library-canonical orphans (no upstream source) had no path to recovery
+/// in the CLI; the user had to hand-edit `.tome-manifest.json`.
+///
+/// What this does:
+///
+/// 1. Hash the directory contents via `manifest::hash_directory` (same
+///    `ContentHash` that consolidate writes).
+/// 2. Construct a `SkillEntry::new_unowned` (source_name: None,
+///    previous_source: None — there is no prior source for a true
+///    orphan).
+/// 3. Insert into the manifest under the directory's basename (validated
+///    as a `SkillName`).
+/// 4. Save the manifest atomically.
+///
+/// On next `tome sync`:
+/// - The skill stays in the library (Unowned content preserved per LIB-04).
+/// - Distribute pushes symlinks to every configured `target` / `synced`
+///   directory.
+/// - `tome doctor` no longer flags it as orphan (it's now in the manifest).
+fn claim_orphan_directory(path: &Path, paths: &TomePaths) -> Result<()> {
+    let skill_name_str = path.file_name().and_then(|n| n.to_str()).with_context(|| {
+        format!(
+            "could not extract a skill name from path '{}'",
+            path.display()
+        )
+    })?;
+
+    let skill_name = crate::discover::SkillName::new(skill_name_str).with_context(|| {
+        format!(
+            "directory name '{skill_name_str}' is not a valid skill identifier \
+             (must be non-empty, no path separators, no `.` or `..`)"
+        )
+    })?;
+
+    let content_hash = manifest::hash_directory(path)
+        .with_context(|| format!("failed to hash directory {}", path.display()))?;
+
+    let mut man = manifest::load(paths.config_dir())?;
+    if man.contains_key(skill_name.as_str()) {
+        // Defensive: shouldn't happen because is_orphan_directory filters
+        // exactly entries that are NOT in the manifest. But the check
+        // makes the error mode explicit if a future refactor changes the
+        // filter contract.
+        anyhow::bail!(
+            "skill '{}' is already in the manifest — refusing to clobber its entry",
+            skill_name
+        );
+    }
+    let entry = manifest::SkillEntry::new_unowned(
+        path.to_path_buf(),
+        content_hash,
+        false, // managed: false (orphans have no upstream package manager)
+        None,  // previous_source: None (true orphan, never owned)
+    );
+    man.insert(skill_name.clone(), entry);
+    manifest::save(&man, paths.config_dir())
+        .with_context(|| "failed to save manifest after claiming orphan")?;
+
+    println!(
+        "  {} Claimed {} into manifest as Unowned skill '{}'",
+        style("fixed").green(),
+        path.display(),
+        style(skill_name.as_str()).cyan()
+    );
+    println!(
+        "    {}",
+        style("→ tome sync will now distribute it to your target directories").dim()
+    );
+    Ok(())
 }
 
 /// Build the OBS-06 `summary` JSON object exposed in
@@ -2294,5 +2391,131 @@ mod tests {
             "message must use the 'foreign symlink' wording: {}",
             foreign[0].message
         );
+    }
+
+    // -- Phase 21 (v0.14): claim_orphan_directory tests --
+
+    #[test]
+    fn claim_orphan_adds_unowned_entry_to_manifest() {
+        // Plant an orphan dir in the library, run claim_orphan_directory,
+        // verify the manifest now has an Unowned entry for it.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib.clone()).unwrap();
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+
+        // Create the orphan: library/test-skill/SKILL.md
+        let orphan = lib.join("test-skill");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(
+            orphan.join("SKILL.md"),
+            "---\nname: test-skill\n---\n# Test\nContent body.\n",
+        )
+        .unwrap();
+
+        // Manifest starts empty (orphan = not in manifest).
+        let man = manifest::load(paths.config_dir()).unwrap();
+        assert!(man.is_empty(), "manifest should start empty");
+
+        claim_orphan_directory(&orphan, &paths).unwrap();
+
+        // After claim: manifest has one entry, Unowned (source_name=None),
+        // content_hash matches what hash_directory would compute now.
+        let man = manifest::load(paths.config_dir()).unwrap();
+        assert_eq!(man.len(), 1, "claim should add one manifest entry");
+        let entry = man
+            .get("test-skill")
+            .expect("test-skill should be in manifest");
+        assert_eq!(
+            entry.source_name, None,
+            "claimed orphan must be Unowned (source_name=None)"
+        );
+        assert_eq!(
+            entry.previous_source, None,
+            "true orphan has no previous_source"
+        );
+        assert!(!entry.managed, "claimed orphan is not managed");
+
+        // Hash matches a fresh hash of the dir.
+        let expected_hash = manifest::hash_directory(&orphan).unwrap();
+        assert_eq!(entry.content_hash, expected_hash);
+    }
+
+    #[test]
+    fn claim_orphan_refuses_to_clobber_existing_manifest_entry() {
+        // If a manifest entry already exists for the skill name (defensive
+        // check; shouldn't happen in production because is_orphan_directory
+        // filters to NOT-in-manifest entries — but the explicit guard
+        // documents the invariant).
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib.clone()).unwrap();
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+
+        let orphan = lib.join("dup-skill");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(orphan.join("SKILL.md"), "---\nname: dup-skill\n---\n").unwrap();
+
+        // Pre-populate the manifest with a same-name entry.
+        let mut man = manifest::Manifest::default();
+        let existing_hash = manifest::hash_directory(&orphan).unwrap();
+        man.insert(
+            crate::discover::SkillName::new("dup-skill").unwrap(),
+            manifest::SkillEntry::new_unowned(
+                orphan.clone(),
+                existing_hash,
+                false,
+                Some(crate::config::DirectoryName::new("ghost-source").unwrap()),
+            ),
+        );
+        manifest::save(&man, paths.config_dir()).unwrap();
+
+        // Now try to claim — should bail.
+        let err = claim_orphan_directory(&orphan, &paths).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("dup-skill") && msg.contains("already in the manifest"),
+            "error should name the conflict + manifest-presence; got: {msg}"
+        );
+    }
+
+    #[test]
+    fn claim_orphan_distributes_on_next_sync() {
+        // After claim, the orphan should be findable in the manifest with
+        // the same shape any other Unowned skill has — meaning subsequent
+        // sync code paths (distribute, lockfile generation, doctor) treat
+        // it identically. This test pins the contract that the entry is
+        // a "real" Unowned entry, not a partial / placeholder shape.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib.clone()).unwrap();
+        std::fs::create_dir_all(paths.config_dir()).unwrap();
+
+        let orphan = lib.join("shape-test");
+        std::fs::create_dir_all(&orphan).unwrap();
+        std::fs::write(orphan.join("SKILL.md"), "---\nname: shape-test\n---\n").unwrap();
+
+        claim_orphan_directory(&orphan, &paths).unwrap();
+
+        let man = manifest::load(paths.config_dir()).unwrap();
+        let entry = man.get("shape-test").expect("entry present");
+
+        // Shape parity with Unowned entries created via the LIB-04
+        // source-removal transition: source_name=None, previous_source=None
+        // (or Some, but here it's None for true orphans), managed=false,
+        // synced_at populated. The content_hash is what makes downstream
+        // sync distribute the entry like any other.
+        assert_eq!(entry.source_name, None);
+        assert!(!entry.managed);
+        assert!(
+            !entry.synced_at.is_empty(),
+            "synced_at must be populated (used by tome status' Last sync line)"
+        );
+        // source_path points at the library copy (the canonical home for
+        // Unowned skills).
+        assert_eq!(entry.source_path, orphan);
     }
 }

@@ -176,6 +176,19 @@ Shows a plan summary (skill count + per-skill disk estimate via `walkdir` + `met
 
 Full-screen interactive skill browser using fuzzy search. Supports sorting, grouping by source, and per-skill actions (view source, copy path, disable/enable).
 
+### `tome doctor`
+
+Diagnose library state. When run interactively (no `--no-input`, no `--dry-run`), surfaces issues and offers per-category repair prompts.
+
+#### Orphan-directory repair (v0.14+)
+
+When `tome doctor` finds a directory in the library that has no matching manifest entry (an "orphan"), it offers four choices per orphan:
+
+- **`claim`** — Register the orphan in the manifest as an Unowned skill (v0.14+). Hashes the directory, writes a `SkillEntry::new_unowned`, and the entry distributes to your `target` / `synced` directories on the next `tome sync`. This is the proper fix when the orphan represents a real skill you want to keep (e.g., a directory you copied in by hand, or one whose source was removed but you want to preserve it).
+- **`keep`** — Leave the directory on disk; `tome sync` will re-register it IF it discovers the orphan from a configured source. Useful when you know the orphan's source got temporarily disconnected and will come back. **Note:** for library-canonical orphans with no upstream source, this option is a no-op until you `claim` it or add a source that covers it.
+- **`delete`** — Remove the directory from disk permanently.
+- **`skip`** — Leave the orphan as-is; doctor will surface it again on the next run.
+
 ### `tome lint`
 
 | Flag | Description |
