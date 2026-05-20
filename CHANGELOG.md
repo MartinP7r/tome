@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tome doctor` flags library skills with unparsable SKILL.md
+  frontmatter** (Phase 23 / v0.16, backlog 999.1). Discovery already
+  warned on stderr and passed the skill through with `frontmatter:
+  None`, but the failure was invisible outside the sync path. Doctor
+  now walks every manifest-tracked skill, parses its SKILL.md, and
+  surfaces YAML/delimiter errors as Library Warnings (`'<skill>' has
+  unparsable SKILL.md frontmatter: …`). Skills without a SKILL.md
+  file are also flagged. Not auto-repairable — the user must edit
+  the file.
+- **`tome doctor` auto-fixes real-directory collisions in distribution
+  dirs** (Phase 24 / v0.16, backlog 999.3). When a distribution dir
+  contains a real directory whose content matches the library skill
+  of the same name byte-for-byte (typical of a pre-tome manual copy
+  or a user dropping skills in by hand), doctor surfaces it as a
+  repairable Warning and the auto-repair pass replaces the real
+  directory with a symlink into the library. Divergent-content real
+  directories surface as a no-repair Warning so the user can
+  reconcile manually. New `RepairKind` variant
+  `ConsolidateTargetRealDirToSymlink`.
+
 ## [0.15.0] - 2026-05-20
 
 ### Added

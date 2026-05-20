@@ -154,15 +154,25 @@ pub enum RepairKind {
     /// `cleanup::cleanup_target` removes broken symlinks pointing into
     /// the library.
     RemoveStaleTargetSymlink,
+    /// Phase 24 (v0.16+): a real directory in a distribution dir whose
+    /// content matches a library skill byte-for-byte (typically a
+    /// pre-tome manual copy or a user dropping skills in by hand).
+    /// Repair removes the real directory and replaces it with a
+    /// symlink into the library — converging on the v0.10 distribution
+    /// model. Emit site: `check_distribution_dir` "matches library
+    /// content (should be a symlink)". Diverging content stays a
+    /// no-repair Warning (the user must reconcile).
+    ConsolidateTargetRealDirToSymlink,
 }
 
 impl RepairKind {
     /// Compile-time-validated enumeration of every variant. Mirrors
     /// `DiagnosticIssueKind::ALL` and other POLISH-04 patterns.
-    pub const ALL: [Self; 3] = [
+    pub const ALL: [Self; 4] = [
         Self::RemoveStaleManifestEntry,
         Self::RemoveBrokenLibrarySymlink,
         Self::RemoveStaleTargetSymlink,
+        Self::ConsolidateTargetRealDirToSymlink,
     ];
 }
 
@@ -175,10 +185,11 @@ const fn _repair_kind_exhaustiveness_sentinel(k: RepairKind) {
         RepairKind::RemoveStaleManifestEntry => {}
         RepairKind::RemoveBrokenLibrarySymlink => {}
         RepairKind::RemoveStaleTargetSymlink => {}
+        RepairKind::ConsolidateTargetRealDirToSymlink => {}
     }
 }
 const _: () = {
-    assert!(RepairKind::ALL.len() == 3);
+    assert!(RepairKind::ALL.len() == 4);
 };
 
 /// A single diagnostic issue found during a health check.
@@ -670,6 +681,9 @@ fn repair_kind_action_label(k: RepairKind) -> &'static str {
         }
         RepairKind::RemoveBrokenLibrarySymlink => "will delete broken symlink",
         RepairKind::RemoveStaleTargetSymlink => "will delete stale symlink from distribution dir",
+        RepairKind::ConsolidateTargetRealDirToSymlink => {
+            "will delete the real directory and replace it with a symlink into the library"
+        }
     }
 }
 
@@ -859,6 +873,7 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
     // issue.
     let mut ran_library_repair = false;
     let mut ran_target_cleanup = false;
+    let mut ran_target_consolidation = false;
 
     for issue in report.all_issues() {
         match issue.repair_kind {
@@ -884,6 +899,29 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
                         }
                     }
                     ran_target_cleanup = true;
+                }
+            }
+            Some(RepairKind::ConsolidateTargetRealDirToSymlink) => {
+                // Phase 24: batch handler — re-discover real-dir
+                // collisions per distribution dir and replace each with
+                // a symlink. Mirrors the RemoveStaleTargetSymlink
+                // pattern: the issue carries no per-instance state, the
+                // handler re-runs the same scan over `config`.
+                if !ran_target_consolidation {
+                    for (name, dir_config) in config.distribution_dirs() {
+                        let converted =
+                            consolidate_target_real_dirs(&dir_config.path, paths.library_dir())?;
+                        if converted > 0 {
+                            println!(
+                                "  {} Converted {} real director{} in {} to symlink(s)",
+                                style("fixed").green(),
+                                converted,
+                                if converted == 1 { "y" } else { "ies" },
+                                name
+                            );
+                        }
+                    }
+                    ran_target_consolidation = true;
                 }
             }
             None => {
@@ -1104,6 +1142,46 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
     // helper are deleted entirely. If a real failure mode emerges, a
     // new ticket will scope it.
 
+    // Phase 23 (v0.16+): unparsable SKILL.md frontmatter in library
+    // skills. Walks each manifest-tracked skill, reads SKILL.md, and
+    // surfaces YAML/delimiter errors as Library Warnings (no auto-fix
+    // — the user must edit the file). Skills without SKILL.md are
+    // also flagged because they will be invisible to downstream tools.
+    // Promoted from backlog 999.1 — discovery already passes skills
+    // through with `frontmatter: None` on parse failure (warning on
+    // stderr); this surfaces the same problem in `tome doctor` so
+    // broken skills get triaged outside the sync path.
+    for name in m.keys() {
+        let skill_dir = library_dir.join(name.as_str());
+        if !skill_dir.is_dir() {
+            // Missing-directory diagnostic already emitted above.
+            continue;
+        }
+        let skill_md = skill_dir.join("SKILL.md");
+        match std::fs::read_to_string(&skill_md) {
+            Ok(content) => {
+                if let Err(e) = crate::skill::parse(&content) {
+                    issues.push(DiagnosticIssue::library(
+                        IssueSeverity::Warning,
+                        format!("'{name}' has unparsable SKILL.md frontmatter: {e}"),
+                    ));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                issues.push(DiagnosticIssue::library(
+                    IssueSeverity::Warning,
+                    format!("'{name}' has no SKILL.md file"),
+                ));
+            }
+            Err(e) => {
+                issues.push(DiagnosticIssue::library(
+                    IssueSeverity::Error,
+                    format!("'{name}' SKILL.md is unreadable: {e}"),
+                ));
+            }
+        }
+    }
+
     Ok(issues)
 }
 
@@ -1172,10 +1250,104 @@ fn check_distribution_dir(
                     ),
                 ));
             }
+        } else if path.is_dir() {
+            // Phase 24 (v0.16+): real directory in a distribution dir.
+            // If the library has a same-named skill, hash-compare:
+            //   - identical content → auto-fixable (delete + symlink)
+            //   - diverging content → Warning, no auto-repair (the user
+            //     made local changes; reconcile manually)
+            // If the library has no same-named skill, leave the
+            // directory alone — it's not a tome-managed artifact and we
+            // don't presume to own it. Promoted from backlog 999.3.
+            let Some(basename) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            let library_skill = library_dir.join(basename);
+            if !library_skill.is_dir() {
+                continue;
+            }
+            match (
+                manifest::hash_directory(&path),
+                manifest::hash_directory(&library_skill),
+            ) {
+                (Ok(t), Ok(l)) if t == l => {
+                    issues.push(DiagnosticIssue::directory_repairable(
+                        IssueSeverity::Warning,
+                        format!(
+                            "real directory in target matches library content (should be a symlink): {}",
+                            path.display()
+                        ),
+                        RepairKind::ConsolidateTargetRealDirToSymlink,
+                    ));
+                }
+                (Ok(_), Ok(_)) => {
+                    issues.push(DiagnosticIssue::directory(
+                        IssueSeverity::Warning,
+                        format!(
+                            "real directory in target diverges from library content — reconcile manually: {}",
+                            path.display()
+                        ),
+                    ));
+                }
+                _ => {
+                    // Hash failure on either side — skip silently;
+                    // any real I/O problem here will surface via
+                    // other doctor checks.
+                }
+            }
         }
     }
 
     Ok(issues)
+}
+
+/// Phase 24: convert real directories under `target_dir` to symlinks
+/// into `library_dir` when their content matches byte-for-byte.
+///
+/// Same discovery logic as the corresponding `check_distribution_dir`
+/// branch — re-runs so the dispatcher does not need to carry per-issue
+/// path state. Diverging-content directories are skipped (the doctor
+/// check emits a no-repair Warning for those).
+///
+/// Returns the count of directories converted.
+fn consolidate_target_real_dirs(target_dir: &Path, library_dir: &Path) -> Result<usize> {
+    if !target_dir.is_dir() {
+        return Ok(0);
+    }
+    let mut fixed = 0;
+    let entries = std::fs::read_dir(target_dir)
+        .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
+    for entry in entries {
+        let entry =
+            entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
+        let path = entry.path();
+        if path.is_symlink() || !path.is_dir() {
+            continue;
+        }
+        let Some(basename) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let library_skill = library_dir.join(basename);
+        if !library_skill.is_dir() {
+            continue;
+        }
+        let target_hash = manifest::hash_directory(&path)?;
+        let library_hash = manifest::hash_directory(&library_skill)?;
+        if target_hash != library_hash {
+            continue;
+        }
+        std::fs::remove_dir_all(&path)
+            .with_context(|| format!("failed to remove {}", path.display()))?;
+        std::os::unix::fs::symlink(&library_skill, &path).with_context(|| {
+            format!(
+                "failed to create symlink {} -> {}",
+                path.display(),
+                library_skill.display()
+            )
+        })?;
+        fixed += 1;
+    }
+    Ok(fixed)
 }
 
 fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
@@ -1293,6 +1465,13 @@ mod tests {
         let lib = TempDir::new().unwrap();
         let skill_dir = lib.path().join("my-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
+        // Phase 23: doctor now validates SKILL.md frontmatter; library
+        // skills without a valid SKILL.md surface as Warnings.
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: test\n---\nbody",
+        )
+        .unwrap();
 
         let mut m = manifest::Manifest::default();
         m.insert(
@@ -1394,6 +1573,11 @@ mod tests {
         let lib = TempDir::new().unwrap();
         let skill_dir = lib.path().join("my-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: test\n---\nbody",
+        )
+        .unwrap();
 
         let mut m = manifest::Manifest::default();
         m.insert(
@@ -1468,6 +1652,142 @@ mod tests {
         assert_eq!(result[0].severity, IssueSeverity::Error);
     }
 
+    // -- Phase 23: broken-frontmatter diagnostic --
+
+    /// Helper: register a skill in the manifest at `tome_home` with a
+    /// directory at `library/<name>` containing the given SKILL.md content.
+    fn make_skill_with_skill_md(
+        tome_home: &Path,
+        library: &Path,
+        name: &str,
+        skill_md: Option<&str>,
+    ) {
+        let skill_dir = library.join(name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        if let Some(content) = skill_md {
+            std::fs::write(skill_dir.join("SKILL.md"), content).unwrap();
+        }
+        let mut m = manifest::load(tome_home).unwrap_or_default();
+        m.insert(
+            crate::discover::SkillName::new(name).unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from(format!("/tmp/source/{name}")),
+                source_name: Some(DirectoryName::new("test").unwrap()),
+                previous_source: None,
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, tome_home).unwrap();
+    }
+
+    #[test]
+    fn check_library_valid_frontmatter_emits_no_issue() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(
+            tome_home.path(),
+            library.path(),
+            "good-skill",
+            Some("---\nname: good-skill\ndescription: a valid skill\n---\n# Body"),
+        );
+
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            issues.is_empty(),
+            "valid frontmatter should not emit issues, got: {issues:?}"
+        );
+    }
+
+    #[test]
+    fn check_library_broken_yaml_emits_warning() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(
+            tome_home.path(),
+            library.path(),
+            "bad-yaml",
+            Some("---\n: invalid yaml [[\n---\nbody"),
+        );
+
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let matched: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("unparsable SKILL.md frontmatter"))
+            .collect();
+        assert_eq!(
+            matched.len(),
+            1,
+            "broken YAML should emit exactly one Warning, got: {issues:?}"
+        );
+        assert_eq!(matched[0].severity, IssueSeverity::Warning);
+        assert_eq!(matched[0].category, IssueCategory::Library);
+        assert!(
+            matched[0].repair_kind.is_none(),
+            "broken frontmatter is not auto-repairable"
+        );
+    }
+
+    #[test]
+    fn check_library_missing_frontmatter_delimiter_emits_warning() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(
+            tome_home.path(),
+            library.path(),
+            "no-delim",
+            Some("# Just a heading\nNo frontmatter here"),
+        );
+
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let matched: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("unparsable SKILL.md frontmatter"))
+            .collect();
+        assert_eq!(
+            matched.len(),
+            1,
+            "missing delimiter should emit exactly one Warning, got: {issues:?}"
+        );
+        assert_eq!(matched[0].severity, IssueSeverity::Warning);
+    }
+
+    #[test]
+    fn check_library_missing_skill_md_emits_warning() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(tome_home.path(), library.path(), "no-md", None);
+
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let matched: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("has no SKILL.md file"))
+            .collect();
+        assert_eq!(
+            matched.len(),
+            1,
+            "missing SKILL.md should emit exactly one Warning, got: {issues:?}"
+        );
+        assert_eq!(matched[0].severity, IssueSeverity::Warning);
+        assert!(
+            matched[0].repair_kind.is_none(),
+            "missing SKILL.md is not auto-repairable"
+        );
+    }
+
     // -- check_distribution_dir --
 
     #[test]
@@ -1513,6 +1833,118 @@ mod tests {
             "external symlink must surface as one ForeignSymlink Warning, got: {result:?}"
         );
         assert_eq!(foreign[0].severity, IssueSeverity::Warning);
+    }
+
+    // -- Phase 24: real-dir → symlink repair --
+
+    /// Helper: create a library skill `<library>/<name>` and a sibling
+    /// copy under `<target>/<name>` with identical or diverging content.
+    fn make_library_and_target_skill(
+        library: &Path,
+        target: &Path,
+        name: &str,
+        target_diverges: bool,
+    ) {
+        let lib_skill = library.join(name);
+        std::fs::create_dir_all(&lib_skill).unwrap();
+        std::fs::write(
+            lib_skill.join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: test\n---\nbody"),
+        )
+        .unwrap();
+
+        let target_skill = target.join(name);
+        std::fs::create_dir_all(&target_skill).unwrap();
+        let content = if target_diverges {
+            format!("---\nname: {name}\ndescription: diverged\n---\nlocal edits")
+        } else {
+            format!("---\nname: {name}\ndescription: test\n---\nbody")
+        };
+        std::fs::write(target_skill.join("SKILL.md"), content).unwrap();
+    }
+
+    #[test]
+    fn check_distribution_dir_real_dir_matching_library_is_repairable() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        make_library_and_target_skill(library.path(), target.path(), "twin", false);
+
+        let result = check_distribution_dir("test", target.path(), library.path()).unwrap();
+        let matched: Vec<_> = result
+            .iter()
+            .filter(|i| i.repair_kind == Some(RepairKind::ConsolidateTargetRealDirToSymlink))
+            .collect();
+        assert_eq!(
+            matched.len(),
+            1,
+            "matching real dir must surface as one repairable Warning, got: {result:?}"
+        );
+        assert_eq!(matched[0].severity, IssueSeverity::Warning);
+        assert_eq!(matched[0].category, IssueCategory::Directory);
+    }
+
+    #[test]
+    fn check_distribution_dir_real_dir_diverging_is_warning_no_repair() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        make_library_and_target_skill(library.path(), target.path(), "diverged", true);
+
+        let result = check_distribution_dir("test", target.path(), library.path()).unwrap();
+        let matched: Vec<_> = result
+            .iter()
+            .filter(|i| i.message.contains("diverges from library content"))
+            .collect();
+        assert_eq!(
+            matched.len(),
+            1,
+            "diverging real dir must surface as one Warning, got: {result:?}"
+        );
+        assert_eq!(matched[0].severity, IssueSeverity::Warning);
+        assert!(
+            matched[0].repair_kind.is_none(),
+            "diverging real dir must not be auto-repairable (user must reconcile)"
+        );
+    }
+
+    #[test]
+    fn check_distribution_dir_real_dir_without_library_match_is_ignored() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        // Target has a real dir, but the library doesn't have a matching skill.
+        std::fs::create_dir_all(target.path().join("stranger")).unwrap();
+        std::fs::write(target.path().join("stranger/SKILL.md"), "stub").unwrap();
+
+        let result = check_distribution_dir("test", target.path(), library.path()).unwrap();
+        assert!(
+            result.is_empty(),
+            "real dirs with no library counterpart must be left alone, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn consolidate_target_real_dirs_replaces_with_symlink() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        make_library_and_target_skill(library.path(), target.path(), "twin", false);
+        // Also add a diverging dir — must NOT be touched.
+        make_library_and_target_skill(library.path(), target.path(), "left-alone", true);
+
+        let count = consolidate_target_real_dirs(target.path(), library.path()).unwrap();
+        assert_eq!(count, 1, "only the matching twin gets converted");
+
+        let twin_path = target.path().join("twin");
+        assert!(
+            twin_path.is_symlink(),
+            "twin target path must be a symlink after repair"
+        );
+        let dest = std::fs::read_link(&twin_path).unwrap();
+        assert_eq!(dest, library.path().join("twin"));
+
+        let diverged_path = target.path().join("left-alone");
+        assert!(
+            diverged_path.is_dir() && !diverged_path.is_symlink(),
+            "diverging dir must remain a real directory"
+        );
     }
 
     // -- check_config --
@@ -1592,6 +2024,11 @@ mod tests {
         // Create a skill directory in the library
         let skill_dir = library.path().join("my-skill");
         std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: test\n---\nbody",
+        )
+        .unwrap();
 
         // Save manifest at tome_home (not library_dir)
         let mut m = manifest::Manifest::default();
@@ -1907,7 +2344,16 @@ mod tests {
         std::fs::create_dir_all(&library).unwrap();
         let mut m = manifest::Manifest::default();
         for (name, source_opt) in entries {
-            std::fs::create_dir_all(library.join(name)).unwrap();
+            let skill_dir = library.join(name);
+            std::fs::create_dir_all(&skill_dir).unwrap();
+            // Phase 23: doctor checks SKILL.md; write a valid one so this
+            // fixture stays focused on its actual subject (unowned/manifest
+            // surface), not frontmatter parsing.
+            std::fs::write(
+                skill_dir.join("SKILL.md"),
+                format!("---\nname: {name}\ndescription: test\n---\nbody"),
+            )
+            .unwrap();
             let entry = match source_opt {
                 Some(src) => manifest::SkillEntry::new(
                     PathBuf::from(format!("/tmp/src/{name}")),
@@ -2040,12 +2486,13 @@ mod tests {
     // -- FIX-01 / D-REPAIR-1: RepairKind enum --
 
     #[test]
-    fn repair_kind_all_len_3() {
+    fn repair_kind_all_len_matches_variants() {
         // POLISH-04 ALL-array contract: every variant enumerated.
-        assert_eq!(RepairKind::ALL.len(), 3);
+        assert_eq!(RepairKind::ALL.len(), 4);
         assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleManifestEntry));
         assert!(RepairKind::ALL.contains(&RepairKind::RemoveBrokenLibrarySymlink));
         assert!(RepairKind::ALL.contains(&RepairKind::RemoveStaleTargetSymlink));
+        assert!(RepairKind::ALL.contains(&RepairKind::ConsolidateTargetRealDirToSymlink));
     }
 
     #[test]
