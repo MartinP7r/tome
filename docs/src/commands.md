@@ -75,8 +75,43 @@ If `tome sync` finds zero skills at a directory's root AND no `subdir` is config
 | `--tag <tag>` | Pin to a specific tag |
 | `--rev <sha>` | Pin to a specific commit SHA |
 | `--subdir <path>` | Restrict discovery to `<clone>/<path>/*/SKILL.md` (v0.13+, overrides URL-embedded subdir) |
+| `--role <role>` | Override the type-default role (v0.14+). Validated against `valid_roles()` for the chosen type. |
 
 `--branch`, `--tag`, `--rev` are mutually exclusive.
+
+#### Choosing the right role (v0.14+)
+
+The `role` field decides what tome does with a configured directory:
+
+| Role | Behavior |
+|------|----------|
+| `managed` | Read-only upstream (package manager owns content). Discovery only. |
+| `synced` | Both discovery AND distribution — skills found here are pulled into the library, and distribution symlinks are also written back into this dir. |
+| `source` | Discovery only. tome reads but never writes here. |
+| `target` | Distribution only. tome writes symlinks here but doesn't scan for skills. |
+
+**The defaults bite if you don't know them.** When you omit `--role`, the directory's role falls back to its type default:
+
+- `claude-plugins` → `managed`
+- `directory` → `synced`
+- `git` → `source`
+
+The `directory → synced` default is the one that surprises people. If you `tome add` a local directory owned by a package manager (e.g. `~/.pfw/skills/`), the `synced` default writes ~170 distribution symlinks INTO that source directory — polluting it with content tome propagated from other configured directories. **Use `--role source` for read-only package manager directories** to keep them clean.
+
+```bash
+# WRONG (default role = synced; tome writes BACK into ~/.pfw/skills/)
+tome add ~/.pfw/skills
+
+# RIGHT (explicit source; tome only reads from ~/.pfw/skills/)
+tome add ~/.pfw/skills --role source
+```
+
+The success message now echoes the resolved role so you see what you got:
+
+```
+✓ Added directory 'pfw' (git: https://..., role: source)
+  → Source (skills discovered here, not distributed here)
+```
 
 ### `tome remove`
 

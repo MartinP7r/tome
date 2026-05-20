@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`tome add --role <managed|synced|source|target>` flag** (Phase 20 /
+  v0.14). Explicit role override at add time, with `clap::ValueEnum`
+  parsing and `DirectoryType::valid_roles()` validation. Closes the
+  pfw-dogfooding gap where the user had to hand-edit `tome.toml`
+  because the CLI offered no way to express `role = "source"` at add
+  time (the type-default `synced` for `directory` types had silently
+  written 171 distribution symlinks into the user's source dir).
+- **`tome add` success message echoes the resolved role.** The output
+  now includes `(role: source)` plus a dim-styled `→ Source (skills
+  discovered here, not distributed here)` description line so the
+  user sees the role tome will actually use, even when it came from
+  the type default. Both `dry_run` and real paths echo it.
+- **`DirectoryRole::kebab_case()` accessor.** Single source of truth
+  for the wire-format string (matches serde `rename_all = "kebab-
+  case"` and clap `rename_all = "kebab-case"`). Used by the success
+  message, error messages, and tests.
+
+### Changed
+
+- **`DirectoryRole` derives `Copy` + `clap::ValueEnum`.** Required for
+  `--role` parsing and ergonomic in-memory passing. Backward compatible
+  — kebab-case wire format unchanged.
+
+### Docs
+
+- **`docs/src/commands.md` "Choosing the right role" section.** Calls
+  out the `directory → synced` default trap explicitly with a
+  pfw-style example showing wrong vs. right. Adds a role-meaning
+  table.
+
 ## [0.13.0] - 2026-05-19
 
 ### Added
