@@ -1,11 +1,11 @@
 ---
 gsd_state_version: 1.0
-milestone: v0.13
-milestone_name: tome add UX — subdir + Vercel-style URL parsing
+milestone: v0.14
+milestone_name: Polish — type+role UX + doctor claim-orphan
 status: shipped
-stopped_at: v0.13.0 released 2026-05-19 (PR #547 — 3-layer `tome add` improvement: `/tree/<ref>/<subdir>` URL parsing, `--subdir` flag, auto-detect + warn-on-zero hint). v0.12.1 patch 2026-05-17. v0.12.0 2026-05-17 (pre-v1.0 review polish bundle). Backlog: 999.1-999.5 captured during dogfooding. Open follow-up #542 (v1.0 Phase 10 deferred items) and #548 (role-transition cleanup gap). Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
-last_updated: "2026-05-19T00:00:00.000Z"
-last_activity: 2026-05-19
+stopped_at: v0.14.0 released 2026-05-20 (Phases 20-21 — PR #550 `tome add --role` flag + success-message echo, PR #551 `tome doctor` claim-orphan repair option). Closes 999.5 + 999.2 backlog items. v0.13.0 released 2026-05-19 (PR #547 tome add UX). v0.12.x released 2026-05-17. Backlog: 999.1, 999.3, 999.4 remain. Open follow-up #542 (v1.0 Phase 10 deferred items) and #548 (role-transition cleanup gap). Next milestone v1.0 Tauri GUI drafted — pending /gsd-new-milestone ratification.
+last_updated: "2026-05-20T00:00:00.000Z"
+last_activity: 2026-05-20
 progress:
   total_phases: 9
   completed_phases: 8
