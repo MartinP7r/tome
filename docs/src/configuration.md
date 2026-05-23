@@ -97,6 +97,10 @@ path = "/Users/alice-corp/.claude/skills"
 
 [directory_overrides.team-skills]
 path = "/opt/shared/team-skills"
+
+# Per-machine consent for installing missing/drifted managed plugins (RECON-02, v0.10+).
+# `tome sync` prompts on first encounter and persists the answer here.
+auto_install_plugins = "ask"   # one of: always | ask | never
 ```
 
 | Field | Description |
@@ -106,6 +110,7 @@ path = "/opt/shared/team-skills"
 | `[directory.<name>].disabled` | Skills to exclude from a single directory (blocklist). |
 | `[directory.<name>].enabled` | Allowlist — ONLY these skills are distributed to this directory. Mutually exclusive with `disabled` per directory (MACH-04). |
 | `[directory_overrides.<name>].path` | Replaces `directories.<name>.path` on this machine. Useful when the same `tome.toml` is shared across machines with different home layouts. Unknown override names emit a typo-target stderr warning. |
+| `auto_install_plugins` | Per-machine consent for the v0.10+ reconcile flow. `"always"` applies install/update operations silently; `"ask"` prompts each time; `"never"` blocks all install operations (`tome sync --no-install` is the same as `"never"` for a single run). Defaults to first-time-prompt when absent. Persisted by `tome sync` when the user answers the prompt. |
 
 Override application happens at config load (after tilde expansion, before `Config::validate`), so all downstream code sees the canonical post-override paths. Any validation failure caused by an override is wrapped with an error attributing the problem to `machine.toml` rather than the portable `tome.toml`.
 

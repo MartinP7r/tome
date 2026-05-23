@@ -66,7 +66,7 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | ------------------ | -------------------------------------------------------- |
 | `tome init`             | Interactive wizard to configure directories               |
 | `tome sync`             | Reconcile, discover, consolidate, distribute, clean up    |
-| `tome add <url\|path>`   | Register a directory (git URL or local path)              |
+| `tome add <url\|path>`   | Register a directory (git URL, GitHub `owner/repo` slug, `/tree/<ref>/<subdir>` URL, or local path; `--role` / `--subdir` / `--branch` / `--tag` / `--rev` flags) |
 | `tome remove dir <name>` | Remove a directory (manifest entries become Unowned)      |
 | `tome remove skill <name>` | Delete an Unowned skill from the library                |
 | `tome reassign <skill> --to <dir>` | Re-anchor an Unowned skill to a directory       |
@@ -74,7 +74,7 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | `tome status`           | Show library, directories, last-sync, and health          |
 | `tome list`             | List all discovered skills with directory                 |
 | `tome browse`           | Interactively browse discovered skills (fuzzy search)     |
-| `tome doctor`           | Diagnose issues (Library / Directory / Config / Foreign-symlink) |
+| `tome doctor`           | Diagnose Library / Directory / Config / Foreign-symlink issues; auto-repair broken symlinks, stale manifest entries, and target real-dir collisions |
 | `tome lint`             | Validate skill frontmatter and report issues              |
 | `tome config`           | Show current configuration                                |
 | `tome backup`           | Git-backed backup and restore for the skill library       |
@@ -90,13 +90,13 @@ All commands support `--dry-run`, `--verbose`, `--quiet`, `--no-input`, `--confi
 ```mermaid
 graph LR
     subgraph Sources
-        S1["Plugin cache<br/>(23 skills)"]
-        S2["~/.claude/skills<br/>(8 skills)"]
-        S3["~/my-skills<br/>(18 skills)"]
+        S1["Plugin cache<br/>(managed)"]
+        S2["~/.claude/skills<br/>(synced)"]
+        S3["~/my-skills<br/>(source)"]
     end
 
     subgraph Library
-        L["Consolidated<br/>skill library<br/>(copies + symlinks)"]
+        L["Consolidated<br/>skill library<br/>(real-dir copies)"]
     end
 
     subgraph Targets
@@ -170,6 +170,10 @@ enabled = ["work-skill-a", "work-skill-b"]   # allowlist
 # Per-machine path overrides (v0.9 — useful when the same tome.toml is shared across machines)
 [directory_overrides.local-skills]
 path = "/Users/me/dev/skills"   # replaces tome.toml's path on this machine
+
+# Per-machine consent for installing missing/drifted managed plugins (v0.10+).
+# Reconcile prompts on first run and persists the choice here. Override anytime.
+auto_install_plugins = "ask"   # one of: always | ask | never
 ```
 
 Disabled skills stay in the library but are skipped during distribution. `tome sync` reconciles managed-skill drift against the lockfile and offers interactive triage when new or changed skills are detected.
