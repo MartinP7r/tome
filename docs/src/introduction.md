@@ -45,7 +45,7 @@ graph LR
     end
 
     subgraph Library["Library — ~/.tome/skills"]
-        L["Consolidated skill library<br/>(copies for local, symlinks for managed)"]
+        L["Consolidated skill library<br/>(real-directory copies — managed AND local)"]
     end
 
     subgraph Targets["Targets (roles: Synced / Target)"]
@@ -62,10 +62,11 @@ graph LR
     L --> T3
 ```
 
-1. **Discover** — Scan every configured directory (types: `claude-plugins`, `directory`, `git`) for `*/SKILL.md` subdirs
-2. **Consolidate** — Gather skills into `~/.tome/skills`: local skills are copied, managed (package-manager) skills are symlinked back to their source; first-seen-wins on name conflicts
-3. **Distribute** — Create symlinks in each distribution directory (respects per-machine disabled/enabled filters)
-4. **Cleanup** — Remove stale entries and broken symlinks from both library and distribution dirs
+1. **Reconcile** (v0.10+) — Diff managed-plugin state against the lockfile; with consent (`auto_install_plugins = "always" | "ask" | "never"` in `machine.toml`) apply install/update operations via the marketplace adapter before discovery
+2. **Discover** — Scan every configured directory (types: `claude-plugins`, `directory`, `git`) for `*/SKILL.md` subdirs
+3. **Consolidate** — Copy every skill — managed AND local — into `~/.tome/skills` as a real directory (library-canonical model, v0.10+). First-seen-wins on name conflicts. The `managed` flag denotes *update channel*, not storage form
+4. **Distribute** — Create symlinks in each distribution directory (respects per-machine disabled/enabled filters)
+5. **Cleanup** — Remove stale entries and broken symlinks from both library and distribution dirs; orphaned managed skills transition to **Unowned** (v0.14+) with library content preserved
 
 > **v0.6+ unified directory model:** A directory can be *both* a source and a target (role: `Synced`). Discovery and distribution are determined by role, not by separate config sections. See [architecture](./architecture.md) for details.
 

@@ -14,8 +14,18 @@
 | **v0.5.2** | Bugfix                 | Legacy managed symlink cleanup during sync                              | ✓      |
 | **v0.5.3** | UX & CLI Polish        | NO_COLOR, `--no-input`, grouped triage, batch cleanup, docs update      | ✓      |
 | **v0.5.4** | Infrastructure         | Config-based tool root, `--json`, signal handling, frontmatter, XDG config | ✓   |
-| **v0.6**   | Unified Directory Model | Bidirectional directories, git sources, per-target skill selection     |        |
-| **v0.7**   | Skill Composition      | Wolpertinger: merge/synthesize skills from multiple sources via LLM     |        |
+| **v0.6**   | Unified Directory Model | Bidirectional directories, git sources, per-target skill selection     | ✓      |
+| **v0.7**   | Wizard Hardening       | WIZ-01–05 invariants, `find_known_directories_in` coverage, circular-path detection, legacy-config detection | ✓      |
+| **v0.8**   | Cross-Platform Polish  | Partial-failure visibility, arboard clipboard, xdg-open, lockfile/save ordering hotfixes | ✓      |
+| **v0.9**   | Cross-Machine Path Overrides | `[directory_overrides.<name>]` schema, override-annotated diagnostics, `StatusMessage` enum redesign | ✓      |
+| **v0.10**  | Library-Canonical Core | Managed skills as real-directory copies (not symlinks), marketplace adapter, lockfile-authoritative reconcile, Unowned lifecycle, HARD-* hardening, `tome migrate-library` | ✓      |
+| **v0.11**  | Polish + Observability | `tracing` substrate, sync diagnostics, doctor categorization, last-sync stamping, FIX-01..06 bundle | ✓      |
+| **v0.12**  | Doctor/Status Surface  | Repair categorization, status table polish, follow-up bugfixes (Phases 18–19) | ✓      |
+| **v0.13**  | `tome add` UX          | `/tree/<ref>/<subdir>` URL form, `--subdir`, auto-detect Claude plugin layouts | ✓      |
+| **v0.14**  | Type+Role UX + Claim Orphan | `--role` override, doctor's `claim` orphan-to-Unowned option        | ✓      |
+| **v0.15**  | Generic Managed Source | `Directory + Managed` role combo (pfw-style flat-directory package managers as first-class managed sources) | ✓      |
+| **v0.16**  | Doctor Diagnostics Expansion | Broken-frontmatter Warning, real-dir-in-target auto-repair (`ConsolidateTargetRealDirToSymlink`) | ✓      |
+| **v1.0**   | Desktop GUI (Tauri)    | Cross-platform desktop app on top of the existing CLI library (drafted) | 📋     |
 
 ---
 
@@ -183,24 +193,19 @@ Auto-install managed plugins, remote sync, and unified `tome sync` flow. Builds 
 
 Replaces separate `[[sources]]` / `[targets.*]` config with a unified `[directories.*]` concept. Each directory declares its relationship to tome (managed, synced, library-only, target-only). See [#396](https://github.com/MartinP7r/tome/issues/396) for the full design.
 
-- [ ] **Unified directory config** ([#396](https://github.com/MartinP7r/tome/issues/396)): Replace sources/targets with bidirectional directories
-- [ ] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Remote skill repos with clone/pull, branch/tag/SHA pinning, private repo support
-- [ ] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import from arbitrary GitHub repos without plugin.json
-- [ ] **Per-target skill selection** ([#253](https://github.com/MartinP7r/tome/issues/253)): Control which skills are distributed to which targets
-- [ ] **`tome remove`** ([#392](https://github.com/MartinP7r/tome/issues/392)): CLI to remove sources/targets from config
-- [ ] **Change skill source** ([#395](https://github.com/MartinP7r/tome/issues/395)): Switch a skill's source (local → git) without re-adding
-- [ ] **Browse TUI polish** ([#365](https://github.com/MartinP7r/tome/issues/365)): Theming, match highlighting, scrollbar, markdown preview
+- [x] **Unified directory config** ([#396](https://github.com/MartinP7r/tome/issues/396)): Replace sources/targets with bidirectional directories
+- [x] **Git sources** ([#58](https://github.com/MartinP7r/tome/issues/58)): Remote skill repos with clone/pull, branch/tag/SHA pinning, private repo support
+- [x] **Standalone SKILL.md import** ([#92](https://github.com/MartinP7r/tome/issues/92)): Import from arbitrary GitHub repos without plugin.json
+- [x] **Per-target skill selection** ([#253](https://github.com/MartinP7r/tome/issues/253)): Control which skills are distributed to which targets
+- [x] **`tome remove`** ([#392](https://github.com/MartinP7r/tome/issues/392)): CLI to remove sources/targets from config
+- [x] **Change skill source** ([#395](https://github.com/MartinP7r/tome/issues/395)): Switch a skill's source (local → git) without re-adding
+- [x] **Browse TUI polish** ([#365](https://github.com/MartinP7r/tome/issues/365)): Theming, match highlighting, scrollbar, markdown preview
 
-## v0.7 — Skill Composition ("Wolpertinger")
+## v0.7 – v0.16 — see `.planning/ROADMAP.md`
 
-Highly experimental. Generate custom skills by combining or synthesizing content from multiple skill authors/sources.
+Detailed milestone tracking moved to [`.planning/ROADMAP.md`](https://github.com/MartinP7r/tome/blob/main/.planning/ROADMAP.md) and per-milestone documents under [`.planning/milestones/`](https://github.com/MartinP7r/tome/tree/main/.planning/milestones). The summary table at the top of this file lists the shipped themes; the [CHANGELOG](https://github.com/MartinP7r/tome/blob/main/CHANGELOG.md) is the authoritative per-release log.
 
-- [ ] **Multi-source skill synthesis** ([#267](https://github.com/MartinP7r/tome/issues/267)): Select parts from multiple skills (GitHub repos, Claude marketplace, npx skills) and let an LLM create a merged "franken-skill"
-- [ ] **ACP-based authentication**: LLM calls go through an Agent Communication Protocol (ACP) flow — authenticate via existing CLIs the user already has (codex-cli, claude-code, gemini CLI) rather than requiring a separate OAuth/API-key setup
-- [ ] **Skill evaluation/creation skill** ([#268](https://github.com/MartinP7r/tome/issues/268)): A companion skill that agents can use to evaluate, validate, and author skills against the agent skills standard — dogfooding the format
-- [ ] **`tome lint` standard validation** (extension): Extend `tome lint` (v0.4.1) to validate against the emerging agent skills standard, not just cross-tool frontmatter compat
-
-Dependencies: v0.5 (managed sources for marketplace access), v0.6 (git sources for GitHub repos), v0.4.1 (lint infrastructure)
+Originally-planned **v0.7 Skill Composition ("Wolpertinger")** — multi-source skill synthesis via LLM — was deferred indefinitely and moved to [Future Ideas](#future-ideas). v0.7 instead shipped wizard hardening (WIZ-01..05).
 
 ## Tentative — Per-Target Skill Management
 
@@ -255,10 +260,11 @@ Native macOS skill manager app (inspired by [CodexSkillManager](https://github.c
 
 ## Future Ideas
 
-- **Plugin registry**: Browse and install community skill packs (precursor to v0.7 Wolpertinger)
+- **Plugin registry**: Browse and install community skill packs (precursor to Skill Composition / "Wolpertinger")
+- **Skill Composition / "Wolpertinger"**: Originally planned for v0.7 (deferred). Multi-source skill synthesis ([#267](https://github.com/MartinP7r/tome/issues/267)), ACP-based authentication, skill evaluation/creation companion skill ([#268](https://github.com/MartinP7r/tome/issues/268)), `tome lint` standard validation extension.
 - **Conflict resolution UI**: Interactive merge when skills collide
 - ~~**Shell completions**~~: Shipped in v0.4.1 (#208)
-- **Homebrew formula**: `brew install tome`
+- ~~**Homebrew formula**~~: Shipped via cargo-dist (`brew install MartinP7r/tap/tome`)
 - **Backup snapshots**: Moved to v0.5 as git-backed backup (#94)
 - **Token budget estimation**: Show estimated token cost per skill per target tool in `tome status` output
 - **Security audit command**: `tome audit` to scan skills for prompt injection vectors, hidden unicode, and suspicious patterns
