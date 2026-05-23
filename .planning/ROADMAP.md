@@ -13,7 +13,7 @@
 - ✅ **v0.14 Polish: type+role UX + doctor claim-orphan** — Phases 20-21 (shipped 2026-05-20; promoted from backlog 999.5 + 999.2 on 2026-05-19; PR #550 + PR #551)
 - ✅ **v0.15 Generic managed source directory** — Phase 22 (shipped 2026-05-20; promoted from backlog 999.4 on 2026-05-20; PR #553). Allows `[directories.<name>] type = "directory" role = "managed"` so pfw-style package managers are first-class. Two deferred follow-ups: `is_foreign_symlink` managed-source recognition + detect-and-warn for upstream-own-distribution conflict.
 - ✅ **v0.16 Doctor diagnostics expansion** — Phases 23-24 (shipped 2026-05-20; promoted from backlog 999.1 + 999.3 on 2026-05-20; PR #555). Phase 23: `tome doctor` surfaces skills with unparsable SKILL.md frontmatter as Library Warnings (no auto-fix). Phase 24: `tome doctor` consolidates target real-dirs into symlinks when content matches the library byte-for-byte; diverging content surfaces as no-repair Warning. New `RepairKind::ConsolidateTargetRealDirToSymlink` variant.
-- 📋 **v1.0 tome Desktop (Tauri GUI)** — drafted, next milestone — see [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)
+- 🚧 **v1.0 tome Desktop (Tauri GUI)** — Phases 25–31 (ratified 2026-05-23 via `/gsd-new-milestone`; drafted 2026-04-28 in [milestones/v1.0-REQUIREMENTS.md](milestones/v1.0-REQUIREMENTS.md) and [milestones/v1.0-ROADMAP.md](milestones/v1.0-ROADMAP.md)). Tauri 2 desktop GUI over the existing CLI library. 32 requirements across 8 categories (CORE / VIEW / SYNC / CFG / OPS / BAK / DIST / NF). macOS-only for v1.0 (Linux deferred to v2). Cuts: alpha (Phases 25–26) → beta (27–28) → rc (29–30) → v1.0 (31).
 
 ## Phases
 
@@ -244,26 +244,47 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 19-06-wizard-library-default-pinning-test-PLAN.md — Wave 2D: integration test pinning wizard.rs:637 existing TOME_HOME-following behavior — FIX-05
 - [x] 19-07-changelog-and-phase-verification-PLAN.md — Wave 3: CHANGELOG [Unreleased] Phase 19 entries + REQUIREMENTS.md Traceability flip Pending→Done + make ci + human checkpoint against ROADMAP success criteria 1-4 (approved 2026-05-15, retrospective — v0.11 shipped 2026-05-14 via PR #534 + #535)
 
-### 🚧 v0.14 Polish: type+role UX + doctor claim-orphan (In Progress)
+### ✅ v0.14 Polish: type+role UX + doctor claim-orphan (Shipped 2026-05-20)
 
-**Milestone Goal:** Speedrun two backlog items surfaced by post-v0.13 dogfooding. Both are small, well-scoped UX fixes that close real user-friction surfaces — neither needs the v1.0 Phase 10 IPC redesign context. Promoted from backlog (999.5 + 999.2) on 2026-05-19.
+**Milestone Goal:** Speedrun two backlog items surfaced by post-v0.13 dogfooding. Both are small, well-scoped UX fixes that close real user-friction surfaces. Promoted from backlog (999.5 + 999.2) on 2026-05-19. Shipped via PR #550 + PR #551.
 
-- [ ] **Phase 20: Type+role explanation in `tome add`** (promoted from 999.5) — Surface what `type` and `role` mean + their defaults at the moments users are choosing them. Five candidate surfaces (CLI `--role` flag, `tome add` success message echoing role, `tome init` wizard hint, `tome status` table already-good, `commands.md` "Choosing the right role" section). Speedrun: ship CLI flag + success message + docs section.
-- [ ] **Phase 21: Doctor repair — claim orphan into manifest** (promoted from 999.2) — Add a `tome doctor` repair option that registers an orphan library directory into the manifest as Unowned, instead of only offering "delete" or "skip with sync hint". Closes the dead-end where sync can't re-discover orphans.
+- [x] **Phase 20: Type+role explanation in `tome add`** (promoted from 999.5) — Surface what `type` and `role` mean + their defaults at the moments users are choosing them. Shipped: CLI `--role` flag + `tome add` success message echoing role + docs section in `commands.md` ("Choosing the right role").
+- [x] **Phase 21: Doctor repair — claim orphan into manifest** (promoted from 999.2) — `tome doctor` now offers a `claim` option that registers an orphan library directory into the manifest as Unowned. Closes the dead-end where library-canonical orphans with no upstream source had no recovery path.
 
 ### ✅ v0.15 Generic managed source directory (Shipped 2026-05-20)
 
 **Milestone Goal:** Make the `Managed` role first-class for any flat-directory package manager (pfw, etc.), not just `claude-plugins`. Shipped via PR #553.
 
+- [x] **Phase 22: Generic managed source directory** (promoted from 999.4) — Relaxed `valid_roles()` for `DirectoryType::Directory` to include `Managed`. Dropped the `validate.rs` reject rule. Discovery + consolidate already keyed on `role() == Managed` end-to-end, so the change was small: validation surface + tests + docs. **Out of scope (deferred to follow-ups):** (a) `is_foreign_symlink` refinement to recognize managed-source paths as legitimate-origin; (b) detect-and-warn for "pfw's own distribution is fighting tome".
+
 ### ✅ v0.16 Doctor diagnostics expansion (SHIPPED 2026-05-20)
 
 **Milestone Goal:** Two doctor improvements promoted from backlog. Phase 23 surfaces skills with broken SKILL.md frontmatter (the original 999.1 framing about "discover drops them" was wrong — they pass through; the real gap was doctor didn't surface them post-sync). Phase 24 turns the existing `sync` real-dir-collision warning into an actionable doctor repair. Shipped via PR #555.
 
-- [x] **Phase 23: Loosen frontmatter cascade** (promoted from 999.1) — `tome doctor` now walks every manifest-tracked library skill and parses its SKILL.md. YAML/delimiter errors and missing files surface as Library Warnings (`'<skill>' has unparseable SKILL.md frontmatter: …`). Not auto-repairable — the user must edit the file. The "loosen" framing was based on a misread of `discover.rs`: skills with broken frontmatter ALREADY pass through to library + distribution today (no filter drops them). The actionable bit is the doctor diagnostic.
+- [x] **Phase 23: Loosen frontmatter cascade** (promoted from 999.1) — `tome doctor` now walks every manifest-tracked library skill and parses its SKILL.md. YAML/delimiter errors and missing files surface as Library Warnings (`'<skill>' has unparsable SKILL.md frontmatter: …`). Not auto-repairable — the user must edit the file. The "loosen" framing was based on a misread of `discover.rs`: skills with broken frontmatter ALREADY pass through to library + distribution today (no filter drops them). The actionable bit is the doctor diagnostic.
 - [x] **Phase 24: Doctor repair — consolidate target real-dir into symlink** (promoted from 999.3) — Extended `check_distribution_dir` to detect non-symlink entries whose contents are byte-identical to a library skill, and offers an auto-repair (`RepairKind::ConsolidateTargetRealDirToSymlink`) to delete the real dir + replace with a symlink. Diverging-content real dirs surface as a no-repair Warning so the user can reconcile manually.
 
-- [ ] **Phase 22: Generic managed source directory** (promoted from 999.4) — Relax `valid_roles()` for `DirectoryType::Directory` to include `Managed`. Drop the `validate.rs` reject rule. Discovery + consolidate already key on `role() == Managed` end-to-end (the `is_managed` flag flows through), so the change is small: validation surface + tests + docs. **Out of scope (deferred):** (a) `is_foreign_symlink` refinement to recognize managed-source paths as legitimate-origin (the 18 pfw-* symlinks in claude-skills would still flag as foreign — separate follow-up); (b) detect-and-warn for "pfw's own distribution is fighting tome" (the open question from the 999.4 entry).
+### 🚧 v1.0 tome Desktop (Tauri GUI) — Phases 25–31 (Ratified 2026-05-23)
 
+**Milestone Goal:** Make the skill library *visible*. Tauri 2 desktop GUI over the existing CLI library; the Rust core is reshaped to return structured types callable from any front-end. CLI continues to ship unchanged from `crates/tome`; new `crates/tome-desktop` workspace member hosts the app. macOS-only for v1.0 (Linux deferred to v2). Cuts: alpha (Phases 25–26) → beta (27–28) → rc (29–30) → v1.0 (31). Full requirements in [`REQUIREMENTS.md`](REQUIREMENTS.md); full per-phase plan in [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md).
+
+- [ ] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.**
+- [ ] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.**
+- [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
+- [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
+- [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
+- [ ] **Phase 30: Backup UI — rc cut** (BAK-01..04 + NF-04) — Backup history view, snapshot action, diff view, restore flow with automatic post-restore sync. **v1.0-rc cut.**
+- [ ] **Phase 31: Distribution — v1.0 ship** (DIST-01..05) — Sign + notarize + DMG (aarch64 + x86_64), `tauri-plugin-updater` auto-update with signed manifest, combined GitHub Actions release workflow (CLI cargo-dist outputs preserved), first-launch UX, embedded CLI with "Show in terminal" affordances. **v1.0 ship.**
+
+**Open questions (Q1–Q7 from `milestones/v1.0-ROADMAP.md`):**
+
+- Q1: Frontend framework choice — resolve in Phase 25 spike (D-GUI-04)
+- Q2: Tauri minor-version pinning policy
+- Q3: How `tome lint` failures surface (separate view / integrated into doctor / both)
+- Q4: Tray-icon presence (default: no, launch on demand)
+- Q5: Linux as stretch goal vs strict v2 (default: strict v2)
+- Q6: Sparkle vs `tauri-plugin-updater` (default Tauri; revisit in Phase 31)
+- Q7: Telemetry / crash reporting (out of scope v1.0; flag for v2)
 
 ## Backlog
 

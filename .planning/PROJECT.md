@@ -124,45 +124,51 @@ The wizard-surface work below shipped in v0.6 (as WIZ-01–05) but lacked valida
 
 ## Current State
 
-**Shipped:** v0.10.0 (2026-05-11)
+**Shipped:** v0.16.0 (2026-05-20)
 
-v0.10 milestone complete — Library-canonical Model + Cross-Machine Plugin Reconciliation. **49 requirements shipped** across 7 phases (LIB-01..05 + ADP-01..04 + RECON-01..05 + UNOWN-01..03 + HARD-01..22 + UX-01..02 + DOC-01..03 + REL-01..05). Archive: [`milestones/v0.10-ROADMAP.md`](milestones/v0.10-ROADMAP.md).
+After v0.10 (library-canonical model) shipped 2026-05-11, the project entered a 9-day polish sprint that produced six minor releases:
 
-**Headline transformation:**
-- The library moved from "two-tier symlink cache" (managed = symlink into machine-specific cache) to **library-canonical real-directory copies** for both managed and local skills. Plugin uninstall, version churn, and cross-machine sync now all preserve library content.
-- `tome sync` is now **lockfile-authoritative** — reconciles installed plugins against `tome.lock` via marketplace adapters (Cargo.lock-shaped). Match/Drift/Vanished classification + interactive consent + edit-in-library detection.
-- `MarketplaceAdapter` trait + `ClaudeMarketplaceAdapter` (subprocess to `claude plugin install/update/list --json`) + `GitAdapter` (thin shim over `git.rs`).
-- **Unowned-library lifecycle** is first-class — source removal preserves library content; `tome reassign --to <dir>` re-anchors Unowned skills; `tome remove skill <name>` deletes them. The originally-proposed `tome adopt`/`forget` verbs were merged into existing commands per Phase 14 D-API-1/-2.
-- One-shot `tome migrate-library` converts v0.9-shape libraries to v0.10 shape with confirmation, summary table, and `--yes` bypass. Idempotent on re-run.
-- Three-bucket cleanup output (UX-01) — `removed-from-config` / `missing-from-disk` / `now-in-exclude-list` — with per-skill actionable hints. The "no longer configured" trigger phrase that motivated this milestone is gone.
-- Major hardening pass: 22 review-followup + older-bug fixes (HARD-01..22), test count 662 → 987 (+325, +49%), `lib.rs::run` decomposed into 16 `cmd_<name>` helpers, `config.rs` split into a 4-file module, `tests/cli.rs` (6,703 LOC) split into 16 per-domain files.
-- Documentation: `architecture.md` rewritten 60→254 lines; new `cross-machine-sync.md` (259 lines); CHANGELOG `[Unreleased]` rewritten 22→209 lines with full migration walkthrough.
+- **v0.11** (2026-05-14) — Polish + Observability. Adopted `tracing` (OBS-01..05) with `--verbose`/`--quiet` flag wiring; sync diagnostics + change-cause attribution; doctor categorization (`IssueCategory` Library / Directory / Config / Foreign-symlink); typed `RepairKind` enum dispatch; OBS-07 last-sync stamping; FIX-01..06 bundle (doctor auto-fix UX, browse timing flake bound, managed-symlinks-in-git false-positive deletion, wizard polish, Makefile CHANGELOG date stamp).
+- **v0.12.x** (2026-05-17) — Pre-v1.0 review polish. Whole-codebase audit fix bundle from 5 specialist review agents; 15/16 findings shipped (the 16th — Owned/Unowned enum migration — tracked in [#542](https://github.com/MartinP7r/tome/issues/542) for v1.0 Phase 25 absorption). Includes the `DirectoryRole` JSON shape change in `tome status --json`. v0.12.1 = trivial version-bump-only patch.
+- **v0.13** (2026-05-19) — `tome add` UX. `/tree/<ref>/<subdir>` URL form, `--subdir` flag, auto-detect Claude plugin layouts with hint-on-zero (PR #547). Open follow-up [#548](https://github.com/MartinP7r/tome/issues/548) tracks the role-transition cleanup gap from dogfooding.
+- **v0.14** (2026-05-20) — Type+role UX + claim-orphan. `--role` override flag for `tome add`; `tome doctor` `claim` orphan-to-Unowned option closing the dead-end where library-canonical orphans had no recovery path.
+- **v0.15** (2026-05-20) — Generic managed source directory. `[directories.<name>] type = "directory" role = "managed"` first-class for flat-directory package managers (pfw, etc.); valid_roles surface relaxed; v0.14 `--role source` workaround retired.
+- **v0.16** (2026-05-20) — Doctor diagnostics expansion. Broken-frontmatter Warning (Phase 23, no auto-fix) and `ConsolidateTargetRealDirToSymlink` auto-repair (Phase 24, target real-dir → symlink when byte-identical to library).
 
-**Released as:** v0.10.0 via cargo-dist (tag `578f787`, GitHub Release with 11 macOS + Linux artifacts, Homebrew formula updated). Real-library migration smoke-test (REL-04) executed on Martin's `~/dev/coding-agent-files` with 57/57 SHA-256 hashes byte-identical pre/post; one mid-stream bug found and fixed (PR #528 — reconcile hard-fail on stale manifest entries).
+**Released:** v0.11.0 → v0.16.0 via cargo-dist, with Homebrew formula updated on every release.
 
-**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard / xdg-open) **formally deferred to v1.0** (Tauri Desktop GUI) — fifth consecutive milestone, written rationale in the UAT frontmatter. Will be naturally exercised when v1.0's GUI build target requires Linux hardware.
+**Carry-over:** 2 Linux-runtime UAT items in `08-HUMAN-UAT.md` (clipboard / xdg-open) **formally deferred to v1.0** (Tauri Desktop GUI) — sixth consecutive milestone, written rationale in the UAT frontmatter. Will be naturally exercised when v1.0's GUI build target requires Linux hardware.
 
-## Current Milestone: v0.11 Polish + Observability
+**Open follow-ups:** [#542](https://github.com/MartinP7r/tome/issues/542) Owned/Unowned enum migration (v1.0 Phase 25 absorption); [#548](https://github.com/MartinP7r/tome/issues/548) role-transition cleanup gap; two Phase 22 deferrals (`is_foreign_symlink` managed-source recognition + detect-and-warn for upstream-own-distribution conflict).
 
-**Goal:** Ship the v0.10-surfaced bugs and adopt structured logging across the codebase so `tome sync`/`doctor`/`status` give clearer signal — laying groundwork for the v1.0 GUI's IPC + log-capture needs.
+## Current Milestone: v1.0 tome Desktop (Tauri GUI)
+
+**Ratified:** 2026-05-23 via `/gsd-new-milestone` after v0.16 shipped. Drafted 2026-04-28 in [`milestones/v1.0-REQUIREMENTS.md`](milestones/v1.0-REQUIREMENTS.md).
+
+**Goal:** Make the skill library *visible* — directories, skills, sync state, and conflicts observed and managed from a desktop app rather than a terminal. Tauri 2 GUI over the existing CLI library; CLI ships unchanged.
 
 **Target features:**
 
-- **Structured logging foundation** — adopt `tracing` (default; `log` reconsidered if cost shows up), map existing `eprintln!`/`println!` to log levels, wire `--verbose`/`--quiet` to subscriber filter. Single-pass instrumentation, no output rewrite.
-- **Sync diagnostics surface** — per-step timing in `--verbose`, change-cause attribution ("why did this skill re-copy?"), reconcile classification breakdown in summary.
-- **Doctor / status richer surface** — better counts, categories, actionable hints in both text and JSON.
-- **Bugfix bundle** — #530 doctor auto-fixable UX, #511 timing flake (folds in HARD-14 `backup::push_and_pull_roundtrip` carry-over), managed-symlinks-in-git false positive, wizard polish (#453, #454, #456), `make release` CHANGELOG date stamp.
+- **Rust core extraction** — reshape `crates/tome` so domain operations return structured types callable from any front-end; `lib.rs::run` becomes a CLI presenter over those calls. New `crates/tome-desktop` workspace member hosts the Tauri app.
+- **Type bridge** — `specta` + `tauri-specta` generate `bindings.ts` at build time; no hand-rolled JS-side types.
+- **Read-only views** — status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher for auto-refresh.
+- **Sync + triage UI** — visual sync with per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellation, retry.
+- **Configuration UI** — first-run wizard, directory editor with live validation, `tome add` form, machine prefs editor. All writes through `Config::save_checked`.
+- **Mutating operations UI** — remove / reassign / fork / relocate / eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics).
+- **Backup UI** — history view, snapshot, diff, restore with automatic post-restore sync.
+- **Distribution** — code sign + notarize + DMG (aarch64 + x86_64), `tauri-plugin-updater` auto-update, first-launch UX, embedded CLI for "Show in terminal" affordances.
 
 **Key context:**
 
-- **Scope discipline:** observability is "instrument existing output" — not "redesign output." New JSON-by-default streams, OpenTelemetry, etc. stay out of scope.
-- **`tracing` is the default** structured-logging crate (spans, structured fields, async-aware; aligns with what v1.0 Tauri IPC will need). `log` is the cheaper fallback if adoption cost shows up during planning.
-- **Linux UAT carry-overs** (clipboard + xdg-open from v0.8 `08-HUMAN-UAT.md`) — fifth milestone without Linux hardware. Formally deferred to **v1.0** where the Tauri build forces Linux access.
-- **Backward compat:** None (per project policy). Log-level flag changes will be release-noted but not gated on a migration shim.
-- **TS migration parked.** `docs/migration/rust-to-typescript-feature-inventory.md` stays an untracked exploration artifact; v1.0 (Tauri GUI) remains the milestone after v0.11.
-- **Sized at ~2 phases, ~12–15 requirements, 2–4 weeks of focused work.** Phase numbering continues from 17 → starts at Phase 18.
+- **Tauri 2 over Electron + napi-rs** (D-GUI-01) — existing Rust core, ~8 MB vs ~150 MB bundle, no N-API ABI layer, built-in code-signed auto-update, reuses Developer ID flow we already need for the CLI.
+- **macOS-only for v1.0** (D-GUI-06) — Linux deferred to v2 (still missing v0.8 UAT hardware); Windows out of scope.
+- **No CLI regression** — `crates/tome` ships unchanged via cargo-dist. The GUI is additive — both share the same library, manifest, lockfile (D-GUI-07).
+- **No JS-side business logic** — frontend renders Tauri-command results and dispatches commands. Validation, planning, side effects all in Rust.
+- **Frontend framework TBD** in the Phase 25 spike (D-GUI-04) — shortlist React / Solid / Svelte.
+- **Sized at ~7 phases, 15–22 weeks single-dev** (calendar 4–6 months with overhead). Phase numbering continues from v0.16 (last phase: 24) → v1.0 starts at **Phase 25**.
+- **Cuts** along the way: alpha (Phases 25–26), beta (27–28), rc (29–30), v1.0 (31).
 
-Run `/gsd:plan-phase 18` after roadmap approval to start execution. **v1.0 (Tauri Desktop GUI)** remains the milestone after v0.11 — drafted in [`milestones/v1.0-{REQUIREMENTS,ROADMAP}.md`](milestones/v1.0-REQUIREMENTS.md).
+Run `/gsd:plan-phase 25` after this milestone ratification to start execution.
 
 <details>
 <summary>v0.10 milestone details (archive recap)</summary>
@@ -210,6 +216,13 @@ Run `/gsd:plan-phase 18` after roadmap approval to start execution. **v1.0 (Taur
 - v0.7 Wizard Hardening (Phases 4-6, shipped 2026-04-22) — `Config::validate()` Conflict+Why+Suggestion errors, `Config::save_checked` round-trip, `--no-input` plumbing, 12-combo matrix test, `tabled` summary
 - v0.8 Wizard UX & Safety Hardening (Phases 7-8 + 8.1 hotfix, shipped 2026-04-27) — wizard greenfield/brownfield/legacy flows, partial-failure visibility, cross-platform browse, lockfile regen safety
 - v0.9 Cross-Machine Config Portability & Polish (Phases 9-10, shipped 2026-04-29) — `[directory_overrides.<name>]` schema, override surfacing, Phase 8 review tail (StatusMessage redesign, FailureKind compile-enforcement, RemoveFailure invariant, arboard patch-pin)
+- v0.10 Library-canonical Model + Cross-Machine Plugin Reconciliation (Phases 11-17, shipped 2026-05-11) — 49 requirements; managed-as-real-dir, MarketplaceAdapter trait, Unowned lifecycle, three-bucket cleanup, `tome migrate-library`, 22-item CLI hardening bundle
+- v0.11 Polish + Observability (Phases 18-19, shipped 2026-05-14, v0.11.1 patch 2026-05-15) — `tracing` substrate, sync diagnostics, doctor categorization, OBS-07 last-sync stamping, FIX-01..06 bundle
+- v0.12 Pre-v1.0 Review Polish (shipped 2026-05-17 + v0.12.1 same day) — whole-codebase audit fix bundle from 5 review agents; 15/16 findings shipped (#542 deferred to v1.0 Phase 25)
+- v0.13 `tome add` UX (shipped 2026-05-19; PR #547) — `/tree/<ref>/<subdir>` URL form, `--subdir`, auto-detect Claude plugin layouts
+- v0.14 Type+role UX + claim-orphan (Phases 20-21, shipped 2026-05-20; PR #550 + #551) — `--role` override, doctor `claim` orphan-to-Unowned
+- v0.15 Generic managed source directory (Phase 22, shipped 2026-05-20; PR #553) — `Directory + Managed` role combo for flat-directory package managers
+- v0.16 Doctor diagnostics expansion (Phases 23-24, shipped 2026-05-20; PR #555) — broken-frontmatter Warning + real-dir → symlink auto-repair
 
 </details>
 
