@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
-stopped_at: Completed 25-03-PLAN.md (Wave 2)
-last_updated: "2026-05-25T14:40:15.818Z"
-last_activity: 2026-05-25 -- 25-03 complete (ProgressSink/CancelToken threading + presenter decomposition)
+stopped_at: Completed 25-04-PLAN.md (Wave 3)
+last_updated: "2026-05-26T00:00:00.000Z"
+last_activity: 2026-05-26 -- 25-04 complete (tome-desktop Tauri crate + get_status + typed bindings.ts + CI gate)
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 6
-  completed_plans: 3
-  percent: 50
+  completed_plans: 4
+  percent: 67
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 ## Current Position
 
 Phase: 25 (rust-core-extraction-tauri-integration-spike) — EXECUTING
-Plan: 3 of 6 complete (25-01, 25-02, 25-03 — Wave 1 + Wave 2 plan 03)
+Plan: 4 of 6 complete (25-01, 25-02, 25-03, 25-04 — Wave 1 + Wave 2 + Wave 3)
 Status: Executing Phase 25
-Last activity: 2026-05-25 -- 25-03 complete (ProgressSink/CancelToken threading + presenter decomposition)
+Last activity: 2026-05-26 -- 25-04 complete (tome-desktop Tauri crate + get_status + typed bindings.ts + CI gate)
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -71,6 +71,7 @@ Historical decisions are archived in:
 - `.planning/milestones/v0.11-REQUIREMENTS.md` — v0.11 archived requirements (REQUIREMENTS.md overwritten with v1.0 content on ratification)
 - [Phase 18..24]: decisions logged historically here; see archived `.planning/STATE.md` history in git for full list
 - [Phase 25]: 25-03: threaded ProgressSink + CancelToken through sync() (typed ProgressEvent per stage, is_cancelled() at every boundary); IndicatifSink re-homes spinners at the CLI edge, NullSink under --quiet/--verbose; promoted remove/reassign/relocate/eject plan() to pub + extracted list::collect — GUI-callable domain surface (D-09/D-11/D-12/D-GUI-08)
+- [Phase 25]: 25-04: stood up crates/tome-desktop (Tauri 2, path dep on tome+bindings, specta trio pinned =2.0.0-rc.25). get_status command returns real StatusReport; TauriEventSink bridges typed ProgressEvent→SyncProgress (typed SyncStage, saturating casts); make_builder() is the single command/event registry shared by main.rs + gen-bindings; committed bindings.ts is an INTENTIONAL Wave-3 partial snapshot (Result<StatusReport,String>, pre-TomeError — 25-05 regenerates). Exported bindings from gen-bindings bin not build.rs (D-07 corrected); Builder::dangerously_cast_bigints_to_number() to export usize counts as TS number (no library type change); CI bindings-freshness gate + macOS desktop-build job on macos-latest; [package.metadata.dist] dist=false excludes tome-desktop from cargo-dist (release CLI-only, release.yml untouched) (CORE-02/03/04, D-06/D-07)
 
 ### v1.0 design context (consume during phase planning)
 
@@ -113,6 +114,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-25T14:40:15.812Z
+Last session: 2026-05-25T15:16:03.292Z
 Stopped at: Completed 25-03-PLAN.md (Wave 2)
 Resume file: None
