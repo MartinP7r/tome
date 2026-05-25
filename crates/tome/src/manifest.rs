@@ -201,7 +201,16 @@ pub struct SkillEntry {
 ///
 /// Never constructed directly — serde builds it during `SkillEntry`
 /// deserialization (the `from` container attribute on `SkillEntry`).
+///
+/// **specta note (25-04):** `SkillEntry` carries `#[serde(from =
+/// "SkillEntryRepr")]`, and specta honors serde's `from` by requiring the
+/// source type to also implement `Type`. So the `specta::Type` derive is
+/// mirrored here under the `bindings` feature. `SkillEntry` is not (yet)
+/// reachable from any registered Tauri command/event, so this type does not
+/// surface in `bindings.ts` this wave — the derive exists only to keep
+/// `tome --features bindings` compiling.
 #[derive(Deserialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 struct SkillEntryRepr {
     source_path: PathBuf,
     /// New shape: present in entries written after #542. Wins over the

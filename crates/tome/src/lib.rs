@@ -82,7 +82,12 @@ pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
 pub(crate) mod skill;
-pub(crate) mod status;
+// `status` is `pub` so the v1.0 GUI (`tome-desktop`) can call
+// `tome::status::gather` and consume `tome::status::StatusReport` across the
+// crate boundary (CORE-04 / D-GUI-08). The CLI presenter (`status::show`)
+// stays in-crate; only the structured `gather`/`StatusReport` surface is the
+// GUI contract. Widened in 25-04 (carry-forward from 25-03's pub `plan` fns).
+pub mod status;
 pub(crate) mod summary;
 pub mod tracing_init;
 pub(crate) mod update;
