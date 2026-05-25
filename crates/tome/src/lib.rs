@@ -51,7 +51,14 @@ pub mod config;
 pub(crate) mod discover;
 pub(crate) mod distribute;
 pub(crate) mod doctor;
+// `errors` is `pub` because `DomainErrorKind` is the domain half of the
+// GUI error boundary (CORE-05 / D-14): `tome-desktop`'s `TomeError::from`
+// downcasts these typed sentinels out of the anyhow cause chain to pick a
+// coarse `ErrorCode`. Re-exported as `tome::DomainErrorKind` below. The CLI
+// never names this type (the domain stays `anyhow::Result`); it is attached
+// at GUI-relevant failure sites via `.context()` and only read at the IPC edge.
 pub(crate) mod eject;
+pub mod errors;
 pub(crate) mod git;
 pub(crate) mod library;
 pub(crate) mod lint;
@@ -124,6 +131,12 @@ pub use manifest::hash_directory;
 /// the library calling `process::exit` itself.
 pub use lint::LintFailed;
 pub use migration_v010::MigrationPartialOrFailed;
+
+/// CORE-05 / D-14: the typed `DomainErrorKind` sentinels the `tome-desktop`
+/// IPC boundary downcasts out of the anyhow cause chain to classify errors
+/// into a coarse `ErrorCode`. Attached at GUI-relevant failure sites via
+/// `.context()`; the domain itself stays `anyhow::Result`.
+pub use errors::DomainErrorKind;
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →

@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
+use crate::errors::{DomainErrorKind, WithDomainKind};
 use crate::progress::{CancelToken, ProgressEvent, ProgressSink};
 
 /// Run a git command in the given directory with env clearing, returning raw output.
@@ -94,6 +95,23 @@ pub(crate) fn clone_repo(
     sink: &dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
+    // Tag every failure of this op with the `Git` sentinel (CORE-05 / D-14) so
+    // the GUI boundary classifies it as `ErrorCode::Git` via downcast. The tag
+    // is transparent — the human-readable `{e:#}` chain (and the CLI's
+    // warn-and-continue messages) are unchanged.
+    clone_repo_inner(url, dest, branch, tag, rev, sink, cancel)
+        .with_domain_kind(DomainErrorKind::Git)
+}
+
+fn clone_repo_inner(
+    url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
     if cancel.is_cancelled() {
         anyhow::bail!("git clone cancelled before start");
     }
@@ -151,6 +169,20 @@ pub(crate) fn clone_repo(
 /// emits a [`ProgressEvent::GitCloneProgress`] when the fetch begins and
 /// checks `cancel` before launching the subprocess.
 pub(crate) fn update_repo(
+    repo_dir: &Path,
+    branch: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
+    // Tag every failure with the `Git` sentinel (CORE-05 / D-14); transparent to
+    // the CLI's `{e:#}` output (mirrors `clone_repo`).
+    update_repo_inner(repo_dir, branch, tag, rev, sink, cancel)
+        .with_domain_kind(DomainErrorKind::Git)
+}
+
+fn update_repo_inner(
     repo_dir: &Path,
     branch: Option<&str>,
     tag: Option<&str>,

@@ -31,6 +31,14 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 walkdir.workspace = true
 serde_yaml.workspace = true
+# Derive macro for the `DomainErrorKind` sentinel enum (CORE-05 / D-14). These
+# typed sentinels are attached at GUI-relevant failure sites via anyhow
+# `.context()` so the `tome-desktop` IPC boundary can downcast them into a
+# coarse `ErrorCode` (instead of fragile message string-matching). `thiserror`
+# is already a transitive dep via the specta trio; pinning it here makes the
+# domain-side sentinel infra explicit. Domain stays `anyhow::Result` — these
+# sentinels are attached, never returned as the error type itself.
+thiserror = "2"
 
 # TUI (browse command)
 ratatui.workspace = true

@@ -4828,6 +4828,7 @@ dependencies = [
  "tabled",
  "tempfile",
  "terminal_size",
+ "thiserror 2.0.18",
  "tome",
  "toml 1.1.2+spec-1.1.0",
  "tracing",
