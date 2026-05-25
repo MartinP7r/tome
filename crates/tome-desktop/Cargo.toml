@@ -1,0 +1,47 @@
+[package]
+name = "tome-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desktop GUI shell for tome (Tauri 2)"
+# Never publish the GUI crate to crates.io — it is a workspace-local app.
+publish = false
+
+# Exclude tome-desktop from cargo-dist release artifacts (RESEARCH Pitfall 4 /
+# A1). cargo-dist 0.30.3 reads `[package.metadata.dist] dist = false` as the
+# per-package opt-out; `dist plan` is the self-check (must list only `tome`).
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "tome-desktop"
+path = "src/main.rs"
+
+# CI runs this bin to regenerate bindings.ts and `git diff --exit-code` it
+# (D-07 corrected — build.rs cannot see the registered #[tauri::command] fns,
+# so the export happens here, sharing make_builder() with main.rs).
+[[bin]]
+name = "gen-bindings"
+path = "src/bin/gen-bindings.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+# Path dep on the canonical domain library with the `bindings` feature on so
+# the cross-boundary types derive `specta::Type`. Default CLI builds keep the
+# feature OFF (zero specta cost).
+tome = { path = "../tome", features = ["bindings"] }
+tauri = { version = "2.11", features = [] }
+# specta trio — pinned EXACTLY with `=` (they move in lockstep; tauri-specta
+# 2.0.0-rc.25 depends on specta =2.0.0-rc.25). Verified specta-rs ownership +
+# crates.io (supply-chain checkpoint approved).
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "0.0.12"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = "2"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
