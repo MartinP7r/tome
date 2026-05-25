@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
-stopped_at: Phase 25 context gathered
-last_updated: "2026-05-25T13:48:56.039Z"
-last_activity: 2026-05-25 -- Phase 25 execution started
+stopped_at: Completed 25-03-PLAN.md (Wave 2)
+last_updated: "2026-05-25T14:40:15.818Z"
+last_activity: 2026-05-25 -- 25-03 complete (ProgressSink/CancelToken threading + presenter decomposition)
 progress:
   total_phases: 1
   completed_phases: 0
   total_plans: 6
-  completed_plans: 0
-  percent: 0
+  completed_plans: 3
+  percent: 50
 ---
 
 # Project State
@@ -26,9 +26,9 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 ## Current Position
 
 Phase: 25 (rust-core-extraction-tauri-integration-spike) — EXECUTING
-Plan: 1 of 6
+Plan: 3 of 6 complete (25-01, 25-02, 25-03 — Wave 1 + Wave 2 plan 03)
 Status: Executing Phase 25
-Last activity: 2026-05-25 -- Phase 25 execution started
+Last activity: 2026-05-25 -- 25-03 complete (ProgressSink/CancelToken threading + presenter decomposition)
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -70,6 +70,7 @@ Historical decisions are archived in:
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — v1.0 source drafts (ratified into top-level REQUIREMENTS.md + ROADMAP.md on 2026-05-23)
 - `.planning/milestones/v0.11-REQUIREMENTS.md` — v0.11 archived requirements (REQUIREMENTS.md overwritten with v1.0 content on ratification)
 - [Phase 18..24]: decisions logged historically here; see archived `.planning/STATE.md` history in git for full list
+- [Phase 25]: 25-03: threaded ProgressSink + CancelToken through sync() (typed ProgressEvent per stage, is_cancelled() at every boundary); IndicatifSink re-homes spinners at the CLI edge, NullSink under --quiet/--verbose; promoted remove/reassign/relocate/eject plan() to pub + extracted list::collect — GUI-callable domain surface (D-09/D-11/D-12/D-GUI-08)
 
 ### v1.0 design context (consume during phase planning)
 
@@ -112,6 +113,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-25T09:55:59.037Z
-Stopped at: Phase 25 context gathered
-Resume file: .planning/phases/25-rust-core-extraction-tauri-integration-spike/25-CONTEXT.md
+Last session: 2026-05-25T14:40:15.812Z
+Stopped at: Completed 25-03-PLAN.md (Wave 2)
+Resume file: None

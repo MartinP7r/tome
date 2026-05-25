@@ -28,10 +28,10 @@ Requirements for the v1.0 release. Grouped by category; each maps to a roadmap p
 
 The Rust crate must be reshaped to support both the existing CLI and the new GUI without duplicating domain logic. This is the foundation; every other GUI requirement depends on it.
 
-- [ ] **CORE-01**: Domain operations (`sync`, `status::gather`, `list::collect`, `lint::lint_library`/`lint_skill`, `doctor::diagnose`, `remove::plan`, `reassign::plan` (covers fork via `is_fork: true` — no separate `fork.rs`), `relocate::plan`, `eject::plan`, `backup::*`) return structured Rust types — not formatted strings — and are callable from any front-end. Existing `lib.rs::run` is decomposed into a thin CLI wrapper that calls these and formats output; the GUI calls them directly.
+- [x] **CORE-01**: Domain operations (`sync`, `status::gather`, `list::collect`, `lint::lint_library`/`lint_skill`, `doctor::diagnose`, `remove::plan`, `reassign::plan` (covers fork via `is_fork: true` — no separate `fork.rs`), `relocate::plan`, `eject::plan`, `backup::*`) return structured Rust types — not formatted strings — and are callable from any front-end. Existing `lib.rs::run` is decomposed into a thin CLI wrapper that calls these and formats output; the GUI calls them directly.
 - [ ] **CORE-02**: A new crate `crates/tome-desktop` is added to the workspace alongside `crates/tome` and depends on it as a path dependency. The Tauri app lives in this crate. The CLI continues to ship from `crates/tome` unchanged.
 - [ ] **CORE-03**: All structured types crossing the Rust↔JS boundary (`StatusReport`, `SkillSummary`, `LockfileDiff`, `RemovePlan`, `Config`, `MachinePrefs`, etc.) generate matching TypeScript types via `specta` + `tauri-specta`, exposed to the front-end as a generated `bindings.ts`. No hand-rolled type definitions on the JS side.
-- [ ] **CORE-04**: Long-running operations (`sync`, git clone in `add`, backup snapshot/restore) emit progress events via Tauri's event system; the front-end subscribes and renders progress without blocking the IPC reply.
+- [x] **CORE-04**: Long-running operations (`sync`, git clone in `add`, backup snapshot/restore) emit progress events via Tauri's event system; the front-end subscribes and renders progress without blocking the IPC reply.
 - [ ] **CORE-05**: All Rust errors crossing into the front-end carry a stable `code` (enum) and `message` (`anyhow` chain) — the GUI can render targeted error UI ("permissions" / "not found" / "validation") without string-matching messages.
 
 ### Read-only views (VIEW)
