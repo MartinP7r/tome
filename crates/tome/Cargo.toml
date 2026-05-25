@@ -37,6 +37,13 @@ ratatui.workspace = true
 crossterm.workspace = true
 nucleo-matcher.workspace = true
 
+# Type-bridge for the v1.0 Tauri GUI (D-06 / D-GUI-03). Optional + behind the
+# `bindings` feature so the default CLI build pulls in ZERO specta. The specta
+# trio (specta / specta-typescript / tauri-specta) moves in lockstep — pinned
+# with an EXACT `=` version; bump the whole trio together on upgrade (RESEARCH
+# A5 / Package Legitimacy Audit: specta-rs org, crates.io-verified, pre-1.0 rc).
+specta = { version = "=2.0.0-rc.25", features = ["derive"], optional = true }
+
 [dev-dependencies]
 assert_cmd.workspace = true
 assert_fs.workspace = true
@@ -57,3 +64,9 @@ tome = { path = ".", features = ["test-support"] }
 # need a synthetic MarketplaceAdapter without `claude` on PATH enable this
 # feature in `[dev-dependencies]`. See OQ-2 in 13-RESEARCH.md.
 test-support = []
+
+# Derive `specta::Type` on every type that crosses the Tauri IPC boundary
+# (D-06). The v1.0 `tome-desktop` crate path-depends on `tome` with this
+# feature on. Default CLI builds leave it OFF — zero specta cost (verified by
+# `cargo tree -e normal` showing no specta under default features).
+bindings = ["dep:specta"]

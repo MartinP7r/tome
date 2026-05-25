@@ -218,21 +218,25 @@ fn phase14_reassign_unowned_input_succeeds() {
         .success()
         .stdout(predicate::str::contains("Reassigned"));
 
-    // Manifest: source_name flipped from None to Some("local-target");
-    // previous_source cleared.
+    // Manifest: ownership flips from Unowned to Owned("local-target") on
+    // re-anchor (#542 SkillOwnership enum on-disk shape; no flat source_name
+    // / previous_source keys). The Owned variant carries no breadcrumb, so
+    // the D-C1 "previous_source cleared" semantic is structural.
     let manifest = fix.manifest_value();
     let entry = &manifest["skills"]["orphan-foo"];
     assert_eq!(
-        entry["source_name"].as_str(),
+        entry["ownership"]["kind"].as_str(),
+        Some("owned"),
+        "ownership.kind must be owned after re-anchor: {entry}"
+    );
+    assert_eq!(
+        entry["ownership"]["source"].as_str(),
         Some("local-target"),
-        "source_name must be Some(local-target) after re-anchor: {entry}"
+        "ownership.source must be local-target after re-anchor: {entry}"
     );
     assert!(
-        entry
-            .get("previous_source")
-            .map(|v| v.is_null())
-            .unwrap_or(true),
-        "previous_source must be cleared on re-anchor (D-C1 closure): {entry}"
+        entry.get("source_name").is_none() && entry.get("previous_source").is_none(),
+        "Owned entry must not carry legacy flat source_name/previous_source keys: {entry}"
     );
 
     // Skill content materialised in the target directory on disk.

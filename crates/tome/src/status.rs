@@ -13,6 +13,7 @@ use crate::paths::TomePaths;
 
 /// A count that may have failed with an error message.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct CountOrError {
     pub count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,6 +47,7 @@ impl From<Result<usize, String>> for CountOrError {
 /// a description string need to switch to `role_description` or to the
 /// enum-aware reader.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct DirectoryStatus {
     pub name: String,
     pub directory_type: String,
@@ -69,6 +71,7 @@ pub struct DirectoryStatus {
 
 /// Complete status report for the tome system.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct StatusReport {
     pub configured: bool,
     pub library_dir: PathBuf,
@@ -142,7 +145,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
                 let last = m.last_synced_at().map(String::from);
                 let unowned = m
                     .iter()
-                    .filter(|(_, entry)| entry.source_name.is_none())
+                    .filter(|(_, entry)| entry.source_name().is_none())
                     .map(|(name, entry)| crate::summary::SkillSummary::from_entry(name, entry))
                     .collect();
                 (unowned, last)
@@ -699,8 +702,9 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -739,8 +743,9 @@ mod tests {
             crate::discover::SkillName::new("missing").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -773,8 +778,9 @@ mod tests {
             crate::discover::SkillName::new("managed-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source"),
-                source_name: Some(DirectoryName::new("plugins").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("plugins").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,

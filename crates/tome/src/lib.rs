@@ -1483,10 +1483,22 @@ fn apply_edit_decisions(
             reconcile::EditDecision::Fork => {
                 if let Some(entry) = manifest.skills_get_mut(edit.name.as_str()) {
                     entry.managed = false;
-                    // Per D-C1 (Phase 14, transition site 3): capture
-                    // previous_source before clearing source_name. Closes the
-                    // Phase 13 D-13 lossy fork-in-place gap.
-                    entry.previous_source = entry.source_name.take();
+                    // Per D-C1 (Phase 14, transition site 3): capture the old
+                    // owning directory as the Unowned breadcrumb. Closes the
+                    // Phase 13 D-13 lossy fork-in-place gap. An already-Unowned
+                    // entry keeps its existing breadcrumb.
+                    entry.ownership = match &entry.ownership {
+                        manifest::SkillOwnership::Owned { source } => {
+                            manifest::SkillOwnership::Unowned {
+                                last_owner: Some(source.clone()),
+                            }
+                        }
+                        manifest::SkillOwnership::Unowned { last_owner } => {
+                            manifest::SkillOwnership::Unowned {
+                                last_owner: last_owner.clone(),
+                            }
+                        }
+                    };
                     mutated = true;
                 }
             }
@@ -2903,11 +2915,15 @@ mod tests {
 
         assert!(mutated, "Fork must report mutated=true");
         let entry = manifest.get("plug").unwrap();
-        assert_eq!(entry.source_name, None, "fork-in-place clears source_name");
+        assert_eq!(
+            entry.source_name(),
+            None,
+            "fork-in-place clears source_name"
+        );
         assert!(!entry.managed, "fork-in-place clears managed");
         assert_eq!(
-            entry.previous_source,
-            Some(config::DirectoryName::new("claude-plugins").unwrap()),
+            entry.previous_source(),
+            Some(&config::DirectoryName::new("claude-plugins").unwrap()),
             "fork-in-place must record previous_source per D-C1 / Phase 13 D-13 closure"
         );
     }
@@ -2937,13 +2953,14 @@ mod tests {
         // semantically. The entry's owned state must be preserved.
         let entry = manifest.get("plug").unwrap();
         assert_eq!(
-            entry.source_name,
-            Some(config::DirectoryName::new("claude-plugins").unwrap()),
+            entry.source_name(),
+            Some(&config::DirectoryName::new("claude-plugins").unwrap()),
             "Revert must preserve source_name"
         );
         assert!(entry.managed, "Revert must preserve managed flag");
         assert_eq!(
-            entry.previous_source, None,
+            entry.previous_source(),
+            None,
             "Revert must not set previous_source"
         );
     }
