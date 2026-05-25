@@ -14,6 +14,7 @@ use crate::manifest::SkillEntry;
 /// One row of the Unowned section in `tome status` and `tome doctor`.
 /// Per D-D3 in the Phase 14 CONTEXT.md.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct SkillSummary {
     /// Skill name as displayed.
     pub name: String,

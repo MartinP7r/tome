@@ -23,8 +23,12 @@ use crate::manifest::Manifest;
 use crate::paths::TomePaths;
 
 /// What will be removed.
-#[derive(Debug)]
-pub(crate) struct RemovePlan {
+///
+/// `pub` (not `pub(crate)`) so the v1.0 `tome-desktop` crate can render a
+/// plan-preview-confirm flow over the Tauri IPC boundary (OPS-* in Phase 29).
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct RemovePlan {
     /// Name of the directory to remove.
     pub directory_name: DirectoryName,
     /// Skills from this directory found in the manifest.
@@ -60,7 +64,8 @@ impl RemovePlan {
 /// content is preserved on disk. The `LibraryDir` and `LibrarySymlink`
 /// variants from v0.9 are removed; only distribution-dir symlinks and the
 /// git repo cache remain as failable filesystem operations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub(crate) enum FailureKind {
     /// Distribution-dir symlink removal — emitted when `remove_file` fails
     /// while iterating `plan.symlinks_to_remove`.
@@ -116,11 +121,18 @@ const _: () = {
 };
 
 /// A single partial-cleanup failure aggregated from `execute`.
-#[derive(Debug)]
+///
+/// The `error` field is a pre-stringified message (not a live
+/// `std::io::Error`) so this type is `Serialize` + `specta::Type` and can
+/// cross the Tauri IPC boundary (Pitfall 2). The GUI can't act on a live
+/// `io::Error` anyway — the display string is the boundary-useful shape. This
+/// is a deliberate field-shape sub-decision flagged in the plan SUMMARY.
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub(crate) struct RemoveFailure {
     pub path: PathBuf,
     pub kind: FailureKind,
-    pub error: std::io::Error,
+    pub error: String,
 }
 
 impl RemoveFailure {
@@ -136,13 +148,20 @@ impl RemoveFailure {
     /// never fires in normal use; it's a forward guard against a future
     /// refactor that adds a relative-path call site. Debug-only via
     /// `debug_assert!` to keep release builds zero-cost.
+    ///
+    /// `error` is stringified at construction (`error.to_string()`) so the
+    /// stored field is the boundary-friendly `String` shape (Pitfall 2).
     pub(crate) fn new(kind: FailureKind, path: PathBuf, error: std::io::Error) -> Self {
         debug_assert!(
             path.is_absolute(),
             "RemoveFailure::path must be absolute, got: {}",
             path.display()
         );
-        RemoveFailure { kind, path, error }
+        RemoveFailure {
+            kind,
+            path,
+            error: error.to_string(),
+        }
     }
 }
 
@@ -159,7 +178,8 @@ impl RemoveFailure {
 /// fails the error propagates via `?` and never lands here. The aggregate
 /// failure-summary semantic only kicks in for filesystem-touch steps that
 /// need group reporting (Phase 8 SAFE-01 + Phase 10 POLISH-04).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub(crate) enum RemoveSkillFailureKind {
     LibraryDir,
     DistributionSymlink,
@@ -208,12 +228,15 @@ const _: () = {
 };
 
 /// A single partial-cleanup failure aggregated from `skill_execute`.
-/// Mirror of `RemoveFailure` for the `skill` flavour.
-#[derive(Debug)]
+/// Mirror of `RemoveFailure` for the `skill` flavour. `error` is a
+/// pre-stringified message so the type is `Serialize` + `specta::Type`
+/// (Pitfall 2).
+#[derive(Debug, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub(crate) struct RemoveSkillFailure {
     pub path: PathBuf,
     pub kind: RemoveSkillFailureKind,
-    pub error: std::io::Error,
+    pub error: String,
 }
 
 impl RemoveSkillFailure {
@@ -222,13 +245,20 @@ impl RemoveSkillFailure {
     /// The path MUST be absolute — downstream rendering uses
     /// `paths::collapse_home(&f.path)` which expects an absolute path.
     /// Debug-only via `debug_assert!` to keep release builds zero-cost.
+    ///
+    /// `error` is stringified at construction (`error.to_string()`) so the
+    /// stored field is the boundary-friendly `String` shape (Pitfall 2).
     pub(crate) fn new(kind: RemoveSkillFailureKind, path: PathBuf, error: std::io::Error) -> Self {
         debug_assert!(
             path.is_absolute(),
             "RemoveSkillFailure::path must be absolute, got: {}",
             path.display()
         );
-        RemoveSkillFailure { kind, path, error }
+        RemoveSkillFailure {
+            kind,
+            path,
+            error: error.to_string(),
+        }
     }
 }
 

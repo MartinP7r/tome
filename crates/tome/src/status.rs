@@ -13,6 +13,7 @@ use crate::paths::TomePaths;
 
 /// A count that may have failed with an error message.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct CountOrError {
     pub count: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,6 +47,7 @@ impl From<Result<usize, String>> for CountOrError {
 /// a description string need to switch to `role_description` or to the
 /// enum-aware reader.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct DirectoryStatus {
     pub name: String,
     pub directory_type: String,
@@ -69,6 +71,7 @@ pub struct DirectoryStatus {
 
 /// Complete status report for the tome system.
 #[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct StatusReport {
     pub configured: bool,
     pub library_dir: PathBuf,
