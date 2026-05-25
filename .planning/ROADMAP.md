@@ -297,13 +297,13 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   4. Long-running operations emit progress via an injected `ProgressSink` trait (`crates/tome/src/progress.rs`); the domain stays synchronous (no tokio dep in `crates/tome`). A per-op typed `ProgressEvent` enum carries stage/op detail. CLI uses an `IndicatifSink`; a `NullSink` serves tests + `--quiet`; the spike app subscribes to `sync-progress` Tauri events via a `TauriEventSink` and renders a placeholder progress bar. A `&CancellationToken` arg is threaded alongside `sink` (real cancel behavior lands in Phase 27/SYNC-04) (CONTEXT.md D-09..D-12).
   5. Errors crossing into the front-end are classified at the IPC boundary into `TomeError { code: ErrorCode, message: String, context: Vec<String> }` — the domain keeps `anyhow::Result` internally (zero-refactor, no CLI regression). `ErrorCode` is a coarse ~6-variant enum (`Validation`, `NotFound`, `Permission`, `Conflict`, `Git`, `Io`, `Internal`); classification uses typed `DomainErrorKind` sentinels via `downcast_ref` (not message string-matching), unmatched → `Internal`. Front-end can pattern-match on `code` without inspecting the message (CONTEXT.md D-13..D-16).
   6. **Frontend framework decision (D-GUI-04):** the spike builds the same single-page `StatusReport` view in all three candidates (React, Solid, Svelte), scores each 1–5 across four criteria (bindings.ts ergonomics, bundle size + cold-start, dev-loop speed, ecosystem fit for v1.0 reqs), and records the winner + rationale + invalidation conditions in an ADR at `.planning/research/v1.0-frontend-framework-decision.md`. D-GUI-04 in `milestones/v1.0-REQUIREMENTS.md` is updated with the chosen framework; the two losing spikes are deleted (CONTEXT.md D-01..D-04).
-**Plans** (TBD at planning — stubs from `milestones/v1.0-ROADMAP.md`):
-- 25-01: Decompose `lib.rs::run` into CLI presenter + structured-type domain calls + #542 `SkillProvenance` migration (CORE-01)
-- 25-02: Add `crates/tome-desktop` workspace member with Tauri 2 scaffolding (CORE-02)
-- 25-03: Wire `specta` + `tauri-specta` for `bindings.ts` generation behind the `bindings` feature (CORE-03)
-- 25-04: `ProgressSink` trait + typed `ProgressEvent` + `IndicatifSink`/`NullSink`/`TauriEventSink` + `CancellationToken` threading (CORE-04)
-- 25-05: `TomeError` boundary wrapper + `ErrorCode` enum + `DomainErrorKind` sentinels (CORE-05)
-- 25-06: Frontend framework spike (3-way) + scoring + ADR decision (D-GUI-04)
+**Plans**: 6 plans (Wave 1: 25-01, 25-02 — foundational, parallel; Wave 2: 25-03 — lib.rs decomposition + sink threading; Wave 3: 25-04 — tome-desktop scaffold + bindings + CI; Wave 4: 25-05 — TomeError boundary; Wave 5: 25-06 — framework spike + ADR)
+- [ ] 25-01-PLAN.md — `SkillOwnership` migration (#542, D-08) + gated `specta::Type` on cross-boundary types + `bindings` cargo feature (CORE-01)
+- [ ] 25-02-PLAN.md — `progress.rs`: `ProgressSink` trait + typed `ProgressEvent`/`SyncStage` + `CancelToken` (no tokio) + `NullSink`/`RecordingSink` (CORE-04)
+- [ ] 25-03-PLAN.md — `lib.rs` presenter decomposition + thread `sink`/`cancel` through `sync()` + `IndicatifSink` (CORE-01, CORE-04)
+- [ ] 25-04-PLAN.md — `crates/tome-desktop` Tauri 2 scaffold + `specta`/`tauri-specta` `bindings.ts` via `gen-bindings` bin + `get_status` + `TauriEventSink` + CI freshness gate + cargo-dist opt-out (CORE-02, CORE-03, CORE-04)
+- [ ] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
+- [ ] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
 
 ## Backlog
 
