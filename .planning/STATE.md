@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: completed
+status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-05-25T09:55:59.050Z"
-last_activity: 2026-05-23 — Milestone v1.0 ratified, drafts promoted
+last_updated: "2026-05-25T13:44:07.205Z"
+last_activity: 2026-05-25 -- Phase 25 planning complete
 progress:
-  total_phases: 26
-  completed_phases: 19
-  total_plans: 79
-  completed_plans: 79
-  percent: 73
+  total_phases: 1
+  completed_phases: 0
+  total_plans: 6
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 
 Phase: Not started (defining requirements complete; phase 25 awaits `/gsd:plan-phase 25`)
 Plan: —
-Status: Defining requirements complete; ratified via `/gsd-new-milestone`
-Last activity: 2026-05-23 — Milestone v1.0 ratified, drafts promoted
+Status: Ready to execute
+Last activity: 2026-05-25 -- Phase 25 planning complete
 
 **v1.0 phase shape (Phases 25–31):**
 
