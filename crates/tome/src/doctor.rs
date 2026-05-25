@@ -430,7 +430,7 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
     let unowned_skills = match manifest::load(paths.config_dir()) {
         Ok(m) => m
             .iter()
-            .filter(|(_, e)| e.source_name.is_none())
+            .filter(|(_, e)| e.source_name().is_none())
             .map(|(n, e)| crate::summary::SkillSummary::from_entry(n, e))
             .collect(),
         Err(_) => Vec::new(),
@@ -1478,8 +1478,9 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -1584,8 +1585,9 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -1609,8 +1611,9 @@ mod tests {
             crate::discover::SkillName::new("gone").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/gone"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -1672,8 +1675,9 @@ mod tests {
             crate::discover::SkillName::new(name).unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from(format!("/tmp/source/{name}")),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -2036,8 +2040,9 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -2075,8 +2080,9 @@ mod tests {
             crate::discover::SkillName::new("orphan-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/orphan-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -2105,8 +2111,9 @@ mod tests {
             crate::discover::SkillName::new("ghost").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/ghost"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -2136,8 +2143,9 @@ mod tests {
             crate::discover::SkillName::new("broken-plugin").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/nonexistent/source"),
-                source_name: Some(DirectoryName::new("plugins").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("plugins").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
@@ -2314,8 +2322,9 @@ mod tests {
             crate::discover::SkillName::new("healthy-skill").unwrap(),
             manifest::SkillEntry {
                 source_path: PathBuf::from("/tmp/source/healthy-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -2875,11 +2884,13 @@ mod tests {
             .get("test-skill")
             .expect("test-skill should be in manifest");
         assert_eq!(
-            entry.source_name, None,
+            entry.source_name(),
+            None,
             "claimed orphan must be Unowned (source_name=None)"
         );
         assert_eq!(
-            entry.previous_source, None,
+            entry.previous_source(),
+            None,
             "true orphan has no previous_source"
         );
         assert!(!entry.managed, "claimed orphan is not managed");
@@ -2955,7 +2966,7 @@ mod tests {
         // (or Some, but here it's None for true orphans), managed=false,
         // synced_at populated. The content_hash is what makes downstream
         // sync distribute the entry like any other.
-        assert_eq!(entry.source_name, None);
+        assert_eq!(entry.source_name(), None);
         assert!(!entry.managed);
         assert!(
             !entry.synced_at.is_empty(),

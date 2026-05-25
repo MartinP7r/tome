@@ -43,10 +43,7 @@ impl SkillSummary {
     pub fn from_entry(name: &SkillName, entry: &SkillEntry) -> Self {
         Self {
             name: name.as_str().to_string(),
-            previous_source: entry
-                .previous_source
-                .as_ref()
-                .map(|d| d.as_str().to_string()),
+            previous_source: entry.previous_source().map(|d| d.as_str().to_string()),
             source_path_display: crate::paths::collapse_home(&entry.source_path),
             synced_at: entry.synced_at.clone(),
             managed: entry.managed,

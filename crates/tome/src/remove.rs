@@ -295,8 +295,7 @@ pub(crate) fn plan(
         .iter()
         .filter(|(_, entry)| {
             entry
-                .source_name
-                .as_ref()
+                .source_name()
                 .is_some_and(|s| s.as_str() == name)
         })
         .map(|(skill_name, _)| skill_name.as_str().to_string())
@@ -464,12 +463,15 @@ pub(crate) fn execute(
     //    skills_get_mut is provided by Plan 11-01 in manifest.rs.
     if !dry_run && failures.is_empty() {
         for skill_name in &plan.skills {
-            if let Some(entry) = manifest.skills_get_mut(skill_name) {
-                // Per D-C1 (Phase 14, transition site 2): capture
-                // previous_source before flipping to Unowned so the user can
+            if let Some(entry) = manifest.skills_get_mut(skill_name)
+                && let crate::manifest::SkillOwnership::Owned { source } = &entry.ownership
+            {
+                // Per D-C1 (Phase 14, transition site 2): capture the old
+                // owning directory as the Unowned breadcrumb so the user can
                 // see the original owner name in `tome status` after this
                 // directory is gone from config.
-                entry.previous_source = entry.source_name.take();
+                let last_owner = Some(source.clone());
+                entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner };
                 library_entries_transitioned_to_unowned += 1;
             }
         }
@@ -539,7 +541,7 @@ pub(crate) fn skill_plan(
     // D-B2 owned guard: refuse to operate on Owned skills. No --force bypass —
     // the source file is still on disk and the next `tome sync` would
     // re-discover the skill. The hint points at actionable paths.
-    if let Some(owner) = &entry.source_name {
+    if let Some(owner) = entry.source_name() {
         anyhow::bail!(
             "skill '{}' is owned by directory '{}' (source_name = {}). \
              Remove the source directory with `tome remove dir {}` first, \
@@ -893,7 +895,7 @@ mod tests {
         );
         assert!(!manifest.is_empty(), "manifest entry retained as Unowned");
         assert_eq!(
-            manifest.get("my-skill").unwrap().source_name,
+            manifest.get("my-skill").unwrap().source_name(),
             None,
             "transitioned to Unowned"
         );
@@ -961,8 +963,8 @@ mod tests {
             "manifest entries must be retained on partial failure so retry sees the skills"
         );
         assert_eq!(
-            manifest.get("my-skill").unwrap().source_name,
-            Some(DirectoryName::new("test-source").unwrap()),
+            manifest.get("my-skill").unwrap().source_name(),
+            Some(&DirectoryName::new("test-source").unwrap()),
             "transition NOT applied on partial failure"
         );
     }
@@ -987,8 +989,8 @@ mod tests {
         );
         assert!(!manifest.is_empty());
         assert_eq!(
-            manifest.get("my-skill").unwrap().source_name,
-            Some(DirectoryName::new("test-source").unwrap()),
+            manifest.get("my-skill").unwrap().source_name(),
+            Some(&DirectoryName::new("test-source").unwrap()),
             "dry-run does not mutate manifest"
         );
     }
@@ -1014,7 +1016,7 @@ mod tests {
         assert_eq!(result.library_entries_transitioned_to_unowned, 3);
         for n in ["my-skill", "skill-2", "skill-3"] {
             assert_eq!(
-                manifest.get(n).unwrap().source_name,
+                manifest.get(n).unwrap().source_name(),
                 None,
                 "skill {n} should transition to Unowned"
             );
@@ -1037,10 +1039,10 @@ mod tests {
         assert_eq!(result.library_entries_transitioned_to_unowned, 1);
 
         let entry = manifest.get("my-skill").unwrap();
-        assert_eq!(entry.source_name, None);
+        assert_eq!(entry.source_name(), None);
         assert_eq!(
-            entry.previous_source,
-            Some(DirectoryName::new("test-source").unwrap()),
+            entry.previous_source(),
+            Some(&DirectoryName::new("test-source").unwrap()),
             "previous_source must record the original owner per D-C1"
         );
     }
@@ -1282,7 +1284,7 @@ mod tests {
         // Transition my-skill to Unowned for this test (production callers
         // never pass an Owned skill to skill_execute — D-B2 guard above).
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         // Build fake lockfile with my-skill.
         use crate::lockfile::{LockEntry, Lockfile};
@@ -1354,7 +1356,7 @@ mod tests {
     fn skill_execute_skill_not_in_lockfile_succeeds() {
         let (_tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         let mut lockfile: Option<crate::lockfile::Lockfile> = None;
         let mut machine_prefs = crate::machine::MachinePrefs::default();
@@ -1389,7 +1391,7 @@ mod tests {
     fn skill_execute_skill_not_in_machine_toml_succeeds() {
         let (_tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         let mut lockfile: Option<crate::lockfile::Lockfile> = None;
         let mut machine_prefs = crate::machine::MachinePrefs::default();
@@ -1425,7 +1427,7 @@ mod tests {
     fn skill_execute_partial_failure_preserves_in_memory_state() {
         let (tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         let mut lockfile: Option<crate::lockfile::Lockfile> = None;
         let mut machine_prefs = crate::machine::MachinePrefs::default();
@@ -1485,7 +1487,7 @@ mod tests {
         // exists but is a regular file (remove_dir_all returns NotADirectory).
         let (tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         // Replace the library dir with a regular file so remove_dir_all errors.
         let lib_path = tmp.path().join("library").join("my-skill");
@@ -1531,7 +1533,7 @@ mod tests {
     fn skill_execute_dry_run_no_mutation() {
         let (tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
         let mut lockfile: Option<crate::lockfile::Lockfile> = None;
         let mut machine_prefs = crate::machine::MachinePrefs::default();
 
@@ -1572,7 +1574,7 @@ mod tests {
 
         let (_tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         let mut lockfile: Option<crate::lockfile::Lockfile> = None;
         let mut machine_prefs = crate::machine::MachinePrefs::default();
@@ -1645,7 +1647,7 @@ mod tests {
 
         let (tmp, config, paths, mut manifest) = make_test_setup();
         let entry = manifest.skills_get_mut("my-skill").unwrap();
-        entry.source_name = None;
+        entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner: None };
 
         // Lockfile with my-skill entry.
         let mut skills = BTreeMap::new();

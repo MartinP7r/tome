@@ -86,9 +86,11 @@ impl Manifest {
     #[allow(dead_code)]
     pub fn update_source_name(&mut self, skill_name: &str, new_source: &DirectoryName) -> bool {
         if let Some(entry) = self.skills.get_mut(skill_name)
-            && entry.source_name.is_some()
+            && matches!(entry.ownership, SkillOwnership::Owned { .. })
         {
-            entry.source_name = Some(new_source.clone());
+            entry.ownership = SkillOwnership::Owned {
+                source: new_source.clone(),
+            };
             true
         } else {
             false
@@ -121,27 +123,58 @@ impl Manifest {
     }
 }
 
+/// Ownership state of a skill in the library (#542 / D-08).
+///
+/// Replaces the old flat `source_name: Option<DirectoryName>` +
+/// `previous_source: Option<DirectoryName>` pair on `SkillEntry` with a
+/// single, type-safe enum that makes the Owned/Unowned distinction explicit
+/// and impossible to misrepresent (e.g. an Owned skill can never carry a
+/// `previous_source` breadcrumb).
+///
+/// Serializes as a TS-friendly **tagged union** so the v1.0 GUI receives a
+/// discriminated union over the IPC boundary:
+/// - `{ "kind": "owned",   "source": "foo" }`
+/// - `{ "kind": "unowned", "last_owner": "bar" }` (or `"last_owner": null`)
+///
+/// Note: this is `SkillOwnership`, **not** `SkillProvenance` — the latter
+/// already exists in `discover.rs` as package-manager metadata (D-08 / Pitfall
+/// 3). Do not introduce a second `SkillProvenance`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum SkillOwnership {
+    /// The skill is **owned** by a directory config entry in `tome.toml`.
+    Owned {
+        /// Which `[directories.*]` entry contributes this skill.
+        source: DirectoryName,
+    },
+    /// The skill is **Unowned** — its source was removed from `tome.toml`
+    /// but the library copy is preserved (LIB-04). `last_owner` records the
+    /// directory that owned it before the transition (D-C1); `None` for
+    /// entries that became Unowned before the breadcrumb was tracked.
+    Unowned {
+        /// Last directory that owned this skill before the Unowned transition.
+        last_owner: Option<DirectoryName>,
+    },
+}
+
 /// A single skill entry in the manifest.
+///
+/// Deserialized via [`SkillEntryRepr`] (`#[serde(from = ...)]`) so old
+/// manifests carrying the flat `source_name` / `previous_source` fields
+/// migrate on read into the [`SkillOwnership`] enum. `Serialize` is derived
+/// directly on this struct, emitting the new enum shape — the next `tome
+/// sync` rewrites old manifests naturally. The asymmetric serde (read via
+/// `SkillEntryRepr`, write via the enum) is intentional and round-trip-safe.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(from = "SkillEntryRepr")]
 pub struct SkillEntry {
     /// Where this skill was originally copied from.
     pub source_path: PathBuf,
-    /// Which directory config entry contributed this skill, or `None` if the
-    /// skill is **Unowned** (its source was removed from `tome.toml` but the
-    /// library copy is preserved per LIB-04).
-    ///
-    /// Old manifests with `"source_name": "foo"` parse as `Some(DirectoryName::new("foo")?)`
-    /// via serde's natural `Option` handling + `DirectoryName`'s transparent
-    /// validating `Deserialize`. New Unowned entries serialize without the key
-    /// (per `skip_serializing_if`) and read back as `None`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_name: Option<DirectoryName>,
-    /// Last directory that owned this skill before transition to Unowned.
-    /// Surfaced in `tome status`/`tome doctor` Unowned section. Cleared
-    /// (set to None) when an Unowned skill is re-anchored via
-    /// `tome reassign`. Per D-C1 (14-CONTEXT.md).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub previous_source: Option<DirectoryName>,
+    /// Ownership state (Owned by a directory, or Unowned with a breadcrumb).
+    /// Replaces the old flat `source_name` + `previous_source` fields (#542).
+    pub ownership: SkillOwnership,
     /// SHA-256 hex digest of the directory contents.
     pub content_hash: ContentHash,
     /// ISO 8601 timestamp of when this skill was last synced.
@@ -156,8 +189,62 @@ pub struct SkillEntry {
     pub managed: bool,
 }
 
+/// Deserialize-only mirror that tolerates **both** the old flat `SkillEntry`
+/// shape and the new enum shape, so deserialization is symmetric with the
+/// `Serialize` derive (round-trip safe) **and** backward-compatible.
+///
+/// - Old manifests carry `source_name` (string / null / absent) and an
+///   optional `previous_source` — captured with `#[serde(default)]` tolerance
+///   and folded into the [`SkillOwnership`] enum by `From`.
+/// - Freshly-serialized entries carry the new `ownership` enum object — when
+///   present it wins outright over the legacy flat fields.
+///
+/// Never constructed directly — serde builds it during `SkillEntry`
+/// deserialization (the `from` container attribute on `SkillEntry`).
+#[derive(Deserialize)]
+struct SkillEntryRepr {
+    source_path: PathBuf,
+    /// New shape: present in entries written after #542. Wins over the
+    /// legacy flat fields when present (round-trip path).
+    #[serde(default)]
+    ownership: Option<SkillOwnership>,
+    /// Legacy flat field (pre-#542). Read for backward-compat only.
+    #[serde(default)]
+    source_name: Option<DirectoryName>,
+    /// Legacy flat field (pre-#542). Read for backward-compat only.
+    #[serde(default)]
+    previous_source: Option<DirectoryName>,
+    content_hash: ContentHash,
+    synced_at: String,
+    #[serde(default)]
+    managed: bool,
+}
+
+impl From<SkillEntryRepr> for SkillEntry {
+    fn from(r: SkillEntryRepr) -> Self {
+        // New enum shape wins when present (round-trip path). Otherwise fold
+        // the old flat fields:
+        //   source_name: Some(x)            → Owned   { source: x }
+        //   source_name: None (+ prev: bar) → Unowned { last_owner: bar }
+        //   source_name: None (no prev)     → Unowned { last_owner: None }
+        let ownership = r.ownership.unwrap_or_else(|| match r.source_name {
+            Some(source) => SkillOwnership::Owned { source },
+            None => SkillOwnership::Unowned {
+                last_owner: r.previous_source,
+            },
+        });
+        SkillEntry {
+            source_path: r.source_path,
+            ownership,
+            content_hash: r.content_hash,
+            synced_at: r.synced_at,
+            managed: r.managed,
+        }
+    }
+}
+
 impl SkillEntry {
-    /// Create a new `SkillEntry` for an **owned** skill (source_name known).
+    /// Create a new `SkillEntry` for an **owned** skill (source known).
     /// Records the current timestamp automatically.
     pub fn new(
         source_path: PathBuf,
@@ -167,11 +254,36 @@ impl SkillEntry {
     ) -> Self {
         Self {
             source_path,
-            source_name: Some(source_name),
-            previous_source: None,
+            ownership: SkillOwnership::Owned {
+                source: source_name,
+            },
             content_hash,
             synced_at: now_iso8601(),
             managed,
+        }
+    }
+
+    /// The directory that owns this skill, or `None` if the skill is Unowned.
+    ///
+    /// Convenience accessor mirroring the pre-#542 `source_name` field so call
+    /// sites that only need the owning directory don't have to match on the
+    /// [`SkillOwnership`] enum. Returns `None` for Unowned entries.
+    pub fn source_name(&self) -> Option<&DirectoryName> {
+        match &self.ownership {
+            SkillOwnership::Owned { source } => Some(source),
+            SkillOwnership::Unowned { .. } => None,
+        }
+    }
+
+    /// The last directory that owned this skill before it became Unowned, or
+    /// `None` if the skill is Owned (or became Unowned before the breadcrumb
+    /// was tracked).
+    ///
+    /// Convenience accessor mirroring the pre-#542 `previous_source` field.
+    pub fn previous_source(&self) -> Option<&DirectoryName> {
+        match &self.ownership {
+            SkillOwnership::Owned { .. } => None,
+            SkillOwnership::Unowned { last_owner } => last_owner.as_ref(),
         }
     }
 
@@ -181,10 +293,10 @@ impl SkillEntry {
     /// `previous_source` (D-C1) — the last directory that owned this skill
     /// before the transition.
     //
-    // Note: production transitions to Unowned in-place via
-    // `entry.previous_source = entry.source_name.take()` (which preserves the
-    // original `synced_at` timestamp — see `cleanup_library` Case 1,
-    // `remove::execute`, and `apply_edit_decisions` Fork branch).
+    // Note: production transitions to Unowned in-place by replacing
+    // `entry.ownership` with `SkillOwnership::Unowned { last_owner: <old source> }`
+    // (which preserves the original `synced_at` timestamp — see `cleanup_library`
+    // Case 1, `remove::execute`, and `apply_edit_decisions` Fork branch).
     //
     // dead_code allow: Phase 14 Plan 14-01 widens the signature with
     // `previous_source`. Production callers arrive in Plans 14-04 (reassign
@@ -199,8 +311,9 @@ impl SkillEntry {
     ) -> Self {
         Self {
             source_path,
-            source_name: None,
-            previous_source,
+            ownership: SkillOwnership::Unowned {
+                last_owner: previous_source,
+            },
             content_hash,
             synced_at: now_iso8601(),
             managed,
@@ -518,8 +631,9 @@ mod tests {
             crate::discover::SkillName::new("my-skill").unwrap(),
             SkillEntry {
                 source_path: PathBuf::from("/tmp/source/my-skill"),
-                source_name: Some(DirectoryName::new("test").unwrap()),
-                previous_source: None,
+                ownership: SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
@@ -629,8 +743,8 @@ mod tests {
         let updated = manifest.update_source_name("my-skill", &new_source);
         assert!(updated, "should return true for existing skill");
         assert_eq!(
-            manifest.get("my-skill").unwrap().source_name,
-            Some(new_source)
+            manifest.get("my-skill").unwrap().source_name(),
+            Some(&new_source)
         );
     }
 
@@ -642,91 +756,116 @@ mod tests {
         assert!(!updated, "should return false for missing skill");
     }
 
+    // ---- #542 SkillOwnership migration-on-read (D-08) ----------------------
+    // Old manifests carry flat `source_name` (string / null / absent) + an
+    // optional `previous_source`. The five tests below mirror the pre-#542
+    // migration tests against the new `SkillOwnership` enum shape: old-string
+    // → Owned, null → Unowned, absent → Unowned, round-trip, and no-
+    // previous_source tolerance.
+
     #[test]
     fn deserialize_old_shape_with_source_name_string() {
+        // old `source_name: "foo"` → Owned { source: "foo" }
         let valid_hash = "a".repeat(64);
         let json = format!(
             r#"{{"source_path":"/tmp/x","source_name":"foo","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
         );
         let entry: SkillEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+        assert_eq!(
+            entry.ownership,
+            SkillOwnership::Owned {
+                source: DirectoryName::new("foo").unwrap()
+            }
+        );
+        assert_eq!(entry.source_name(), Some(&DirectoryName::new("foo").unwrap()));
     }
 
     #[test]
     fn deserialize_new_shape_with_null_source_name() {
+        // `source_name: null` → Unowned { last_owner: None }
         let valid_hash = "a".repeat(64);
         let json = format!(
             r#"{{"source_path":"/tmp/x","source_name":null,"content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
         );
         let entry: SkillEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.ownership,
+            SkillOwnership::Unowned { last_owner: None }
+        );
+        assert_eq!(entry.source_name(), None);
     }
 
     #[test]
     fn deserialize_new_shape_missing_source_name() {
+        // absent `source_name` key → Unowned { last_owner: None }
         let valid_hash = "a".repeat(64);
         let json = format!(
             r#"{{"source_path":"/tmp/x","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
         );
         let entry: SkillEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(entry.source_name, None);
+        assert_eq!(
+            entry.ownership,
+            SkillOwnership::Unowned { last_owner: None }
+        );
+        assert_eq!(entry.source_name(), None);
     }
 
     #[test]
-    fn serialize_unowned_entry_omits_source_name_key() {
-        let entry = SkillEntry::new_unowned(
-            PathBuf::from("/tmp/orphan"),
-            test_hash("orphan"),
-            false,
-            None,
-        );
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(
-            !json.contains("source_name"),
-            "Unowned entry must omit source_name key, got: {json}"
-        );
-        assert!(json.contains("\"managed\":false"));
-    }
-
-    #[test]
-    fn serialize_owned_entry_preserves_string_shape() {
-        let entry = SkillEntry::new(
-            PathBuf::from("/tmp/x"),
-            DirectoryName::new("foo").unwrap(),
-            test_hash("h"),
-            false,
-        );
-        let json = serde_json::to_string(&entry).unwrap();
-        assert!(
-            json.contains("\"source_name\":\"foo\""),
-            "Owned entry must serialize source_name as string, got: {json}"
-        );
-    }
-
-    #[test]
-    fn new_unowned_constructor_sets_source_name_none() {
-        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false, None);
-        assert_eq!(entry.source_name, None);
-        assert_eq!(entry.previous_source, None);
-        assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
-        assert_eq!(entry.content_hash, test_hash("h"));
-        assert!(!entry.managed);
-        assert!(!entry.synced_at.is_empty());
+    fn skill_entry_round_trips_through_serialize_deserialize() {
+        // Asymmetric serde (Serialize on the enum shape, Deserialize via
+        // SkillEntryRepr) must still round-trip to an equal SkillEntry.
+        for entry in [
+            SkillEntry::new(
+                PathBuf::from("/tmp/owned"),
+                DirectoryName::new("foo").unwrap(),
+                test_hash("h1"),
+                true,
+            ),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/unowned"),
+                test_hash("h2"),
+                false,
+                Some(DirectoryName::new("old-dir").unwrap()),
+            ),
+            SkillEntry::new_unowned(
+                PathBuf::from("/tmp/unowned-no-prev"),
+                test_hash("h3"),
+                false,
+                None,
+            ),
+        ] {
+            let json = serde_json::to_string(&entry).unwrap();
+            let back: SkillEntry = serde_json::from_str(&json).unwrap();
+            assert_eq!(back.source_path, entry.source_path);
+            assert_eq!(back.ownership, entry.ownership);
+            assert_eq!(back.content_hash, entry.content_hash);
+            assert_eq!(back.synced_at, entry.synced_at);
+            assert_eq!(back.managed, entry.managed);
+        }
     }
 
     #[test]
     fn deserialize_old_shape_without_previous_source_key() {
+        // No `previous_source` key on an owned entry is tolerated; the entry
+        // remains Owned (no spurious breadcrumb).
         let valid_hash = "a".repeat(64);
         let json = format!(
             r#"{{"source_path":"/tmp/x","source_name":"foo","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}"#
         );
         let entry: SkillEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(entry.previous_source, None);
-        assert_eq!(entry.source_name, Some(DirectoryName::new("foo").unwrap()));
+        assert_eq!(
+            entry.ownership,
+            SkillOwnership::Owned {
+                source: DirectoryName::new("foo").unwrap()
+            }
+        );
+        assert_eq!(entry.previous_source(), None);
     }
 
     #[test]
-    fn serialize_owned_entry_omits_previous_source_when_none() {
+    fn serialize_owned_entry_emits_tagged_owned() {
+        // The new enum serializes as a TS-friendly tagged union with a
+        // lowercase "kind" discriminant.
         let entry = SkillEntry::new(
             PathBuf::from("/tmp/x"),
             DirectoryName::new("foo").unwrap(),
@@ -735,13 +874,17 @@ mod tests {
         );
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
-            !json.contains("previous_source"),
-            "Owned entry with previous_source=None must omit key, got: {json}"
+            json.contains("\"kind\":\"owned\""),
+            "Owned entry must serialize a tagged union, got: {json}"
+        );
+        assert!(
+            json.contains("\"source\":\"foo\""),
+            "Owned entry must carry the source directory, got: {json}"
         );
     }
 
     #[test]
-    fn serialize_unowned_entry_with_previous_source_includes_key() {
+    fn serialize_unowned_entry_emits_tagged_unowned() {
         let entry = SkillEntry::new_unowned(
             PathBuf::from("/tmp/x"),
             test_hash("h"),
@@ -750,9 +893,25 @@ mod tests {
         );
         let json = serde_json::to_string(&entry).unwrap();
         assert!(
-            json.contains("\"previous_source\":\"old-dir\""),
-            "Unowned entry with previous_source=Some must include key, got: {json}"
+            json.contains("\"kind\":\"unowned\""),
+            "Unowned entry must serialize a tagged union, got: {json}"
         );
+        assert!(
+            json.contains("\"last_owner\":\"old-dir\""),
+            "Unowned entry with last_owner=Some must carry the breadcrumb, got: {json}"
+        );
+    }
+
+    #[test]
+    fn new_unowned_constructor_sets_unowned_ownership() {
+        let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false, None);
+        assert_eq!(entry.ownership, SkillOwnership::Unowned { last_owner: None });
+        assert_eq!(entry.source_name(), None);
+        assert_eq!(entry.previous_source(), None);
+        assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));
+        assert_eq!(entry.content_hash, test_hash("h"));
+        assert!(!entry.managed);
+        assert!(!entry.synced_at.is_empty());
     }
 
     #[test]
@@ -763,10 +922,10 @@ mod tests {
             false,
             Some(DirectoryName::new("old").unwrap()),
         );
-        assert_eq!(entry.source_name, None);
+        assert_eq!(entry.source_name(), None);
         assert_eq!(
-            entry.previous_source,
-            Some(DirectoryName::new("old").unwrap())
+            entry.previous_source(),
+            Some(&DirectoryName::new("old").unwrap())
         );
     }
 
@@ -786,10 +945,10 @@ mod tests {
         save(&manifest, tmp.path()).unwrap();
         let loaded = load(tmp.path()).unwrap();
         assert_eq!(
-            loaded.get("orphan").unwrap().previous_source,
-            Some(DirectoryName::new("old-source").unwrap()),
+            loaded.get("orphan").unwrap().previous_source(),
+            Some(&DirectoryName::new("old-source").unwrap()),
         );
-        assert_eq!(loaded.get("orphan").unwrap().source_name, None);
+        assert_eq!(loaded.get("orphan").unwrap().source_name(), None);
     }
 
     #[test]
@@ -808,9 +967,9 @@ mod tests {
             let entry = manifest
                 .skills_get_mut("my-skill")
                 .expect("should be present");
-            entry.source_name = None;
+            entry.ownership = SkillOwnership::Unowned { last_owner: None };
         }
-        assert_eq!(manifest.get("my-skill").unwrap().source_name, None);
+        assert_eq!(manifest.get("my-skill").unwrap().source_name(), None);
     }
 
     #[test]
@@ -990,9 +1149,9 @@ mod tests {
         let loaded = load(tmp.path()).unwrap();
         let entry = loaded.get("kept").unwrap();
         assert_eq!(
-            entry.source_name,
-            Some(DirectoryName::new("active-source").unwrap())
+            entry.source_name(),
+            Some(&DirectoryName::new("active-source").unwrap())
         );
-        assert_eq!(entry.previous_source, None);
+        assert_eq!(entry.previous_source(), None);
     }
 }
