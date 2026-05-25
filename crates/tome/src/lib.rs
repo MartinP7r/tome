@@ -104,6 +104,7 @@ use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
+use progress::{CancelToken, NullSink, ProgressEvent, ProgressSink, SyncStage};
 
 /// Re-exported for integration tests so the synthetic-fixture builder in
 /// `tests/cli.rs` can hash directories with the exact same algorithm the
@@ -163,6 +164,105 @@ fn spinner(msg: &str) -> ProgressBar {
     sp.set_message(msg.to_string());
     sp.enable_steady_tick(std::time::Duration::from_millis(80));
     sp
+}
+
+/// The CLI [`ProgressSink`] (D-11): re-homes the `spinner()` / `finish_and_clear()`
+/// presentation that used to be inlined in `sync()`.
+///
+/// "Structure at the edge" (D-17): the domain `sync()` is now presentation-free
+/// — it `emit`s typed [`ProgressEvent`]s and the *front-end* decides how to show
+/// them. The CLI front-end (this sink) reproduces the exact pre-decomposition
+/// spinner behavior; the GUI front-end (`tome-desktop`, Phase 25-04) ships a
+/// `TauriEventSink` that forwards the same events over IPC.
+///
+/// # Output fidelity
+///
+/// Spinners are a TTY affordance: each is `finish_and_clear()`ed before the next
+/// begins, so they never reach piped stdout and are absent from the `insta` /
+/// `assert_cmd` regression snapshots. This sink therefore preserves CLI output
+/// byte-for-byte — it only redraws the same transient spinners the inline code
+/// drew. `cmd_sync` constructs an `IndicatifSink` for interactive runs and a
+/// [`NullSink`] under `--quiet`/`--verbose`, exactly matching the previous
+/// `show_progress = !quiet && !verbose` gate.
+///
+/// # Interior mutability
+///
+/// `emit(&self, …)` takes `&self` (the trait is `Send + Sync` so a GUI sink can
+/// hold an `AppHandle`). The "currently-active spinner" therefore lives behind a
+/// `Mutex<Option<ProgressBar>>`: `SyncStageStarted` installs a fresh spinner,
+/// `SyncStageFinished` takes it back out and `finish_and_clear()`s it.
+struct IndicatifSink {
+    current: std::sync::Mutex<Option<ProgressBar>>,
+}
+
+impl IndicatifSink {
+    fn new() -> Self {
+        Self {
+            current: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// The transient spinner message for a stage — matches the strings the
+    /// pre-decomposition inline call sites used (Reconcile reused the
+    /// "Resolving git sources..." banner per the plan's stage mapping).
+    fn stage_message(stage: SyncStage) -> &'static str {
+        match stage {
+            SyncStage::Reconcile => "Resolving git sources...",
+            SyncStage::Discover => "Discovering skills...",
+            SyncStage::Consolidate => "Consolidating to library...",
+            SyncStage::Distribute => "Distributing to targets...",
+            SyncStage::Cleanup => "Cleaning up...",
+            SyncStage::Save => "Saving...",
+        }
+    }
+}
+
+impl ProgressSink for IndicatifSink {
+    fn emit(&self, event: ProgressEvent) {
+        let mut current = self.current.lock().expect("IndicatifSink mutex poisoned");
+        match event {
+            ProgressEvent::SyncStageStarted { stage } => {
+                // Replace any in-flight spinner (defensive: stages are
+                // strictly Started→Finished, but a missed Finished must not
+                // leave a stale ticking spinner behind).
+                if let Some(prev) = current.take() {
+                    prev.finish_and_clear();
+                }
+                *current = Some(spinner(Self::stage_message(stage)));
+            }
+            ProgressEvent::SyncStageFinished { .. } => {
+                if let Some(sp) = current.take() {
+                    sp.finish_and_clear();
+                }
+            }
+            // Per-stage incremental progress + the git/backup long-op events
+            // update the active spinner's message in-place when one is live.
+            // No active spinner (e.g. an event emitted between stages) is a
+            // silent no-op — these are transient TTY hints, never captured
+            // output.
+            ProgressEvent::SyncStageProgress {
+                stage,
+                current: done,
+                total,
+            } => {
+                if let Some(sp) = current.as_ref()
+                    && total > 0
+                {
+                    sp.set_message(format!("{} ({done}/{total})", Self::stage_message(stage)));
+                }
+            }
+            ProgressEvent::GitCloneProgress { directory, .. } => {
+                if let Some(sp) = current.as_ref() {
+                    sp.set_message(format!("Fetching {directory}..."));
+                }
+            }
+            ProgressEvent::BackupSnapshot { message } => {
+                if let Some(sp) = current.as_ref() {
+                    sp.set_message(message);
+                }
+            }
+        }
+    }
 }
 
 /// Resolve the machine preferences path from an optional CLI flag,
@@ -359,6 +459,19 @@ pub fn run(cli: Cli) -> Result<()> {
             // would mask schema errors the wizard wants to surface.
             let machine_path = resolve_machine_path(cli.machine.as_deref())?;
             let machine_prefs = machine::load(&machine_path)?;
+            let verbose = cli.log_level().is_verbose();
+            let quiet = cli.log_level().is_quiet();
+            // Same front-end selection as cmd_sync (D-11): IndicatifSink for
+            // interactive post-init sync, NullSink under --quiet/--verbose.
+            let indicatif_sink;
+            let null_sink = NullSink;
+            let sink: &dyn ProgressSink = if !quiet && !verbose {
+                indicatif_sink = IndicatifSink::new();
+                &indicatif_sink
+            } else {
+                &null_sink
+            };
+            let cancel = CancelToken::new();
             sync(
                 &expanded,
                 &paths,
@@ -368,11 +481,13 @@ pub fn run(cli: Cli) -> Result<()> {
                     no_triage: true, // skip on initial sync after init
                     no_input: cli.no_input,
                     no_install: false,
-                    verbose: cli.log_level().is_verbose(),
-                    quiet: cli.log_level().is_quiet(),
+                    verbose,
+                    quiet,
                     machine_path: &machine_path,
                     machine_prefs: &machine_prefs,
                 },
+                sink,
+                &cancel,
             )?;
         }
         return Ok(());
@@ -557,6 +672,21 @@ pub(crate) fn cmd_sync(
     verbose: bool,
     quiet: bool,
 ) -> Result<()> {
+    // Front-end selection (D-11): use the spinner-driven IndicatifSink for
+    // interactive runs, and a discarding NullSink under --quiet or --verbose —
+    // exactly the previous `show_progress = !quiet && !verbose` gate, now
+    // expressed as a sink choice instead of an inline `if`. The CLI never
+    // cancels, so it passes a fresh, never-tripped CancelToken (D-12); the GUI
+    // (Phase 27) clones a live token into its cancel command.
+    let indicatif_sink;
+    let null_sink = NullSink;
+    let sink: &dyn ProgressSink = if !quiet && !verbose {
+        indicatif_sink = IndicatifSink::new();
+        &indicatif_sink
+    } else {
+        &null_sink
+    };
+    let cancel = CancelToken::new();
     sync(
         config,
         paths,
@@ -571,6 +701,8 @@ pub(crate) fn cmd_sync(
             machine_path,
             machine_prefs,
         },
+        sink,
+        &cancel,
     )
 }
 
@@ -1229,7 +1361,18 @@ pub(crate) fn cmd_backup(sub: cli::BackupCommand, paths: &TomePaths, dry_run: bo
             }
         }
         cli::BackupCommand::Snapshot { message } => {
-            backup::snapshot(paths.tome_home(), message.as_deref(), dry_run)?;
+            // The CLI backup commands present via direct `println!` inside
+            // `backup::*`; the BackupSnapshot events have no separate CLI
+            // surface today, so pass a discarding NullSink + a never-tripped
+            // CancelToken (D-11/D-12 plumbing is threaded for signature
+            // symmetry, exercised by the GUI in a later phase).
+            backup::snapshot(
+                paths.tome_home(),
+                message.as_deref(),
+                dry_run,
+                &NullSink,
+                &CancelToken::new(),
+            )?;
         }
         cli::BackupCommand::List { count } => {
             let entries = backup::list(paths.tome_home(), count)?;
@@ -1255,7 +1398,13 @@ pub(crate) fn cmd_backup(sub: cli::BackupCommand, paths: &TomePaths, dry_run: bo
                     );
                 }
             }
-            backup::restore(paths.tome_home(), &target, dry_run)?;
+            backup::restore(
+                paths.tome_home(),
+                &target,
+                dry_run,
+                &NullSink,
+                &CancelToken::new(),
+            )?;
         }
         cli::BackupCommand::Diff { target } => {
             let diff = backup::diff(paths.tome_home(), &target)?;
@@ -1309,6 +1458,8 @@ fn resolve_git_directories(
     config: &Config,
     paths: &TomePaths,
     dry_run: bool,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> BTreeMap<DirectoryName, (PathBuf, Option<String>)> {
     let mut resolved = BTreeMap::new();
     let repos_dir = paths.repos_dir();
@@ -1380,6 +1531,8 @@ fn resolve_git_directories(
                 dir_config.git_ref.as_ref().and_then(|r| r.branch()),
                 dir_config.git_ref.as_ref().and_then(|r| r.tag()),
                 dir_config.git_ref.as_ref().and_then(|r| r.rev()),
+                sink,
+                cancel,
             )
         } else {
             // Fresh clone (GIT-02)
@@ -1390,6 +1543,8 @@ fn resolve_git_directories(
                 dir_config.git_ref.as_ref().and_then(|r| r.branch()),
                 dir_config.git_ref.as_ref().and_then(|r| r.tag()),
                 dir_config.git_ref.as_ref().and_then(|r| r.rev()),
+                sink,
+                cancel,
             )
         };
 
@@ -1532,8 +1687,23 @@ fn apply_edit_decisions(
     mutated
 }
 
-/// The core sync pipeline: discover → consolidate → distribute → cleanup.
-fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()> {
+/// The core sync pipeline: reconcile → discover → consolidate → distribute → cleanup → save.
+///
+/// `sink` receives a typed [`ProgressEvent`] at each stage boundary (D-09/D-11):
+/// the domain stays presentation-free and synchronous; the CLI passes an
+/// [`IndicatifSink`] (spinners) and the GUI a `TauriEventSink` (IPC events).
+/// `cancel` is checked at every stage boundary (D-12); the CLI passes a
+/// never-tripped [`CancelToken`], while Phase 27's GUI clones it into a cancel
+/// command. A cancellation observed between stages bails *before* any
+/// half-written manifest/lockfile (T-25-03a: cancel checks sit at stage
+/// boundaries, never mid-write, so the atomic temp+rename invariant holds).
+fn sync(
+    config: &Config,
+    paths: &TomePaths,
+    opts: SyncOptions<'_>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
     let SyncOptions {
         dry_run,
         force,
@@ -1563,8 +1733,6 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // it after the reconcile block (below) populates it.
     let mut reconcile_install_failures: Vec<marketplace::InstallFailure> = Vec::new();
 
-    let show_progress = !quiet && !verbose;
-
     // Cache git state to avoid repeated subprocess calls
     let has_backup_repo = backup::has_repo(paths.tome_home());
     let has_remote = has_backup_repo && backup::has_remote(paths.tome_home());
@@ -1587,7 +1755,13 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
 
     // Pre-sync auto-snapshot if configured
     if !dry_run && config.backup.enabled && config.backup.auto_snapshot && has_backup_repo {
-        match backup::snapshot(paths.tome_home(), Some("pre-sync auto-snapshot"), false) {
+        match backup::snapshot(
+            paths.tome_home(),
+            Some("pre-sync auto-snapshot"),
+            false,
+            sink,
+            cancel,
+        ) {
             Ok(true) => {
                 info!("pre-sync snapshot created");
             }
@@ -1623,9 +1797,18 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // from `render_sync_report` (final summary block, immediately above the
     // per-bucket cleanup output). The report is threaded into the eventual
     // `SyncReport` via `reconcile_report`.
+    // Stage boundary: cancellation checked before reconcile begins (D-12).
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     let mut reconcile_report: Option<reconcile::ReconcileReport> = None;
     {
         let _span = info_span!("reconcile").entered();
+        // D-09/D-11: the CLI's "Resolving git sources..." spinner is now driven
+        // by the Reconcile stage event; the IndicatifSink redraws it.
+        sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Reconcile,
+        });
         if let Some(claude_adapter) = build_claude_adapter(config)? {
             let mut report = reconcile::reconcile_lockfile(
                 old_lockfile.as_ref(),
@@ -1670,6 +1853,9 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             }
             reconcile_report = Some(report);
         }
+        sink.emit(ProgressEvent::SyncStageFinished {
+            stage: SyncStage::Reconcile,
+        });
     }
 
     // Safety guard: warn and skip cleanup when no directories are configured (CFG-06)
@@ -1683,25 +1869,34 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Per RESEARCH §Pitfall 4: `?` early-returns inside this block still
     // emit the span CLOSE event because the top-level `_sync_span` guard
     // drops at function exit, which also drops the entered child span.
+    // Stage boundary: cancellation checked before discover begins (D-12).
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     let skills = {
         let _span = info_span!("discover").entered();
+        // D-09/D-11: the Discover stage drives the "Discovering skills..."
+        // spinner. Git resolution below emits GitCloneProgress events that
+        // re-message the active spinner ("Fetching {url}...") as each repo is
+        // cloned/updated.
+        sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Discover,
+        });
 
         // 0. Resolve git directories (clone/update to local cache). Verbose
         //    step banners deleted per D-OUT-3 — span CLOSE supplies the
-        //    "step name + time.busy" event.
-        let sp = show_progress.then(|| spinner("Resolving git sources..."));
-        let resolved = resolve_git_directories(config, paths, dry_run);
-        if let Some(sp) = sp {
-            sp.finish_and_clear();
-        }
+        //    "step name + time.busy" event. sink/cancel are threaded into
+        //    git::clone_repo/update_repo so each fetch emits GitCloneProgress
+        //    and observes cancellation (D-11/D-12).
+        let resolved = resolve_git_directories(config, paths, dry_run, sink, cancel);
 
         // 1. Discover
-        let sp = show_progress.then(|| spinner("Discovering skills..."));
         let mut warnings = Vec::new();
         let discovered = discover::discover_all(config, &resolved, &mut warnings)?;
-        if let Some(sp) = sp {
-            sp.finish_and_clear();
-        }
+
+        sink.emit(ProgressEvent::SyncStageFinished {
+            stage: SyncStage::Discover,
+        });
 
         // Discover-warnings emission. EnvFilter handles the quiet vs warn
         // discipline globally (LogLevel::Quiet → "warn" directive still
@@ -1739,14 +1934,20 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         }
     }
 
+    // Stage boundary: cancellation checked before consolidate begins (D-12).
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     // 2. Consolidate into library (copy). OBS-03: `consolidate` step span.
     let (consolidate_result, mut manifest) = {
         let _span = info_span!("consolidate").entered();
-        let sp = show_progress.then(|| spinner("Consolidating to library..."));
+        sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Consolidate,
+        });
         let result = library::consolidate(&skills, paths, dry_run, force)?;
-        if let Some(sp) = sp {
-            sp.finish_and_clear();
-        }
+        sink.emit(ProgressEvent::SyncStageFinished {
+            stage: SyncStage::Consolidate,
+        });
         result
     };
 
@@ -1807,12 +2008,26 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     // Regenerate lockfile after cleanup so it reflects removals
     let new_lockfile = lockfile::generate(&manifest, &skills);
 
+    // Stage boundary: cancellation checked before distribute begins (D-12).
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     // 5. Distribute to directories with distribution roles. OBS-03:
-    //    `distribute` step span.
+    //    `distribute` step span. D-09/D-11: a single Distribute stage spans the
+    //    per-directory loop; SyncStageProgress reports per-directory progress
+    //    (current/total) so a GUI can show a determinate bar. The CLI's
+    //    IndicatifSink keeps one spinner for the whole stage (the per-directory
+    //    "Distributing to {name}..." message was TTY-transient and is not part
+    //    of captured output).
     let distribute_results = {
         let _span = info_span!("distribute").entered();
+        sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Distribute,
+        });
         let mut results = Vec::new();
-        for (name, dir_config) in config.distribution_dirs() {
+        let dirs: Vec<_> = config.distribution_dirs().collect();
+        let total = dirs.len();
+        for (idx, (name, dir_config)) in dirs.into_iter().enumerate() {
             if machine_prefs.is_directory_disabled(name.as_str()) {
                 debug!(
                     "Skipping directory '{}' (disabled in machine preferences)",
@@ -1820,7 +2035,11 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 );
                 continue;
             }
-            let sp = show_progress.then(|| spinner(&format!("Distributing to {}...", name)));
+            sink.emit(ProgressEvent::SyncStageProgress {
+                stage: SyncStage::Distribute,
+                current: idx,
+                total,
+            });
             let result = distribute::distribute_to_directory(
                 paths.library_dir(),
                 name,
@@ -1831,10 +2050,10 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
                 force,
             )?;
             results.push(result);
-            if let Some(sp) = sp {
-                sp.finish_and_clear();
-            }
         }
+        sink.emit(ProgressEvent::SyncStageFinished {
+            stage: SyncStage::Distribute,
+        });
         results
     };
 
@@ -1854,8 +2073,15 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
     //    OUT of the span and runs AFTER `render_sync_report` below
     //    (Option 1 per Plan 18-02 Step 6 — smaller diff than widening
     //    `render_sync_report`'s signature to accept a stderr writer).
+    // Stage boundary: cancellation checked before cleanup begins (D-12).
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     let (removed_from_targets, distribution_cleanup_failures, excluded_skills) = {
         let _span = info_span!("cleanup").entered();
+        sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Cleanup,
+        });
         let mut removed: usize = 0;
         let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
         let mut failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
@@ -1876,10 +2102,25 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
             excluded.extend(dir_excluded);
             failures.extend(dir_failures);
         }
+        sink.emit(ProgressEvent::SyncStageFinished {
+            stage: SyncStage::Cleanup,
+        });
         (removed, failures, excluded)
     };
 
+    // Stage boundary: cancellation checked before the Save stage begins (D-12).
+    // This is the last safe-to-cancel point: every persist below is an atomic
+    // temp+rename, so a cancel here leaves the on-disk manifest/lockfile in
+    // their pre-sync state (T-25-03a). We do NOT check cancellation between the
+    // individual saves below — interleaving a bail mid-save would risk a
+    // half-written set.
+    if cancel.is_cancelled() {
+        anyhow::bail!("sync cancelled");
+    }
     // 7. Save manifest, gitignore, and lockfile
+    sink.emit(ProgressEvent::SyncStageStarted {
+        stage: SyncStage::Save,
+    });
     if !dry_run && paths.config_dir().is_dir() {
         // D-LSYNC-3 (OBS-07): stamp after distribute + cleanup succeed,
         // before persist. The stamp is INSIDE the `!dry_run` guard so
@@ -1900,6 +2141,9 @@ fn sync(config: &Config, paths: &TomePaths, opts: SyncOptions<'_>) -> Result<()>
         lockfile::save(&new_lockfile, paths.config_dir())
             .context("failed to save lockfile — sync completed but lockfile is stale; re-run `tome sync` to retry")?;
     }
+    sink.emit(ProgressEvent::SyncStageFinished {
+        stage: SyncStage::Save,
+    });
 
     let report = SyncReport {
         consolidate: consolidate_result,
@@ -2566,6 +2810,104 @@ mod tests {
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    /// CORE-04 harness (RESEARCH Test Map): drive a real `sync()` with a
+    /// `RecordingSink` and assert that every `SyncStage` emits at least one
+    /// `SyncStageStarted` event. This pins the "≥1 event per stage" contract
+    /// that the GUI (Phase 27) depends on for its per-stage progress UI, and
+    /// guards against a future refactor silently dropping a stage's emit.
+    #[test]
+    fn sync_emits_at_least_one_event_per_stage() {
+        use crate::config::{DirectoryConfig, DirectoryRole, DirectoryType};
+        use crate::progress::RecordingSink;
+
+        let tmp = TempDir::new().unwrap();
+        let tome_home = tmp.path().join("tome-home");
+        let library_dir = tome_home.join("skills");
+        std::fs::create_dir_all(&library_dir).unwrap();
+
+        // A `source` directory holding one discoverable skill.
+        let source_dir = tmp.path().join("source");
+        let skill_dir = source_dir.join("demo-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: demo-skill\n---\n# demo-skill",
+        )
+        .unwrap();
+
+        // A `synced` distribution directory so the Distribute + Cleanup stages
+        // have a target to act on.
+        let target_dir = tmp.path().join("target");
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let mut config = Config {
+            library_dir: library_dir.clone(),
+            ..Config::default()
+        };
+        config.directories.insert(
+            DirectoryName::new("source").unwrap(),
+            DirectoryConfig {
+                path: source_dir,
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+        config.directories.insert(
+            DirectoryName::new("target").unwrap(),
+            DirectoryConfig {
+                path: target_dir,
+                directory_type: DirectoryType::Directory,
+                role: Some(DirectoryRole::Synced),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+
+        let paths = TomePaths::new(tome_home.clone(), library_dir).unwrap();
+        let machine_path = tome_home.join("machine.toml");
+        let machine_prefs = machine::MachinePrefs::default();
+
+        let sink = RecordingSink::new();
+        sync(
+            &config,
+            &paths,
+            SyncOptions {
+                dry_run: false,
+                force: false,
+                no_triage: true,
+                no_input: true,
+                no_install: true,
+                verbose: false,
+                quiet: true, // suppress stdout chrome in the test harness
+                machine_path: &machine_path,
+                machine_prefs: &machine_prefs,
+            },
+            &sink,
+            &CancelToken::new(),
+        )
+        .expect("sync should succeed against the synthetic fixture");
+
+        let started: Vec<SyncStage> = sink
+            .events()
+            .into_iter()
+            .filter_map(|e| match e {
+                ProgressEvent::SyncStageStarted { stage } => Some(stage),
+                _ => None,
+            })
+            .collect();
+
+        for stage in SyncStage::ALL {
+            assert!(
+                started.contains(&stage),
+                "sync() must emit a SyncStageStarted for {stage:?}; got {started:?}",
+            );
+        }
+    }
 
     #[test]
     fn commit_message_all_changes() {
