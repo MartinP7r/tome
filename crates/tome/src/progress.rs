@@ -246,7 +246,10 @@ mod tests {
         let token = CancelToken::new();
         assert!(!token.is_cancelled(), "a fresh token must not be cancelled");
         token.cancel();
-        assert!(token.is_cancelled(), "after cancel() it must report cancelled");
+        assert!(
+            token.is_cancelled(),
+            "after cancel() it must report cancelled"
+        );
     }
 
     #[test]
