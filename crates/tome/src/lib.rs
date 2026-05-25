@@ -55,6 +55,7 @@ pub(crate) mod eject;
 pub(crate) mod git;
 pub(crate) mod library;
 pub(crate) mod lint;
+pub(crate) mod list;
 pub(crate) mod lockfile;
 // `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
 // v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
@@ -2450,12 +2451,16 @@ fn render_sync_report(report: &SyncReport) {
 }
 
 /// List all discovered skills.
+///
+/// Thin presenter (D-GUI-08): the domain computation (discover + sort) lives in
+/// `list::collect`; this function only formats the resulting [`list::ListReport`]
+/// as text or JSON. The GUI calls `list::collect` directly and renders the
+/// report without this CLI formatting.
 fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
-    let mut warnings = Vec::new();
-    let mut skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
-    skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+    let report = list::collect(config)?;
+    let skills = report.skills;
     if !quiet {
-        for w in &warnings {
+        for w in &report.warnings {
             eprintln!("warning: {}", w);
         }
     }

@@ -43,7 +43,10 @@ pub(crate) struct SkillMoveEntry {
 /// Build a relocation plan by scanning the current library state.
 ///
 /// This is a read-only operation that validates inputs and enumerates what would change.
-pub(crate) fn plan(
+///
+/// `pub` (CORE-01 / D-GUI-08): the GUI calls this directly to render the
+/// `RelocatePlan` preview before confirming a library move.
+pub fn plan(
     config: &Config,
     paths: &TomePaths,
     new_library_dir: &Path,

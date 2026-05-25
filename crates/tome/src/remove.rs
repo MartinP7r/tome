@@ -305,7 +305,11 @@ pub(crate) struct RemoveResult {
 }
 
 /// Build a plan describing what `tome remove <name>` will do.
-pub(crate) fn plan(
+///
+/// `pub` (CORE-01 / D-GUI-08): the reference plan/preview/confirm fn that the
+/// GUI's mutating-operations UI (Phase 29) calls directly to render the
+/// `RemovePlan` before executing.
+pub fn plan(
     name: &str,
     config: &Config,
     paths: &TomePaths,

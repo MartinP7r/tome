@@ -98,7 +98,12 @@ pub(crate) struct ReassignPlan {
 }
 
 /// Build a plan describing what the reassign/fork will do.
-pub(crate) fn plan(
+///
+/// `pub` (CORE-01 / D-GUI-08): the GUI uses this single fn for BOTH reassign and
+/// fork (fork passes `is_fork: true`) — there is no separate `fork::plan`. The
+/// mutating-operations UI (Phase 29) calls it directly to render the
+/// `ReassignPlan` preview.
+pub fn plan(
     skill_name: &str,
     to_dir: &str,
     config: &Config,
