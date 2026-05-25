@@ -2,15 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: planning
-stopped_at: v1.0 ratified 2026-05-23 via /gsd-new-milestone after v0.16 shipped. Phases 25–31 (32 reqs across 8 categories: CORE/VIEW/SYNC/CFG/OPS/BAK/DIST/NF). Cuts: alpha (25–26) → beta (27–28) → rc (29–30) → v1.0 (31). macOS-only for v1.0; Linux deferred to v2 per D-GUI-06. Ready for /gsd:plan-phase 25 (or /gsd:discuss-phase 25 first to clarify approach).
-last_updated: "2026-05-23T00:00:00.000Z"
-last_activity: 2026-05-23
+status: completed
+stopped_at: Phase 25 context gathered
+last_updated: "2026-05-25T09:55:59.050Z"
+last_activity: 2026-05-23 — Milestone v1.0 ratified, drafts promoted
 progress:
-  total_phases: 7
-  completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_phases: 26
+  completed_phases: 19
+  total_plans: 79
+  completed_plans: 79
+  percent: 73
 ---
 
 # Project State
@@ -111,6 +112,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-23T00:00:00.000Z
-Stopped at: v1.0 ratification complete — PROJECT.md/REQUIREMENTS.md/ROADMAP.md/STATE.md updated; phases 25–31 reflected; ready for `/gsd:plan-phase 25`.
-Resume file: None
+Last session: 2026-05-25T09:55:59.037Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-rust-core-extraction-tauri-integration-spike/25-CONTEXT.md
