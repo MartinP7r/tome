@@ -227,7 +227,7 @@ impl From<SkillEntryRepr> for SkillEntry {
         //   source_name: Some(x)            → Owned   { source: x }
         //   source_name: None (+ prev: bar) → Unowned { last_owner: bar }
         //   source_name: None (no prev)     → Unowned { last_owner: None }
-        let ownership = r.ownership.unwrap_or_else(|| match r.source_name {
+        let ownership = r.ownership.unwrap_or(match r.source_name {
             Some(source) => SkillOwnership::Owned { source },
             None => SkillOwnership::Unowned {
                 last_owner: r.previous_source,
@@ -777,7 +777,10 @@ mod tests {
                 source: DirectoryName::new("foo").unwrap()
             }
         );
-        assert_eq!(entry.source_name(), Some(&DirectoryName::new("foo").unwrap()));
+        assert_eq!(
+            entry.source_name(),
+            Some(&DirectoryName::new("foo").unwrap())
+        );
     }
 
     #[test]
@@ -905,7 +908,10 @@ mod tests {
     #[test]
     fn new_unowned_constructor_sets_unowned_ownership() {
         let entry = SkillEntry::new_unowned(PathBuf::from("/tmp/x"), test_hash("h"), false, None);
-        assert_eq!(entry.ownership, SkillOwnership::Unowned { last_owner: None });
+        assert_eq!(
+            entry.ownership,
+            SkillOwnership::Unowned { last_owner: None }
+        );
         assert_eq!(entry.source_name(), None);
         assert_eq!(entry.previous_source(), None);
         assert_eq!(entry.source_path, PathBuf::from("/tmp/x"));

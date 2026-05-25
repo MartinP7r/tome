@@ -408,12 +408,10 @@ pub fn cleanup_library(
             // source into `last_owner`. skills_get_mut is provided by Plan
             // 11-01 in manifest.rs.
             if let Some(manifest_entry) = manifest.skills_get_mut(entry.name.as_str())
-                && let crate::manifest::SkillOwnership::Owned { source } =
-                    &manifest_entry.ownership
+                && let crate::manifest::SkillOwnership::Owned { source } = &manifest_entry.ownership
             {
                 let last_owner = Some(source.clone());
-                manifest_entry.ownership =
-                    crate::manifest::SkillOwnership::Unowned { last_owner };
+                manifest_entry.ownership = crate::manifest::SkillOwnership::Unowned { last_owner };
             }
         }
         result.transitioned_to_unowned += 1;

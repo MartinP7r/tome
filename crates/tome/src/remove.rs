@@ -323,11 +323,7 @@ pub(crate) fn plan(
     // Find skills from this directory in the manifest
     let skills: Vec<String> = manifest
         .iter()
-        .filter(|(_, entry)| {
-            entry
-                .source_name()
-                .is_some_and(|s| s.as_str() == name)
-        })
+        .filter(|(_, entry)| entry.source_name().is_some_and(|s| s.as_str() == name))
         .map(|(skill_name, _)| skill_name.as_str().to_string())
         .collect();
 
