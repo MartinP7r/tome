@@ -302,7 +302,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 25-02-PLAN.md — `progress.rs`: `ProgressSink` trait + typed `ProgressEvent`/`SyncStage` + `CancelToken` (no tokio) + `NullSink`/`RecordingSink` (CORE-04)
 - [x] 25-03-PLAN.md — `lib.rs` presenter decomposition + thread `sink`/`cancel` through `sync()` + `IndicatifSink` (CORE-01, CORE-04)
 - [x] 25-04-PLAN.md — `crates/tome-desktop` Tauri 2 scaffold + `specta`/`tauri-specta` `bindings.ts` via `gen-bindings` bin + `get_status` + `TauriEventSink` + CI freshness gate + cargo-dist opt-out (CORE-02, CORE-03, CORE-04)
-- [ ] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
+- [x] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
 - [ ] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
 
 ## Backlog

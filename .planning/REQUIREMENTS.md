@@ -32,7 +32,7 @@ The Rust crate must be reshaped to support both the existing CLI and the new GUI
 - [x] **CORE-02**: A new crate `crates/tome-desktop` is added to the workspace alongside `crates/tome` and depends on it as a path dependency. The Tauri app lives in this crate. The CLI continues to ship from `crates/tome` unchanged.
 - [x] **CORE-03**: All structured types crossing the Rust↔JS boundary (`StatusReport`, `SkillSummary`, `LockfileDiff`, `RemovePlan`, `Config`, `MachinePrefs`, etc.) generate matching TypeScript types via `specta` + `tauri-specta`, exposed to the front-end as a generated `bindings.ts`. No hand-rolled type definitions on the JS side.
 - [x] **CORE-04**: Long-running operations (`sync`, git clone in `add`, backup snapshot/restore) emit progress events via Tauri's event system; the front-end subscribes and renders progress without blocking the IPC reply.
-- [ ] **CORE-05**: All Rust errors crossing into the front-end carry a stable `code` (enum) and `message` (`anyhow` chain) — the GUI can render targeted error UI ("permissions" / "not found" / "validation") without string-matching messages.
+- [x] **CORE-05**: All Rust errors crossing into the front-end carry a stable `code` (enum) and `message` (`anyhow` chain) — the GUI can render targeted error UI ("permissions" / "not found" / "validation") without string-matching messages.
 
 ### Read-only views (VIEW)
 
