@@ -68,6 +68,14 @@ pub(crate) mod manifest;
 pub mod marketplace;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
+// `progress` is `pub` because its trait + event vocabulary
+// (`ProgressSink`/`ProgressEvent`/`SyncStage`/`CancelToken`) is the domain
+// half of the "structure at the edge" pattern (D-09/D-11): the GUI's
+// `tome-desktop` crate implements `ProgressSink` and pattern-matches the
+// typed `ProgressEvent` enum across the Tauri IPC boundary. The CLI
+// `IndicatifSink` + sync threading land in 25-03; the GUI `TauriEventSink`
+// in 25-04.
+pub mod progress;
 pub(crate) mod reassign;
 pub(crate) mod reconcile;
 pub(crate) mod relocate;
