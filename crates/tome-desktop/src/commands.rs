@@ -8,10 +8,7 @@
 use tome::TomePaths;
 use tome::config::Config;
 
-// TODO(25-05): replace the `String` error with the structured `TomeError`
-// (CORE-05 / D-13..D-16). This Wave-3 snapshot returns `Result<_, String>` so
-// the command compiles before the error boundary lands; 25-05 Task 2
-// regenerates + re-commits `bindings.ts` once `TomeError` enters the boundary.
+use crate::error::TomeError;
 
 /// Resolve the user's real `tome_home` + `Config` the same way the CLI does
 /// with no flags: default config path, then default `tome_home`.
@@ -35,7 +32,10 @@ fn load_context() -> anyhow::Result<(Config, TomePaths)> {
 /// variants; for the read-only status path it is currently unused.
 #[tauri::command]
 #[specta::specta]
-pub fn get_status(_app: tauri::AppHandle) -> Result<tome::status::StatusReport, String> {
-    let (config, paths) = load_context().map_err(|e| format!("{e:#}"))?;
-    tome::status::gather(&config, &paths).map_err(|e| format!("{e:#}"))
+pub fn get_status(_app: tauri::AppHandle) -> Result<tome::status::StatusReport, TomeError> {
+    // CORE-05 / D-13: classify the domain's `anyhow::Error` into a structured
+    // `TomeError` at the IPC boundary. The front-end pattern-matches on
+    // `TomeError.code`; the full anyhow chain is preserved in `context`.
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    tome::status::gather(&config, &paths).map_err(TomeError::from)
 }

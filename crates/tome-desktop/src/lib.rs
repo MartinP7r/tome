@@ -11,6 +11,7 @@
 //! actually exposes.
 
 pub mod commands;
+pub mod error;
 pub mod sink;
 
 use tauri_specta::{Builder, collect_commands, collect_events};

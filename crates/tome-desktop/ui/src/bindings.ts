@@ -12,7 +12,7 @@ export const commands = {
 	 *  later phases can inject a [`crate::sink::TauriEventSink`] for long-running
 	 *  variants; for the read-only status path it is currently unused.
 	 */
-	getStatus: () => typedError<StatusReport_Serialize, string>(__TAURI_INVOKE("get_status")),
+	getStatus: () => typedError<StatusReport_Serialize, TomeError>(__TAURI_INVOKE("get_status")),
 };
 
 /** Events */
@@ -148,6 +148,29 @@ export type DirectoryStatus_Serialize = {
 };
 
 /**
+ *  Coarse, stable error categories surfaced to the front-end (D-15).
+ * 
+ *  Grows additively. The GUI branches on this discriminant; new variants are a
+ *  non-breaking superset. Mirrors `tome::DomainErrorKind` plus an `Internal`
+ *  fallback (the domain enum deliberately omits `Internal` — see its docs).
+ */
+export type ErrorCode = 
+/**  Input/config validation failure. */
+"Validation" | 
+/**  A required path/config/resource was not found. */
+"NotFound" | 
+/**  A filesystem operation was denied by the OS. */
+"Permission" | 
+/**  A content-hash or path-overlap collision. */
+"Conflict" | 
+/**  A `git` clone/update operation failed. */
+"Git" | 
+/**  A generic I/O failure. */
+"Io" | 
+/**  Anything not classified by a domain sentinel (the fallback, D-14). */
+"Internal";
+
+/**
  *  One row of the Unowned section in `tome status` and `tome doctor`.
  *  Per D-D3 in the Phase 14 CONTEXT.md.
  */
@@ -268,6 +291,23 @@ export type SyncStage =
 "Cleanup" | 
 /**  Persist manifest, lockfile, and `.gitignore`. */
 "Save";
+
+/**
+ *  The structured error payload that crosses the Tauri IPC boundary (D-16).
+ * 
+ *  - `code`: the stable [`ErrorCode`] the GUI pattern-matches on.
+ *  - `message`: the top-level error string (`err.to_string()`).
+ *  - `context`: the flattened anyhow cause chain, outermost first — the same
+ *    information the CLI prints via `{e:#}`, available for a details view.
+ */
+export type TomeError = {
+	/**  Stable, coarse classification. */
+	code: ErrorCode,
+	/**  Top-level human-readable message. */
+	message: string,
+	/**  Flattened anyhow `.context()` chain (outermost first). */
+	context: string[],
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

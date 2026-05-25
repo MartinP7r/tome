@@ -132,11 +132,12 @@ pub use manifest::hash_directory;
 pub use lint::LintFailed;
 pub use migration_v010::MigrationPartialOrFailed;
 
-/// CORE-05 / D-14: the typed `DomainErrorKind` sentinels the `tome-desktop`
-/// IPC boundary downcasts out of the anyhow cause chain to classify errors
-/// into a coarse `ErrorCode`. Attached at GUI-relevant failure sites via
-/// `.context()`; the domain itself stays `anyhow::Result`.
-pub use errors::DomainErrorKind;
+/// CORE-05 / D-14: the typed `DomainErrorKind` sentinels (and the transparent
+/// `DomainTagged` wrapper that carries one through the anyhow cause chain) the
+/// `tome-desktop` IPC boundary downcasts to classify errors into a coarse
+/// `ErrorCode`. Attached at GUI-relevant failure sites via
+/// `WithDomainKind::with_domain_kind`; the domain itself stays `anyhow::Result`.
+pub use errors::{DomainErrorKind, DomainTagged};
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
