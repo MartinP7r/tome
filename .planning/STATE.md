@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-05-25T13:44:07.205Z"
-last_activity: 2026-05-25 -- Phase 25 planning complete
+last_updated: "2026-05-25T13:48:56.039Z"
+last_activity: 2026-05-25 -- Phase 25 execution started
 progress:
   total_phases: 1
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 25 — Rust core extraction + Tauri integration spike (not started)
+**Current focus:** Phase 25 — rust-core-extraction-tauri-integration-spike
 
 ## Current Position
 
-Phase: Not started (defining requirements complete; phase 25 awaits `/gsd:plan-phase 25`)
-Plan: —
-Status: Ready to execute
-Last activity: 2026-05-25 -- Phase 25 planning complete
+Phase: 25 (rust-core-extraction-tauri-integration-spike) — EXECUTING
+Plan: 1 of 6
+Status: Executing Phase 25
+Last activity: 2026-05-25 -- Phase 25 execution started
 
 **v1.0 phase shape (Phases 25–31):**
 
