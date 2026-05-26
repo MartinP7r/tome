@@ -1,0 +1,152 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
+    sans-serif;
+  font-size: 14px;
+  color: #1d1d1f;
+  background: #f5f5f7;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 28px 48px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: #6e6e73;
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.card .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #8a8a8e;
+}
+
+.card .value {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 4px;
+}
+
+section {
+  background: #fff;
+  border: 1px solid #e2e2e6;
+  border-radius: 10px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+section > h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid #ededf0;
+  background: #fafafa;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f0f0f2;
+}
+
+th {
+  color: #8a8a8e;
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.role-managed {
+  background: #efeaff;
+  color: #6336c9;
+}
+.role-synced {
+  background: #e3f3e8;
+  color: #1f8f4e;
+}
+.role-source {
+  background: #fff1da;
+  color: #a35d00;
+}
+.role-target {
+  background: #e4eefb;
+  color: #1f5fb8;
+}
+
+.mono {
+  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-size: 12px;
+  color: #515156;
+}
+
+.ok {
+  color: #1f8f4e;
+}
+.warn {
+  color: #a35d00;
+}
+.err {
+  color: #c8362f;
+}
+
+.error-banner {
+  background: #fdecea;
+  border: 1px solid #f5c6c2;
+  color: #99201a;
+  border-radius: 10px;
+  padding: 14px 16px;
+}

@@ -4,10 +4,16 @@
   "version": "0.16.0",
   "identifier": "com.martinp7r.tome",
   "build": {
-    "frontendDist": "ui/dist",
-    "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "frontendDist": "ui-svelte/dist",
+    "devUrl": "http://localhost:1422",
+    "beforeDevCommand": {
+      "cwd": "ui-svelte",
+      "script": "npm run dev"
+    },
+    "beforeBuildCommand": {
+      "cwd": "ui-svelte",
+      "script": "npm run build"
+    }
   },
   "app": {
     "windows": [

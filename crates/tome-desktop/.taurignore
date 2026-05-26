@@ -1,0 +1,10 @@
+# Tauri's Rust-side dev watcher should ignore the frontend dirs — Vite owns
+# their HMR. Critically, main.rs re-exports ui/src/bindings.ts on every debug
+# startup (#[cfg(debug_assertions)]); without this ignore the watcher sees that
+# write, restarts the app, which re-exports, looping forever. The gen-bindings
+# bin + CI `git diff` gate (D-07) is the real freshness guarantee, not the
+# watcher.
+ui/
+ui-react/
+ui-solid/
+ui-svelte/

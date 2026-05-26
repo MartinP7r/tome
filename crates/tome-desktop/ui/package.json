@@ -1,0 +1,10 @@
+{
+  "name": "tome-ui-bindings",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Owns the canonical generated bindings.ts and its @tauri-apps/api peer dep. The spike frontends (ui-react/ui-solid/ui-svelte) alias @bindings to src/bindings.ts; resolving its @tauri-apps/api import from THIS package's node_modules keeps the single source of truth self-contained.",
+  "dependencies": {
+    "@tauri-apps/api": "^2"
+  }
+}

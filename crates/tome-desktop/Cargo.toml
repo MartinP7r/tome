@@ -8,6 +8,10 @@ repository.workspace = true
 description = "Desktop GUI shell for tome (Tauri 2)"
 # Never publish the GUI crate to crates.io — it is a workspace-local app.
 publish = false
+# Two bins live here (the app + the gen-bindings CI helper). `cargo tauri dev`
+# and bare `cargo run -p tome-desktop` must launch the app, not error on the
+# ambiguity — pin the default run target.
+default-run = "tome-desktop"
 
 # Exclude tome-desktop from cargo-dist release artifacts (RESEARCH Pitfall 4 /
 # A1). cargo-dist 0.30.3 reads `[package.metadata.dist] dist = false` as the
