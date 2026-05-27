@@ -4,14 +4,14 @@
   "version": "0.16.0",
   "identifier": "com.martinp7r.tome",
   "build": {
-    "frontendDist": "ui-svelte/dist",
-    "devUrl": "http://localhost:1422",
+    "frontendDist": "ui/dist",
+    "devUrl": "http://localhost:1420",
     "beforeDevCommand": {
-      "cwd": "ui-svelte",
+      "cwd": "ui",
       "script": "npm run dev"
     },
     "beforeBuildCommand": {
-      "cwd": "ui-svelte",
+      "cwd": "ui",
       "script": "npm run build"
     }
   },

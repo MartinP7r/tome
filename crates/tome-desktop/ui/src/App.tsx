@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-// Single source of truth: the canonical generated bindings, aliased (not copied).
-import { commands } from "@bindings";
+// Single source of truth: the co-located canonical generated bindings.
+import { commands } from "./bindings";
 import type {
   StatusReport_Serialize,
   CountOrError_Serialize,
   DirectoryRole,
   TomeError,
-} from "@bindings";
+} from "./bindings";
 
 function count(c: CountOrError_Serialize): string {
   if (c.error) return c.error;
@@ -22,7 +22,7 @@ export default function App() {
   const [err, setErr] = useState<TomeError | null>(null);
 
   useEffect(() => {
-    // Typed discriminated-union result straight from @bindings — no casts.
+    // Typed discriminated-union result straight from ./bindings — no casts.
     commands.getStatus().then((res) => {
       if (res.status === "ok") setStatus(res.data);
       else setErr(res.error);
@@ -52,7 +52,7 @@ export default function App() {
   return (
     <div className="app">
       <h1>tome</h1>
-      <p className="subtitle">React spike · live StatusReport from your tome_home</p>
+      <p className="subtitle">Live StatusReport from your tome_home</p>
 
       <div className="cards">
         <div className="card">

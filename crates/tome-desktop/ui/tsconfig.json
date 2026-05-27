@@ -14,11 +14,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "baseUrl": ".",
-    "paths": {
-      "@bindings": ["../ui/src/bindings.ts"]
-    }
+    "noFallthroughCasesInSwitch": true
   },
   "include": ["src"]
 }
