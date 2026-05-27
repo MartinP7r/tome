@@ -143,7 +143,7 @@ Deferred to post-v1.0.
 | **D-GUI-01** | Tauri 2 over Electron + napi-rs | Existing Rust core; ~8 MB vs ~150 MB bundle; no N-API ABI layer; built-in code-signed auto-update; reuses Developer ID flow. |
 | **D-GUI-02** | New `crates/tome-desktop` workspace member, not a feature flag in `crates/tome` | Isolates Tauri / webview deps from the CLI; CLI binary stays slim; CI can build either independently. |
 | **D-GUI-03** | `specta` + `tauri-specta` for TS type generation | First-class Tauri 2 integration; generates `bindings.ts` at build time; eliminates JS-side type drift. |
-| **D-GUI-04** | Frontend framework: **TBD in Phase 25 spike** — shortlist React, Solid, Svelte | Decision deferred to spike: React for ecosystem, Solid for performance/size, Svelte for ergonomics. Pick one and commit; no multi-framework UI. |
+| **D-GUI-04** | Frontend framework: **React** (chosen in Phase 25 spike, 25-06) | Built 3-way spike (React/Solid/Svelte) scored 1-5 across four criteria; React + Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization / NF-02 a11y / NF-03 HIG). Irreversible from Phase 26. See `.planning/research/v1.0-frontend-framework-decision.md`. |
 | **D-GUI-05** | Auto-update via `tauri-plugin-updater` + GitHub Releases manifest | Built into Tauri 2; signed updates; no third-party service dependency. |
 | **D-GUI-06** | macOS only for v1.0; Linux behind v0.8 carry-over | Linux runtime UAT items still pending hardware; GUI adds the same surface. Defer to v2. |
 | **D-GUI-07** | App and CLI share `tome.lock` + `.tome-manifest.json`; file watcher in app reloads on external change | Single source of truth; no GUI-private state files. |
