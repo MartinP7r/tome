@@ -268,7 +268,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Milestone Goal:** Make the skill library *visible*. Tauri 2 desktop GUI over the existing CLI library; the Rust core is reshaped to return structured types callable from any front-end. CLI continues to ship unchanged from `crates/tome`; new `crates/tome-desktop` workspace member hosts the app. macOS-only for v1.0 (Linux deferred to v2). Cuts: alpha (Phases 25–26) → beta (27–28) → rc (29–30) → v1.0 (31). Full requirements in [`REQUIREMENTS.md`](REQUIREMENTS.md); full per-phase plan in [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md).
 
-- [ ] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.**
+- [x] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.** (completed 2026-05-27)
 - [ ] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.**
 - [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
@@ -278,7 +278,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Open questions (Q1–Q7 from `milestones/v1.0-ROADMAP.md`):**
 
-- Q1: Frontend framework choice — resolve in Phase 25 spike (D-GUI-04)
+- Q1: Frontend framework choice — **RESOLVED in Phase 25 spike (25-06): React** (D-GUI-04, irreversible from Phase 26). See `.planning/research/v1.0-frontend-framework-decision.md`.
 - Q2: Tauri minor-version pinning policy
 - Q3: How `tome lint` failures surface (separate view / integrated into doctor / both)
 - Q4: Tray-icon presence (default: no, launch on demand)
@@ -303,7 +303,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 25-03-PLAN.md — `lib.rs` presenter decomposition + thread `sink`/`cancel` through `sync()` + `IndicatifSink` (CORE-01, CORE-04)
 - [x] 25-04-PLAN.md — `crates/tome-desktop` Tauri 2 scaffold + `specta`/`tauri-specta` `bindings.ts` via `gen-bindings` bin + `get_status` + `TauriEventSink` + CI freshness gate + cargo-dist opt-out (CORE-02, CORE-03, CORE-04)
 - [x] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
-- [ ] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
+- [x] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
 
 ## Backlog
 

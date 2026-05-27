@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
-stopped_at: Completed 25-05-PLAN.md (Wave 4)
-last_updated: "2026-05-26T15:38:20.060Z"
-last_activity: 2026-05-26 -- 25-05 complete (TomeError IPC-boundary classification; DomainErrorKind sentinels; bindings.ts regenerated with TomeError+ErrorCode)
+stopped_at: Completed 25-06-PLAN.md (Wave 5) -- Phase 25 complete (6/6)
+last_updated: "2026-05-27T03:54:50.770Z"
+last_activity: 2026-05-27
 progress:
   total_phases: 1
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 6
-  completed_plans: 5
-  percent: 83
+  completed_plans: 6
+  percent: 100
 ---
 
 # Project State
@@ -25,10 +25,10 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 
 ## Current Position
 
-Phase: 25 (rust-core-extraction-tauri-integration-spike) — EXECUTING
-Plan: 5 of 6 complete (25-01, 25-02, 25-03, 25-04, 25-05 — Waves 1–4)
-Status: Executing Phase 25
-Last activity: 2026-05-26 -- 25-05 complete (TomeError IPC-boundary classification + DomainErrorKind sentinels; bindings.ts regenerated)
+Phase: 25 (rust-core-extraction-tauri-integration-spike) — COMPLETE (6/6 plans)
+Plan: 6 of 6 complete (25-01..25-06 — Waves 1–5)
+Status: Phase 25 complete; ready for Phase 26 (Read-only views) planning
+Last activity: 2026-05-27 -- 25-06 complete (v1.0 frontend framework = React, D-GUI-04; spikes scored + collapsed into crates/tome-desktop/ui/; losers deleted; ADR recorded)
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -73,6 +73,7 @@ Historical decisions are archived in:
 - [Phase 25]: 25-03: threaded ProgressSink + CancelToken through sync() (typed ProgressEvent per stage, is_cancelled() at every boundary); IndicatifSink re-homes spinners at the CLI edge, NullSink under --quiet/--verbose; promoted remove/reassign/relocate/eject plan() to pub + extracted list::collect — GUI-callable domain surface (D-09/D-11/D-12/D-GUI-08)
 - [Phase 25]: 25-04: stood up crates/tome-desktop (Tauri 2, path dep on tome+bindings, specta trio pinned =2.0.0-rc.25). get_status command returns real StatusReport; TauriEventSink bridges typed ProgressEvent→SyncProgress (typed SyncStage, saturating casts); make_builder() is the single command/event registry shared by main.rs + gen-bindings; committed bindings.ts is an INTENTIONAL Wave-3 partial snapshot (Result<StatusReport,String>, pre-TomeError — 25-05 regenerates). Exported bindings from gen-bindings bin not build.rs (D-07 corrected); Builder::dangerously_cast_bigints_to_number() to export usize counts as TS number (no library type change); CI bindings-freshness gate + macOS desktop-build job on macos-latest; [package.metadata.dist] dist=false excludes tome-desktop from cargo-dist (release CLI-only, release.yml untouched) (CORE-02/03/04, D-06/D-07)
 - [Phase 25]: 25-05: TomeError IPC-boundary classification (CORE-05). RESEARCH .with_context(|| DomainErrorKind) is NOT downcastable through anyhow — replaced with a transparent DomainTagged wrapper (Display delegates to underlying top, source() skips it) so the {e:#} chain is byte-for-byte unchanged while chain().find_map(downcast_ref) recovers the kind. Boundary classifies DomainTagged + bare DomainErrorKind, else Internal; ErrorCode has ALL+const _ guard + exhaustive From<&DomainErrorKind>. Sentinels at Config::validate (Validation/Conflict), bad --config (NotFound), git clone/update (Git). bindings.ts regenerated with TomeError+ErrorCode (supersedes 25-04 Wave-3 snapshot; freshness clean).
+- [Phase 25]: 25-06: v1.0 frontend framework = React (D-GUI-04, irreversible from Phase 26). Built 3-way StatusReport spike (React/Solid/Svelte) scored 1-5 x4 criteria; React+Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization/NF-02 a11y/NF-03 HIG). Bundle gzip: Solid 6.20kB / Svelte 15.85kB / React 62.29kB. Winner collapsed into crates/tome-desktop/ui/ (one canonical bindings.ts, relative ./bindings import); losers deleted. ADR: .planning/research/v1.0-frontend-framework-decision.md
 
 ### v1.0 design context (consume during phase planning)
 
@@ -115,6 +116,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-26T15:38:20.060Z
-Stopped at: Completed 25-05-PLAN.md (Wave 4)
+Last session: 2026-05-27T03:54:50.765Z
+Stopped at: Completed 25-06-PLAN.md (Wave 5) -- Phase 25 complete (6/6)
 Resume file: None
