@@ -305,6 +305,29 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
 - [x] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
 
+### Phase 26: Read-only views — alpha cut
+**Goal**: Ship the read-only half of the GUI: status dashboard, virtualised skill list, detail pane with markdown preview, doctor health view, and on-disk file watcher. After this phase, the desktop app is useful for inspection but does not mutate state. First user-visible UI; built on the React scaffold chosen in Phase 25.
+**Depends on**: Phase 25 (Rust core extraction + Tauri integration spike) — structured domain types (`StatusReport`, etc.), `bindings.ts` generation, `ProgressSink`, `TomeError` boundary, and the React `ui/` scaffold all land there.
+**Requirements**: VIEW-01, VIEW-02, VIEW-03, VIEW-04, VIEW-05, VIEW-06, NF-01 (perf budget), NF-02 (a11y), NF-03 (HIG), NF-05 (concurrency)
+**Success Criteria** (what must be TRUE):
+  1. Status dashboard renders all fields from `tome status --json` with role/type badges, last-sync time, and lockfile state. Refreshes within 200 ms of an external `tome sync` from the CLI.
+  2. Skill list view handles a 2000-skill library at sustained 60 fps during search-as-you-type on M1 (8 GB) — verified via a synthetic-skills bench in CI (NF-01).
+  3. Detail pane renders frontmatter (parsed by existing `lint.rs`), source path, content hash, last sync, managed/local badge, and disabled state. Three actions (open source, copy path, disable on this machine) wired to the same handlers as the existing browse TUI.
+  4. Markdown preview renders SKILL.md body with the same Markdown subset as `browse/markdown.rs`. Code blocks, headings, lists, links all render.
+  5. Health pane lists all `tome doctor` findings with one-click fix actions. Fix actions go through the same repair handlers used by interactive `tome doctor`.
+  6. File watcher reloads UI state when manifest, lockfile, or library content changes externally. No stale UI after CLI sync (VIEW-06).
+  7. Every interactive element is keyboard-accessible and has a VoiceOver label (NF-02). Native menu bar shows File / Edit / View / Library / Help (NF-03).
+**Cut**: **v1.0-alpha**. Internal release; CLI still required for sync and edit.
+**Plans**: TBD — sequencing set during `/gsd:plan-phase`. Draft shape from milestone roadmap:
+- [ ] 26-01-PLAN.md — Status dashboard view (VIEW-01)
+- [ ] 26-02-PLAN.md — Virtualised skill list + fuzzy search (VIEW-02)
+- [ ] 26-03-PLAN.md — Detail pane + per-skill actions (VIEW-03)
+- [ ] 26-04-PLAN.md — Markdown preview component (VIEW-04)
+- [ ] 26-05-PLAN.md — Doctor health pane + fix actions (VIEW-05)
+- [ ] 26-06-PLAN.md — File watcher integration + auto-refresh (VIEW-06)
+- [ ] 26-07-PLAN.md — A11y + HIG audit (NF-02, NF-03)
+- [ ] 26-08-PLAN.md — Perf bench + harness (NF-01)
+
 ## Backlog
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
