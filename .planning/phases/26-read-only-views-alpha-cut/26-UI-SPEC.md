@@ -5,6 +5,7 @@ status: draft
 shadcn_initialized: false
 preset: none
 created: 2026-05-28
+revised: 2026-05-28
 ---
 
 # Phase 26 — UI Design Contract
@@ -73,18 +74,50 @@ Confirm during 26-07 (HIG audit plan).
 
 System font stack only (D-13). No web font load.
 
+**4 sizes · 2 weights.** Weight 400 is the regular roman; weight 600 is the only emphasis weight. The macOS system font renders 400 vs. 600 with clear contrast — no mid-weight (500) is declared.
+
 | Role | Token | Size | Weight | Line Height | Usage |
 |------|-------|------|--------|-------------|-------|
-| Caption (uppercase labels) | `--text-caption` | 11px | 500 | 1.2 | Section headers ("LIBRARY", "AUTO-FIXABLE"), badge labels, metadata grid labels |
-| Footnote | `--text-footnote` | 12px | 400 | 1.4 | List-row secondary line, table cell values, finding descriptions |
-| Body | `--text-body` | 13px | 400 | 1.5 | Default body, list-row primary, markdown paragraph, button labels |
-| Body-medium | `--text-body` | 13px | 500 | 1.5 | Emphasised inline text, selected nav-item label |
-| Subhead | `--text-subhead` | 16px | 600 | 1.3 | Markdown H2/H3, "Directories" section header, popover header |
-| Title | `--text-title` | 22px | 600 | 1.2 | View title in content-pane header ("Status" / "Skills" / "Health"), skill name in detail header |
+| Small (uppercase caption / footnote) | `--text-small` | 12px | 400 **or** 600 (per role list below) | 1.4 | Caption labels (uppercase, 600); footnote/secondary text (400) |
+| Body | `--text-body` | 13px | 400 **or** 600 (per role list below) | 1.5 | Default body, list-row primary, markdown paragraph, button labels (400); titles/emphasis (600) |
+| Subhead | `--text-subhead` | 16px | 600 | 1.3 | Markdown H2, "Directories" section header, popover-anchored subhead, all-clear heading |
+| Title | `--text-title` | 22px | 600 | 1.2 | View title in content-pane header ("Status" / "Skills" / "Health"), skill name in `DetailHeader`, markdown H1 |
 
-**Total declared sizes: 4** (11 / 12 / 13 / 16 / 22 px — 13px counts once across two weights). **Weights: 2 effective** (400 regular + 600 semibold), with 500 used as a single mid-weight for caption/emphasis only.
+Monospace family (code blocks, content hashes, paths): `ui-monospace, "SF Mono", Menlo, monospace` at `--text-small` (12px, weight 400).
 
-Monospace family (code blocks, content hashes, paths): `ui-monospace, "SF Mono", Menlo, monospace` at `--text-footnote` (12px, weight 400).
+### Weight assignment — exhaustive role list
+
+Every place text appears in Phase 26 is bound to one of these two weights. No 500.
+
+**Weight 400 (regular)** — body text, neutral information, controls without emphasis:
+
+- `--text-body` paragraph text (markdown body, descriptions, error-banner message line, `KeyValueRow` value, `DirectoryTable` row primary, `SkillListRow` primary when **not** selected, `FindingRow` description's first paragraph, `Titlebar` centre title text).
+- `--text-small` footnote/secondary text (`SkillListRow` secondary "source · managed|local" line, `DirectoryTable` row secondary path, `FindingRow` description tail, `PreviewPopover` helper text, metadata-grid values, all-clear sub-line, manual remediation hint, error-banner context list items, code/hash monospace, `Pill — Updated` is 600 — see below — but other small-text pills like Status `In sync` literal are 400).
+- `Button--secondary` label ("Open source folder", "Copy path", "Cancel").
+- `SearchField` placeholder text ("Search skills") and value text the user has typed.
+- `PopupMenu` trigger label and menu-item labels.
+- `Badge` non-emphasis subtypes: `Badge--type-claude-plugins`, `Badge--type-git`, `Badge--type-directory`, `Badge--role-discovery`, `Badge--role-distribution`, `Badge--override` (informational tints).
+
+**Weight 600 (semibold)** — titles, captions in uppercase, primary actions, emphasis:
+
+- View titles (`--text-title` 22px): "Status", "Skills", "Health", and the skill name at the top of `DetailHeader`.
+- `Titlebar` centre title — `--text-body` 13px / 600 (treating the title as a chrome label rather than body text; reverses the prior 500 binding).
+- Uppercase caption labels at `--text-small` (12px): `LIBRARY` (sidebar header), `AUTO-FIXABLE` / `NEEDS ATTENTION` (Health section headers), `PREVIEW` (popover header), every `KeyValueRow` label ("TOME HOME", "LIBRARY", "LAST SYNC", "LOCKFILE", "MACHINE"), every metadata-grid label ("SOURCE", "HASH", "SYNC"), `DirectoryTable` column headers ("NAME", "ROLE", "TYPE").
+- Markdown headings: H1 (`--text-title` 22px / 600), H2 (`--text-subhead` 16px / 600), H3 (`--text-body` 13px / 600 — **no raw 14px**).
+- Selected `NavItem` label (`--text-body` 13px / 600 on `--accent` background).
+- Selected `SkillListRow` primary (`--text-body` 13px / 600 on `--accent` background; secondary line stays 400).
+- `FindingRow` title (`--text-body` 13px / 600).
+- `Button--primary` label ("Disable on this machine", "Apply") — `--text-body` 13px / 600.
+- `Button--small-fix` label ("Fix") — `--text-small` 12px / 600.
+- `Badge--managed` label text — `--text-small` 12px / 600 (emphasis: signals provenance).
+- `Badge--disabled` label text "**Disabled**" — `--text-small` 12px / 600 (emphasis: state badge that affects user intent).
+- `Pill — Updated` text "**Updated**" — `--text-small` 12px / 600 (emphasis: transient acknowledgement).
+- Status — "In sync" / "Out of sync" textual states — `--text-body` 13px / 600 (paired with the `StatusDot`; reads as a state label).
+- Error-banner code prefix `[CODE]` — `--text-small` 12px / 600 (in uppercase via the `ErrorCode` enum's existing values).
+- All-clear heading "Everything looks healthy" — `--text-subhead` 16px / 600 (already 600).
+- `SectionHeader` count chip `(N)` — `--text-small` 12px / 600 (paired with the uppercase caption; consistent weight inside the header line).
+
+If a future component needs a text role not listed above, the planner picks **400** unless the role is a title, a caption, a primary action label, an emphasised state, or a heading.
 
 ---
 
@@ -167,7 +200,7 @@ For every component below: purpose, props/variants, React Aria primitive (D-14 a
 - **Tokens:** background `--bg-app`; titlebar background `--bg-app` light / `--bg-window` dark.
 
 #### `Titlebar`
-- **Purpose:** Unified macOS titlebar; renders traffic lights (OS-owned, left) + centred title `tome — {section}` (`--text-body` weight 500).
+- **Purpose:** Unified macOS titlebar; renders traffic lights (OS-owned, left) + centred title `tome — {section}` (`--text-body` 13px / **600**).
 - **Props:** `section: 'Status' | 'Skills' | 'Health'`.
 - **Height:** 44px (anchor from extract).
 - **A11y:** `role="banner"`, `aria-label="tome ${section}"`.
@@ -176,18 +209,23 @@ For every component below: purpose, props/variants, React Aria primitive (D-14 a
 - **Purpose:** Vibrancy/translucent left rail. Sections: `LIBRARY` caption header → three `NavItem`s (Status / Skills / Health) → spacer → footer `tome · {N} skills`.
 - **Material:** `--sidebar-material` token. **Falls back to solid** when `@media (prefers-reduced-transparency: reduce)` (D-16, NF-03).
 - **Width:** 210px (anchor).
+- **Caption header `LIBRARY`:** `--text-small` 12px / 600 uppercase, `--label-secondary`.
+- **Footer `tome · {N} skills`:** `--text-small` 12px / 400, `--label-secondary`.
 - **A11y:** `<nav aria-label="Sections">` + React Aria `ListBox` for keyboard nav with arrow-key traversal.
 
 #### `NavItem`
 - **Purpose:** Sidebar row. Icon (SF-shaped) + label.
 - **Variants:** `default | hover | selected | badge`.
+- **Label typography:**
+  - Default / hover: `--text-body` 13px / **400**, `--label-primary`.
+  - Selected: `--text-body` 13px / **600**, `--accent-on` (on the `--accent` capsule fill).
 - **Selected:** accent-blue capsule fill (`--accent` background, `--accent-on` foreground, `--radius-md` 6px); covers full row width minus 8px gutters.
-- **Badge variant:** trailing red circle (`--danger` fill, `--accent-on` text, `--text-caption`), shown when `Health` has findings (D-02). Hidden at zero findings.
+- **Badge variant:** trailing red circle (`--danger` fill, `--accent-on` text, `--text-small` 12px / 600), shown when `Health` has findings (D-02). Hidden at zero findings.
 - **A11y:** React Aria `ListBoxItem` with `aria-label="${label}, ${section} section${badge ? `, ${count} health issues` : ''}"`. Selected announces "selected".
 - **Keyboard:** ↑/↓ to move; Enter / Space to select; ⌘1 / ⌘2 / ⌘3 jump to Status / Skills / Health (added to keyboard map below).
 
 #### `ContentPane`
-- **Purpose:** Right region (list + detail OR full-width Status/Health). Header (view title 22px + optional trailing meta like the "Updated" pill) + scrolling body.
+- **Purpose:** Right region (list + detail OR full-width Status/Health). Header (view title 22px / 600 + optional trailing meta like the "Updated" pill) + scrolling body.
 - **Variants:** `single-pane` (Status, Health) | `split` (Skills: middle list column + right detail column).
 - **A11y:** `<main aria-label="${viewTitle}">`.
 
@@ -207,14 +245,17 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 | `Badge--disabled` | `#f2f2f4` | `#6e6e73` | `#2c2c2e` | `#98989d` |
 | `Badge--override` | `#fff1da` | `#a35d00` | `#3d2a10` | `#e0a060` |
 
-- **Shape:** pill (`--radius-pill: 9999px`), padding `2px 8px`, `--text-caption` (11px / 500).
+- **Shape:** pill (`--radius-pill: 9999px`), padding `2px 8px`, `--text-small` (12px).
+- **Weight per subtype:**
+  - `Badge--managed`, `Badge--disabled` → **600** (emphasis: provenance + state badges that the user reads as a decision input).
+  - `Badge--role-*`, `Badge--type-*`, `Badge--override` → **400** (informational tints).
 - **Disabled badge label:** **"Disabled"** (verbatim — D-06; the mockup's `OFF` is **superseded** — see open item 3).
 - **A11y:** rendered as plain `<span>`. Badges accompanying skill name are read via the parent row's `aria-label` (see `SkillListRow`).
 
 #### `Pill — Updated`
 - **Purpose:** Transient acknowledgement of a watcher-driven refresh (D-03). Fades over ~2s (CSS transition opacity 1 → 0 between 1500ms and 2000ms after mount).
 - **Position:** Inline next to the **"Last sync"** field in the Status view ContentPane header — NOT in the sidebar or titlebar.
-- **Style:** pill, fill `--success` at 18% alpha (light) / 24% alpha (dark), text `--success`, label **"Updated"** (verbatim, 11px / 500). `prefers-reduced-motion: reduce` → no fade, just appears 2s then snaps to `display: none`.
+- **Style:** pill, fill `--success` at 18% alpha (light) / 24% alpha (dark), text `--success`, label **"Updated"** (verbatim, `--text-small` 12px / **600**). `prefers-reduced-motion: reduce` → no fade, just appears 2s then snaps to `display: none`.
 - **A11y:** `role="status"` with `aria-live="polite"`, `aria-atomic="true"`. Screen reader announces "Updated" once.
 
 #### `StatusDot`
@@ -227,20 +268,20 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 
 #### `Button`
 - **Variants:** `primary | secondary | small-fix`.
-- **Primary:** `--accent` fill, `--accent-on` text, 13px / 500, padding `6px 12px`, `--radius-md` (6px). Used for: "Disable on this machine" (detail header), "Apply" (popover). Hover/pressed → `--accent-pressed`.
-- **Secondary:** `--bg-window` fill, `--label-primary` text, 1px `--separator` border, same metrics. Used for: "Open source folder", "Copy path", "Cancel".
-- **Small-fix:** secondary metrics with smaller padding `4px 10px`, `--text-footnote` (12px), only used inside `FindingRow`. Label **"Fix"**.
+- **Primary:** `--accent` fill, `--accent-on` text, `--text-body` 13px / **600**, padding `6px 12px`, `--radius-md` (6px). Used for: "Disable on this machine" (detail header), "Apply" (popover). Hover/pressed → `--accent-pressed`.
+- **Secondary:** `--bg-window` fill, `--label-primary` text, `--text-body` 13px / **400**, 1px `--separator` border, same metrics. Used for: "Open source folder", "Copy path", "Cancel".
+- **Small-fix:** secondary metrics with smaller padding `4px 10px`, `--text-small` 12px / **600**, only used inside `FindingRow`. Label **"Fix"**.
 - **A11y:** React Aria `Button`. Disabled state via `aria-disabled="true"` and 50% opacity — not rendered when the action does not apply (D-12 — never a dead `Fix` button on non-fixable findings).
 
 #### `SearchField`
 - React Aria `SearchField`. Magnifier glyph (SF-shaped) left, X-clear when non-empty right.
-- Background `--bg-subtle`, `--radius-md`, padding `6px 10px`, `--text-body`.
+- Background `--bg-subtle`, `--radius-md`, padding `6px 10px`, `--text-body` 13px / **400** (placeholder + entered value).
 - Placeholder: **"Search skills"** (verbatim).
 - **Pinned at the top of the Skills middle column** (D-04); ⌘F focuses it (see keyboard map).
 - A11y: implicit `role="searchbox"` + `aria-label="Search skills"`. Each keystroke filters the list at the React-Aria-bound `Virtualizer`; matches show inline highlight via background `rgba(0,122,255,0.15)`.
 
 #### `PopupMenu`
-- React Aria `MenuTrigger` + `Menu`. Closed state: button with current value + chevron-down.
+- React Aria `MenuTrigger` + `Menu`. Closed state: button with current value + chevron-down. Trigger and menu items use `--text-body` 13px / **400**.
 - Two instances in the Skills list-column toolbar:
   - **Sort** — items `Name` (default) / `Source` / `Recent`.
   - **Group** — items `None` (default) / `Source` / `Role`.
@@ -251,20 +292,24 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 #### `KeyValueRow` (Status dashboard)
 - **Purpose:** Label + value horizontal row, optional trailing badge/dot.
 - **Layout:** `display: grid; grid-template-columns: 160px 1fr auto; gap: var(--space-3);`.
-- **Label:** `--text-caption` (uppercase, 11px / 500, `--label-secondary`).
-- **Value:** `--text-body` (13px / 400, `--label-primary`); monospace if path/hash.
+- **Label:** `--text-small` 12px / **600** uppercase, `--label-secondary`.
+- **Value:** `--text-body` 13px / **400**, `--label-primary`; monospace (`--text-small` 12px / 400) if path/hash. For Lockfile state, the textual "In sync" / "Out of sync" value uses **600** to read as a state label (paired with `StatusDot`).
 - **Used by:** every Status field — "tome home" / "Library" / "Last sync" / "Lockfile" / "Machine prefs". Trailing slot hosts `StatusDot`, badges, or the transient `Updated` pill (Last sync row only).
 
 #### `DirectoryTable` (Status, "Directories" section)
 - **Columns:** NAME (with secondary path line) / ROLE (`Badge--role-*`) / TYPE (`Badge--type-*`).
-- **Header:** `--text-caption` uppercase, `--bg-subtle` zebra.
-- **Row:** `--text-body` primary + `--text-footnote` `--label-secondary` secondary, 1px `--separator` bottom.
+- **Header:** `--text-small` 12px / **600** uppercase, `--bg-subtle` zebra, `--label-secondary` foreground.
+- **Row primary (skill name):** `--text-body` 13px / **400**, `--label-primary`.
+- **Row secondary (path):** `--text-small` 12px / **400**, `--label-secondary`, monospace.
+- 1px `--separator` bottom per row.
 - **A11y:** native `<table>` with `<th scope="col">`. No row interaction in Phase 26.
 
 #### `SkillListRow`
-- **Purpose:** Middle-column row in Skills view. Two-line: primary skill name (13px / 500), secondary `source · managed|local` (12px / 400, `--label-secondary`). Trailing `Badge--disabled` when disabled-on-this-machine.
+- **Purpose:** Middle-column row in Skills view. Two-line: primary skill name, secondary `source · managed|local`. Trailing `Badge--disabled` when disabled-on-this-machine.
 - **Variants:** `default | hover | selected | disabled-on-this-machine`.
-- **Selected:** `--accent` background, `--accent-on` text (skill name only; secondary line `rgba(255,255,255,0.78)`), `--radius-md` capsule, 8px horizontal inset.
+- **Primary:** `--text-body` 13px / **400** when not selected; `--text-body` 13px / **600** when selected (and recoloured to `--accent-on`).
+- **Secondary:** `--text-small` 12px / **400**, `--label-secondary`; on selected row recoloured to `rgba(255,255,255,0.78)` (still weight 400).
+- **Selected:** `--accent` background, `--accent-on` text, `--radius-md` capsule, 8px horizontal inset.
 - **Height:** 52px (anchor).
 - **Virtualisation:** rendered inside TanStack Virtual `useVirtualizer` (NF-01).
 - **A11y:** React Aria `ListBoxItem`. `aria-label="${name}, source ${sourceName}, ${managed ? 'managed' : 'local'}${disabled ? ', disabled on this machine' : ''}"`. Up/Down/Home/End/PgUp/PgDn nav. Enter opens detail; right-click → `ContextMenu` (open source / copy path / disable).
@@ -272,8 +317,8 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 #### `DetailHeader` (Skills right column, top section)
 - **Purpose:** Compact metadata header above the scrolling markdown body (D-05).
 - **Layout (top-to-bottom):**
-  1. Row 1: skill name (`--text-title` 22px / 600) + trailing badges (`Badge--managed`, `Badge--disabled` if applicable).
-  2. Row 2: metadata grid — three labelled cells: **Source path** (mono, ellipsised middle), **Content hash** (mono, truncated `sha256:abc123…`), **Last sync** (relative time, e.g. "2 minutes ago"). Each cell label uses `--text-caption`; value `--text-footnote`. 16px column gap.
+  1. Row 1: skill name (`--text-title` 22px / **600**) + trailing badges (`Badge--managed`, `Badge--disabled` if applicable).
+  2. Row 2: metadata grid — three labelled cells: **Source path** (mono, ellipsised middle), **Content hash** (mono, truncated `sha256:abc123…`), **Last sync** (relative time, e.g. "2 minutes ago"). Each cell label uses `--text-small` 12px / **600** uppercase, `--label-secondary`; value `--text-small` 12px / **400** (mono for path/hash, regular for relative time), `--label-primary`. 16px column gap.
   3. Row 3: three action buttons, left-aligned, 8px gap — order: `[Open source folder]` `[Copy path]` `[Disable on this machine]`. **"Disable on this machine" is the only primary** (D-06); the other two are secondary (D-07).
 - **Bottom border:** 1px `--separator`. Section padding 20px / 24px.
 - **A11y:** `aria-label="${skill name} details"`. Action buttons each have explicit `aria-label`:
@@ -285,11 +330,15 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 - **Purpose:** Renders SKILL.md body (post-frontmatter) below the `DetailHeader` (VIEW-04, D-08).
 - **Library:** `react-markdown` + `remark-gfm`.
 - **Subset enforced via `allowedElements`:**
-  - Headings: `h1`, `h2`, `h3` (`--text-title` 22 / `--text-subhead` 16 / 14px 600 respectively; 1.3 line-height).
-  - Lists: `ul`, `ol`, `li` (16px left padding, default disc/decimal markers).
-  - Links: `a` (rendered as `<a>` with `target="_blank"` + Tauri opener invocation — opens in system browser per CONTEXT §"Claude's Discretion"). Colour `--accent`, underline on hover.
-  - Code: inline `code` (mono 12px, background `--bg-subtle`, `--radius-xs` 3px, padding `1px 4px`) and fenced `pre > code` (mono 12px, background `--bg-subtle`, `--radius-md` 6px, padding 12px, overflow `auto`). **Plain rendering** — no syntax highlighting in alpha (CONTEXT §"Deferred Ideas").
-  - Inline emphasis: `strong` (600), `em` (italic).
+  - Headings:
+    - `h1` → `--text-title` 22px / **600**, 1.2 line-height.
+    - `h2` → `--text-subhead` 16px / **600**, 1.3 line-height.
+    - `h3` → `--text-body` 13px / **600**, 1.3 line-height (**no raw 14px** — bound to the body token).
+  - Lists: `ul`, `ol`, `li` — `--text-body` 13px / 400 (16px left padding, default disc/decimal markers).
+  - Paragraph `p` — `--text-body` 13px / 400, line-height 1.5.
+  - Links: `a` (rendered as `<a>` with `target="_blank"` + Tauri opener invocation — opens in system browser per CONTEXT §"Claude's Discretion"). Colour `--accent`, underline on hover. `--text-body` 13px / 400 (inherits paragraph weight).
+  - Code: inline `code` (mono `--text-small` 12px / 400, background `--bg-subtle`, `--radius-xs` 3px, padding `1px 4px`) and fenced `pre > code` (mono `--text-small` 12px / 400, background `--bg-subtle`, `--radius-md` 6px, padding 12px, overflow `auto`). **Plain rendering** — no syntax highlighting in alpha (CONTEXT §"Deferred Ideas").
+  - Inline emphasis: `strong` (`--text-body` 13px / **600**), `em` (italic, weight 400).
 - **NOT rendered (stripped by `react-markdown` allow-list):** tables, images, blockquotes, task lists, HTML passthrough, footnotes — out of SC#4 subset.
 - **Scrolling:** the markdown body is the scrollable region; the `DetailHeader` stays fixed at top.
 - **A11y:** `<article aria-label="${skillName} documentation">`. Heading hierarchy preserved for VoiceOver rotor navigation. Links carry `aria-label="${linkText}, opens in browser"` when the visible text is non-descriptive (URL only).
@@ -297,19 +346,19 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 
 #### `SectionHeader` (Health)
 - **Purpose:** Group findings into `AUTO-FIXABLE` / `NEEDS ATTENTION` sections (D-12 layout from "Claude's Discretion" — Claude chose flat-grouped over fully-flat).
-- **Layout:** `--text-caption` uppercase (`--label-secondary`) on the left, count chip on the right (`(N)` in `--label-secondary`).
+- **Layout:** `--text-small` 12px / **600** uppercase (`--label-secondary`) on the left, count chip on the right `(N)` in `--text-small` 12px / **600**, `--label-secondary`.
 - 24px top margin between sections; 8px below the header before the first row.
 - A11y: rendered as `<h2>` so it appears in VoiceOver's headings rotor; count is part of the heading text.
 
 #### `FindingRow`
 - **Purpose:** A single doctor finding (auto-fixable or manual). Single-row default; expands to disclose `TomeError` chain when a fix has just failed (D-11).
 - **Layout (default):** `[SeverityIcon] [title — primary] [description — secondary]            [Fix button | manual hint]`
-- **Title:** `--text-body` 500, `--label-primary`.
-- **Description:** `--text-footnote`, `--label-secondary`. Truncated with ellipsis if needed; full text visible in VoiceOver via the row's `aria-label`.
+- **Title:** `--text-body` 13px / **600**, `--label-primary`.
+- **Description:** `--text-small` 12px / **400**, `--label-secondary`. Truncated with ellipsis if needed; full text visible in VoiceOver via the row's `aria-label`.
 - **Trailing slot:**
   - **Auto-fixable (RepairKind::* with a Rust handler):** `Button--small-fix` labelled **"Fix"**. Opens `PreviewPopover` (D-09).
-  - **Non-fixable (`unparsable-frontmatter`, `diverging-target`):** Inline text in `--text-footnote` `--label-secondary`, **NO button** (D-12). See Copywriting §Manual remediation hints for the exact strings.
-- **Failed-fix state (after Apply errored, D-11):** Row stays visible; below the primary line a disclosure shows the `TomeError` — formatted as `[Code] {message}` in `--danger` (`--text-footnote`) with a collapsible "Show context" disclosure listing the `context: Vec<String>` chain. The Fix button stays available for retry.
+  - **Non-fixable (`unparsable-frontmatter`, `diverging-target`):** Inline text in `--text-small` 12px / **400**, `--label-secondary`, **NO button** (D-12). See Copywriting §Manual remediation hints for the exact strings.
+- **Failed-fix state (after Apply errored, D-11):** Row stays visible; below the primary line a disclosure shows the `TomeError` — formatted as `[Code] {message}` in `--danger` (`--text-small` 12px; `[Code]` weight 600, message weight 400) with a collapsible "Show context" disclosure listing the `context: Vec<String>` chain (`--text-small` 12px / 400). The Fix button stays available for retry.
 - **Successful-fix state:** Row removes itself on next file-watcher refresh (D-11; D-03's silent re-render reconciles). No optimistic animation in alpha — the disk truth is the source.
 - **A11y:** `role="group"` with `aria-label="${severity} finding: ${title}. ${description}. ${fixable ? 'Fix available' : 'Manual remediation required'}"`. React Aria `Button` for the Fix action.
 
@@ -317,21 +366,21 @@ Three subtypes — distinct token bindings to avoid 10% accent rule violation:
 - **Purpose:** Preview-then-confirm sheet for each repair, satisfying NF-04. Anchored to the Fix button via React Aria `Popover` (no modal overlay — non-blocking; clicking outside cancels).
 - **Width:** 320px max.
 - **Layout (top-to-bottom):**
-  1. Caption header **"PREVIEW"** (`--text-caption` uppercase, `--label-secondary`).
-  2. Change line — one sentence describing the dry-run effect, sourced from the `RepairKind`'s human description (already lives in `doctor.rs`). `--text-body`, `--label-primary`. Path fragments rendered monospace.
-  3. Helper text (`--text-footnote`, `--label-secondary`) — e.g. **"This change is reversible by running tome sync."** Optional per repair kind.
+  1. Caption header **"PREVIEW"** (`--text-small` 12px / **600** uppercase, `--label-secondary`).
+  2. Change line — one sentence describing the dry-run effect, sourced from the `RepairKind`'s human description (already lives in `doctor.rs`). `--text-body` 13px / **400**, `--label-primary`. Path fragments rendered monospace (`--text-small` 12px / 400).
+  3. Helper text (`--text-small` 12px / **400**, `--label-secondary`) — e.g. **"This change is reversible by running tome sync."** Optional per repair kind.
   4. Button row, right-aligned, 8px gap: `[Cancel]` (secondary) `[Apply]` (primary).
 - A11y: `role="dialog"` with `aria-modal="true"` (focus trap), `aria-labelledby` → the PREVIEW header. Escape dismisses; Cancel returns focus to the Fix button. After Apply: focus moves to the (now-likely-removed) row's parent section header so VoiceOver picks up the change.
 
 ### States
 
 #### Empty selection (Skills view, no row selected)
-- **Layout:** Detail column shows neutral centred placeholder. `--text-body` (`--label-secondary`).
+- **Layout:** Detail column shows neutral centred placeholder. `--text-body` 13px / **400**, `--label-secondary`.
 - **Copy:** **"Select a skill to view details"** (verbatim, see Copywriting).
 - A11y: `role="status"`, `aria-live="polite"` so VoiceOver announces on the first render only.
 
 #### All-clear health (D-12)
-- **Layout:** Health ContentPane body shows centred SF-shaped checkmark glyph (32×32, `--success`) above the heading "Everything looks healthy" (`--text-subhead` 16px / 600, `--label-primary`) and a sub-line (`--text-body` `--label-secondary`).
+- **Layout:** Health ContentPane body shows centred SF-shaped checkmark glyph (32×32, `--success`) above the heading "Everything looks healthy" (`--text-subhead` 16px / **600**, `--label-primary`) and a sub-line (`--text-body` 13px / **400**, `--label-secondary`).
 - **Copy:** see Copywriting (heading + sub-line).
 - **Sidebar:** Health `NavItem` badge variant **disappears** (D-12; cleared at zero findings).
 - A11y: `<section role="status" aria-label="Library health">`. The state heading is an `<h2>` so the headings rotor lists it.
@@ -541,7 +590,7 @@ Reuses the Phase 25 scaffold's pattern in `App.tsx`:
   • <context item 1>
 ```
 
-Rendered in a `--danger`-bordered banner at the top of whichever pane raised the error. Body copy `--text-body`, code prefix `--text-caption` (uppercase). Distinct from a per-row fix failure (those stay inline on the `FindingRow`).
+Rendered in a `--danger`-bordered banner at the top of whichever pane raised the error. Body copy `--text-body` 13px / 400; the `[CODE]` prefix `--text-small` 12px / 600 (uppercase via the existing `ErrorCode` enum values). Distinct from a per-row fix failure (those stay inline on the `FindingRow`).
 
 ### Destructive operations
 
@@ -588,6 +637,13 @@ These four open items come straight from `26-DESIGN-EXTRACT.md` §"Open items fo
 
 4. **Reconcile markdown subset wording.** `REQUIREMENTS.md` VIEW-04 says "same Markdown subset as `browse/markdown.rs`" — this is **superseded** by ROADMAP SC#4 + this spec's `MarkdownBody` allow-list (headings H1–H3, lists, links, code blocks, inline bold/italic/code). `browse/markdown.rs` is a ratatui-only hand-rolled renderer (headers + horizontal rules + inline bold-italic-code only — no lists, links, or code blocks); it is **not reused** for a webview.
    - **Owner:** planner. **Action:** during 26-04 (Markdown preview plan), file a small REQUIREMENTS.md cleanup commit updating VIEW-04's literal wording to point at SC#4 and this spec. Non-blocking for implementation.
+
+---
+
+## Revision Log
+
+- **2026-05-28 (initial draft).** Locked tokens, components, copywriting, keyboard map.
+- **2026-05-28 (revision 1 — checker feedback).** Typography re-aligned to **4 sizes / 2 weights**: collapsed `--text-caption` 11px and `--text-footnote` 12px into a single `--text-small` 12px (used at 400 for footnote / 600 for uppercase caption); dropped weight 500 entirely (reassigned to 400 or 600 by role); bound MarkdownBody H3 to `--text-body` (13px / 600) — no raw 14px. Propagated through every component spec that previously referenced the dropped token or weight (Titlebar, Sidebar caption/footer, NavItem, Badge, Pill, Button, SearchField, PopupMenu, KeyValueRow, DirectoryTable, SkillListRow, DetailHeader, MarkdownBody, SectionHeader, FindingRow, PreviewPopover, Error banner, all states). Non-blocking FLAGs (12px/20px spacing exceptions, "Fix"/"Cancel"/"Apply" single-word CTAs, provisional dark tokens) intentionally retained.
 
 ---
 
