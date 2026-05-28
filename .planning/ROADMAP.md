@@ -318,15 +318,15 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   6. File watcher reloads UI state when manifest, lockfile, or library content changes externally. No stale UI after CLI sync (VIEW-06).
   7. Every interactive element is keyboard-accessible and has a VoiceOver label (NF-02). Native menu bar shows File / Edit / View / Library / Help (NF-03).
 **Cut**: **v1.0-alpha**. Internal release; CLI still required for sync and edit.
-**Plans**: TBD — sequencing set during `/gsd:plan-phase`. Draft shape from milestone roadmap:
-- [ ] 26-01-PLAN.md — Status dashboard view (VIEW-01)
-- [ ] 26-02-PLAN.md — Virtualised skill list + fuzzy search (VIEW-02)
-- [ ] 26-03-PLAN.md — Detail pane + per-skill actions (VIEW-03)
-- [ ] 26-04-PLAN.md — Markdown preview component (VIEW-04)
-- [ ] 26-05-PLAN.md — Doctor health pane + fix actions (VIEW-05)
-- [ ] 26-06-PLAN.md — File watcher integration + auto-refresh (VIEW-06)
-- [ ] 26-07-PLAN.md — A11y + HIG audit (NF-02, NF-03)
-- [ ] 26-08-PLAN.md — Perf bench + harness (NF-01)
+**Plans**: 8 plans (Wave 1: 26-01 — StatusReport extension unblocks UI plans; Wave 2: 26-02..26-06 — UI feature plans + Rust watcher in parallel, all depend on 26-01's StatusReport shape; Wave 3: 26-07 + 26-08 — a11y/HIG audit + perf bench depend on all UI plans landing first)
+- [ ] 26-01-PLAN.md — Status dashboard view + StatusReport lockfile/machine-prefs extension (VIEW-01)
+- [ ] 26-02-PLAN.md — Shell (3-col NavigationSplitView + tokens) + virtualised skill list + fuzzy search (VIEW-02, NF-01 setup)
+- [ ] 26-03-PLAN.md — Detail pane + per-skill actions (open/copy/disable) via tome::actions module + Tauri opener+clipboard plugins (VIEW-03)
+- [ ] 26-04-PLAN.md — Markdown preview component (react-markdown SC#4 subset) + REQUIREMENTS.md VIEW-04 cleanup (VIEW-04)
+- [ ] 26-05-PLAN.md — Doctor health pane + per-item PreviewPopover fixes + content-aware FindingId enum (VIEW-05)
+- [ ] 26-06-PLAN.md — Rust-side file watcher (notify 8.2 + debouncer-full 0.7) + 4 typed events + per-hook subscriptions (VIEW-06, NF-05)
+- [ ] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
+- [ ] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
 ## Backlog
 
