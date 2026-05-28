@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: planning
-stopped_at: Phase 26 context gathered
-last_updated: "2026-05-27T13:39:47.132Z"
+stopped_at: Phase 26 UI-SPEC approved
+last_updated: "2026-05-28T13:05:59.279Z"
 last_activity: 2026-05-27 -- 25-06 complete (v1.0 frontend framework = React, D-GUI-04; spikes scored + collapsed into crates/tome-desktop/ui/; losers deleted; ADR recorded)
 progress:
   total_phases: 2
@@ -116,6 +116,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-27T13:39:47.121Z
-Stopped at: Phase 26 context gathered
-Resume file: .planning/phases/26-read-only-views-alpha-cut/26-CONTEXT.md
+Last session: 2026-05-28T13:05:59.273Z
+Stopped at: Phase 26 UI-SPEC approved
+Resume file: .planning/phases/26-read-only-views-alpha-cut/26-UI-SPEC.md
