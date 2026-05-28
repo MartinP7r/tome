@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: planning
+status: executing
 stopped_at: Phase 26 UI-SPEC approved
-last_updated: "2026-05-28T13:05:59.279Z"
-last_activity: 2026-05-27 -- 25-06 complete (v1.0 frontend framework = React, D-GUI-04; spikes scored + collapsed into crates/tome-desktop/ui/; losers deleted; ADR recorded)
+last_updated: "2026-05-28T15:56:22.263Z"
+last_activity: 2026-05-28 -- Phase 26 planning complete
 progress:
   total_phases: 2
   completed_phases: 1
-  total_plans: 6
+  total_plans: 14
   completed_plans: 6
-  percent: 50
+  percent: 43
 ---
 
 # Project State
@@ -27,8 +27,8 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 
 Phase: 25 (rust-core-extraction-tauri-integration-spike) — COMPLETE (6/6 plans)
 Plan: 6 of 6 complete (25-01..25-06 — Waves 1–5)
-Status: Phase 25 complete; ready for Phase 26 (Read-only views) planning
-Last activity: 2026-05-27 -- 25-06 complete (v1.0 frontend framework = React, D-GUI-04; spikes scored + collapsed into crates/tome-desktop/ui/; losers deleted; ADR recorded)
+Status: Ready to execute
+Last activity: 2026-05-28 -- Phase 26 planning complete
 
 **v1.0 phase shape (Phases 25–31):**
 
