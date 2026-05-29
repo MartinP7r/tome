@@ -1,0 +1,109 @@
+/* Badge — atom (UI-SPEC §Component Contract — Badge).
+ *
+ * Pill shape, 12px text, per-subtype color tokens. Two weight bins:
+ *   - managed / disabled → 600 (state badges)
+ *   - everything else → 400 (informational tints)
+ *
+ * Token swap: plan 26-02's tokens.css will replace these literal hex values
+ * with `var(--badge-role-discovery-fill)` etc. The class hierarchy already
+ * separates the concerns so the swap is mechanical.
+ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.weight600 {
+  font-weight: 600;
+}
+
+/* Role badges */
+
+.roleDiscovery {
+  background: #e3f3e8;
+  color: #1f8f4e;
+}
+.roleDistribution {
+  background: #e4eefb;
+  color: #1f5fb8;
+}
+.roleManaged {
+  background: #efeaff;
+  color: #6336c9;
+}
+
+/* Type badges */
+
+.typeClaudePlugins {
+  background: #efeaff;
+  color: #6336c9;
+}
+.typeGit {
+  background: #fff1da;
+  color: #a35d00;
+}
+.typeDirectory {
+  background: #f2f2f4;
+  color: #6e6e73;
+}
+
+/* State badges (weight 600) */
+
+.managed {
+  background: #e4eefb;
+  color: #1f5fb8;
+}
+.disabled {
+  background: #f2f2f4;
+  color: #6e6e73;
+}
+.override {
+  background: #fff1da;
+  color: #a35d00;
+}
+
+@media (prefers-color-scheme: dark) {
+  .roleDiscovery {
+    background: #1c3a26;
+    color: #62d391;
+  }
+  .roleDistribution {
+    background: #1a2e4d;
+    color: #6aa7f0;
+  }
+  .roleManaged {
+    background: #2e2350;
+    color: #b29bff;
+  }
+  .typeClaudePlugins {
+    background: #2e2350;
+    color: #b29bff;
+  }
+  .typeGit {
+    background: #3d2a10;
+    color: #e0a060;
+  }
+  .typeDirectory {
+    background: #2c2c2e;
+    color: #98989d;
+  }
+  .managed {
+    background: #1a2e4d;
+    color: #6aa7f0;
+  }
+  .disabled {
+    background: #2c2c2e;
+    color: #98989d;
+  }
+  .override {
+    background: #3d2a10;
+    color: #e0a060;
+  }
+}

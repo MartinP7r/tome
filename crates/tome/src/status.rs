@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::Config;
+use crate::lockfile;
+use crate::machine;
 use crate::manifest;
 use crate::paths::TomePaths;
 
@@ -33,6 +35,120 @@ impl From<Result<usize, String>> for CountOrError {
             },
         }
     }
+}
+
+/// State of `tome.lock` relative to the on-disk manifest (VIEW-01).
+///
+/// Classification reuses the same content-hash comparison `reconcile.rs`
+/// performs against the marketplace: every lockfile entry must have a
+/// matching manifest entry whose `content_hash` equals the lockfile-recorded
+/// value. Any divergence (missing manifest entry OR hash mismatch) increments
+/// `drift_count`.
+///
+/// Variant tag style matches the GUI's discriminated-union pattern (D-GUI-08):
+/// the serialized shape is `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`
+/// so the React side can pattern-match without parsing strings.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LockfileState {
+    /// Every lockfile entry's `content_hash` matches the manifest.
+    InSync,
+    /// At least one lockfile entry has no matching manifest hash. `drift_count`
+    /// counts the divergent entries (mismatch + missing manifest combined).
+    OutOfSync { drift_count: usize },
+    /// `tome.lock` does not exist on disk (fresh `tome_home`, never synced).
+    Missing,
+}
+
+impl LockfileState {
+    /// All variant tag strings, in declaration order.
+    ///
+    /// Mirrors the [`crate::marketplace::InstallFailureKind::ALL`] /
+    /// [`crate::remove::FailureKind::ALL`] POLISH-04 pattern: paired with
+    /// [`_ensure_lockfile_state_exhaustive`] + the const-length guard below,
+    /// a hand-edit that adds a variant without growing `ALL` (or vice versa)
+    /// fails to compile.
+    pub const ALL: [&'static str; 3] = ["in_sync", "out_of_sync", "missing"];
+
+    /// Classify the lockfile/manifest pair at `paths`.
+    ///
+    /// Returns:
+    /// - [`LockfileState::Missing`] when `tome.lock` does not exist.
+    /// - [`LockfileState::InSync`] when every lockfile entry has a matching
+    ///   manifest entry with byte-equal `content_hash`.
+    /// - [`LockfileState::OutOfSync`] otherwise, with `drift_count` set to the
+    ///   number of divergent entries (missing-from-manifest + hash-mismatch).
+    ///
+    /// Reuses the manifest+lockfile content-hash comparison that
+    /// [`crate::reconcile::classify_lockfile`] performs against the
+    /// marketplace, but operates against the on-disk manifest (no adapter
+    /// required) — matching `reconcile.rs`-shaped semantics per OQ-4 /
+    /// RESEARCH §"Standard Stack — Status dashboard".
+    pub fn classify(paths: &TomePaths) -> Result<Self> {
+        let lockfile = match lockfile::load(paths.config_dir())? {
+            Some(lf) => lf,
+            None => return Ok(LockfileState::Missing),
+        };
+
+        // Manifest read errors fall back to "no manifest" — every lockfile
+        // entry counts as drift in that case so the user is signalled.
+        let manifest = manifest::load(paths.config_dir()).unwrap_or_default();
+
+        let mut drift_count = 0usize;
+        for (name, lock_entry) in lockfile.skills() {
+            match manifest.get(name.as_str()) {
+                Some(manifest_entry) if manifest_entry.content_hash == lock_entry.content_hash => {
+                    // matched
+                }
+                _ => drift_count += 1,
+            }
+        }
+
+        if drift_count == 0 {
+            Ok(LockfileState::InSync)
+        } else {
+            Ok(LockfileState::OutOfSync { drift_count })
+        }
+    }
+}
+
+/// Compile-time drift guard for [`LockfileState::ALL`] (POLISH-04 option c).
+///
+/// If a new variant is added to [`LockfileState`], this `const fn` fails to
+/// compile because the match below is exhaustive. The fix is to (a) add an
+/// arm here AND (b) append the new tag string to `ALL`. Mirrors
+/// [`crate::marketplace::_ensure_install_failure_kind_all_exhaustive`].
+#[allow(dead_code)] // sentinel-only — its purpose is the exhaustiveness check
+const fn _lockfile_state_exhaustiveness_sentinel(state: LockfileState) -> usize {
+    match state {
+        LockfileState::InSync => 0,
+        LockfileState::OutOfSync { .. } => 1,
+        LockfileState::Missing => 2,
+    }
+}
+
+const _: () = {
+    // If this fails: LockfileState::ALL is missing or has extra variants.
+    // The match arms in _lockfile_state_exhaustiveness_sentinel are the
+    // source of truth — ALL must contain exactly one tag per arm.
+    assert!(LockfileState::ALL.len() == 3);
+};
+
+/// Per-machine prefs summary shown in the Status view (VIEW-01).
+///
+/// Surfaces the integer counts the Status view's `MACHINE` row renders
+/// ("N skills disabled"). Counts only — the full skill / directory lists
+/// stay in `machine.toml`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct MachinePrefsSummary {
+    /// `MachinePrefs.disabled.len()` — count of skills globally disabled
+    /// on this machine.
+    pub disabled_count: usize,
+    /// `MachinePrefs.disabled_directories.len()` — count of directories
+    /// disabled on this machine.
+    pub disabled_directory_count: usize,
 }
 
 /// Status of a single configured directory.
@@ -88,6 +204,13 @@ pub struct StatusReport {
     /// Directories table and the Health line (D-D2). Always present in
     /// JSON output for stable shape; empty array when no Unowned skills.
     pub unowned: Vec<crate::summary::SkillSummary>,
+    /// State of `tome.lock` relative to the on-disk manifest (VIEW-01).
+    /// Surfaces in the Status view's `LOCKFILE` row paired with `StatusDot`.
+    /// JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
+    pub lockfile: LockfileState,
+    /// Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
+    /// `MACHINE` row ("N skills disabled").
+    pub machine_prefs_summary: MachinePrefsSummary,
     /// Number of health issues, or an error message.
     pub health: CountOrError,
 }
@@ -153,6 +276,29 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
             Err(_) => (Vec::new(), None),
         };
 
+    // VIEW-01: lockfile classification + machine-prefs summary. Both degrade
+    // gracefully — IO/parse errors on the lockfile fall through to `Missing`
+    // (the same outcome a missing file produces), and machine-prefs read
+    // errors fall through to `Default::default()` so the Status view always
+    // renders the row.
+    let lockfile = LockfileState::classify(paths).unwrap_or(LockfileState::Missing);
+    let machine_prefs_summary = match machine::default_machine_path() {
+        Ok(p) => match machine::load(&p) {
+            Ok(prefs) => MachinePrefsSummary {
+                disabled_count: prefs.disabled.len(),
+                disabled_directory_count: prefs.disabled_directories.len(),
+            },
+            Err(_) => MachinePrefsSummary {
+                disabled_count: 0,
+                disabled_directory_count: 0,
+            },
+        },
+        Err(_) => MachinePrefsSummary {
+            disabled_count: 0,
+            disabled_directory_count: 0,
+        },
+    };
+
     Ok(StatusReport {
         configured,
         library_dir: paths.library_dir().to_path_buf(),
@@ -160,6 +306,8 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         last_sync,
         directories,
         unowned,
+        lockfile,
+        machine_prefs_summary,
         health: health.into(),
     })
 }
@@ -318,6 +466,24 @@ fn render_status(report: &StatusReport) {
         println!("{rendered}");
         println!();
     }
+
+    // Lockfile state + machine-prefs summary (VIEW-01).
+    let lockfile_str = match &report.lockfile {
+        LockfileState::InSync => format!("{} {}", style("✓").green(), style("in sync").green()),
+        LockfileState::OutOfSync { drift_count } => format!(
+            "{} {}",
+            style("⚠").yellow(),
+            style(format!("out of sync ({} drift)", drift_count)).yellow()
+        ),
+        LockfileState::Missing => format!("{} {}", style("✗").red(), style("missing").red()),
+    };
+    println!("{} {}", style("Lockfile:").bold(), lockfile_str);
+    println!(
+        "{} {} skills disabled, {} directories disabled",
+        style("Machine:").bold(),
+        style(report.machine_prefs_summary.disabled_count).cyan(),
+        style(report.machine_prefs_summary.disabled_directory_count).cyan(),
+    );
 
     // Health
     let health = match (&report.health.count, &report.health.error) {
@@ -1005,6 +1171,11 @@ mod tests {
             last_sync: None,
             directories: Vec::new(),
             unowned: Vec::new(),
+            lockfile: LockfileState::Missing,
+            machine_prefs_summary: MachinePrefsSummary {
+                disabled_count: 0,
+                disabled_directory_count: 0,
+            },
             health: CountOrError {
                 count: Some(0),
                 error: None,
@@ -1044,6 +1215,11 @@ mod tests {
             last_sync: None,
             directories: Vec::new(),
             unowned: vec![summary],
+            lockfile: LockfileState::Missing,
+            machine_prefs_summary: MachinePrefsSummary {
+                disabled_count: 0,
+                disabled_directory_count: 0,
+            },
             health: CountOrError {
                 count: Some(0),
                 error: None,
@@ -1120,5 +1296,190 @@ mod tests {
             rendered.contains("~/legacy/path"),
             "D-C2 fallback: should render source_path_display when previous_source is None: {rendered}"
         );
+    }
+
+    // -- VIEW-01: LockfileState classifier --
+
+    #[test]
+    fn lockfile_state_missing_when_no_lockfile_on_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib).unwrap();
+
+        let state = LockfileState::classify(&paths).unwrap();
+        assert_eq!(state, LockfileState::Missing);
+    }
+
+    #[test]
+    fn lockfile_state_in_sync_when_hashes_match() {
+        use crate::lockfile::{LockEntry, Lockfile};
+        use std::collections::BTreeMap;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib).unwrap();
+
+        let hash = crate::validation::test_hash("alpha-body");
+
+        // Manifest with one entry.
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/src/alpha"),
+                crate::config::DirectoryName::new("dotfiles").unwrap(),
+                hash.clone(),
+                false,
+            ),
+        );
+        manifest::save(&m, paths.config_dir()).unwrap();
+
+        // Lockfile with matching hash.
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            LockEntry {
+                source_name: Some(crate::config::DirectoryName::new("dotfiles").unwrap()),
+                previous_source: None,
+                content_hash: hash,
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let lf = Lockfile {
+            version: 1,
+            skills: entries,
+        };
+        crate::lockfile::save(&lf, paths.config_dir()).unwrap();
+
+        let state = LockfileState::classify(&paths).unwrap();
+        assert_eq!(state, LockfileState::InSync);
+    }
+
+    #[test]
+    fn lockfile_state_out_of_sync_when_hashes_differ() {
+        use crate::lockfile::{LockEntry, Lockfile};
+        use std::collections::BTreeMap;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib).unwrap();
+
+        let lock_hash = crate::validation::test_hash("OLD-CONTENT");
+        let manifest_hash = crate::validation::test_hash("NEW-CONTENT");
+
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            manifest::SkillEntry::new(
+                PathBuf::from("/tmp/src/alpha"),
+                crate::config::DirectoryName::new("dotfiles").unwrap(),
+                manifest_hash,
+                false,
+            ),
+        );
+        manifest::save(&m, paths.config_dir()).unwrap();
+
+        let mut entries = BTreeMap::new();
+        entries.insert(
+            crate::discover::SkillName::new("alpha").unwrap(),
+            LockEntry {
+                source_name: Some(crate::config::DirectoryName::new("dotfiles").unwrap()),
+                previous_source: None,
+                content_hash: lock_hash,
+                registry_id: None,
+                version: None,
+                git_commit_sha: None,
+            },
+        );
+        let lf = Lockfile {
+            version: 1,
+            skills: entries,
+        };
+        crate::lockfile::save(&lf, paths.config_dir()).unwrap();
+
+        let state = LockfileState::classify(&paths).unwrap();
+        assert!(
+            matches!(state, LockfileState::OutOfSync { drift_count: 1 }),
+            "expected OutOfSync {{ drift_count: 1 }}, got {state:?}"
+        );
+    }
+
+    #[test]
+    fn lockfile_state_out_of_sync_counts_missing_manifest_entries_as_drift() {
+        use crate::lockfile::{LockEntry, Lockfile};
+        use std::collections::BTreeMap;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib).unwrap();
+
+        // Empty manifest.
+        let m = manifest::Manifest::default();
+        manifest::save(&m, paths.config_dir()).unwrap();
+
+        // Lockfile records two entries that have no manifest counterpart.
+        let mut entries = BTreeMap::new();
+        for n in ["alpha", "beta"] {
+            entries.insert(
+                crate::discover::SkillName::new(n).unwrap(),
+                LockEntry {
+                    source_name: Some(crate::config::DirectoryName::new("dotfiles").unwrap()),
+                    previous_source: None,
+                    content_hash: crate::validation::test_hash(n),
+                    registry_id: None,
+                    version: None,
+                    git_commit_sha: None,
+                },
+            );
+        }
+        let lf = Lockfile {
+            version: 1,
+            skills: entries,
+        };
+        crate::lockfile::save(&lf, paths.config_dir()).unwrap();
+
+        let state = LockfileState::classify(&paths).unwrap();
+        assert!(
+            matches!(state, LockfileState::OutOfSync { drift_count: 2 }),
+            "expected OutOfSync {{ drift_count: 2 }}, got {state:?}"
+        );
+    }
+
+    #[test]
+    fn lockfile_state_serializes_with_kind_tag() {
+        let in_sync = serde_json::to_value(LockfileState::InSync).unwrap();
+        assert_eq!(in_sync["kind"], "in_sync");
+
+        let out = serde_json::to_value(LockfileState::OutOfSync { drift_count: 3 }).unwrap();
+        assert_eq!(out["kind"], "out_of_sync");
+        assert_eq!(out["drift_count"], 3);
+
+        let missing = serde_json::to_value(LockfileState::Missing).unwrap();
+        assert_eq!(missing["kind"], "missing");
+    }
+
+    #[test]
+    fn lockfile_state_all_contains_every_tag_in_declaration_order() {
+        // POLISH-04 anchor: this test pins the tag-string order so a hand-edit
+        // that scrambles ALL is obvious; the compile-time `const _` block
+        // pins the length.
+        assert_eq!(LockfileState::ALL, ["in_sync", "out_of_sync", "missing"]);
+    }
+
+    #[test]
+    fn machine_prefs_summary_serializes_with_count_fields() {
+        let summary = MachinePrefsSummary {
+            disabled_count: 7,
+            disabled_directory_count: 2,
+        };
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["disabled_count"], 7);
+        assert_eq!(json["disabled_directory_count"], 2);
     }
 }
