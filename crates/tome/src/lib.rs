@@ -57,7 +57,12 @@ pub mod cli;
 pub mod config;
 pub(crate) mod discover;
 pub(crate) mod distribute;
-pub(crate) mod doctor;
+// `doctor` is `pub` since Phase 26 plan 26-05: the GUI Health view's two
+// Tauri commands (`get_doctor_report` / `doctor_repair_one`) call into
+// `tome::doctor::collect_doctor_view` + `tome::doctor::repair_one`, and the
+// IPC boundary needs the public `FindingId` / `DoctorView` / `DoctorFinding`
+// types to round-trip across the webview wire.
+pub mod doctor;
 // `errors` is `pub` because `DomainErrorKind` is the domain half of the
 // GUI error boundary (CORE-05 / D-14): `tome-desktop`'s `TomeError::from`
 // downcasts these typed sentinels out of the anyhow cause chain to pick a
