@@ -31,22 +31,33 @@ export function useStatus(): UseStatusResult {
   const [err, setErr] = useState<TomeError | null>(null);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
 
-  const refetch = useCallback(async () => {
+  // `fetch(true)` flashes the Updated pill; `fetch(false)` does not.
+  // We want the pill to mean "data changed under you since you last looked"
+  // — i.e. a watcher event or an explicit user refetch — NOT "we just did
+  // the initial fetch on app launch". Phase 26 UAT walk surfaced the cold-
+  // mount flash as confusing: the pill appeared next to a LAST SYNC that
+  // was days old, implying something had just synced.
+  const fetchStatus = useCallback(async (fromEvent: boolean) => {
     // Result-narrowing pattern from Phase 25 App.tsx — no try/catch around
     // the typed discriminated-union result.
     const res = await commands.getStatus();
     if (res.status === "ok") {
       setStatus(res.data);
       setErr(null);
-      setUpdatedAt(Date.now());
+      if (fromEvent) setUpdatedAt(Date.now());
     } else {
       setErr(res.error);
     }
   }, []);
 
+  // Manual refetch (returned to caller) and watcher-driven refetch BOTH
+  // flash the pill — the cold-mount fetch in the useEffect below is the
+  // only path that suppresses it.
+  const refetch = useCallback(() => fetchStatus(true), [fetchStatus]);
+
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    fetchStatus(false);
+  }, [fetchStatus]);
 
   // Plan 26-06 event-subscription matrix — Status row depends on all 4
   // watched roots. Each subscription is a separate hook call so cleanup is

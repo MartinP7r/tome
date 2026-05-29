@@ -8,10 +8,14 @@
  */
 
 .row {
-  display: grid;
-  grid-template-columns: 160px 1fr auto;
-  gap: 12px;
+  /* Flexbox (not grid) so the trailing slot sits immediately after the value
+   * with a fixed gap, instead of being pushed to the row's right edge by a
+   * 1fr value column. Phase 26 UAT walk found the original `160px 1fr auto`
+   * layout left the LIBRARY skill-count chip and LOCKFILE status dot stranded
+   * at the far right of the pane, away from the data they annotate. */
+  display: flex;
   align-items: baseline;
+  gap: 12px;
   padding: 8px 0;
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
 }
@@ -21,6 +25,7 @@
 }
 
 .label {
+  flex: 0 0 160px;
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
@@ -29,23 +34,31 @@
   line-height: 1.4;
 }
 
+/* Value takes its natural width but can shrink to make room for very long
+ * paths. `min-width: 0` enables that shrinkage; `overflow-wrap: anywhere`
+ * lets long un-broken strings wrap inside the column. */
 .value {
+  flex: 0 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-weight: 400;
   color: #1d1d1f;
   line-height: 1.5;
-  min-width: 0;
   overflow-wrap: anywhere;
 }
 
 .valueMono {
+  flex: 0 1 auto;
+  min-width: 0;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 12px;
   font-weight: 400;
   color: #1d1d1f;
+  overflow-wrap: anywhere;
 }
 
 .trailing {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 8px;
