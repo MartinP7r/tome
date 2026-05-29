@@ -52,7 +52,25 @@ export function SkillsView() {
   const [sort, setSort] = useState<SortMode>("name");
   const [group, setGroup] = useState<GroupMode>("none");
   const [selected, setSelected] = useState<string | null>(null);
+  const [removalAnnouncement, setRemovalAnnouncement] = useState<string>("");
   const searchRef = useRef<SearchFieldHandle>(null);
+
+  // Plan 26-06 D-03 — when a watcher-driven refetch removes the currently
+  // selected skill from the list (renamed/deleted externally), clear the
+  // selection AND fire a one-time aria-live announcement so VoiceOver users
+  // know why focus shifted. The selection state itself is preserved across
+  // every other refresh — `useSkills` rebuilds `skills[]`; we leave
+  // `selected` alone unless the skill is gone.
+  useEffect(() => {
+    if (!skills || selected === null) return;
+    if (!skills.some((s) => s.name === selected)) {
+      setSelected(null);
+      setRemovalAnnouncement("Selected skill was removed.");
+      // Clear after a beat so the message is fresh next time it fires.
+      const t = window.setTimeout(() => setRemovalAnnouncement(""), 1000);
+      return () => window.clearTimeout(t);
+    }
+  }, [skills, selected]);
 
   // Filter via fuse.js (display-only — D-GUI-08 §S-10 allowed exception for
   // sort/group/filter computations).
@@ -97,6 +115,26 @@ export function SkillsView() {
 
   return (
     <div className={styles.split}>
+      {/* Hidden aria-live region — fires when a watcher refresh removes the
+          selected skill (D-03 + UI-SPEC §Transient). visually-hidden via
+          inline style to avoid pulling another CSS-Module slot. */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
+        {removalAnnouncement}
+      </div>
       <div className={styles.listColumn}>
         <div className={styles.searchSlot}>
           <SearchField ref={searchRef} value={query} onChange={setQuery} />
