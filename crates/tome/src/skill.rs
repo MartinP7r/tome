@@ -180,9 +180,7 @@ fn yaml_to_json_string(value: &serde_yaml::Value) -> String {
         Err(_) => return "null".to_string(),
     };
     match serde_yaml::from_str::<serde_json::Value>(&yaml_str) {
-        Ok(json) => {
-            serde_json::to_string(&json).unwrap_or_else(|_| format!("{json:?}"))
-        }
+        Ok(json) => serde_json::to_string(&json).unwrap_or_else(|_| format!("{json:?}")),
         Err(_) => serde_json::to_string(&format!("{value:?}"))
             .unwrap_or_else(|_| "\"<unrepresentable>\"".to_string()),
     }
@@ -285,8 +283,12 @@ pub fn collect_detail(
 
     let machine_path = crate::machine::default_machine_path()
         .context("failed to resolve default machine.toml path")?;
-    let prefs = crate::machine::load(&machine_path)
-        .with_context(|| format!("failed to load machine prefs from {}", machine_path.display()))?;
+    let prefs = crate::machine::load(&machine_path).with_context(|| {
+        format!(
+            "failed to load machine prefs from {}",
+            machine_path.display()
+        )
+    })?;
 
     Ok(SkillDetail {
         name: name.clone(),
@@ -430,7 +432,8 @@ mod tests {
 
     #[test]
     fn frontmatter_view_projects_metadata_map() {
-        let yaml = "---\nname: m\nmetadata:\n  tags:\n    - swift\n    - ios\n  level: 3\n---\nbody";
+        let yaml =
+            "---\nname: m\nmetadata:\n  tags:\n    - swift\n    - ios\n  level: 3\n---\nbody";
         let (fm, _) = parse(yaml).unwrap();
         let view = SkillFrontmatterView::from_frontmatter(&fm);
         let meta = view.metadata.expect("metadata present");

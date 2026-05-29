@@ -10,9 +10,9 @@
 //! `core:default`/`core:event:default`, no `fs:default` or shell widening
 //! (T-25-04-EoP mitigation).
 
+use tome::SkillName;
 use tome::TomePaths;
 use tome::config::Config;
-use tome::SkillName;
 
 use crate::error::TomeError;
 

@@ -1483,7 +1483,9 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
                         format!("manifest entry '{}' has no directory on disk", name),
                         RepairKind::RemoveStaleManifestEntry,
                     )
-                    .with_id(FindingId::LibraryStaleManifest { skill: name.clone() }),
+                    .with_id(FindingId::LibraryStaleManifest {
+                        skill: name.clone(),
+                    }),
                 );
             }
         }
@@ -1526,9 +1528,7 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
                         ),
                         RepairKind::RemoveBrokenLibrarySymlink,
                     )
-                    .with_id(FindingId::LibraryBrokenSymlink {
-                        path: path.clone(),
-                    }),
+                    .with_id(FindingId::LibraryBrokenSymlink { path: path.clone() }),
                 );
             }
         }
@@ -1566,7 +1566,9 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
                             IssueSeverity::Warning,
                             format!("'{name}' has unparsable SKILL.md frontmatter: {e}"),
                         )
-                        .with_id(FindingId::UnparsableFrontmatter { skill: name.clone() }),
+                        .with_id(FindingId::UnparsableFrontmatter {
+                            skill: name.clone(),
+                        }),
                     );
                 }
             }
@@ -3687,8 +3689,7 @@ mod tests {
         repair_one(&id, &config, &paths).unwrap();
 
         assert!(
-            !lib.path().join("legacy-a").exists()
-                && !lib.path().join("legacy-a").is_symlink(),
+            !lib.path().join("legacy-a").exists() && !lib.path().join("legacy-a").is_symlink(),
             "legacy-a should be removed"
         );
         assert!(
