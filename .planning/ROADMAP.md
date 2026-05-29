@@ -324,7 +324,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [ ] 26-03-PLAN.md — Detail pane + per-skill actions (open/copy/disable) via tome::actions module + Tauri opener+clipboard plugins (VIEW-03)
 - [ ] 26-04-PLAN.md — Markdown preview component (react-markdown SC#4 subset) + REQUIREMENTS.md VIEW-04 cleanup (VIEW-04)
 - [ ] 26-05-PLAN.md — Doctor health pane + per-item PreviewPopover fixes + content-aware FindingId enum (VIEW-05)
-- [ ] 26-06-PLAN.md — Rust-side file watcher (notify 8.2 + debouncer-full 0.7) + 4 typed events + per-hook subscriptions (VIEW-06, NF-05)
+- [x] 26-06-PLAN.md — Rust-side file watcher (notify 8.2 + debouncer-full 0.7) + 4 typed events + per-hook subscriptions (VIEW-06, NF-05)
 - [ ] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
 - [ ] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
