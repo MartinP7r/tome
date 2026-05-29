@@ -1,0 +1,48 @@
+/* Pill — transient acknowledgement atom (UI-SPEC §Atoms — Pill — Updated).
+ *
+ * Fades over ~2s via opacity 1 → 0 between 1500ms and 2000ms after mount.
+ * `prefers-reduced-motion: reduce` snaps and then hides.
+ */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  opacity: 1;
+}
+
+.updated {
+  /* --success at 18% alpha (light) */
+  background: rgba(40, 200, 64, 0.18);
+  color: #28c840;
+  animation: pillFade 2000ms ease-out forwards;
+}
+
+@keyframes pillFade {
+  0% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .updated {
+    animation: pillFadeReduced 2000ms steps(2, end) forwards;
+  }
+  @keyframes pillFadeReduced {
+    0% { opacity: 1; }
+    99% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  .updated {
+    /* --success at 24% alpha (dark) */
+    background: rgba(48, 209, 88, 0.24);
+    color: #30d158;
+  }
+}

@@ -171,6 +171,50 @@ export type ErrorCode =
 "Internal";
 
 /**
+ *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
+ * 
+ *  Classification reuses the same content-hash comparison `reconcile.rs`
+ *  performs against the marketplace: every lockfile entry must have a
+ *  matching manifest entry whose `content_hash` equals the lockfile-recorded
+ *  value. Any divergence (missing manifest entry OR hash mismatch) increments
+ *  `drift_count`.
+ * 
+ *  Variant tag style matches the GUI's discriminated-union pattern (D-GUI-08):
+ *  the serialized shape is `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`
+ *  so the React side can pattern-match without parsing strings.
+ */
+export type LockfileState = 
+/**  Every lockfile entry's `content_hash` matches the manifest. */
+{ kind: "in_sync" } | 
+/**
+ *  At least one lockfile entry has no matching manifest hash. `drift_count`
+ *  counts the divergent entries (mismatch + missing manifest combined).
+ */
+{ kind: "out_of_sync"; drift_count: number } | 
+/**  `tome.lock` does not exist on disk (fresh `tome_home`, never synced). */
+{ kind: "missing" };
+
+/**
+ *  Per-machine prefs summary shown in the Status view (VIEW-01).
+ * 
+ *  Surfaces the integer counts the Status view's `MACHINE` row renders
+ *  ("N skills disabled"). Counts only — the full skill / directory lists
+ *  stay in `machine.toml`.
+ */
+export type MachinePrefsSummary = {
+	/**
+	 *  `MachinePrefs.disabled.len()` — count of skills globally disabled
+	 *  on this machine.
+	 */
+	disabled_count: number,
+	/**
+	 *  `MachinePrefs.disabled_directories.len()` — count of directories
+	 *  disabled on this machine.
+	 */
+	disabled_directory_count: number,
+};
+
+/**
  *  One row of the Unowned section in `tome status` and `tome doctor`.
  *  Per D-D3 in the Phase 14 CONTEXT.md.
  */
@@ -225,6 +269,17 @@ export type StatusReport_Deserialize = {
 	 *  JSON output for stable shape; empty array when no Unowned skills.
 	 */
 	unowned: SkillSummary[],
+	/**
+	 *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
+	 *  Surfaces in the Status view's `LOCKFILE` row paired with `StatusDot`.
+	 *  JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
+	 */
+	lockfile: LockfileState,
+	/**
+	 *  Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
+	 *  `MACHINE` row ("N skills disabled").
+	 */
+	machine_prefs_summary: MachinePrefsSummary,
 	/**  Number of health issues, or an error message. */
 	health: CountOrError_Deserialize,
 };
@@ -250,6 +305,17 @@ export type StatusReport_Serialize = {
 	 *  JSON output for stable shape; empty array when no Unowned skills.
 	 */
 	unowned: SkillSummary[],
+	/**
+	 *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
+	 *  Surfaces in the Status view's `LOCKFILE` row paired with `StatusDot`.
+	 *  JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
+	 */
+	lockfile: LockfileState,
+	/**
+	 *  Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
+	 *  `MACHINE` row ("N skills disabled").
+	 */
+	machine_prefs_summary: MachinePrefsSummary,
 	/**  Number of health issues, or an error message. */
 	health: CountOrError_Serialize,
 };
