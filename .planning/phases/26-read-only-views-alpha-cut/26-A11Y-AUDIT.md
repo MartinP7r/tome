@@ -153,22 +153,71 @@ Sequence runs against `cargo tauri dev` with VoiceOver on (⌘F5). Each row's `a
 
 ## 4. axe-core/playwright CI gate baseline
 
-Populated by Task 3 once `npm run test:a11y` runs against the built UI for the first time.
+The gate is wired in `crates/tome-desktop/tests/a11y/axe.spec.ts`, run by
+`crates/tome-desktop/ui` → `npm run test:a11y` (which spawns Vite with
+`A11Y_TEST=1` so `@tauri-apps/*` imports are aliased to the deterministic
+fixture mocks under `src/__mocks__/`).
 
-### First-run results
+CI: `.github/workflows/ci.yml` job `a11y` on `macos-latest`.
 
-_(pending Task 3 — to be filled when `npm run test:a11y` is wired and run against the alpha cut.)_
+Local execution: by default Playwright downloads its own Chromium
+build (~150MB). When that download is unavailable (offline sandbox,
+restricted egress), set `PW_USE_SYSTEM_CHROME=1` to fall back to the
+system Google Chrome via Playwright's `channel: "chrome"` option.
+CI always uses Playwright's bundled Chromium for determinism.
+
+### First-run results (2026-05-29, plan 26-07 Task 3)
 
 | View | Violations (count) | Worst severity | Resolution |
 |------|-------------------|----------------|------------|
-| Status | — | — | — |
-| Skills | — | — | — |
-| Health | — | — | — |
-| PreviewPopover (open) | — | — | — |
+| Status | 0 (with `color-contrast` disabled) | — | PASS — every non-color rule clean. |
+| Skills | 0 (with `color-contrast` disabled) | — | PASS — every non-color rule clean. |
+| Health | 0 (with `color-contrast` disabled) | — | PASS — every non-color rule clean. |
+| PreviewPopover (open) | 0 (with `color-contrast` disabled) | — | PASS — every non-color rule clean. |
 
 ### Known exceptions (`disableRules` with justification)
 
-_(none — empty unless a violation can't be fixed in this plan.)_
+The 4 tests disable exactly one axe rule:
+
+- **`color-contrast`** — Plan 26-07 task 3 first-run flagged the
+  following sub-4.5:1 pairings against WCAG-AA-normal-text (4.5:1):
+
+  | Element | Foreground / background | Measured | Threshold | Source |
+  |---|---|---|---|---|
+  | `PreviewPopover`'s Apply button | `#ffffff` on `#007aff` | 4.01:1 | 4.5:1 | `--accent` / `--accent-on` (UI-SPEC §Color light) |
+  | `Sidebar` NavItem label on the vibrancy material | `--label-primary` on the underlying page (sampled through `--sidebar-material` rgba 0.72) | varies (≈ 4.0–4.4:1) | 4.5:1 | UI-SPEC §Color light + §Sidebar §Material |
+  | `Sidebar` LIBRARY caption / footer / role-badge | `--label-secondary` on the vibrancy material | < 4.5:1 | 4.5:1 | UI-SPEC §Color light + §Typography (small) |
+  | `Updated` pill ("Updated") | pill `color` on its background tint | < 4.5:1 | 4.5:1 | UI-SPEC §Components §"Pill — Updated" |
+
+  **Why deferred from this plan**: every finding traces back to a
+  UI-SPEC §Color decision (the canonical Apple SF Blue `#007aff`,
+  the translucent sidebar material, the pill background tint). Each
+  is part of the design system, not an isolated component bug;
+  shifting them touches the whole alpha visually and needs design
+  sign-off. The plan 26-07 audit (this doc, §1–§3) already mitigates
+  the keyboard / VoiceOver dimensions; the color-contrast tightening
+  is a separate work item.
+
+  **Action**: file a follow-up issue / OpenSpec entry titled
+  "tighten Phase-26 design tokens to clear WCAG-AA-normal (4.5:1)
+  contrast on every label / button / pill pairing" and reference it
+  in §Revision Log. Candidate fixes the design owner can pick from:
+  - Bump `--accent` to a darker accessible blue (e.g. `#0040DD`)
+    for use as a button background — keep SF Blue for accent strokes.
+  - Introduce `--accent-strong` for primary-button backgrounds and
+    set `--accent` to the lighter SF Blue for accent-only surfaces.
+  - Disable vibrancy on the Sidebar entirely when
+    `prefers-contrast: more` is set (more conservative than the
+    existing reduced-transparency fallback).
+  - Bump the "Updated" pill background to one of the existing
+    bolder tokens.
+
+  Once the design-token retune lands, remove `color-contrast` from
+  `DISABLED_RULES` in `axe.spec.ts` and re-baseline this section.
+
+Every other axe rule is enforced. The disabled list is not a wildcard;
+it's a single rule, scoped via `.disableRules(['color-contrast'])` on
+every test, with the explicit follow-up above.
 
 ---
 
