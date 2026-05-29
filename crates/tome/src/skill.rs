@@ -88,9 +88,10 @@ pub fn parse(content: &str) -> anyhow::Result<(SkillFrontmatter, String)> {
 /// webview's render path; anything beyond 1 MiB is truncated with a
 /// marker line so the user can tell.
 //
-// `dead_code` allow: this surface lands ahead of the `tome-desktop` consumer
-// (Task 2 of plan 26-03 wires the `get_skill_detail` Tauri command). Drop
-// the allow attrs in Task 2.
+// `dead_code` allow on the CLI build only — `tome-desktop` consumes the
+// constant via `collect_detail` under feature `bindings`. The bare CLI
+// build never references it. Keep this attr; SKILL_BODY_MAX_BYTES is
+// shared API surface even when bindings are off.
 #[allow(dead_code)]
 pub const SKILL_BODY_MAX_BYTES: usize = 1_048_576;
 
@@ -98,14 +99,18 @@ pub const SKILL_BODY_MAX_BYTES: usize = 1_048_576;
 /// boundary.
 ///
 /// The CLI-side [`SkillFrontmatter`] type carries unstructured `metadata` and
-/// `extra` maps keyed by `String → serde_yaml::Value`. `specta`'s
-/// `serde_yaml` support is not enabled in this crate (would add a heavier
-/// transitive dep just for ad-hoc YAML), so the GUI ships a parallel shape
-/// with `serde_json::Value` entries instead. The conversion happens via a
-/// YAML→JSON pass in [`SkillFrontmatterView::from_frontmatter`] — the
-/// projection is **best-effort**: YAML constructs that have no JSON
-/// equivalent (tags, anchors) collapse into a stringified placeholder, which
-/// is the right trade-off for a GUI display surface.
+/// `extra` maps keyed by `String → serde_yaml::Value`. specta's `serde_yaml`
+/// support is not enabled in this crate (would add a heavier transitive dep
+/// for ad-hoc YAML), and `serde_json::Value` is recursive and can't be
+/// inlined by specta's TypeScript exporter. So the GUI ships **JSON-encoded
+/// string blobs** for the unstructured fields — the JS side `JSON.parse`s
+/// them on demand. The known-typed fields (name / description / license /
+/// ...) keep their native Rust types.
+///
+/// Phase 26 alpha (plan 26-03) doesn't actually render `metadata` / `extra`
+/// in the DetailHeader — those fields ride along for plan 26-04 (markdown
+/// body) and beyond. The string-encoded shape lands a clean TS schema; the
+/// JS side parses values only when a downstream UI surface needs them.
 #[derive(Debug, Clone, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(specta::Type))]
 #[allow(dead_code)]
@@ -120,23 +125,26 @@ pub struct SkillFrontmatterView {
     pub argument_hint: Option<String>,
     pub context: Option<String>,
     pub agent: Option<String>,
-    /// Structured `metadata` map (YAML→JSON projection). `None` when the
-    /// frontmatter has no `metadata` key.
-    pub metadata: Option<BTreeMap<String, serde_json::Value>>,
-    /// Unknown / non-standard top-level frontmatter fields (YAML→JSON
-    /// projection). Empty when the frontmatter is fully canonical.
-    pub extra: BTreeMap<String, serde_json::Value>,
+    /// Structured `metadata` map (YAML→JSON, then each value serialized as a
+    /// JSON string blob — avoids specta's "recursive inline type" panic on
+    /// `serde_json::Value`). `None` when the frontmatter has no `metadata`
+    /// key. The JS side `JSON.parse`s individual entries on demand.
+    pub metadata: Option<BTreeMap<String, String>>,
+    /// Unknown / non-standard top-level frontmatter fields. Same
+    /// YAML→JSON→string encoding as `metadata`. Empty map when the
+    /// frontmatter is fully canonical.
+    pub extra: BTreeMap<String, String>,
 }
 
 #[allow(dead_code)]
 impl SkillFrontmatterView {
     /// Project a [`SkillFrontmatter`] into the GUI-facing view.
     ///
-    /// YAML values are passed through `serde_yaml::to_string` →
-    /// `serde_json::from_str` to coerce them into JSON-shaped values. YAML
-    /// constructs that don't round-trip cleanly (tags, anchors, non-string
-    /// keys) collapse into a stringified placeholder via `to_string`. This is
-    /// a display-only projection — full fidelity stays on the CLI side.
+    /// Known-typed fields pass through verbatim. `metadata` / `extra` values
+    /// are coerced YAML→JSON, then serialized as JSON strings (see the
+    /// struct docs for why). YAML constructs that don't round-trip cleanly
+    /// (tags, anchors, non-string keys) collapse into the YAML-Debug
+    /// representation as a last-resort string so the UI still gets a value.
     pub fn from_frontmatter(fm: &SkillFrontmatter) -> Self {
         SkillFrontmatterView {
             name: fm.name.clone(),
@@ -150,33 +158,34 @@ impl SkillFrontmatterView {
             agent: fm.agent.clone(),
             metadata: fm.metadata.as_ref().map(|m| {
                 m.iter()
-                    .map(|(k, v)| (k.clone(), yaml_to_json(v)))
+                    .map(|(k, v)| (k.clone(), yaml_to_json_string(v)))
                     .collect()
             }),
             extra: fm
                 .extra
                 .iter()
-                .map(|(k, v)| (k.clone(), yaml_to_json(v)))
+                .map(|(k, v)| (k.clone(), yaml_to_json_string(v)))
                 .collect(),
         }
     }
 }
 
-/// Coerce a `serde_yaml::Value` into a `serde_json::Value` best-effort. YAML
-/// constructs without a clean JSON equivalent collapse into a string fallback.
+/// Coerce a `serde_yaml::Value` into a JSON-encoded string. YAML constructs
+/// without a clean JSON equivalent fall back to the YAML-Debug repr wrapped
+/// in a JSON string literal.
 #[allow(dead_code)]
-fn yaml_to_json(value: &serde_yaml::Value) -> serde_json::Value {
-    // Round-trip via the YAML serializer + JSON deserializer. YAML's
-    // superset (anchors, tags, non-string keys) is reduced to the common
-    // shape JSON can represent; everything else falls back to a stringified
-    // placeholder so the UI still gets a non-null value to render.
+fn yaml_to_json_string(value: &serde_yaml::Value) -> String {
     let yaml_str = match serde_yaml::to_string(value) {
         Ok(s) => s,
-        Err(_) => return serde_json::Value::Null,
+        Err(_) => return "null".to_string(),
     };
-    serde_yaml::from_str::<serde_json::Value>(&yaml_str).unwrap_or_else(|_| {
-        serde_json::Value::String(format!("{value:?}"))
-    })
+    match serde_yaml::from_str::<serde_json::Value>(&yaml_str) {
+        Ok(json) => {
+            serde_json::to_string(&json).unwrap_or_else(|_| format!("{json:?}"))
+        }
+        Err(_) => serde_json::to_string(&format!("{value:?}"))
+            .unwrap_or_else(|_| "\"<unrepresentable>\"".to_string()),
+    }
 }
 
 /// GUI-facing aggregate of everything a single skill exposes (Phase 26 plan
@@ -405,15 +414,18 @@ mod tests {
     }
 
     #[test]
-    fn frontmatter_view_passes_extra_through_as_json() {
+    fn frontmatter_view_passes_extra_through_as_json_strings() {
         let yaml = "---\nname: x\nversion: \"1.2\"\nrole: assistant\n---\nbody";
         let (fm, _) = parse(yaml).unwrap();
         let view = SkillFrontmatterView::from_frontmatter(&fm);
-        // `version` and `role` are non-canonical → land in `extra` as JSON.
+        // `version` and `role` are non-canonical → land in `extra` as
+        // JSON-encoded string blobs.
         let version = view.extra.get("version").expect("version present");
-        assert_eq!(version.as_str(), Some("1.2"));
+        let version_json: serde_json::Value = serde_json::from_str(version).unwrap();
+        assert_eq!(version_json.as_str(), Some("1.2"));
         let role = view.extra.get("role").expect("role present");
-        assert_eq!(role.as_str(), Some("assistant"));
+        let role_json: serde_json::Value = serde_json::from_str(role).unwrap();
+        assert_eq!(role_json.as_str(), Some("assistant"));
     }
 
     #[test]
@@ -423,11 +435,13 @@ mod tests {
         let view = SkillFrontmatterView::from_frontmatter(&fm);
         let meta = view.metadata.expect("metadata present");
         let tags = meta.get("tags").expect("tags key");
-        let arr = tags.as_array().expect("tags is an array");
+        let tags_json: serde_json::Value = serde_json::from_str(tags).unwrap();
+        let arr = tags_json.as_array().expect("tags is an array");
         assert_eq!(arr.len(), 2);
         assert_eq!(arr[0].as_str(), Some("swift"));
         let level = meta.get("level").expect("level key");
-        assert_eq!(level.as_i64(), Some(3));
+        let level_json: serde_json::Value = serde_json::from_str(level).unwrap();
+        assert_eq!(level_json.as_i64(), Some(3));
     }
 
     // ---- collect_detail integration ----

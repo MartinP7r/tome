@@ -19,6 +19,13 @@ fn main() {
     }
 
     tauri::Builder::default()
+        // Phase 26 plan 26-03 / D-07: opener plugin (Finder reveal for the
+        // "Open source folder" action) and clipboard-manager plugin (the JS
+        // side calls `writeText` after the `copy_path` command returns).
+        // Both grants are narrowed in `capabilities/main.json` to the
+        // specific permissions they need (no fs widening).
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             // Wire the typed events so `SyncProgress::emit(&app)` reaches the

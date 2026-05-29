@@ -99,7 +99,11 @@ pub(crate) mod reassign;
 pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
-pub(crate) mod skill;
+// `skill` is `pub` so `tome-desktop` can call `skill::collect_detail` and
+// consume `SkillDetail` + `SkillFrontmatterView` directly across the crate
+// boundary (Phase 26 plan 26-03 / VIEW-03 / D-05). The CLI/TUI keep using
+// `skill::parse` (also pub); the GUI is purely additive.
+pub mod skill;
 // `status` is `pub` so the v1.0 GUI (`tome-desktop`) can call
 // `tome::status::gather` and consume `tome::status::StatusReport` across the
 // crate boundary (CORE-04 / D-GUI-08). The CLI presenter (`status::show`)
@@ -156,6 +160,13 @@ pub use errors::{DomainErrorKind, DomainTagged};
 /// narrow (single function — no `MachinePrefs` etc.) so the GUI watcher's
 /// dependency surface stays small.
 pub use machine::default_machine_path;
+
+/// Phase 26 plan 26-03 (VIEW-03) — `tome-desktop` accepts `SkillName` as the
+/// input arg for the 4 new commands (`get_skill_detail`, `set_skill_disabled`,
+/// `open_source_folder`, `copy_path`). Re-exporting at the crate root keeps
+/// the `discover` module's larger surface (`DiscoveredSkill`, scanners) out
+/// of the GUI's import path while making the validated newtype reachable.
+pub use discover::SkillName;
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
