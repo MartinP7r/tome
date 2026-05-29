@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
 stopped_at: Phase 26 UI-SPEC approved
-last_updated: "2026-05-28T15:56:22.263Z"
-last_activity: 2026-05-28 -- Phase 26 planning complete
+last_updated: "2026-05-29T02:36:43.445Z"
+last_activity: 2026-05-29 -- Phase 26 execution started
 progress:
   total_phases: 2
   completed_phases: 1
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 25 — rust-core-extraction-tauri-integration-spike
+**Current focus:** Phase 26 — read-only-views-alpha-cut
 
 ## Current Position
 
-Phase: 25 (rust-core-extraction-tauri-integration-spike) — COMPLETE (6/6 plans)
-Plan: 6 of 6 complete (25-01..25-06 — Waves 1–5)
-Status: Ready to execute
-Last activity: 2026-05-28 -- Phase 26 planning complete
+Phase: 26 (read-only-views-alpha-cut) — EXECUTING
+Plan: 1 of 8
+Status: Executing Phase 26
+Last activity: 2026-05-29 -- Phase 26 execution started
 
 **v1.0 phase shape (Phases 25–31):**
 

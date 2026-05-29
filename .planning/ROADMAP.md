@@ -319,7 +319,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   7. Every interactive element is keyboard-accessible and has a VoiceOver label (NF-02). Native menu bar shows File / Edit / View / Library / Help (NF-03).
 **Cut**: **v1.0-alpha**. Internal release; CLI still required for sync and edit.
 **Plans**: 8 plans (Wave 1: 26-01 — StatusReport extension unblocks UI plans; Wave 2: 26-02..26-06 — UI feature plans + Rust watcher in parallel, all depend on 26-01's StatusReport shape; Wave 3: 26-07 + 26-08 — a11y/HIG audit + perf bench depend on all UI plans landing first)
-- [ ] 26-01-PLAN.md — Status dashboard view + StatusReport lockfile/machine-prefs extension (VIEW-01)
+- [x] 26-01-PLAN.md — Status dashboard view + StatusReport lockfile/machine-prefs extension (VIEW-01)
 - [ ] 26-02-PLAN.md — Shell (3-col NavigationSplitView + tokens) + virtualised skill list + fuzzy search (VIEW-02, NF-01 setup)
 - [ ] 26-03-PLAN.md — Detail pane + per-skill actions (open/copy/disable) via tome::actions module + Tauri opener+clipboard plugins (VIEW-03)
 - [ ] 26-04-PLAN.md — Markdown preview component (react-markdown SC#4 subset) + REQUIREMENTS.md VIEW-04 cleanup (VIEW-04)
