@@ -55,10 +55,52 @@ pub struct LibraryChanged;
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
 pub struct MachinePrefsChanged;
 
+/// Watcher event kind — the testable enum the FSEvents → Tauri-emit bridge
+/// switches on. The production code path translates each variant to the
+/// corresponding [`tauri_specta::Event::emit`] call; the integration test in
+/// `tests/watcher_smoke.rs` collects these directly via
+/// [`spawn_watcher_with_sink`] without depending on a live Tauri app handle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WatcherEvent {
+    /// `.tome-manifest.json` was rewritten.
+    Manifest,
+    /// `tome.lock` was rewritten.
+    Lockfile,
+    /// Library directory contents changed.
+    Library,
+    /// `machine.toml` was rewritten.
+    MachinePrefs,
+}
+
+/// Configuration bundle for the watcher — the four watched roots plus the
+/// machine.toml path (which the production code derives from
+/// [`tome::default_machine_path`] but tests supply directly so they can point
+/// at a [`tempfile::TempDir`] copy).
+#[derive(Debug, Clone)]
+pub struct WatcherPaths {
+    pub manifest_path: PathBuf,
+    pub lockfile_path: PathBuf,
+    pub library_dir: PathBuf,
+    pub machine_path: PathBuf,
+}
+
+impl WatcherPaths {
+    /// Production constructor — mirrors `spawn_watcher`'s path resolution.
+    pub fn from_tome_paths(paths: &tome::TomePaths) -> Result<Self> {
+        Ok(Self {
+            manifest_path: paths.manifest_path(),
+            lockfile_path: paths.lockfile_path(),
+            library_dir: paths.library_dir().to_path_buf(),
+            machine_path: tome::default_machine_path()
+                .context("failed to resolve default machine.toml path")?,
+        })
+    }
+}
+
 /// Spawn the file watcher on a dedicated thread.
 ///
 /// The watcher captures paths derived from [`tome::TomePaths`] +
-/// [`tome::machine::default_machine_path`] at startup. Live `tome relocate`
+/// [`tome::default_machine_path`] at startup. Live `tome relocate`
 /// (Phase 29 / OPS-03) is out of scope — users must restart the GUI after
 /// relocating the library.
 ///
@@ -68,30 +110,83 @@ pub struct MachinePrefsChanged;
 /// (a degraded "GUI stops auto-refreshing" failure mode is preferable to a
 /// hard crash on a watchdog edge case).
 pub fn spawn_watcher(app: tauri::AppHandle, paths: tome::TomePaths) -> Result<()> {
-    let manifest_path = paths.manifest_path();
-    let lockfile_path = paths.lockfile_path();
-    let library_dir = paths.library_dir().to_path_buf();
-    let machine_path = tome::default_machine_path()
-        .context("failed to resolve default machine.toml path")?;
+    let watcher_paths = WatcherPaths::from_tome_paths(&paths)?;
+    // Production sink: each high-level WatcherEvent becomes the matching
+    // typed tauri-specta emit call.
+    spawn_watcher_with_sink(watcher_paths, move |event| match event {
+        WatcherEvent::Manifest => {
+            let _ = ManifestChanged.emit(&app);
+        }
+        WatcherEvent::Lockfile => {
+            let _ = LockfileChanged.emit(&app);
+        }
+        WatcherEvent::Library => {
+            let _ = LibraryChanged.emit(&app);
+        }
+        WatcherEvent::MachinePrefs => {
+            let _ = MachinePrefsChanged.emit(&app);
+        }
+    })
+}
 
-    let app2 = app.clone();
+/// Spawn the file watcher with an arbitrary event sink — the testable variant
+/// used by `tests/watcher_smoke.rs` to collect emitted events without
+/// depending on a live Tauri app handle.
+///
+/// This is the cleanest path around Pitfall 10: the FSEvents interaction is
+/// exercised by real OS-level writes inside a [`tempfile::TempDir`], and the
+/// test sink records the high-level [`WatcherEvent`]s that would be emitted
+/// to the webview in production.
+pub fn spawn_watcher_with_sink<F>(paths: WatcherPaths, sink: F) -> Result<()>
+where
+    F: Fn(WatcherEvent) + Send + 'static,
+{
     std::thread::spawn(move || {
-        if let Err(e) =
-            run_watcher(app2, manifest_path, lockfile_path, library_dir, machine_path)
-        {
+        if let Err(e) = run_watcher_with_sink(paths, sink) {
             eprintln!("warning: watcher thread exited: {e:#}");
         }
     });
     Ok(())
 }
 
-fn run_watcher(
-    app: tauri::AppHandle,
-    manifest_path: PathBuf,
-    lockfile_path: PathBuf,
-    library_dir: PathBuf,
-    machine_path: PathBuf,
-) -> Result<()> {
+fn run_watcher_with_sink<F>(paths: WatcherPaths, sink: F) -> Result<()>
+where
+    F: Fn(WatcherEvent),
+{
+    let WatcherPaths {
+        manifest_path,
+        lockfile_path,
+        library_dir,
+        machine_path,
+    } = paths;
+
+    // FSEvents on macOS reports events with canonicalized paths (e.g.
+    // `/var/folders/...` becomes `/private/var/folders/...`). If we compare
+    // raw user-supplied paths against the FSEvents-reported paths, the
+    // comparison can fail on symlinked path prefixes. Canonicalize each
+    // PARENT dir up front and rebuild the full file path via `parent.join(
+    // file_name)` so the equality checks below survive symlink resolution.
+    // Falling back to the original parent on canonicalize errors is safe —
+    // the comparisons against not-yet-existing paths simply won't match
+    // until the file appears (and then the next canonicalize during a re-
+    // watch would succeed). The library root is canonicalized directly
+    // because it's a dir-prefix match (`starts_with`), not a file-equality.
+    let canon_parent = |p: &PathBuf| -> PathBuf {
+        p.parent()
+            .and_then(|d| std::fs::canonicalize(d).ok())
+            .unwrap_or_else(|| p.parent().map(PathBuf::from).unwrap_or_default())
+    };
+    let rebuild_file = |p: &PathBuf, canon_dir: &PathBuf| -> PathBuf {
+        canon_dir.join(p.file_name().map(PathBuf::from).unwrap_or_default())
+    };
+    let manifest_parent_canon = canon_parent(&manifest_path);
+    let lockfile_parent_canon = canon_parent(&lockfile_path);
+    let machine_parent_canon = canon_parent(&machine_path);
+    let library_canon = std::fs::canonicalize(&library_dir).unwrap_or_else(|_| library_dir.clone());
+    let manifest_canon = rebuild_file(&manifest_path, &manifest_parent_canon);
+    let lockfile_canon = rebuild_file(&lockfile_path, &lockfile_parent_canon);
+    let machine_canon = rebuild_file(&machine_path, &machine_parent_canon);
+
     let (tx, rx) = std::sync::mpsc::channel();
     let mut debouncer = new_debouncer(
         Duration::from_millis(200),
@@ -112,28 +207,10 @@ fn run_watcher(
     // edits live nested inside `<library>/<skill>/SKILL.md`. We filter to the
     // exact file paths inside the debouncer callback below.
     let watch_targets: Vec<(PathBuf, RecursiveMode)> = vec![
-        (
-            manifest_path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(".")),
-            RecursiveMode::NonRecursive,
-        ),
-        (
-            lockfile_path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(".")),
-            RecursiveMode::NonRecursive,
-        ),
-        (library_dir.clone(), RecursiveMode::Recursive),
-        (
-            machine_path
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| PathBuf::from(".")),
-            RecursiveMode::NonRecursive,
-        ),
+        (manifest_parent_canon.clone(), RecursiveMode::NonRecursive),
+        (lockfile_parent_canon.clone(), RecursiveMode::NonRecursive),
+        (library_canon.clone(), RecursiveMode::Recursive),
+        (machine_parent_canon.clone(), RecursiveMode::NonRecursive),
     ];
     for (path, mode) in &watch_targets {
         if path.exists()
@@ -150,31 +227,31 @@ fn run_watcher(
         let mut saw_machine = false;
         for ev in events {
             for path in &ev.paths {
-                if path == &manifest_path {
+                if path == &manifest_canon {
                     saw_manifest = true;
                 }
-                if path == &lockfile_path {
+                if path == &lockfile_canon {
                     saw_lockfile = true;
                 }
-                if path == &machine_path {
+                if path == &machine_canon {
                     saw_machine = true;
                 }
-                if path.starts_with(&library_dir) {
+                if path.starts_with(&library_canon) {
                     saw_library = true;
                 }
             }
         }
         if saw_manifest {
-            let _ = ManifestChanged.emit(&app);
+            sink(WatcherEvent::Manifest);
         }
         if saw_lockfile {
-            let _ = LockfileChanged.emit(&app);
+            sink(WatcherEvent::Lockfile);
         }
         if saw_library {
-            let _ = LibraryChanged.emit(&app);
+            sink(WatcherEvent::Library);
         }
         if saw_machine {
-            let _ = MachinePrefsChanged.emit(&app);
+            sink(WatcherEvent::MachinePrefs);
         }
     }
 

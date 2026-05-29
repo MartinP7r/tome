@@ -26,7 +26,10 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 /// it appear in `bindings.ts` on the next `gen-bindings` run.
 pub fn make_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
-        .commands(collect_commands![commands::get_status, commands::list_skills])
+        .commands(collect_commands![
+            commands::get_status,
+            commands::list_skills
+        ])
         .events(collect_events![
             sink::SyncProgress,
             watcher::ManifestChanged,
