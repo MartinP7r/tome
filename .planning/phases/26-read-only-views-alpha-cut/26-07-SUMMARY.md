@@ -74,7 +74,7 @@ shortcuts collide with text-input copy/paste).
 
 - [x] Task 0 — Package legitimacy gate (`@axe-core/playwright` + `playwright`) — APPROVED by user with version + repo verification.
 - [x] Task 1 — Native macOS menu bar + `MenuAction` event + `useMenuActions` hook (commit `c9ca2bb`).
-- [ ] Task 2 — Keyboard shortcut conflict audit + UI-SPEC §Keyboard Map amendment + `26-A11Y-AUDIT.md`.
+- [x] Task 2 — Keyboard shortcut conflict audit + UI-SPEC §Keyboard Map amendment + `26-A11Y-AUDIT.md` (commit `eac1418`).
 - [ ] Task 3 — axe-core/playwright CI gate (4 tests: Status / Skills / Health / PreviewPopover).
 
 ## Commits so far
@@ -82,6 +82,7 @@ shortcuts collide with text-input copy/paste).
 | Task | Hash      | Subject |
 |------|-----------|---------|
 | 1    | `c9ca2bb` | feat(26-07): native macOS menu bar + MenuAction event + useMenuActions |
+| 2    | `eac1418` | fix(26-07): macOS HIG + Pitfall 9 keyboard audit; 26-A11Y-AUDIT.md |
 
 ## Deviations from plan
 
