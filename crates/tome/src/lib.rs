@@ -31,6 +31,13 @@
 //! - [`TomePaths`] — bundled home/library paths
 //! - [`SyncReport`] — sync operation results
 
+// `actions` is `pub` so `tome-desktop`'s Tauri command surface can call
+// `tome::actions::resolve_source_path` + `tome::actions::set_skill_disabled`
+// directly (Phase 26 plan 26-03 / VIEW-03 / D-06/D-07). The module is the
+// CORE-01 collect-shape for cross-surface mutations: pure helpers, no
+// presentation. The browse TUI's `apply_toggle` Global-scope arm also calls
+// `set_skill_disabled` to avoid duplicating the load/mutate/save chain.
+pub mod actions;
 pub(crate) mod add;
 pub(crate) mod backup;
 // `browse` is normally `pub(crate)` so the rest of v1.0's GUI Tauri IPC
