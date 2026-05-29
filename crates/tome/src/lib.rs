@@ -88,7 +88,15 @@ pub(crate) mod lockfile;
 pub mod machine;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod machine;
-pub(crate) mod manifest;
+// `manifest` is `pub` so `tome-desktop`'s perf-bench fixture generator
+// (`tests/perf/synthetic_skills.rs`, Phase 26 plan 26-08) can construct
+// `Manifest` + `SkillEntry` rows with the canonical serde shape — no
+// hand-written JSON, no drift risk. Narrow surface: only `Manifest`,
+// `SkillEntry`, `SkillOwnership`, `load`, `save`, `hash_directory` are
+// reachable; `MANIFEST_FILENAME` stays `pub(crate)`. The same precedent
+// (lift module to `pub` so the GUI crate can reuse it) was set when
+// `tome::list` was lifted in plan 26-02.
+pub mod manifest;
 pub mod marketplace;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
