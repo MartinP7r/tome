@@ -13,3 +13,10 @@ crates/tome-desktop/ui/test-results/
 crates/tome-desktop/ui/playwright-report/
 crates/tome-desktop/tests/a11y/test-results/
 crates/tome-desktop/tests/a11y/playwright-report/
+# Playwright perf-bench runtime artifacts (plan 26-08 Task 2).
+# The runs TSV grows on every bench invocation; curated rows are
+# promoted into 26-PERF-REPORT.md's table during human review (CI
+# uploads the TSV as an artefact on every workflow run).
+crates/tome-desktop/tests/perf/test-results/
+crates/tome-desktop/tests/perf/playwright-report/
+.planning/phases/26-read-only-views-alpha-cut/26-PERF-RUNS.tsv
