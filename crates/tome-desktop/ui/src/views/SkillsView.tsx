@@ -23,6 +23,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { commands } from "../bindings";
 import type { DiscoveredSkill } from "../bindings";
 import { DetailHeader } from "../components/DetailHeader";
+import { MarkdownBody } from "../components/MarkdownBody";
 import { PopupMenu, type PopupMenuItem } from "../components/PopupMenu";
 import { SearchField, type SearchFieldHandle } from "../components/SearchField";
 import {
@@ -290,13 +291,16 @@ function DetailColumn({ name }: { name: string }) {
         </div>
       )}
       {detail ? (
-        <DetailHeader
-          detail={detail}
-          onOpenSource={actions.onOpenSource}
-          onCopyPath={actions.onCopyPath}
-          onDisableToggle={actions.onDisableToggle}
-          copyState={actions.copyState}
-        />
+        <>
+          <DetailHeader
+            detail={detail}
+            onOpenSource={actions.onOpenSource}
+            onCopyPath={actions.onCopyPath}
+            onDisableToggle={actions.onDisableToggle}
+            copyState={actions.copyState}
+          />
+          <MarkdownBody body={detail.body} skillName={detail.name} />
+        </>
       ) : surfacedErr ? null : (
         <p className={styles.placeholder}>Loading…</p>
       )}
