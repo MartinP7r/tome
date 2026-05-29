@@ -19,10 +19,16 @@
     "windows": [
       {
         "title": "tome",
-        "width": 1000,
-        "height": 720,
-        "minWidth": 720,
-        "minHeight": 480
+        "width": 1100,
+        "height": 740,
+        "minWidth": 900,
+        "minHeight": 600,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "windowEffects": {
+          "effects": ["sidebar"],
+          "state": "followsWindowActiveState"
+        }
       }
     ],
     "security": {

@@ -1,9 +1,11 @@
+/* Token import MUST come before any rules that consume custom properties. */
+@import "./tokens.css";
+
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue",
-    sans-serif;
-  font-size: 14px;
-  color: #1d1d1f;
-  background: #f5f5f7;
+  font-family: var(--font-system);
+  font-size: var(--text-body-size);
+  color: var(--label-primary);
+  background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -13,6 +15,14 @@
 
 body {
   margin: 0;
+}
+
+/* Phase 26 shell takes over the viewport — fill it so the 3-column grid
+ * has somewhere to live. */
+html,
+body,
+#root {
+  height: 100%;
 }
 
 .app {
