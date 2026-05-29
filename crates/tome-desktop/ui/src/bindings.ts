@@ -64,6 +64,36 @@ export const commands = {
 	 *  boundary).
 	 */
 	copyPath: (name: SkillName) => typedError<string, TomeError>(__TAURI_INVOKE("copy_path", { name })),
+	/**
+	 *  Return the full doctor report for the GUI Health view (Phase 26 plan
+	 *  26-05 / VIEW-05).
+	 * 
+	 *  Wraps [`tome::doctor::collect_doctor_view`] — the GUI-facing projection of
+	 *  `DoctorReport` that exposes only the 6 surfaced finding categories (4
+	 *  auto-fixable + 2 informational) plus pre-computed `auto_fixable_count` /
+	 *  `manual_count` so the React section headers render without re-walking the
+	 *  list. Non-GUI issues (orphan dirs, missing SKILL.md, config issues,
+	 *  foreign symlinks) intentionally do NOT cross the IPC boundary in Phase 26.
+	 */
+	getDoctorReport: () => typedError<DoctorView_Serialize, TomeError>(__TAURI_INVOKE("get_doctor_report")),
+	/**
+	 *  Dispatch a per-item doctor repair for the GUI's `PreviewPopover` Apply
+	 *  button (Phase 26 plan 26-05 / VIEW-05 / D-09).
+	 * 
+	 *  Wraps [`tome::doctor::repair_one`] — re-runs `check()` to locate the live
+	 *  issue, then matches the [`tome::doctor::RepairKind`] exhaustively against
+	 *  per-item helpers. NF-04 preview-then-confirm: this command is only reached
+	 *  after the user clicks Apply inside the `PreviewPopover` (no keyboard
+	 *  shortcut bypasses it; T-26-05-01 mitigation).
+	 * 
+	 *  Returns a structured `TomeError` for the two GUI-visible failure modes:
+	 *  stale FindingId ("no longer present" — T-26-05-02), or non-auto-fixable
+	 *  kind ("not auto-fixable" — defensive, the GUI never sends one of these).
+	 *  The watcher (plan 26-06) fires `LibraryChanged` / `ManifestChanged` /
+	 *  `MachinePrefsChanged` for the resulting writes; the React Health view
+	 *  refetches on those.
+	 */
+	doctorRepairOne: (findingId: FindingId) => typedError<null, TomeError>(__TAURI_INVOKE("doctor_repair_one", { findingId })),
 };
 
 /** Events */
@@ -234,6 +264,137 @@ export type DiscoveredSkill = {
 };
 
 /**
+ *  Wire-shape for a single doctor finding crossing the Tauri IPC boundary
+ *  (Phase 26 plan 26-05).
+ * 
+ *  Distinct from the internal `DiagnosticIssue` to keep the GUI contract
+ *  stable as `DiagnosticIssue` evolves. The React Health view renders
+ *  `title` + `description` per row; `dry_run_description` populates the
+ *  `PreviewPopover` body for auto-fixable findings.
+ */
+export type DoctorFinding = DoctorFinding_Serialize | DoctorFinding_Deserialize;
+
+/**
+ *  Wire-shape for a single doctor finding crossing the Tauri IPC boundary
+ *  (Phase 26 plan 26-05).
+ * 
+ *  Distinct from the internal `DiagnosticIssue` to keep the GUI contract
+ *  stable as `DiagnosticIssue` evolves. The React Health view renders
+ *  `title` + `description` per row; `dry_run_description` populates the
+ *  `PreviewPopover` body for auto-fixable findings.
+ */
+export type DoctorFinding_Deserialize = {
+	/**
+	 *  Stable content-aware identifier — round-trips back through
+	 *  `doctor_repair_one(finding_id)` to dispatch the per-item repair.
+	 */
+	id: FindingId,
+	severity: IssueSeverity,
+	category: IssueCategory,
+	/**
+	 *  Short human label (e.g. "Broken library symlink", "Unparsable SKILL.md
+	 *  frontmatter — {skill}"). Renders as the `FindingRow`'s primary line.
+	 */
+	title: string,
+	/**
+	 *  Verbatim diagnostic message from the underlying `DiagnosticIssue`.
+	 *  Renders as the `FindingRow`'s secondary description.
+	 */
+	description: string,
+	/**
+	 *  Auto-repair classifier. `Some(kind)` ↔ the row exposes a Fix button
+	 *  that opens the `PreviewPopover`; `None` → manual remediation hint
+	 *  (D-12, never a dead control).
+	 */
+	repair_kind: RepairKind | null,
+	/**
+	 *  One-sentence dry-run description rendered as the `PreviewPopover` body
+	 *  (NF-04 preview-then-confirm). Populated from `repair_kind_action_label`
+	 *  when `repair_kind.is_some()`; `None` otherwise.
+	 */
+	dry_run_description: string | null,
+};
+
+/**
+ *  Wire-shape for a single doctor finding crossing the Tauri IPC boundary
+ *  (Phase 26 plan 26-05).
+ * 
+ *  Distinct from the internal `DiagnosticIssue` to keep the GUI contract
+ *  stable as `DiagnosticIssue` evolves. The React Health view renders
+ *  `title` + `description` per row; `dry_run_description` populates the
+ *  `PreviewPopover` body for auto-fixable findings.
+ */
+export type DoctorFinding_Serialize = {
+	/**
+	 *  Stable content-aware identifier — round-trips back through
+	 *  `doctor_repair_one(finding_id)` to dispatch the per-item repair.
+	 */
+	id: FindingId,
+	severity: IssueSeverity,
+	category: IssueCategory,
+	/**
+	 *  Short human label (e.g. "Broken library symlink", "Unparsable SKILL.md
+	 *  frontmatter — {skill}"). Renders as the `FindingRow`'s primary line.
+	 */
+	title: string,
+	/**
+	 *  Verbatim diagnostic message from the underlying `DiagnosticIssue`.
+	 *  Renders as the `FindingRow`'s secondary description.
+	 */
+	description: string,
+	/**
+	 *  Auto-repair classifier. `Some(kind)` ↔ the row exposes a Fix button
+	 *  that opens the `PreviewPopover`; `None` → manual remediation hint
+	 *  (D-12, never a dead control).
+	 */
+	repair_kind?: RepairKind | null,
+	/**
+	 *  One-sentence dry-run description rendered as the `PreviewPopover` body
+	 *  (NF-04 preview-then-confirm). Populated from `repair_kind_action_label`
+	 *  when `repair_kind.is_some()`; `None` otherwise.
+	 */
+	dry_run_description?: string | null,
+};
+
+/**
+ *  Wire-shape for the GUI Health view's full payload (Phase 26 plan 26-05).
+ * 
+ *  Stable on the IPC boundary — the React side renders
+ *  `auto_fixable_count` / `manual_count` in the section headers and iterates
+ *  `findings` once to partition into the AUTO-FIXABLE / NEEDS ATTENTION
+ *  sections.
+ */
+export type DoctorView = DoctorView_Serialize | DoctorView_Deserialize;
+
+/**
+ *  Wire-shape for the GUI Health view's full payload (Phase 26 plan 26-05).
+ * 
+ *  Stable on the IPC boundary — the React side renders
+ *  `auto_fixable_count` / `manual_count` in the section headers and iterates
+ *  `findings` once to partition into the AUTO-FIXABLE / NEEDS ATTENTION
+ *  sections.
+ */
+export type DoctorView_Deserialize = {
+	findings: DoctorFinding_Deserialize[],
+	auto_fixable_count: number,
+	manual_count: number,
+};
+
+/**
+ *  Wire-shape for the GUI Health view's full payload (Phase 26 plan 26-05).
+ * 
+ *  Stable on the IPC boundary — the React side renders
+ *  `auto_fixable_count` / `manual_count` in the section headers and iterates
+ *  `findings` once to partition into the AUTO-FIXABLE / NEEDS ATTENTION
+ *  sections.
+ */
+export type DoctorView_Serialize = {
+	findings: DoctorFinding_Serialize[],
+	auto_fixable_count: number,
+	manual_count: number,
+};
+
+/**
  *  Coarse, stable error categories surfaced to the front-end (D-15).
  * 
  *  Grows additively. The GUI branches on this discriminant; new variants are a
@@ -255,6 +416,77 @@ export type ErrorCode =
 "Io" | 
 /**  Anything not classified by a domain sentinel (the fallback, D-14). */
 "Internal";
+
+/**
+ *  Stable, content-aware identifier for a single doctor finding (Phase 26
+ *  plan 26-05, OQ-2 resolution).
+ * 
+ *  Used to dispatch per-item repairs through `repair_one`: the GUI sends the
+ *  `FindingId` it harvested from the last `collect_doctor_view` snapshot, and
+ *  `repair_one` re-runs `check()` to locate the matching live issue. The
+ *  content-aware enum (variants carry the identifying data inline) avoids the
+ *  hash-collision class hash-style IDs would invite (T-26-05-03).
+ * 
+ *  Variants align 1:1 with the 4 [`RepairKind`] auto-fix arms plus 2
+ *  informational categories ([`Self::UnparsableFrontmatter`],
+ *  [`Self::DivergingTarget`]) the UI surfaces with manual remediation hints.
+ * 
+ *  JSON wire-shape: `{ "kind": "library_stale_manifest", "skill": "name" }` etc.
+ * 
+ *  Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel pin every
+ *  variant. Adding a variant without updating `ALL` is a `cargo check` failure.
+ */
+export type FindingId = 
+/**
+ *  Manifest entry whose library directory is missing on disk (also covers
+ *  broken managed symlinks — same repair handler).
+ */
+{ kind: "library_stale_manifest"; skill: SkillName } | 
+/**  Broken legacy symlink in the library directory (not in the manifest). */
+{ kind: "library_broken_symlink"; path: string } | 
+/**
+ *  Stale symlink in a distribution directory (points into the library at
+ *  a now-missing skill).
+ */
+{ kind: "target_stale_symlink"; directory: DirectoryName; path: string } | 
+/**
+ *  Real directory in a distribution directory whose content matches a
+ *  library skill byte-for-byte (Phase 24 — auto-fixable by replacing with
+ *  a symlink).
+ */
+{ kind: "target_real_dir_to_symlink"; directory: DirectoryName; path: string } | 
+/**
+ *  Library skill whose `SKILL.md` YAML frontmatter does not parse
+ *  (informational; user must edit the file). Phase 23.
+ */
+{ kind: "unparsable_frontmatter"; skill: SkillName } | 
+/**
+ *  Real directory in a distribution directory whose content diverges from
+ *  the matching library skill (informational; user must reconcile
+ *  manually).
+ */
+{ kind: "diverging_target"; directory: DirectoryName; path: string };
+
+/**
+ *  Category of a [`DiagnosticIssue`]. Derived at construction from the
+ *  [`DoctorReport`] field the issue lives in, with `ForeignSymlink`
+ *  promoted regardless of source field per D-CAT-1.
+ * 
+ *  JSON serialisation is snake_case (`"library"`, `"directory"`,
+ *  `"config"`, `"foreign_symlink"`), matching the project convention.
+ * 
+ *  Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+ *  keep every variant pinned. Adding a variant without updating `ALL`
+ *  is a `cargo check` failure.
+ */
+export type IssueCategory = "library" | "directory" | "config" | "foreign_symlink";
+
+/**  Severity of a diagnostic issue. */
+export type IssueSeverity = 
+/**  Critical problem (e.g., missing directory, broken symlink). */
+"Error" | 
+/**  Non-critical problem (e.g., orphan directory, missing source path). */
+"Warning";
 
 /**
  *  Library directory contents changed (skill add/remove/edit).
@@ -353,6 +585,59 @@ export type MachinePrefsSummary = {
  *  refetch on this event.
  */
 export type ManifestChanged = null;
+
+/**
+ *  Categorises the auto-repair available for a [`DiagnosticIssue`]
+ *  (D-REPAIR-1).
+ * 
+ *  `Some(kind)` on [`DiagnosticIssue::repair_kind`] ↔ the issue is
+ *  auto-fixable and the global repair dispatcher in [`diagnose`] has a
+ *  handler arm for `kind`. `None` means the issue requires user
+ *  interaction (e.g. orphan directories, which use a per-item Select
+ *  prompt) or is informational only.
+ * 
+ *  JSON serialisation is snake_case
+ *  (`"remove_stale_manifest_entry"`, `"remove_broken_library_symlink"`,
+ *  `"remove_stale_target_symlink"`).
+ * 
+ *  Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel
+ *  pin every variant. The repair dispatcher matches exhaustively on
+ *  `Option<RepairKind>` — adding a variant without a handler arm fails
+ *  to compile.
+ */
+export type RepairKind = 
+/**
+ *  Remove a manifest entry whose library directory is missing on
+ *  disk OR whose managed symlink is broken. Emit sites in
+ *  `check_library` (both cases share the action:
+ *  `Manifest::remove(name)` plus `remove_file` if the entry is a
+ *  symlink).
+ */
+"remove_stale_manifest_entry" | 
+/**
+ *  Remove a broken legacy symlink in the library directory (not
+ *  referenced by the manifest). Emit site: `check_library`
+ *  "broken legacy symlink: X -> Y". Action: `remove_file(path)`.
+ */
+"remove_broken_library_symlink" | 
+/**
+ *  Remove a stale symlink from a distribution directory. Emit
+ *  site: `check_distribution_dir` "stale symlink X". Action:
+ *  `cleanup::cleanup_target` removes broken symlinks pointing into
+ *  the library.
+ */
+"remove_stale_target_symlink" | 
+/**
+ *  Phase 24 (v0.16+): a real directory in a distribution dir whose
+ *  content matches a library skill byte-for-byte (typically a
+ *  pre-tome manual copy or a user dropping skills in by hand).
+ *  Repair removes the real directory and replaces it with a
+ *  symlink into the library — converging on the v0.10 distribution
+ *  model. Emit site: `check_distribution_dir` "matches library
+ *  content (should be a symlink)". Diverging content stays a
+ *  no-repair Warning (the user must reconcile).
+ */
+"consolidate_target_real_dir_to_symlink";
 
 /**
  *  GUI-facing aggregate of everything a single skill exposes (Phase 26 plan
