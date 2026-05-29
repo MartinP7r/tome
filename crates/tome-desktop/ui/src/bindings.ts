@@ -22,6 +22,48 @@ export const commands = {
 	 *  IPC would blow the 60fps budget.
 	 */
 	listSkills: () => typedError<ListReport, TomeError>(__TAURI_INVOKE("list_skills")),
+	/**
+	 *  Aggregate a single skill's right-pane payload for the GUI's
+	 *  `DetailHeader` + `MarkdownBody` (Phase 26 plan 26-03 / VIEW-03 / D-05).
+	 * 
+	 *  Wraps [`tome::skill::collect_detail`] — manifest entry + parsed
+	 *  frontmatter projection + machine-prefs disabled flag + capped markdown
+	 *  body. Body length is capped at 1 MiB at the domain layer so the webview
+	 *  render path is bounded.
+	 */
+	getSkillDetail: (name: SkillName) => typedError<SkillDetail, TomeError>(__TAURI_INVOKE("get_skill_detail", { name })),
+	/**
+	 *  Toggle a skill's membership in the global `disabled` set in `machine.toml`
+	 *  (Phase 26 plan 26-03 / D-06 — the lone Phase 26 mutation).
+	 * 
+	 *  Routes through the shared [`tome::actions::set_skill_disabled`] helper, so
+	 *  the GUI and the browse TUI hit the same atomic temp+rename. The Phase-26
+	 *  file watcher (plan 26-06) fires `MachinePrefsChanged` for the resulting
+	 *  write — own-process writes are observed verbatim, no manual refresh
+	 *  signal needed.
+	 */
+	setSkillDisabled: (name: SkillName, disabled: boolean) => typedError<null, TomeError>(__TAURI_INVOKE("set_skill_disabled", { name, disabled })),
+	/**
+	 *  Reveal the resolved source folder of a skill in Finder (Phase 26 plan
+	 *  26-03 / D-07).
+	 * 
+	 *  Resolves the source path through [`tome::actions::resolve_source_path`]
+	 *  (Owned manifest source / Unowned library-canonical fallback), then asks
+	 *  `tauri-plugin-opener` to do the OS-call. The plugin maps to `open -R` on
+	 *  macOS, `xdg-open` parents on Linux, `explorer.exe /select,` on Windows.
+	 */
+	openSourceFolder: (name: SkillName) => typedError<null, TomeError>(__TAURI_INVOKE("open_source_folder", { name })),
+	/**
+	 *  Return the resolved source path of a skill as a UTF-8 string (Phase 26
+	 *  plan 26-03 / D-07).
+	 * 
+	 *  The Rust side resolves the path; the React side calls
+	 *  `@tauri-apps/plugin-clipboard-manager::writeText` with the returned
+	 *  string. Splitting the work this way keeps the IPC contract narrow (a
+	 *  single `String` return type; no clipboard-write plumbing crossing the
+	 *  boundary).
+	 */
+	copyPath: (name: SkillName) => typedError<string, TomeError>(__TAURI_INVOKE("copy_path", { name })),
 };
 
 /** Events */
@@ -34,6 +76,9 @@ export const events = {
 };
 
 /* Types */
+/**  A validated SHA-256 content hash (64 hex characters). */
+export type ContentHash = string;
+
 /**  A count that may have failed with an error message. */
 export type CountOrError = CountOrError_Serialize | CountOrError_Deserialize;
 
@@ -308,6 +353,92 @@ export type MachinePrefsSummary = {
  *  refetch on this event.
  */
 export type ManifestChanged = null;
+
+/**
+ *  GUI-facing aggregate of everything a single skill exposes (Phase 26 plan
+ *  26-03 / VIEW-03 / D-05).
+ * 
+ *  Owned by the right-pane DetailHeader + MarkdownBody in the React UI. The
+ *  shape is intentionally projection-flat: no nested manifest type leaks
+ *  across the IPC edge.
+ */
+export type SkillDetail = {
+	name: SkillName,
+	/**
+	 *  Resolved source-of-truth path (manifest source for Owned skills,
+	 *  library-canonical copy for Unowned). Computed by
+	 *  [`crate::actions::resolve_source_path`].
+	 */
+	source_path: string,
+	/**  SHA-256 of the source directory at the last sync. */
+	content_hash: ContentHash,
+	/**
+	 *  ISO-8601 timestamp of the last sync; the manifest tracks this per
+	 *  entry. Always populated for entries that exist in the manifest.
+	 */
+	last_sync: string | null,
+	/**
+	 *  Whether the skill's source directory is managed by a package
+	 *  manager (true) or a local directory (false).
+	 */
+	managed: boolean,
+	/**
+	 *  Whether the skill is currently in the **global** `disabled` set in
+	 *  `machine.toml` on this machine.
+	 */
+	disabled: boolean,
+	/**  Parsed frontmatter (specta-friendly projection). */
+	frontmatter: SkillFrontmatterView,
+	/**
+	 *  Post-frontmatter markdown body. Capped at [`SKILL_BODY_MAX_BYTES`]
+	 *  (1 MiB) with an inline truncation marker beyond that.
+	 */
+	body: string,
+};
+
+/**
+ *  Specta-friendly projection of [`SkillFrontmatter`] crossing the GUI IPC
+ *  boundary.
+ * 
+ *  The CLI-side [`SkillFrontmatter`] type carries unstructured `metadata` and
+ *  `extra` maps keyed by `String → serde_yaml::Value`. specta's `serde_yaml`
+ *  support is not enabled in this crate (would add a heavier transitive dep
+ *  for ad-hoc YAML), and `serde_json::Value` is recursive and can't be
+ *  inlined by specta's TypeScript exporter. So the GUI ships **JSON-encoded
+ *  string blobs** for the unstructured fields — the JS side `JSON.parse`s
+ *  them on demand. The known-typed fields (name / description / license /
+ *  ...) keep their native Rust types.
+ * 
+ *  Phase 26 alpha (plan 26-03) doesn't actually render `metadata` / `extra`
+ *  in the DetailHeader — those fields ride along for plan 26-04 (markdown
+ *  body) and beyond. The string-encoded shape lands a clean TS schema; the
+ *  JS side parses values only when a downstream UI surface needs them.
+ */
+export type SkillFrontmatterView = {
+	name: string | null,
+	description: string | null,
+	license: string | null,
+	compatibility: string | null,
+	allowed_tools: string | null,
+	/**  Claude Code extension — `user-invocable: false` flag. */
+	user_invocable: boolean | null,
+	argument_hint: string | null,
+	context: string | null,
+	agent: string | null,
+	/**
+	 *  Structured `metadata` map (YAML→JSON, then each value serialized as a
+	 *  JSON string blob — avoids specta's "recursive inline type" panic on
+	 *  `serde_json::Value`). `None` when the frontmatter has no `metadata`
+	 *  key. The JS side `JSON.parse`s individual entries on demand.
+	 */
+	metadata: { [key in string]: string } | null,
+	/**
+	 *  Unknown / non-standard top-level frontmatter fields. Same
+	 *  YAML→JSON→string encoding as `metadata`. Empty map when the
+	 *  frontmatter is fully canonical.
+	 */
+	extra: { [key in string]: string },
+};
 
 /**
  *  A validated skill name.

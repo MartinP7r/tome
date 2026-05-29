@@ -1,12 +1,18 @@
 //! Tauri command surface (webview → Rust trust boundary).
 //!
-//! This phase exposes a single command: [`get_status`], which returns a real
-//! [`tome::status::StatusReport`] gathered against the user's actual
-//! `tome_home`. The IPC surface is deliberately minimal (T-25-04-EoP): no
-//! `tauri-plugin-shell`/`-fs`, only `get_status` on the main window.
+//! Phase-26 alpha commands. Read-only commands resolve a real
+//! [`tome::status::StatusReport`] / [`tome::list::ListReport`] /
+//! [`tome::skill::SkillDetail`]; the lone Phase-26 mutation
+//! ([`set_skill_disabled`]) goes through the shared
+//! [`tome::actions::set_skill_disabled`] helper so the TUI and GUI hit the
+//! same atomic temp+rename code path. The IPC surface stays minimal —
+//! `opener:default` + `clipboard-manager:allow-write-text` plus
+//! `core:default`/`core:event:default`, no `fs:default` or shell widening
+//! (T-25-04-EoP mitigation).
 
 use tome::TomePaths;
 use tome::config::Config;
+use tome::SkillName;
 
 use crate::error::TomeError;
 
@@ -54,4 +60,76 @@ pub fn get_status(_app: tauri::AppHandle) -> Result<tome::status::StatusReport, 
 pub fn list_skills(_app: tauri::AppHandle) -> Result<tome::list::ListReport, TomeError> {
     let (config, _paths) = load_context().map_err(TomeError::from)?;
     tome::list::collect(&config).map_err(TomeError::from)
+}
+
+/// Aggregate a single skill's right-pane payload for the GUI's
+/// `DetailHeader` + `MarkdownBody` (Phase 26 plan 26-03 / VIEW-03 / D-05).
+///
+/// Wraps [`tome::skill::collect_detail`] — manifest entry + parsed
+/// frontmatter projection + machine-prefs disabled flag + capped markdown
+/// body. Body length is capped at 1 MiB at the domain layer so the webview
+/// render path is bounded.
+#[tauri::command]
+#[specta::specta]
+pub fn get_skill_detail(
+    _app: tauri::AppHandle,
+    name: SkillName,
+) -> Result<tome::skill::SkillDetail, TomeError> {
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    tome::skill::collect_detail(&name, &config, &paths).map_err(TomeError::from)
+}
+
+/// Toggle a skill's membership in the global `disabled` set in `machine.toml`
+/// (Phase 26 plan 26-03 / D-06 — the lone Phase 26 mutation).
+///
+/// Routes through the shared [`tome::actions::set_skill_disabled`] helper, so
+/// the GUI and the browse TUI hit the same atomic temp+rename. The Phase-26
+/// file watcher (plan 26-06) fires `MachinePrefsChanged` for the resulting
+/// write — own-process writes are observed verbatim, no manual refresh
+/// signal needed.
+#[tauri::command]
+#[specta::specta]
+pub fn set_skill_disabled(
+    _app: tauri::AppHandle,
+    name: SkillName,
+    disabled: bool,
+) -> Result<(), TomeError> {
+    let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
+    tome::actions::set_skill_disabled(&name, disabled, &machine_path).map_err(TomeError::from)
+}
+
+/// Reveal the resolved source folder of a skill in Finder (Phase 26 plan
+/// 26-03 / D-07).
+///
+/// Resolves the source path through [`tome::actions::resolve_source_path`]
+/// (Owned manifest source / Unowned library-canonical fallback), then asks
+/// `tauri-plugin-opener` to do the OS-call. The plugin maps to `open -R` on
+/// macOS, `xdg-open` parents on Linux, `explorer.exe /select,` on Windows.
+#[tauri::command]
+#[specta::specta]
+pub fn open_source_folder(app: tauri::AppHandle, name: SkillName) -> Result<(), TomeError> {
+    use tauri_plugin_opener::OpenerExt;
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    let src =
+        tome::actions::resolve_source_path(&name, &config, &paths).map_err(TomeError::from)?;
+    app.opener()
+        .reveal_item_in_dir(&src)
+        .map_err(|e| TomeError::from(anyhow::anyhow!("opener: {e}")))
+}
+
+/// Return the resolved source path of a skill as a UTF-8 string (Phase 26
+/// plan 26-03 / D-07).
+///
+/// The Rust side resolves the path; the React side calls
+/// `@tauri-apps/plugin-clipboard-manager::writeText` with the returned
+/// string. Splitting the work this way keeps the IPC contract narrow (a
+/// single `String` return type; no clipboard-write plumbing crossing the
+/// boundary).
+#[tauri::command]
+#[specta::specta]
+pub fn copy_path(_app: tauri::AppHandle, name: SkillName) -> Result<String, TomeError> {
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    let src =
+        tome::actions::resolve_source_path(&name, &config, &paths).map_err(TomeError::from)?;
+    Ok(src.display().to_string())
 }

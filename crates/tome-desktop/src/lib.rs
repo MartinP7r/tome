@@ -28,7 +28,12 @@ pub fn make_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             commands::get_status,
-            commands::list_skills
+            commands::list_skills,
+            // Phase 26 plan 26-03 (VIEW-03 / D-05/D-06/D-07).
+            commands::get_skill_detail,
+            commands::set_skill_disabled,
+            commands::open_source_folder,
+            commands::copy_path,
         ])
         .events(collect_events![
             sink::SyncProgress,

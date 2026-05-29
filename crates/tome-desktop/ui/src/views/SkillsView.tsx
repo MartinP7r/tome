@@ -19,11 +19,20 @@ import {
   ListLayout,
   Virtualizer,
 } from "react-aria-components";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { commands } from "../bindings";
 import type { DiscoveredSkill } from "../bindings";
+import { DetailHeader } from "../components/DetailHeader";
 import { PopupMenu, type PopupMenuItem } from "../components/PopupMenu";
 import { SearchField, type SearchFieldHandle } from "../components/SearchField";
+import {
+  SkillContextMenu,
+  type SkillContextAction,
+} from "../components/SkillContextMenu";
 import { SkillListRow } from "../components/SkillListRow";
 import { useFuzzySearch } from "../hooks/useFuzzySearch";
+import { useSkillActions } from "../hooks/useSkillActions";
+import { useSkillDetail } from "../hooks/useSkillDetail";
 import { useSkills } from "../hooks/useSkills";
 import styles from "./SkillsView.module.css";
 
@@ -103,6 +112,13 @@ export function SkillsView() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
+  // Look up the disabled flag for the selected row from the in-list skill
+  // record — this drives both the context-menu label and the ⌘D shortcut
+  // before the detail-pane fetch completes. The list rows don't carry
+  // disabled state today (Phase 26's `DiscoveredSkill` shape pre-dates the
+  // GUI's machine.toml read), so we lean on the detail-pane fetch via
+  // `useSkillDetail` below for the authoritative flag.
+
   if (err) {
     return (
       <div className={styles.split}>
@@ -181,7 +197,11 @@ export function SkillsView() {
                   aria-label={`${skill.name}, source ${skill.source_name}, ${skill.origin.kind === "managed" ? "managed" : "local"}`}
                 >
                   {({ isSelected }) => (
-                    <SkillListRow skill={skill} selected={isSelected} />
+                    <SkillContextMenuRow
+                      skill={skill}
+                      selected={isSelected}
+                      onSelect={() => setSelected(skill.name)}
+                    />
                   )}
                 </ListBoxItem>
               )}
@@ -191,14 +211,157 @@ export function SkillsView() {
       </div>
       <div className={styles.detailColumn}>
         {selected ? (
-          <p className={styles.placeholder}>
-            Detail pane ships in 26-03
-          </p>
+          <DetailColumn name={selected} />
         ) : (
           <p className={styles.placeholder}>Select a skill to view details</p>
         )}
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Detail column — DetailHeader + (future MarkdownBody from 26-04).  */
+/* ------------------------------------------------------------------ */
+
+function DetailColumn({ name }: { name: string }) {
+  const { detail, err, refetch } = useSkillDetail(name);
+  const actions = useSkillActions({
+    name,
+    disabled: detail?.disabled ?? false,
+    refetch,
+  });
+
+  // ⌘C / ⌘O / ⌘D (UI-SPEC §Keyboard Map) — scoped to "a skill is selected".
+  // We bind at the window level so the shortcuts work even when focus is on
+  // the list (the common case). HIG audit deferred to plan 26-07 — Pitfall 9
+  // flags ⌘D for "Don't Save" conflicts; if 26-07 finds a conflict we'll
+  // rebind here.
+  useEffect(() => {
+    if (!detail) return;
+    const handler = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
+        return;
+      if (event.key === "c") {
+        event.preventDefault();
+        void actions.onCopyPath();
+      } else if (event.key === "o") {
+        event.preventDefault();
+        void actions.onOpenSource();
+      } else if (event.key === "d") {
+        event.preventDefault();
+        void actions.onDisableToggle();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [
+    detail,
+    actions.onCopyPath,
+    actions.onOpenSource,
+    actions.onDisableToggle,
+  ]);
+
+  const surfacedErr = err ?? actions.err;
+
+  return (
+    <>
+      {/* Visually-hidden aria-live region for D-06 announcements. */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        style={{
+          position: "absolute",
+          width: 1,
+          height: 1,
+          padding: 0,
+          overflow: "hidden",
+          clip: "rect(0 0 0 0)",
+          whiteSpace: "nowrap",
+          border: 0,
+        }}
+      >
+        {actions.announcement}
+      </div>
+      {surfacedErr && (
+        <div className={styles.errorBanner}>
+          <strong>[{surfacedErr.code}]</strong> {surfacedErr.message}
+        </div>
+      )}
+      {detail ? (
+        <DetailHeader
+          detail={detail}
+          onOpenSource={actions.onOpenSource}
+          onCopyPath={actions.onCopyPath}
+          onDisableToggle={actions.onDisableToggle}
+          copyState={actions.copyState}
+        />
+      ) : surfacedErr ? null : (
+        <p className={styles.placeholder}>Loading…</p>
+      )}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Row wrapper — adds the right-click context menu (D-07).           */
+/* ------------------------------------------------------------------ */
+
+interface SkillContextMenuRowProps {
+  skill: DiscoveredSkill;
+  selected: boolean;
+  onSelect: () => void;
+}
+
+function SkillContextMenuRow({
+  skill,
+  selected,
+  onSelect,
+}: SkillContextMenuRowProps) {
+  // Right-click contextual actions (D-07). To avoid issuing a per-row
+  // `getSkillDetail` fetch (would be N + 1 IPC calls on mount), we do NOT
+  // know the row's disabled flag here — the context menu uses neutral
+  // labels ("Toggle disabled on this machine"), and the actual toggle
+  // resolves the current state via a fresh fetch on click. The DetailHeader
+  // continues to show the precise Disable / Enable label (driven by the
+  // selected row's `useSkillDetail` result in `DetailColumn`).
+  const handleAction = async (action: SkillContextAction) => {
+    // Select the row first so the detail pane mirrors the user's intent.
+    onSelect();
+    if (action === "open") {
+      const res = await commands.openSourceFolder(skill.name);
+      // Errors are swallowed at the row level — DetailColumn's surfaced
+      // error banner is the canonical surface. Right-click errors aren't
+      // common enough to warrant a per-row banner.
+      void res;
+    } else if (action === "copy") {
+      const res = await commands.copyPath(skill.name);
+      if (res.status === "ok") {
+        try {
+          await writeText(res.data);
+        } catch {
+          /* see comment above — silenced */
+        }
+      }
+    } else if (action === "toggle-disable") {
+      const detailRes = await commands.getSkillDetail(skill.name);
+      if (detailRes.status === "ok") {
+        await commands.setSkillDisabled(skill.name, !detailRes.data.disabled);
+      }
+    }
+  };
+
+  return (
+    <SkillContextMenu
+      // The label flips based on a per-click fetch, not pre-loaded state.
+      // We render "Disable" by default; the actual toggle inspects current
+      // state at click time.
+      disabled={false}
+      onAction={handleAction}
+    >
+      <SkillListRow skill={skill} selected={selected} />
+    </SkillContextMenu>
   );
 }
 
