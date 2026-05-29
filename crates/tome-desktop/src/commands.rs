@@ -133,3 +133,44 @@ pub fn copy_path(_app: tauri::AppHandle, name: SkillName) -> Result<String, Tome
         tome::actions::resolve_source_path(&name, &config, &paths).map_err(TomeError::from)?;
     Ok(src.display().to_string())
 }
+
+/// Return the full doctor report for the GUI Health view (Phase 26 plan
+/// 26-05 / VIEW-05).
+///
+/// Wraps [`tome::doctor::collect_doctor_view`] — the GUI-facing projection of
+/// `DoctorReport` that exposes only the 6 surfaced finding categories (4
+/// auto-fixable + 2 informational) plus pre-computed `auto_fixable_count` /
+/// `manual_count` so the React section headers render without re-walking the
+/// list. Non-GUI issues (orphan dirs, missing SKILL.md, config issues,
+/// foreign symlinks) intentionally do NOT cross the IPC boundary in Phase 26.
+#[tauri::command]
+#[specta::specta]
+pub fn get_doctor_report(_app: tauri::AppHandle) -> Result<tome::doctor::DoctorView, TomeError> {
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    tome::doctor::collect_doctor_view(&config, &paths).map_err(TomeError::from)
+}
+
+/// Dispatch a per-item doctor repair for the GUI's `PreviewPopover` Apply
+/// button (Phase 26 plan 26-05 / VIEW-05 / D-09).
+///
+/// Wraps [`tome::doctor::repair_one`] — re-runs `check()` to locate the live
+/// issue, then matches the [`tome::doctor::RepairKind`] exhaustively against
+/// per-item helpers. NF-04 preview-then-confirm: this command is only reached
+/// after the user clicks Apply inside the `PreviewPopover` (no keyboard
+/// shortcut bypasses it; T-26-05-01 mitigation).
+///
+/// Returns a structured `TomeError` for the two GUI-visible failure modes:
+/// stale FindingId ("no longer present" — T-26-05-02), or non-auto-fixable
+/// kind ("not auto-fixable" — defensive, the GUI never sends one of these).
+/// The watcher (plan 26-06) fires `LibraryChanged` / `ManifestChanged` /
+/// `MachinePrefsChanged` for the resulting writes; the React Health view
+/// refetches on those.
+#[tauri::command]
+#[specta::specta]
+pub fn doctor_repair_one(
+    _app: tauri::AppHandle,
+    finding_id: tome::doctor::FindingId,
+) -> Result<(), TomeError> {
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+    tome::doctor::repair_one(&finding_id, &config, &paths).map_err(TomeError::from)
+}

@@ -6,16 +6,18 @@
 // view's right side hosts a list column + detail column instead of a single
 // ContentPane, so we branch on `view === 'skills'` before rendering.
 //
-// `SkillsView` and `HealthPlaceholder` are deliberately small in this plan:
-//   - SkillsView ships its real virtualised list in plan 26-02 Task 2.
-//   - HealthPlaceholder is replaced by the real HealthView in plan 26-05.
+// Plan 26-05 wires the Sidebar Health badge to `useDoctorReport`'s live
+// `findings.length` and replaces the HealthPlaceholder with the real
+// HealthView.
 
 import { useEffect } from "react";
 import { ContentPane } from "./shell/ContentPane";
 import { Sidebar } from "./shell/Sidebar";
 import { Titlebar, type SectionLabel } from "./shell/Titlebar";
 import { Window } from "./shell/Window";
+import { useDoctorReport } from "./hooks/useDoctorReport";
 import { useRouter, setView, type View } from "./stores/router";
+import { HealthView } from "./views/HealthView";
 import { SkillsView } from "./views/SkillsView";
 import { StatusView } from "./views/StatusView";
 
@@ -28,10 +30,6 @@ function sectionLabel(view: View): SectionLabel {
     case "health":
       return "Health";
   }
-}
-
-function HealthPlaceholder() {
-  return <p>Health view ships in 26-05</p>;
 }
 
 /** ⌘1 / ⌘2 / ⌘3 → setView. Bound at the document level so the shortcuts
@@ -59,13 +57,18 @@ function useGlobalShortcuts() {
 export default function App() {
   const { view } = useRouter();
   useGlobalShortcuts();
+  // Plan 26-05 / D-02 / D-12: live doctor-finding count drives the Sidebar
+  // Health badge. Subscribes to manifest + library + lockfile events; the
+  // badge clears at zero findings.
+  const { report: doctorReport } = useDoctorReport();
+  const badgeCount = doctorReport?.findings.length ?? 0;
 
   const isSkills = view === "skills";
 
   return (
     <Window mode={isSkills ? "split" : "single"}>
       <Titlebar section={sectionLabel(view)} />
-      <Sidebar selected={view} onChange={setView} badgeCount={0} />
+      <Sidebar selected={view} onChange={setView} badgeCount={badgeCount} />
       {isSkills ? (
         <SkillsView />
       ) : view === "status" ? (
@@ -74,7 +77,7 @@ export default function App() {
         </ContentPane>
       ) : (
         <ContentPane title="Health">
-          <HealthPlaceholder />
+          <HealthView />
         </ContentPane>
       )}
     </Window>

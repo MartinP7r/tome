@@ -1,0 +1,31 @@
+/* SectionHeader — UI-SPEC §Components §SectionHeader (Health). */
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: var(--space-6) 0 var(--space-2);
+  /* First section header at the top of the pane shouldn't have an extra
+   * gap above its title — the ContentPane body padding already separates
+   * it from the page title. */
+}
+
+.header:first-child {
+  margin-top: 0;
+}
+
+.label {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: var(--text-small-line);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+}
+
+.count {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+}

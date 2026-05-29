@@ -1,15 +1,16 @@
 //! Diagnose and optionally repair issues such as missing entries, orphan directories,
 //! and stale directory symlinks.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use console::style;
 use dialoguer::Confirm;
 use std::io::IsTerminal;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::debug;
 
 use crate::cleanup;
-use crate::config::Config;
+use crate::config::{Config, DirectoryName};
+use crate::discover::SkillName;
 use crate::manifest;
 use crate::paths::{TomePaths, resolve_symlink_target};
 
@@ -17,6 +18,7 @@ use crate::paths::{TomePaths, resolve_symlink_target};
 
 /// Severity of a diagnostic issue.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub enum IssueSeverity {
     /// Critical problem (e.g., missing directory, broken symlink).
     Error,
@@ -80,6 +82,7 @@ const _: () = {
 /// keep every variant pinned. Adding a variant without updating `ALL`
 /// is a `cargo check` failure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 pub enum IssueCategory {
     Library,
@@ -133,6 +136,7 @@ const _: () = {
 /// `Option<RepairKind>` — adding a variant without a handler arm fails
 /// to compile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 #[serde(rename_all = "snake_case")]
 // Every variant in this enum names a specific "Remove …" action. The
 // shared `Remove` prefix is intentional (one variant per real
@@ -192,6 +196,88 @@ const _: () = {
     assert!(RepairKind::ALL.len() == 4);
 };
 
+/// Stable, content-aware identifier for a single doctor finding (Phase 26
+/// plan 26-05, OQ-2 resolution).
+///
+/// Used to dispatch per-item repairs through `repair_one`: the GUI sends the
+/// `FindingId` it harvested from the last `collect_doctor_view` snapshot, and
+/// `repair_one` re-runs `check()` to locate the matching live issue. The
+/// content-aware enum (variants carry the identifying data inline) avoids the
+/// hash-collision class hash-style IDs would invite (T-26-05-03).
+///
+/// Variants align 1:1 with the 4 [`RepairKind`] auto-fix arms plus 2
+/// informational categories ([`Self::UnparsableFrontmatter`],
+/// [`Self::DivergingTarget`]) the UI surfaces with manual remediation hints.
+///
+/// JSON wire-shape: `{ "kind": "library_stale_manifest", "skill": "name" }` etc.
+///
+/// Per POLISH-04: `ALL` array + compile-time exhaustiveness sentinel pin every
+/// variant. Adding a variant without updating `ALL` is a `cargo check` failure.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum FindingId {
+    /// Manifest entry whose library directory is missing on disk (also covers
+    /// broken managed symlinks — same repair handler).
+    LibraryStaleManifest { skill: SkillName },
+    /// Broken legacy symlink in the library directory (not in the manifest).
+    LibraryBrokenSymlink { path: PathBuf },
+    /// Stale symlink in a distribution directory (points into the library at
+    /// a now-missing skill).
+    TargetStaleSymlink {
+        directory: DirectoryName,
+        path: PathBuf,
+    },
+    /// Real directory in a distribution directory whose content matches a
+    /// library skill byte-for-byte (Phase 24 — auto-fixable by replacing with
+    /// a symlink).
+    TargetRealDirToSymlink {
+        directory: DirectoryName,
+        path: PathBuf,
+    },
+    /// Library skill whose `SKILL.md` YAML frontmatter does not parse
+    /// (informational; user must edit the file). Phase 23.
+    UnparsableFrontmatter { skill: SkillName },
+    /// Real directory in a distribution directory whose content diverges from
+    /// the matching library skill (informational; user must reconcile
+    /// manually).
+    DivergingTarget {
+        directory: DirectoryName,
+        path: PathBuf,
+    },
+}
+
+impl FindingId {
+    /// Compile-time-validated enumeration of every variant's wire-tag.
+    /// Mirrors [`RepairKind::ALL`] and other POLISH-04 patterns.
+    pub const ALL: [&'static str; 6] = [
+        "library_stale_manifest",
+        "library_broken_symlink",
+        "target_stale_symlink",
+        "target_real_dir_to_symlink",
+        "unparsable_frontmatter",
+        "diverging_target",
+    ];
+}
+
+/// Compile-time drift guard for [`FindingId::ALL`] (POLISH-04).
+/// Adding a variant without updating `ALL` and this match fails to compile
+/// (`non-exhaustive patterns`) or trips the const-len assert.
+#[allow(dead_code)]
+const fn _finding_id_exhaustiveness_sentinel(id: &FindingId) {
+    match id {
+        FindingId::LibraryStaleManifest { .. } => {}
+        FindingId::LibraryBrokenSymlink { .. } => {}
+        FindingId::TargetStaleSymlink { .. } => {}
+        FindingId::TargetRealDirToSymlink { .. } => {}
+        FindingId::UnparsableFrontmatter { .. } => {}
+        FindingId::DivergingTarget { .. } => {}
+    }
+}
+const _: () = {
+    assert!(FindingId::ALL.len() == 6);
+};
+
 /// A single diagnostic issue found during a health check.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct DiagnosticIssue {
@@ -216,6 +302,19 @@ pub struct DiagnosticIssue {
     /// Omitted from JSON when `None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repair_kind: Option<RepairKind>,
+    /// Stable, content-aware identifier for the GUI's per-item fix
+    /// dispatch (Phase 26 plan 26-05, OQ-2). `Some` for any issue the
+    /// Health view surfaces — the 4 auto-fixable [`RepairKind`] variants
+    /// and the 2 informational categories (UnparsableFrontmatter,
+    /// DivergingTarget). `None` for issues that have no dedicated UI
+    /// surface (orphan directories — interactive-only; missing-SKILL.md
+    /// warnings; config issues; ForeignSymlink Warnings — those flow
+    /// through the CLI `tome doctor` text path only).
+    ///
+    /// Omitted from JSON when `None` (existing wire-shape preserved for
+    /// `tome doctor --json` consumers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<FindingId>,
 }
 
 impl DiagnosticIssue {
@@ -236,6 +335,7 @@ impl DiagnosticIssue {
             kind: None,
             category: IssueCategory::Library,
             repair_kind: None,
+            finding_id: None,
         }
     }
 
@@ -254,6 +354,7 @@ impl DiagnosticIssue {
             kind: None,
             category: IssueCategory::Library,
             repair_kind: Some(repair_kind),
+            finding_id: None,
         }
     }
 
@@ -265,6 +366,7 @@ impl DiagnosticIssue {
             kind: None,
             category: IssueCategory::Directory,
             repair_kind: None,
+            finding_id: None,
         }
     }
 
@@ -281,6 +383,7 @@ impl DiagnosticIssue {
             kind: None,
             category: IssueCategory::Directory,
             repair_kind: Some(repair_kind),
+            finding_id: None,
         }
     }
 
@@ -298,6 +401,7 @@ impl DiagnosticIssue {
             kind: Some(DiagnosticIssueKind::ForeignSymlink),
             category: IssueCategory::ForeignSymlink,
             repair_kind: None,
+            finding_id: None,
         }
     }
 
@@ -310,7 +414,27 @@ impl DiagnosticIssue {
             kind: None,
             category: IssueCategory::Config,
             repair_kind: None,
+            finding_id: None,
         }
+    }
+
+    /// Builder: stamp a [`FindingId`] onto an existing issue. Used at the
+    /// `check_library` / `check_distribution_dir` emit sites for the 6 GUI-
+    /// surfaced finding categories so `repair_one` can locate the issue on
+    /// the next `check()` snapshot.
+    pub(crate) fn with_id(mut self, id: FindingId) -> Self {
+        self.finding_id = Some(id);
+        self
+    }
+
+    /// Return the stable [`FindingId`] for this issue, if any.
+    ///
+    /// Phase 26 plan 26-05 (OQ-2). Used by `repair_one` to locate the live
+    /// issue matching a UI-supplied id after re-running `check()`. `None` for
+    /// issues that have no dedicated GUI surface (orphan directories, missing
+    /// SKILL.md, config issues, ForeignSymlink Warnings).
+    pub fn id(&self) -> Option<&FindingId> {
+        self.finding_id.as_ref()
     }
 }
 
@@ -671,10 +795,16 @@ fn category_display_name(c: IssueCategory) -> &'static str {
 }
 
 /// Action description for a repair kind. Used by
-/// `render_repair_plan_auto` so each auto-fixable issue gets a typed
-/// description (no substring matching). New `RepairKind` variants get
-/// a new arm here automatically via the exhaustive match.
-fn repair_kind_action_label(k: RepairKind) -> &'static str {
+/// `render_repair_plan_auto` (CLI) so each auto-fixable issue gets a typed
+/// description (no substring matching), AND by the GUI `PreviewPopover` body
+/// text via `collect_doctor_view` (Phase 26 plan 26-05, NF-04 preview-then-
+/// confirm). New `RepairKind` variants get a new arm here automatically via
+/// the exhaustive match.
+///
+/// `pub` since plan 26-05 — `commands::get_doctor_report` includes the label
+/// in each `DoctorFinding::dry_run_description` so the React side can render
+/// the preview verbatim.
+pub fn repair_kind_action_label(k: RepairKind) -> &'static str {
     match k {
         RepairKind::RemoveStaleManifestEntry => {
             "will remove entry from manifest file (and broken symlink, if any)"
@@ -941,6 +1071,265 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
     Ok(())
 }
 
+// -- Phase 26 plan 26-05: per-item repair helpers + GUI wire-shape --
+//
+// The CLI batch dispatcher (`dispatch_repairs` above) stays as-is: it preserves
+// the existing "one helper sweep per kind" behaviour `tome doctor` users rely
+// on. The per-item helpers below are dedicated to `repair_one`, which dispatches
+// a SINGLE issue from a UI-supplied `FindingId`. They re-use the same low-level
+// primitives (`cleanup::cleanup_target` for the target-symlink case is
+// path-scoped, etc.) but operate on one `DiagnosticIssue` at a time.
+
+/// Repair a single library-side finding (`LibraryStaleManifest` or
+/// `LibraryBrokenSymlink`).
+///
+/// The two repair kinds share an implementation because the underlying action
+/// is the same: remove the manifest entry (if any) and delete the orphan
+/// directory entry / broken symlink at the issue's path. Per Phase 26 plan
+/// 26-05 — GUI per-item dispatch.
+pub(crate) fn repair_library_one(paths: &TomePaths, issue: &DiagnosticIssue) -> Result<()> {
+    let Some(id) = issue.finding_id.as_ref() else {
+        bail!("internal: repair_library_one called on issue without FindingId");
+    };
+    let config_dir = paths.config_dir();
+    let library_dir = paths.library_dir();
+    match id {
+        FindingId::LibraryStaleManifest { skill } => {
+            let mut m = manifest::load(config_dir).with_context(|| {
+                format!(
+                    "cannot repair: manifest is unreadable. Back up {} and run sync --force",
+                    crate::manifest::MANIFEST_FILENAME
+                )
+            })?;
+            let entry_path = library_dir.join(skill.as_str());
+            // Clean up broken managed symlinks
+            if entry_path.is_symlink() {
+                std::fs::remove_file(&entry_path).with_context(|| {
+                    format!("failed to remove broken symlink {}", entry_path.display())
+                })?;
+            }
+            let had_entry = m.contains_key(skill.as_str());
+            m.remove(skill.as_str());
+            if had_entry {
+                manifest::save(&m, config_dir)?;
+            }
+            Ok(())
+        }
+        FindingId::LibraryBrokenSymlink { path } => {
+            // Defensive: only remove if it's still a broken symlink.
+            if path.is_symlink() {
+                std::fs::remove_file(path).with_context(|| {
+                    format!("failed to remove broken symlink {}", path.display())
+                })?;
+            }
+            Ok(())
+        }
+        _ => bail!(
+            "internal: repair_library_one called with non-library FindingId {:?}",
+            id
+        ),
+    }
+}
+
+/// Repair a single stale target symlink (`TargetStaleSymlink`).
+pub(crate) fn repair_target_one(
+    _config: &Config,
+    _paths: &TomePaths,
+    issue: &DiagnosticIssue,
+) -> Result<()> {
+    let Some(FindingId::TargetStaleSymlink { path, .. }) = issue.finding_id.as_ref() else {
+        bail!("internal: repair_target_one called with wrong FindingId");
+    };
+    if path.is_symlink() {
+        std::fs::remove_file(path)
+            .with_context(|| format!("failed to remove stale symlink {}", path.display()))?;
+    }
+    Ok(())
+}
+
+/// Replace a single matching real directory in a target dir with a symlink
+/// into the library (`TargetRealDirToSymlink`).
+pub(crate) fn consolidate_target_one(
+    _config: &Config,
+    paths: &TomePaths,
+    issue: &DiagnosticIssue,
+) -> Result<()> {
+    let Some(FindingId::TargetRealDirToSymlink { path, .. }) = issue.finding_id.as_ref() else {
+        bail!("internal: consolidate_target_one called with wrong FindingId");
+    };
+    let library_dir = paths.library_dir();
+    let Some(basename) = path.file_name().and_then(|n| n.to_str()) else {
+        bail!("target path has no valid basename: {}", path.display());
+    };
+    let library_skill = library_dir.join(basename);
+    if !library_skill.is_dir() {
+        bail!(
+            "library does not have a matching skill for {} — cannot consolidate",
+            path.display()
+        );
+    }
+    // Re-verify content matches before destroying anything (the disk may have
+    // shifted between `check()` and this call).
+    let target_hash = manifest::hash_directory(path)?;
+    let library_hash = manifest::hash_directory(&library_skill)?;
+    if target_hash != library_hash {
+        bail!(
+            "target content no longer matches library content — refusing to consolidate {}",
+            path.display()
+        );
+    }
+    std::fs::remove_dir_all(path)
+        .with_context(|| format!("failed to remove {}", path.display()))?;
+    std::os::unix::fs::symlink(&library_skill, path).with_context(|| {
+        format!(
+            "failed to create symlink {} -> {}",
+            path.display(),
+            library_skill.display()
+        )
+    })?;
+    Ok(())
+}
+
+/// Per-item repair dispatch (Phase 26 plan 26-05 / VIEW-05 / NF-04).
+///
+/// Locates the live `DiagnosticIssue` matching `finding_id` by re-running
+/// `check(config, paths)` and looking up `i.id() == Some(finding_id)`. If the
+/// finding is no longer present (e.g. CLI repaired it concurrently) or has no
+/// auto-repair handler, returns a structured `anyhow::Error` the GUI surfaces
+/// as an inline `TomeError` disclosure on the FindingRow (D-11 / SAFE-01).
+///
+/// The dispatch matches `RepairKind` exhaustively (POLISH-04) so adding a new
+/// auto-fixable variant is a compile-time error if no per-item helper exists.
+pub fn repair_one(finding_id: &FindingId, config: &Config, paths: &TomePaths) -> Result<()> {
+    let report = check(config, paths)?;
+    let issue = report
+        .all_issues()
+        .find(|i| i.id() == Some(finding_id))
+        .ok_or_else(|| {
+            anyhow!(
+                "finding {:?} is no longer present (the CLI may have repaired it concurrently)",
+                finding_id
+            )
+        })?;
+    let Some(kind) = issue.repair_kind else {
+        bail!("finding {:?} is not auto-fixable", finding_id);
+    };
+    match kind {
+        RepairKind::RemoveStaleManifestEntry | RepairKind::RemoveBrokenLibrarySymlink => {
+            repair_library_one(paths, issue)?
+        }
+        RepairKind::RemoveStaleTargetSymlink => repair_target_one(config, paths, issue)?,
+        RepairKind::ConsolidateTargetRealDirToSymlink => {
+            consolidate_target_one(config, paths, issue)?
+        }
+    }
+    Ok(())
+}
+
+/// Wire-shape for a single doctor finding crossing the Tauri IPC boundary
+/// (Phase 26 plan 26-05).
+///
+/// Distinct from the internal `DiagnosticIssue` to keep the GUI contract
+/// stable as `DiagnosticIssue` evolves. The React Health view renders
+/// `title` + `description` per row; `dry_run_description` populates the
+/// `PreviewPopover` body for auto-fixable findings.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct DoctorFinding {
+    /// Stable content-aware identifier — round-trips back through
+    /// `doctor_repair_one(finding_id)` to dispatch the per-item repair.
+    pub id: FindingId,
+    pub severity: IssueSeverity,
+    pub category: IssueCategory,
+    /// Short human label (e.g. "Broken library symlink", "Unparsable SKILL.md
+    /// frontmatter — {skill}"). Renders as the `FindingRow`'s primary line.
+    pub title: String,
+    /// Verbatim diagnostic message from the underlying `DiagnosticIssue`.
+    /// Renders as the `FindingRow`'s secondary description.
+    pub description: String,
+    /// Auto-repair classifier. `Some(kind)` ↔ the row exposes a Fix button
+    /// that opens the `PreviewPopover`; `None` → manual remediation hint
+    /// (D-12, never a dead control).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repair_kind: Option<RepairKind>,
+    /// One-sentence dry-run description rendered as the `PreviewPopover` body
+    /// (NF-04 preview-then-confirm). Populated from `repair_kind_action_label`
+    /// when `repair_kind.is_some()`; `None` otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dry_run_description: Option<String>,
+}
+
+/// Wire-shape for the GUI Health view's full payload (Phase 26 plan 26-05).
+///
+/// Stable on the IPC boundary — the React side renders
+/// `auto_fixable_count` / `manual_count` in the section headers and iterates
+/// `findings` once to partition into the AUTO-FIXABLE / NEEDS ATTENTION
+/// sections.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct DoctorView {
+    pub findings: Vec<DoctorFinding>,
+    pub auto_fixable_count: usize,
+    pub manual_count: usize,
+}
+
+/// Derive the verbatim UI-SPEC §Copywriting title for a doctor finding.
+///
+/// The titles below match the §"Per-view Design — Health" + §Copywriting
+/// strings in `26-UI-SPEC.md`. The match arms are gated on the issue's
+/// `finding_id`; issues without a FindingId fall back to the raw `message`
+/// (CLI parity).
+fn derive_title(issue: &DiagnosticIssue) -> String {
+    match issue.finding_id.as_ref() {
+        Some(FindingId::LibraryStaleManifest { .. }) => "Stale manifest entry".to_string(),
+        Some(FindingId::LibraryBrokenSymlink { .. }) => "Broken library symlink".to_string(),
+        Some(FindingId::TargetStaleSymlink { .. }) => "Stale target symlink".to_string(),
+        Some(FindingId::TargetRealDirToSymlink { .. }) => {
+            "Real directory shadows library skill".to_string()
+        }
+        Some(FindingId::UnparsableFrontmatter { skill }) => {
+            format!("Unparsable SKILL.md frontmatter — {skill}")
+        }
+        Some(FindingId::DivergingTarget { .. }) => "Diverging target content".to_string(),
+        None => issue.message.clone(),
+    }
+}
+
+/// Collect the GUI Health view payload (Phase 26 plan 26-05).
+///
+/// Runs the same `check()` the CLI uses, then projects every issue that has a
+/// `FindingId` into a `DoctorFinding`. Issues without a FindingId (orphan
+/// directories, missing SKILL.md, config issues, foreign symlinks) are
+/// intentionally excluded — those flow through the CLI `tome doctor` text
+/// path only and don't have a dedicated GUI surface in Phase 26.
+pub fn collect_doctor_view(config: &Config, paths: &TomePaths) -> Result<DoctorView> {
+    let report = check(config, paths)?;
+    let findings: Vec<DoctorFinding> = report
+        .all_issues()
+        .filter_map(|issue| {
+            let id = issue.finding_id.clone()?;
+            Some(DoctorFinding {
+                id,
+                severity: issue.severity.clone(),
+                category: issue.category,
+                title: derive_title(issue),
+                description: issue.message.clone(),
+                repair_kind: issue.repair_kind,
+                dry_run_description: issue
+                    .repair_kind
+                    .map(|k| repair_kind_action_label(k).to_string()),
+            })
+        })
+        .collect();
+    let auto_fixable_count = findings.iter().filter(|f| f.repair_kind.is_some()).count();
+    let manual_count = findings.len() - auto_fixable_count;
+    Ok(DoctorView {
+        findings,
+        auto_fixable_count,
+        manual_count,
+    })
+}
+
 /// Show auto-fixable repair actions. Each auto-fixable issue prints
 /// its repair-kind action label (typed dispatch; no substring
 /// matching). Non-auto-fixable issues are skipped (they're rendered
@@ -1076,20 +1465,26 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
                 // Broken managed symlink — same action as "missing
                 // directory" (remove manifest entry + delete symlink),
                 // so it shares the RemoveStaleManifestEntry handler.
-                issues.push(DiagnosticIssue::library_repairable(
-                    IssueSeverity::Error,
-                    format!(
-                        "managed skill '{}' has a broken symlink (source may have been uninstalled)",
-                        name
-                    ),
-                    RepairKind::RemoveStaleManifestEntry,
-                ));
+                issues.push(
+                    DiagnosticIssue::library_repairable(
+                        IssueSeverity::Error,
+                        format!(
+                            "managed skill '{}' has a broken symlink (source may have been uninstalled)",
+                            name
+                        ),
+                        RepairKind::RemoveStaleManifestEntry,
+                    )
+                    .with_id(FindingId::LibraryStaleManifest { skill: name.clone() }),
+                );
             } else {
-                issues.push(DiagnosticIssue::library_repairable(
-                    IssueSeverity::Error,
-                    format!("manifest entry '{}' has no directory on disk", name),
-                    RepairKind::RemoveStaleManifestEntry,
-                ));
+                issues.push(
+                    DiagnosticIssue::library_repairable(
+                        IssueSeverity::Error,
+                        format!("manifest entry '{}' has no directory on disk", name),
+                        RepairKind::RemoveStaleManifestEntry,
+                    )
+                    .with_id(FindingId::LibraryStaleManifest { skill: name.clone() }),
+                );
             }
         }
     }
@@ -1121,15 +1516,20 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
             if !is_managed {
                 let raw_target = std::fs::read_link(&path)
                     .with_context(|| format!("failed to read symlink {}", path.display()))?;
-                issues.push(DiagnosticIssue::library_repairable(
-                    IssueSeverity::Error,
-                    format!(
-                        "broken legacy symlink: {} -> {}",
-                        path.display(),
-                        raw_target.display()
-                    ),
-                    RepairKind::RemoveBrokenLibrarySymlink,
-                ));
+                issues.push(
+                    DiagnosticIssue::library_repairable(
+                        IssueSeverity::Error,
+                        format!(
+                            "broken legacy symlink: {} -> {}",
+                            path.display(),
+                            raw_target.display()
+                        ),
+                        RepairKind::RemoveBrokenLibrarySymlink,
+                    )
+                    .with_id(FindingId::LibraryBrokenSymlink {
+                        path: path.clone(),
+                    }),
+                );
             }
         }
     }
@@ -1161,10 +1561,13 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
         match std::fs::read_to_string(&skill_md) {
             Ok(content) => {
                 if let Err(e) = crate::skill::parse(&content) {
-                    issues.push(DiagnosticIssue::library(
-                        IssueSeverity::Warning,
-                        format!("'{name}' has unparsable SKILL.md frontmatter: {e}"),
-                    ));
+                    issues.push(
+                        DiagnosticIssue::library(
+                            IssueSeverity::Warning,
+                            format!("'{name}' has unparsable SKILL.md frontmatter: {e}"),
+                        )
+                        .with_id(FindingId::UnparsableFrontmatter { skill: name.clone() }),
+                    );
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -1186,11 +1589,20 @@ fn check_library(paths: &TomePaths) -> Result<Vec<DiagnosticIssue>> {
 }
 
 fn check_distribution_dir(
-    _name: &str,
+    name: &str,
     skills_dir: &Path,
     library_dir: &Path,
 ) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
+
+    // Phase 26 plan 26-05: derive a DirectoryName for the structured FindingId
+    // stamps below. The directory name always came from a validated
+    // `config.distribution_dirs()` key in production, so `DirectoryName::new`
+    // succeeds in every production caller; tests that pass a free-form `&str`
+    // get a `None` here (which means the issues get no FindingId — fine for
+    // the existing CLI-text-rendering tests that don't dispatch through
+    // `repair_one`).
+    let dir_name = DirectoryName::new(name).ok();
 
     if !skills_dir.is_dir() {
         issues.push(DiagnosticIssue::directory(
@@ -1226,11 +1638,20 @@ fn check_distribution_dir(
             let points_into_library =
                 target.starts_with(library_dir) || target.starts_with(&canonical_library);
             if points_into_library && !target.exists() {
-                issues.push(DiagnosticIssue::directory_repairable(
+                let issue = DiagnosticIssue::directory_repairable(
                     IssueSeverity::Error,
                     format!("stale symlink {}", path.display()),
                     RepairKind::RemoveStaleTargetSymlink,
-                ));
+                );
+                let issue = if let Some(dn) = dir_name.clone() {
+                    issue.with_id(FindingId::TargetStaleSymlink {
+                        directory: dn,
+                        path: path.clone(),
+                    })
+                } else {
+                    issue
+                };
+                issues.push(issue);
             }
             // HARD-09 / D-DIST-2: surface foreign symlinks so they show
             // up in `tome doctor` even when the user hasn't run `sync`
@@ -1271,23 +1692,41 @@ fn check_distribution_dir(
                 manifest::hash_directory(&library_skill),
             ) {
                 (Ok(t), Ok(l)) if t == l => {
-                    issues.push(DiagnosticIssue::directory_repairable(
+                    let issue = DiagnosticIssue::directory_repairable(
                         IssueSeverity::Warning,
                         format!(
                             "real directory in target matches library content (should be a symlink): {}",
                             path.display()
                         ),
                         RepairKind::ConsolidateTargetRealDirToSymlink,
-                    ));
+                    );
+                    let issue = if let Some(dn) = dir_name.clone() {
+                        issue.with_id(FindingId::TargetRealDirToSymlink {
+                            directory: dn,
+                            path: path.clone(),
+                        })
+                    } else {
+                        issue
+                    };
+                    issues.push(issue);
                 }
                 (Ok(_), Ok(_)) => {
-                    issues.push(DiagnosticIssue::directory(
+                    let issue = DiagnosticIssue::directory(
                         IssueSeverity::Warning,
                         format!(
                             "real directory in target diverges from library content — reconcile manually: {}",
                             path.display()
                         ),
-                    ));
+                    );
+                    let issue = if let Some(dn) = dir_name.clone() {
+                        issue.with_id(FindingId::DivergingTarget {
+                            directory: dn,
+                            path: path.clone(),
+                        })
+                    } else {
+                        issue
+                    };
+                    issues.push(issue);
                 }
                 _ => {
                     // Hash failure on either side — skip silently;
@@ -2975,5 +3414,402 @@ mod tests {
         // source_path points at the library copy (the canonical home for
         // Unowned skills).
         assert_eq!(entry.source_path, orphan);
+    }
+
+    // -- Phase 26 plan 26-05: FindingId + repair_one + collect_doctor_view --
+
+    #[test]
+    fn finding_id_all_len_6() {
+        // POLISH-04 ALL-array contract: every variant enumerated.
+        assert_eq!(FindingId::ALL.len(), 6);
+        assert!(FindingId::ALL.contains(&"library_stale_manifest"));
+        assert!(FindingId::ALL.contains(&"library_broken_symlink"));
+        assert!(FindingId::ALL.contains(&"target_stale_symlink"));
+        assert!(FindingId::ALL.contains(&"target_real_dir_to_symlink"));
+        assert!(FindingId::ALL.contains(&"unparsable_frontmatter"));
+        assert!(FindingId::ALL.contains(&"diverging_target"));
+    }
+
+    #[test]
+    fn finding_id_round_trip_through_serde() {
+        // Plan 26-05: the IPC boundary serialises the enum as a tagged
+        // discriminated union; round-trip must preserve every field.
+        let original = FindingId::TargetStaleSymlink {
+            directory: DirectoryName::new("claude").unwrap(),
+            path: PathBuf::from("/tmp/skills/foo"),
+        };
+        let json = serde_json::to_string(&original).unwrap();
+        assert!(json.contains("\"kind\":\"target_stale_symlink\""), "{json}");
+        let decoded: FindingId = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn finding_id_serialises_with_snake_case_tag() {
+        let id = FindingId::UnparsableFrontmatter {
+            skill: SkillName::new("foo-bar").unwrap(),
+        };
+        let json = serde_json::to_string(&id).unwrap();
+        // Tagged enum with snake_case discriminator on `kind`.
+        assert!(
+            json.contains("\"kind\":\"unparsable_frontmatter\""),
+            "expected snake_case tag, got: {json}"
+        );
+        assert!(json.contains("\"skill\":\"foo-bar\""), "{json}");
+    }
+
+    #[test]
+    fn diagnostic_issue_id_returns_stamped_finding_id() {
+        let id = FindingId::LibraryBrokenSymlink {
+            path: PathBuf::from("/x"),
+        };
+        let issue = DiagnosticIssue::library_repairable(
+            IssueSeverity::Error,
+            "msg",
+            RepairKind::RemoveBrokenLibrarySymlink,
+        )
+        .with_id(id.clone());
+        assert_eq!(issue.id(), Some(&id));
+    }
+
+    #[test]
+    fn diagnostic_issue_id_is_none_when_not_stamped() {
+        // Orphan-dir / config-issue / foreign-symlink emit sites don't stamp
+        // FindingIds — only the 6 GUI-surfaced variants do. Issues without an
+        // ID are filtered out of `collect_doctor_view`.
+        let issue = DiagnosticIssue::library(IssueSeverity::Warning, "orphan directory: /tmp/x");
+        assert_eq!(issue.id(), None);
+    }
+
+    #[test]
+    fn check_library_stamps_finding_id_on_stale_manifest_entry() {
+        let lib = TempDir::new().unwrap();
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("gone").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/gone"),
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        let issues = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let with_id: Vec<_> = issues.iter().filter(|i| i.id().is_some()).collect();
+        assert_eq!(with_id.len(), 1);
+        assert!(matches!(
+            with_id[0].id(),
+            Some(FindingId::LibraryStaleManifest { skill }) if skill.as_str() == "gone"
+        ));
+    }
+
+    #[test]
+    fn check_library_stamps_finding_id_on_broken_legacy_symlink() {
+        let lib = TempDir::new().unwrap();
+        unix_fs::symlink("/nonexistent/target", lib.path().join("legacy")).unwrap();
+        let issues = check_library(
+            &TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let with_id: Vec<_> = issues
+            .iter()
+            .filter(|i| matches!(i.id(), Some(FindingId::LibraryBrokenSymlink { .. })))
+            .collect();
+        assert_eq!(with_id.len(), 1);
+    }
+
+    #[test]
+    fn check_library_stamps_finding_id_on_unparsable_frontmatter() {
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(
+            tome_home.path(),
+            library.path(),
+            "bad-yaml",
+            Some("---\n: invalid yaml [[\n---\nbody"),
+        );
+
+        let issues = check_library(
+            &TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
+        )
+        .unwrap();
+        let matched: Vec<_> = issues
+            .iter()
+            .filter(|i| matches!(i.id(), Some(FindingId::UnparsableFrontmatter { skill }) if skill.as_str() == "bad-yaml"))
+            .collect();
+        assert_eq!(matched.len(), 1, "got issues: {issues:?}");
+    }
+
+    #[test]
+    fn check_distribution_dir_stamps_finding_id_on_stale_symlink() {
+        let lib = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let stale_target = lib.path().join("deleted-skill");
+        unix_fs::symlink(&stale_target, target.path().join("skill-link")).unwrap();
+
+        let issues = check_distribution_dir("claude", target.path(), lib.path()).unwrap();
+        let with_id: Vec<_> = issues
+            .iter()
+            .filter(|i| {
+                matches!(
+                    i.id(),
+                    Some(FindingId::TargetStaleSymlink { directory, .. }) if directory.as_str() == "claude"
+                )
+            })
+            .collect();
+        assert_eq!(with_id.len(), 1, "got issues: {issues:?}");
+    }
+
+    #[test]
+    fn check_distribution_dir_stamps_finding_id_on_diverging_target() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        make_library_and_target_skill(library.path(), target.path(), "diverged", true);
+        let issues = check_distribution_dir("codex", target.path(), library.path()).unwrap();
+        let matched: Vec<_> = issues
+            .iter()
+            .filter(|i| matches!(i.id(), Some(FindingId::DivergingTarget { directory, .. }) if directory.as_str() == "codex"))
+            .collect();
+        assert_eq!(matched.len(), 1, "got: {issues:?}");
+    }
+
+    #[test]
+    fn repair_one_unknown_finding_errors() {
+        // Plan 26-05: an old FindingId that doesn't match any current issue
+        // surfaces as a "no longer present" error (T-26-05-02).
+        let tmp = TempDir::new().unwrap();
+        let lib = tmp.path().join("library");
+        std::fs::create_dir_all(&lib).unwrap();
+        let config = Config {
+            library_dir: lib.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tmp.path().to_path_buf(), lib).unwrap();
+        let bogus = FindingId::LibraryStaleManifest {
+            skill: SkillName::new("never-existed").unwrap(),
+        };
+        let err = repair_one(&bogus, &config, &paths).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("no longer present"),
+            "error should mention 'no longer present', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn repair_one_unfixable_finding_errors() {
+        // Plan 26-05 D-12: UnparsableFrontmatter has no repair_kind; calling
+        // `repair_one` on it surfaces as a "not auto-fixable" error.
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        make_skill_with_skill_md(
+            tome_home.path(),
+            library.path(),
+            "broken",
+            Some("---\n: invalid [[\n---\nbody"),
+        );
+        let config = Config {
+            library_dir: library.path().to_path_buf(),
+            ..Config::default()
+        };
+        let paths =
+            TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap();
+        let id = FindingId::UnparsableFrontmatter {
+            skill: SkillName::new("broken").unwrap(),
+        };
+        let err = repair_one(&id, &config, &paths).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("not auto-fixable"),
+            "error should mention 'not auto-fixable', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn repair_one_removes_stale_manifest_entry() {
+        let lib = TempDir::new().unwrap();
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("ghost").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/ghost"),
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap();
+        let id = FindingId::LibraryStaleManifest {
+            skill: SkillName::new("ghost").unwrap(),
+        };
+        repair_one(&id, &config, &paths).unwrap();
+
+        let after = manifest::load(lib.path()).unwrap();
+        assert!(
+            !after.contains_key("ghost"),
+            "per-item repair should remove the manifest entry"
+        );
+    }
+
+    #[test]
+    fn repair_one_removes_single_broken_legacy_symlink() {
+        // Two broken symlinks present — repair_one removes only the
+        // FindingId-specified one. Pins per-item granularity.
+        let lib = TempDir::new().unwrap();
+        unix_fs::symlink("/nonexistent/a", lib.path().join("legacy-a")).unwrap();
+        unix_fs::symlink("/nonexistent/b", lib.path().join("legacy-b")).unwrap();
+
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap();
+        let id = FindingId::LibraryBrokenSymlink {
+            path: lib.path().join("legacy-a"),
+        };
+        repair_one(&id, &config, &paths).unwrap();
+
+        assert!(
+            !lib.path().join("legacy-a").exists()
+                && !lib.path().join("legacy-a").is_symlink(),
+            "legacy-a should be removed"
+        );
+        assert!(
+            lib.path().join("legacy-b").is_symlink(),
+            "legacy-b must remain (per-item dispatch)"
+        );
+    }
+
+    // -- collect_doctor_view --
+
+    #[test]
+    fn collect_doctor_view_counts_match() {
+        // Fixture: one auto-fixable (LibraryStaleManifest) + one manual
+        // (UnparsableFrontmatter).
+        let tome_home = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+
+        // Auto-fixable: manifest entry pointing at a missing directory.
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("gone").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/gone"),
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        // Manual: bad-yaml skill with a real directory.
+        let bad = library.path().join("bad-yaml");
+        std::fs::create_dir_all(&bad).unwrap();
+        std::fs::write(bad.join("SKILL.md"), "---\n: invalid [[\n---\nbody").unwrap();
+        m.insert(
+            crate::discover::SkillName::new("bad-yaml").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/bad-yaml"),
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
+                content_hash: crate::validation::test_hash("xyz"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, tome_home.path()).unwrap();
+
+        let config = Config {
+            library_dir: library.path().to_path_buf(),
+            ..Config::default()
+        };
+        let paths =
+            TomePaths::new(tome_home.path().to_path_buf(), library.path().to_path_buf()).unwrap();
+        let view = collect_doctor_view(&config, &paths).unwrap();
+        assert_eq!(view.auto_fixable_count, 1, "view: {view:?}");
+        assert_eq!(view.manual_count, 1, "view: {view:?}");
+        assert_eq!(view.findings.len(), 2);
+        // Every finding carries a dry_run_description iff repair_kind is some.
+        for f in &view.findings {
+            assert_eq!(f.dry_run_description.is_some(), f.repair_kind.is_some());
+        }
+    }
+
+    #[test]
+    fn collect_doctor_view_empty_when_healthy() {
+        // No issues → empty findings + zero counts.
+        let lib = TempDir::new().unwrap();
+        let skill_dir = lib.path().join("ok-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: ok-skill\ndescription: ok\n---\nbody",
+        )
+        .unwrap();
+        let mut m = manifest::Manifest::default();
+        m.insert(
+            crate::discover::SkillName::new("ok-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: PathBuf::from("/tmp/source/ok-skill"),
+                ownership: manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new("test").unwrap(),
+                },
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+            },
+        );
+        manifest::save(&m, lib.path()).unwrap();
+        let config = Config {
+            library_dir: lib.path().to_path_buf(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(lib.path().to_path_buf(), lib.path().to_path_buf()).unwrap();
+        let view = collect_doctor_view(&config, &paths).unwrap();
+        assert!(view.findings.is_empty(), "got: {view:?}");
+        assert_eq!(view.auto_fixable_count, 0);
+        assert_eq!(view.manual_count, 0);
+    }
+
+    #[test]
+    fn doctor_finding_title_uses_ui_spec_strings() {
+        // UI-SPEC §Copywriting + §"Per-view Design — Health" wording.
+        let stale = DiagnosticIssue::library_repairable(
+            IssueSeverity::Error,
+            "manifest entry 'x' has no directory on disk",
+            RepairKind::RemoveStaleManifestEntry,
+        )
+        .with_id(FindingId::LibraryStaleManifest {
+            skill: SkillName::new("x").unwrap(),
+        });
+        assert_eq!(derive_title(&stale), "Stale manifest entry");
+
+        let bad = DiagnosticIssue::library(IssueSeverity::Warning, "'broken' has unparsable")
+            .with_id(FindingId::UnparsableFrontmatter {
+                skill: SkillName::new("broken").unwrap(),
+            });
+        assert_eq!(
+            derive_title(&bad),
+            "Unparsable SKILL.md frontmatter — broken"
+        );
     }
 }

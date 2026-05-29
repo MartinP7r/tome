@@ -1,0 +1,148 @@
+/* PreviewPopover — UI-SPEC §Components §PreviewPopover (D-09 / NF-04). */
+
+/* Fix trigger button — variants align with Button.module.css `.smallFix`
+ * but `<DialogTrigger>` doesn't accept a custom `<Button>` component (it
+ * needs the React Aria primitive directly), so we duplicate the styling
+ * rules. Token bindings stay identical. */
+.fix {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-window);
+  color: var(--label-primary);
+  font-family: inherit;
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 4px 10px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  cursor: default;
+  outline: none;
+  transition: background 90ms ease, border-color 90ms ease;
+}
+
+.fix[data-hovered="true"] {
+  background: var(--bg-subtle);
+}
+
+.fix[data-pressed="true"] {
+  background: var(--bg-subtle);
+  border-color: var(--label-secondary);
+}
+
+.fix[data-focus-visible="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Popover container — React Aria handles positioning; we just style the
+ * card chrome. 320px max width per UI-SPEC. */
+.popover {
+  max-width: 320px;
+  background: var(--bg-window);
+  border: 1px solid var(--separator-strong);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  /* React Aria adds entry/exit data-entering / data-exiting attrs; we keep
+   * the transition lightweight so rapid Cancel/Apply doesn't churn. */
+}
+
+.dialog {
+  padding: var(--space-3) var(--space-4) var(--space-3);
+  outline: none;
+}
+
+.heading {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: var(--text-small-line);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+  margin: 0 0 var(--space-2);
+}
+
+.body {
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  line-height: var(--text-body-line);
+  color: var(--label-primary);
+  margin: 0 0 var(--space-2);
+}
+
+.helper {
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  margin: 0 0 var(--space-3);
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+/* Cancel — secondary button shape. */
+.cancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-window);
+  color: var(--label-primary);
+  font-family: inherit;
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  line-height: 1.2;
+  padding: 6px 12px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  cursor: default;
+  outline: none;
+  transition: background 90ms ease, border-color 90ms ease;
+}
+
+.cancel[data-hovered="true"] {
+  background: var(--bg-subtle);
+}
+
+.cancel[data-pressed="true"] {
+  background: var(--bg-subtle);
+  border-color: var(--label-secondary);
+}
+
+.cancel[data-focus-visible="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Apply — primary button shape. */
+.apply {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-on);
+  font-family: inherit;
+  font-size: var(--text-body-size);
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-md);
+  cursor: default;
+  outline: none;
+  transition: background 90ms ease;
+}
+
+.apply[data-hovered="true"],
+.apply[data-pressed="true"] {
+  background: var(--accent-pressed, var(--accent));
+}
+
+.apply[data-focus-visible="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

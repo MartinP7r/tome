@@ -34,6 +34,9 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             commands::set_skill_disabled,
             commands::open_source_folder,
             commands::copy_path,
+            // Phase 26 plan 26-05 (VIEW-05 / D-09/D-10/D-11/D-12).
+            commands::get_doctor_report,
+            commands::doctor_repair_one,
         ])
         .events(collect_events![
             sink::SyncProgress,

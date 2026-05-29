@@ -5,8 +5,9 @@
 // circle badge when `badgeCount > 0` (D-02). The footer reads the live skill
 // count from `useStatus` so the user always sees an accurate total.
 //
-// Hard-coded `badgeCount={0}` in this plan — the doctor wiring lands in
-// plan 26-05.
+// Plan 26-05: the optional `badgeCount` prop is now backed by
+// `useDoctorReport().report?.findings.length`, supplied by App.tsx. The
+// badge clears at zero findings (D-12).
 
 import { ListBox, ListBoxItem } from "react-aria-components";
 import { useStatus } from "../hooks/useStatus";
