@@ -23,6 +23,8 @@ use crate::discover::{self, DiscoveredSkill};
 /// the rest of the crate already uses — no list-specific wrapper types — so the
 /// GUI consumes the same vocabulary the CLI does (the library-canonical types
 /// are the contract, STATE.md).
+#[derive(serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct ListReport {
     /// Discovered skills, sorted alphabetically by skill name.
     pub skills: Vec<DiscoveredSkill>,

@@ -1,0 +1,61 @@
+/* SearchField — UI-SPEC §Atoms §SearchField. */
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md);
+  padding: 6px 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  transition: border-color 120ms ease;
+}
+
+.field[data-focus-within="true"] {
+  border-color: var(--accent);
+}
+
+.icon {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: var(--label-secondary);
+}
+
+.input {
+  flex: 1 1 auto;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-system);
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  color: var(--label-primary);
+  min-width: 0;
+}
+
+.input::placeholder {
+  color: var(--label-secondary);
+}
+
+.clear {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--label-secondary);
+  color: var(--bg-window);
+  border: none;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+}
+
+.clear:hover {
+  background: var(--label-primary);
+}

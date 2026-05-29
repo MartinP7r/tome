@@ -13,6 +13,15 @@ export const commands = {
 	 *  variants; for the read-only status path it is currently unused.
 	 */
 	getStatus: () => typedError<StatusReport_Serialize, TomeError>(__TAURI_INVOKE("get_status")),
+	/**
+	 *  Return the discovered skill list backing the GUI's VIEW-02 (Skills view).
+	 * 
+	 *  Thin wrapper over [`tome::list::collect`] — the CORE-01 collect-shape
+	 *  function. The GUI fetches once on mount, then runs fuzzy filter / sort /
+	 *  group-by JS-side (RESEARCH §"Standard Stack — Fuzzy search"); per-keystroke
+	 *  IPC would blow the 60fps budget.
+	 */
+	listSkills: () => typedError<ListReport, TomeError>(__TAURI_INVOKE("list_skills")),
 };
 
 /** Events */
@@ -35,6 +44,13 @@ export type CountOrError_Serialize = {
 	count: number | null,
 	error?: string | null,
 };
+
+/**
+ *  A validated directory name.
+ * 
+ *  Rejects empty names and path separators, matching the `SkillName` validation pattern.
+ */
+export type DirectoryName = string;
 
 /**
  *  The role a directory plays in the sync pipeline.
@@ -148,6 +164,27 @@ export type DirectoryStatus_Serialize = {
 };
 
 /**
+ *  A discovered skill with its metadata.
+ * 
+ *  Crosses the Tauri IPC boundary as the row type backing the GUI's Skills
+ *  view (`list_skills` Tauri command, plan 26-02 Task 2). The `frontmatter`
+ *  field is skipped on serialization to keep payload size proportional to the
+ *  VIEW-02 row contract — the detail pane fetches frontmatter via its own
+ *  command in plan 26-03. `path` is serialized as a string for cross-boundary
+ *  compatibility (Rust `PathBuf` → TS `string`).
+ */
+export type DiscoveredSkill = {
+	/**  Skill name (directory name) */
+	name: SkillName,
+	/**  Path to the skill directory (contains SKILL.md) */
+	path: string,
+	/**  Which configured directory this skill came from (matches a key in `Config::directories`). */
+	source_name: DirectoryName,
+	/**  How this skill was sourced (managed vs local), with optional provenance metadata. */
+	origin: SkillOrigin,
+};
+
+/**
  *  Coarse, stable error categories surfaced to the front-end (D-15).
  * 
  *  Grows additively. The GUI branches on this discriminant; new variants are a
@@ -169,6 +206,26 @@ export type ErrorCode =
 "Io" | 
 /**  Anything not classified by a domain sentinel (the fallback, D-14). */
 "Internal";
+
+/**
+ *  The structured result of `tome list`: every discovered skill (sorted by
+ *  name) plus any non-fatal discovery warnings.
+ * 
+ *  Field shapes are deliberately the same `DiscoveredSkill` / `String` types
+ *  the rest of the crate already uses — no list-specific wrapper types — so the
+ *  GUI consumes the same vocabulary the CLI does (the library-canonical types
+ *  are the contract, STATE.md).
+ */
+export type ListReport = {
+	/**  Discovered skills, sorted alphabetically by skill name. */
+	skills: DiscoveredSkill[],
+	/**
+	 *  Non-fatal warnings emitted during discovery (naming-convention hints,
+	 *  deduplication notices). The CLI prints these to stderr unless `--quiet`;
+	 *  the GUI can surface them in a diagnostics view.
+	 */
+	warnings: string[],
+};
 
 /**
  *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
@@ -212,6 +269,50 @@ export type MachinePrefsSummary = {
 	 *  disabled on this machine.
 	 */
 	disabled_directory_count: number,
+};
+
+/**
+ *  A validated skill name.
+ * 
+ *  Lenient validation: rejects empty names and path separators.
+ *  Warns on names that don't match the strict `[a-z0-9-]+` pattern
+ *  (which may become a hard requirement in a future version).
+ */
+export type SkillName = string;
+
+/**
+ *  How a skill was sourced — determines consolidation strategy.
+ * 
+ *  The IPC boundary serializes this as a discriminated union shaped
+ *  `{ "kind": "managed" | "local", ... }` so the GUI can pattern-match
+ *  the kind without parsing strings — same shape as `LockfileState`
+ *  from plan 26-01.
+ */
+export type SkillOrigin = 
+/**
+ *  Managed by a package manager (v0.10+: stored as a real-directory
+ *  copy in the library, NOT a symlink). The `managed: true` manifest
+ *  flag marks the update channel — upstream sync feeds the copy via
+ *  `MarketplaceAdapter`. Pre-v0.10 stored managed skills as symlinks
+ *  into the source dir; that shape is now refused at the sync gate
+ *  (see `library::consolidate_managed` and `migration_v010`).
+ */
+{ kind: "managed"; provenance: SkillProvenance | null } | 
+/**
+ *  Local skill; library entry is a real-directory copy of the source.
+ *  The library copy is editable in-place; `tome sync` detects drift
+ *  via content_hash comparison.
+ */
+{ kind: "local" };
+
+/**  Provenance metadata from package manager sources. */
+export type SkillProvenance = {
+	/**  Registry identifier (e.g. "my-plugin@npm") */
+	registry_id: string,
+	/**  Version string (e.g. "1.2.0"). `None` when not available. */
+	version: string | null,
+	/**  Git commit SHA for exact version pinning. `None` when not available. */
+	git_commit_sha: string | null,
 };
 
 /**
