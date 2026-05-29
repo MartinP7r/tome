@@ -12,6 +12,7 @@
 
 pub mod commands;
 pub mod error;
+pub mod menu;
 pub mod sink;
 pub mod watcher;
 
@@ -44,6 +45,13 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             watcher::LockfileChanged,
             watcher::LibraryChanged,
             watcher::MachinePrefsChanged,
+            // Phase 26 plan 26-07 (NF-03). The native macOS menu bar
+            // is gated `#[cfg(target_os = "macos")]` inside `menu.rs`,
+            // but the `MenuAction` enum stays compiled everywhere so
+            // `bindings.ts` is stable across platforms — the React
+            // `useMenuActions` hook can always subscribe; the event
+            // simply never fires off-mac.
+            menu::MenuAction,
         ])
         // `StatusReport`'s count fields are `Option<usize>` (skill/health
         // tallies). specta forbids exporting `usize`/`u64` to TS by default to

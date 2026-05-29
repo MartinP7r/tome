@@ -98,20 +98,14 @@ export function SkillsView() {
   // (TODO 26-03+: implement grouped rendering once perf bench is green.)
   void group;
 
-  // ⌘F → focus the SearchField (UI-SPEC §Keyboard Map). Scoped to the
-  // Skills view; ⌘1/⌘2/⌘3 stay global. Esc inside the SearchField is
+  // ⌘F → focus the SearchField is now dispatched by the native macOS
+  // menu (plan 26-07's View → Focus Search item) through the typed
+  // `MenuAction::FocusSearch` event, handled in `useMenuActions`. The
+  // duplicate document-level listener that lived here pre-26-07 was
+  // removed to avoid a double-binding conflict with the menu
+  // accelerator (Pitfall 9). Esc inside the SearchField is still
   // handled by React Aria SearchField's default behaviour (clears the
   // query — which we observe via the controlled `onChange`).
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.metaKey && event.key === "f") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
 
   // Look up the disabled flag for the selected row from the in-list skill
   // record — this drives both the context-menu label and the ⌘D shortcut
