@@ -269,7 +269,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Milestone Goal:** Make the skill library *visible*. Tauri 2 desktop GUI over the existing CLI library; the Rust core is reshaped to return structured types callable from any front-end. CLI continues to ship unchanged from `crates/tome`; new `crates/tome-desktop` workspace member hosts the app. macOS-only for v1.0 (Linux deferred to v2). Cuts: alpha (Phases 25–26) → beta (27–28) → rc (29–30) → v1.0 (31). Full requirements in [`REQUIREMENTS.md`](REQUIREMENTS.md); full per-phase plan in [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md).
 
 - [x] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.** (completed 2026-05-27)
-- [ ] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.**
+- [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
 - [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
@@ -326,7 +326,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 26-05-PLAN.md — Doctor health pane + per-item PreviewPopover fixes + content-aware FindingId enum (VIEW-05)
 - [x] 26-06-PLAN.md — Rust-side file watcher (notify 8.2 + debouncer-full 0.7) + 4 typed events + per-hook subscriptions (VIEW-06, NF-05)
 - [x] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
-- [ ] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
+- [x] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
 ## Backlog
 
