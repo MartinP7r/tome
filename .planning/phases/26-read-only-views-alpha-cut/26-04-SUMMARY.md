@@ -32,10 +32,12 @@ key-files:
     - crates/tome-desktop/ui/vitest.config.ts
     - crates/tome-desktop/ui/src/test-setup.ts
     - crates/tome-desktop/ui/src/components/__tests__/MarkdownBody.test.tsx
+  created-snapshot:
+    - crates/tome-desktop/ui/src/components/__tests__/__snapshots__/MarkdownBody.test.tsx.snap
   modified:
     - crates/tome-desktop/ui/src/views/SkillsView.tsx (DetailColumn renders MarkdownBody below DetailHeader)
     - crates/tome-desktop/ui/src/views/SkillsView.module.css (detail column → non-scrolling flex; body scrolls)
-    - crates/tome-desktop/ui/package.json (deps + scripts)
+    - crates/tome-desktop/ui/package.json (deps + scripts test/test:watch)
     - .planning/REQUIREMENTS.md (VIEW-04 wording)
 decisions:
   - "Use react-markdown's allowedElements (not rehype-sanitize) — the allow-list is small enough that DOM-level filtering is overkill, and rehype-sanitize would add a runtime dep without changing the threat surface."
@@ -56,9 +58,8 @@ react-markdown 10 + remark-gfm 4 rendering the SKILL.md body in the SkillsView d
 | Task | Name | Commit | Files |
 | ---- | ---- | ------ | ----- |
 | 1    | MarkdownBody + SkillsView wire + REQUIREMENTS.md VIEW-04 | `cd86375` | MarkdownBody.{tsx,module.css}, SkillsView.{tsx,module.css}, package.json, package-lock.json, REQUIREMENTS.md |
-| 2    | Vitest config + snapshot test | (pending Task 2 commit) | vitest.config.ts, src/test-setup.ts, src/components/__tests__/MarkdownBody.test.tsx, package.json (scripts) |
-
-(Task 2 progress updated after its commit.)
+| —    | Draft SUMMARY (incremental save per connection-resilience rule) | `2629eba` | 26-04-SUMMARY.md |
+| 2    | Vitest harness + MarkdownBody snapshot + scheme-guard tests | `2eedf7c` | vitest.config.ts, src/test-setup.ts, src/components/__tests__/MarkdownBody.test.tsx, MarkdownBody.test.tsx.snap, package.json (scripts) |
 
 ## What Shipped (Task 1)
 
@@ -93,10 +94,63 @@ None.
 
 - **Task 0 (Package legitimacy gate)** — Resolved by orchestrator with all 6 packages verified clean: `react-markdown@10.1.0`, `remark-gfm@4.0.1`, `vitest@4.1.7`, `@testing-library/react@16.3.2`, `@testing-library/jest-dom@6.9.1`, `jsdom@29.1.1` (constraint `^25` resolves to 25.x — intentional per plan). All MIT-licensed; all on their canonical upstream repos.
 
-## Tasks Pending
+## What Shipped (Task 2)
 
-- Task 2: Vitest config + `test-setup.ts` + `MarkdownBody.test.tsx` (4 tests — allow-list render, allow-list strip, javascript: scheme guard, https: openUrl call). Adding `npm test` script.
+- **`vitest.config.ts`** — first Vitest config in the repo. `jsdom` env, `globals: true`, `setupFiles: ['./src/test-setup.ts']`, `css: true` (so CSS Module imports don't choke the test runner). Plugin chain reuses `@vitejs/plugin-react`.
+- **`src/test-setup.ts`** — single `import '@testing-library/jest-dom'` line, registers the custom matchers.
+- **`src/components/__tests__/MarkdownBody.test.tsx`** — 5 tests, 1 snapshot file:
+  1. **Allow-list FORWARD** (Pitfall 3 inverse): renders a fixture exercising every allowed element (h1/h2/h3, p, strong, em, inline code, ul/ol/li, link, fenced pre+code), asserts each is in the DOM at the right tag, snapshots the `<article>` HTML.
+  2. **Allow-list REVERSE** (Pitfall 3): a fixture with tables, images, blockquotes, and raw `<script>`/`<div>` HTML — parsed-disallowed nodes drop element AND descendant text; raw-HTML-disallowed nodes drop the element (the security guarantee — no XSS primitive) but survive as inert escaped text. Test asserts `container.querySelector('script') === null` and `container.querySelector('article > div') === null`.
+  3. **`javascript:` link scheme guard** (T-26-04-02): clicking the rendered `<a>` does NOT call `openUrl`. (react-markdown sanitises the href at parse time; our onClick is the safety-net layer for any scheme that slips through the parser.)
+  4. **`mailto:` link scheme guard** (T-26-04-02): react-markdown KEEPS this href (its default URL transform allow-lists http/https/mailto/tel/irc), and our onClick regex `/^https?:/` rejects it. Confirms the click-time guard catches schemes the parser misses.
+  5. **`https://` happy path** (T-26-04-02): clicking the link calls `openUrl` exactly once with the original href.
+- **`package.json` scripts** — `npm test` → `vitest run` (one-shot for CI); `npm run test:watch` → `vitest` (interactive).
 
-## Self-Check
+## Deviations from Plan (Task 2)
 
-(Filled in after Task 2 commit; this file is intentionally written-then-amended per the orchestrator's connection-resilience rule.)
+### Auto-fixed Issues
+
+**3. [Rule 1 - Bug] Test 2 (allow-list reverse) — text-absence assertion is wrong for raw-HTML cases**
+- **Found during:** First Vitest run after Task 2.
+- **Issue:** The plan's behaviour spec for Test 2 says "raw HTML `<script>alert(1)</script>` has the element STRIPPED — text NOT present in the rendered DOM". react-markdown without `rehype-raw` does NOT parse HTML at all — `<script>` strings survive as ESCAPED TEXT nodes, not parsed `<script>` elements. So the literal text "SCRIPT_TEXT" is in the DOM (inert), but no `<script>` element is. Asserting text absence was wrong; asserting element absence is right. Fixed both assertions and added a comment explaining why this is the correct security check.
+- **Files modified:** `crates/tome-desktop/ui/src/components/__tests__/MarkdownBody.test.tsx`
+- **Commit:** `2eedf7c`
+
+**4. [Rule 1 - Bug] Test 3 (javascript: link) — getByRole("link") fails on parser-blanked href**
+- **Found during:** First Vitest run.
+- **Issue:** react-markdown's default URL transform sanitises `javascript:` URLs to an empty href at parse time. `@testing-library`'s `getByRole("link", { name })` requires a non-empty href to recognise the element as a link role (jsdom follows ARIA's accessible-name rules). The plan's Test 3 design pre-dated that detail.
+- **Fix:** Two-layer test: (a) the original `javascript:` test now queries the `<a>` element directly via `container.querySelector("article a")` and confirms react-markdown stripped the dangerous href; (b) added a `mailto:` test that proves our onClick guard rejects schemes the parser KEEPS (defence-in-depth). Both assert `openUrl` is not called.
+- **Files modified:** `crates/tome-desktop/ui/src/components/__tests__/MarkdownBody.test.tsx`
+- **Commit:** `2eedf7c`
+
+## Verification Results
+
+- `cd crates/tome-desktop/ui && npm test` → **5 passed (5)** in 712ms (jsdom env, React 19 runtime). No console.error / no React 19 deprecation warnings.
+- `cd crates/tome-desktop/ui && npx tsc --noEmit` → exit 0 (covers both production and test code).
+- `cargo check -p tome-desktop` → exit 0 (no Rust-side changes; build still links).
+- REQUIREMENTS.md VIEW-04 text reflects SC#4 wording — verified by `rg -n "VIEW-04" .planning/REQUIREMENTS.md`.
+- Manual smoke test (cargo tauri dev) — **deferred to the orchestrator's post-merge gate**. The automated tests already pin the allow-list, scheme guard, and a11y `<article aria-label>` so a real-rich SKILL.md is a visual sanity check, not a contract test.
+
+## Threat Surface Scan
+
+No new threat surface beyond what the plan's `<threat_model>` already enumerates (T-26-04-01..04 + T-26-04-SC). The MarkdownBody component is the entire attack surface this plan introduces, and every threat in the register has a mitigation pinned by test or by configuration (`allowedElements` excludes `<script>`; no `rehype-raw`; onClick scheme guard).
+
+No flags to add.
+
+## Known Stubs
+
+None. MarkdownBody receives its body string from the real `SkillDetail.body` field (26-03), which the file watcher (26-06) refetches on external edit. No placeholder text, no empty defaults flowing to UI.
+
+## TDD Gate Compliance
+
+This plan's Task 2 had `tdd="true"` and the implementation of MarkdownBody happened in Task 1 (typical Phase-26 pattern: ship the component, then pin behaviour with tests). The gate sequence is:
+- `feat(26-04)` — `cd86375` (implementation)
+- `test(26-04)` — `2eedf7c` (behavioural pinning)
+
+A strict RED-first reading would order these `test` → `feat`. We deliberately deviated because the plan itself orders them this way (Task 1 ships the component before Task 2 writes the test), and the snapshot test serves as the regression contract going forward. If a future plan needs a clean RED gate it can be tracked there.
+
+## Self-Check: PASSED
+
+- Artifacts exist: MarkdownBody.tsx, MarkdownBody.module.css, MarkdownBody.test.tsx, MarkdownBody.test.tsx.snap, vitest.config.ts, src/test-setup.ts — all FOUND.
+- Commits exist: `cd86375` (feat), `2629eba` (docs draft), `2eedf7c` (test) — all FOUND in git log.
+- 5 Vitest tests pass; tsc clean; cargo check clean.
