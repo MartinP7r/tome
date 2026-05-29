@@ -17,7 +17,10 @@ use crate::error::TomeError;
 /// GUI observes exactly the same state the CLI would (`Config::load_or_default`
 /// is missing-file tolerant — an unconfigured machine yields a default config
 /// and `StatusReport { configured: false, .. }`).
-fn load_context() -> anyhow::Result<(Config, TomePaths)> {
+///
+/// `pub` since plan 26-06 — `main.rs::setup` calls it to derive the
+/// `TomePaths` it hands to the file watcher (`watcher::spawn_watcher`).
+pub fn load_context() -> anyhow::Result<(Config, TomePaths)> {
     let config_path = tome::config::default_config_path()?;
     let config = Config::load_or_default(Some(&config_path))?;
     let tome_home = tome::config::default_tome_home()?;

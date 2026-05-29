@@ -13,6 +13,7 @@
 pub mod commands;
 pub mod error;
 pub mod sink;
+pub mod watcher;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
 
@@ -26,7 +27,13 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 pub fn make_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![commands::get_status, commands::list_skills])
-        .events(collect_events![sink::SyncProgress])
+        .events(collect_events![
+            sink::SyncProgress,
+            watcher::ManifestChanged,
+            watcher::LockfileChanged,
+            watcher::LibraryChanged,
+            watcher::MachinePrefsChanged,
+        ])
         // `StatusReport`'s count fields are `Option<usize>` (skill/health
         // tallies). specta forbids exporting `usize`/`u64` to TS by default to
         // guard against BigInt precision loss. These counts are small, bounded

@@ -46,6 +46,15 @@ specta-typescript = "0.0.12"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = "2"
+# File-watcher stack for VIEW-06 / NF-05 (Phase 26 plan 26-06). Caret-pinned to
+# the latest stable lines (8.2.x / 0.7.x) — 9.0.0-rc.x and 0.8.0-rc.x exist on
+# crates.io but the caret range excludes them; cargo resolves stable only.
+# Package-legitimacy gate: notify-rs canonical (CC0-1.0 / MIT OR Apache-2.0).
+notify = "8.2"
+notify-debouncer-full = "0.7"
+
+[dev-dependencies]
+tempfile = "3"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

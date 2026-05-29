@@ -143,6 +143,13 @@ pub use migration_v010::MigrationPartialOrFailed;
 /// `WithDomainKind::with_domain_kind`; the domain itself stays `anyhow::Result`.
 pub use errors::{DomainErrorKind, DomainTagged};
 
+/// Phase 26 plan 26-06 (VIEW-06 / NF-05) — the `tome-desktop` file watcher
+/// reads the canonical `machine.toml` path here without forcing the whole
+/// `machine` module to become part of the public API. Keep the re-export
+/// narrow (single function — no `MachinePrefs` etc.) so the GUI watcher's
+/// dependency surface stays small.
+pub use machine::default_machine_path;
+
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
 /// cleanup → save). This is the primary data source for any consumer that
