@@ -1,0 +1,105 @@
+/* Sidebar — vibrancy/translucent left rail (UI-SPEC §Shell §Sidebar). */
+
+.sidebar {
+  width: var(--sidebar-width);
+  background: var(--sidebar-material);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-3) 0 var(--space-3);
+  /* Solid fallback handled inside tokens.css via the
+   * `prefers-reduced-transparency` media query. */
+  border-right: 1px solid var(--separator);
+  overflow: hidden;
+  -webkit-app-region: drag;
+}
+
+/* Inside the sidebar the NavItem list is interactive, so we re-allow
+ * pointer events for it (the outer sidebar is draggable so the user can
+ * pick up the window anywhere on the rail). */
+.nav,
+.caption,
+.footer {
+  -webkit-app-region: no-drag;
+}
+
+.caption {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+  padding: 0 var(--space-4) var(--space-2);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--space-2);
+  flex: 1 1 auto;
+  list-style: none;
+  margin: 0;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--nav-item-height);
+  padding: 0 var(--space-3);
+  border-radius: var(--radius-md);
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  color: var(--label-primary);
+  cursor: default;
+  outline: none;
+}
+
+.navItem:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .navItem:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+}
+
+.navItem[data-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-on);
+  font-weight: 600;
+}
+
+.navItem[data-selected="true"]:hover {
+  background: var(--accent-pressed);
+}
+
+/* React Aria focus ring: `[data-focus-visible="true"]` is the aria-recommended
+ * attribute the library sets when the user is keyboard-driving. */
+.navItem[data-focus-visible="true"] {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  background: var(--danger);
+  color: var(--accent-on);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-small-size);
+  font-weight: 600;
+}
+
+.footer {
+  padding: var(--space-2) var(--space-4) 0;
+  border-top: 1px solid var(--separator);
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  color: var(--label-secondary);
+  margin-top: var(--space-2);
+}

@@ -54,26 +54,25 @@ export function StatusView() {
   const { status, err, updatedAt } = useStatus();
 
   if (err) {
-    // Error banner — matches Phase 25 App.tsx shape.
+    // Error banner — matches Phase 25 App.tsx shape. Rendered as a fragment so
+    // the surrounding ContentPane owns the outer page chrome (plan 26-02
+    // Task 1 wired the shell — see App.tsx).
     return (
-      <div className="app">
-        <h1>tome</h1>
-        <div className="error-banner">
-          <strong>[{err.code}]</strong> {err.message}
-          {err.context.length > 0 && (
-            <ul>
-              {err.context.map((c, i) => (
-                <li key={i}>{c}</li>
-              ))}
-            </ul>
-          )}
-        </div>
+      <div className="error-banner">
+        <strong>[{err.code}]</strong> {err.message}
+        {err.context.length > 0 && (
+          <ul>
+            {err.context.map((c, i) => (
+              <li key={i}>{c}</li>
+            ))}
+          </ul>
+        )}
       </div>
     );
   }
 
   if (!status) {
-    return <div className="app">Loading…</div>;
+    return <div>Loading…</div>;
   }
 
   const tomeHome = deriveTomeHome(status.library_dir);
@@ -82,9 +81,7 @@ export function StatusView() {
   const lockfileOk = status.lockfile.kind === "in_sync";
 
   return (
-    <div className="app">
-      <h1>Status</h1>
-
+    <>
       <section>
         <KeyValueRow label="TOME HOME" value={tomeHome} mono />
         <KeyValueRow
@@ -113,6 +110,6 @@ export function StatusView() {
         <h2>Directories ({status.directories.length})</h2>
         <DirectoryTable directories={status.directories} />
       </section>
-    </div>
+    </>
   );
 }

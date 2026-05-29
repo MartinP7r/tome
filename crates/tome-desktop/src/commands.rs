@@ -39,3 +39,16 @@ pub fn get_status(_app: tauri::AppHandle) -> Result<tome::status::StatusReport, 
     let (config, paths) = load_context().map_err(TomeError::from)?;
     tome::status::gather(&config, &paths).map_err(TomeError::from)
 }
+
+/// Return the discovered skill list backing the GUI's VIEW-02 (Skills view).
+///
+/// Thin wrapper over [`tome::list::collect`] — the CORE-01 collect-shape
+/// function. The GUI fetches once on mount, then runs fuzzy filter / sort /
+/// group-by JS-side (RESEARCH §"Standard Stack — Fuzzy search"); per-keystroke
+/// IPC would blow the 60fps budget.
+#[tauri::command]
+#[specta::specta]
+pub fn list_skills(_app: tauri::AppHandle) -> Result<tome::list::ListReport, TomeError> {
+    let (config, _paths) = load_context().map_err(TomeError::from)?;
+    tome::list::collect(&config).map_err(TomeError::from)
+}

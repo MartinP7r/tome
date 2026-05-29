@@ -62,7 +62,11 @@ pub mod errors;
 pub(crate) mod git;
 pub(crate) mod library;
 pub(crate) mod lint;
-pub(crate) mod list;
+// `list` is `pub` so `tome-desktop` can call `list::collect` directly from
+// the `list_skills` Tauri command (plan 26-02 Task 2 / VIEW-02). The
+// CORE-01 collect-shape (gather → render) keeps the surface narrow: only
+// `ListReport` + `collect` are public.
+pub mod list;
 pub(crate) mod lockfile;
 // `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
 // v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
