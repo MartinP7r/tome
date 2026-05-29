@@ -1,4 +1,20 @@
-/* Token import MUST come before any rules that consume custom properties. */
+/* Global stylesheet.
+ *
+ * The token import MUST come before any rules that consume custom properties.
+ * Every color reference below resolves through tokens.css so that the
+ * `@media (prefers-color-scheme: dark)` block in tokens.css drives the whole
+ * surface automatically.
+ *
+ * Phase 26-XX hotfix: the original styles.css predated tokens.css (it was
+ * authored during Phase 25's CSS-Modules spike) and left `background: #fff`
+ * + `color: #6e6e73` literals on `.card`, `<section>`, `<section> > h2`, and
+ * the bare `th`/`td` rules. In dark mode the KeyValueRow/DirectoryTable
+ * module CSS correctly switched their text to `#f5f5f7` — but the underlying
+ * `<section>` stayed white, so the readable text disappeared into the card
+ * background. Refactored to consume `var(--bg-window)`, `var(--bg-subtle)`,
+ * `var(--label-*)`, and `var(--separator)` so dark mode is automatic.
+ */
+
 @import "./tokens.css";
 
 :root {
@@ -38,7 +54,7 @@ h1 {
 }
 
 .subtitle {
-  color: #6e6e73;
+  color: var(--label-secondary);
   margin: 0 0 20px;
   font-size: 13px;
 }
@@ -51,8 +67,8 @@ h1 {
 }
 
 .card {
-  background: #fff;
-  border: 1px solid #e2e2e6;
+  background: var(--bg-window);
+  border: 1px solid var(--separator);
   border-radius: 10px;
   padding: 14px 16px;
 }
@@ -61,18 +77,19 @@ h1 {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #8a8a8e;
+  color: var(--label-secondary);
 }
 
 .card .value {
   font-size: 22px;
   font-weight: 600;
   margin-top: 4px;
+  color: var(--label-primary);
 }
 
 section {
-  background: #fff;
-  border: 1px solid #e2e2e6;
+  background: var(--bg-window);
+  border: 1px solid var(--separator);
   border-radius: 10px;
   margin-bottom: 18px;
   overflow: hidden;
@@ -83,8 +100,9 @@ section > h2 {
   font-weight: 600;
   margin: 0;
   padding: 12px 16px;
-  border-bottom: 1px solid #ededf0;
-  background: #fafafa;
+  border-bottom: 1px solid var(--separator);
+  background: var(--bg-subtle);
+  color: var(--label-primary);
 }
 
 table {
@@ -97,11 +115,12 @@ th,
 td {
   text-align: left;
   padding: 8px 16px;
-  border-bottom: 1px solid #f0f0f2;
+  border-bottom: 1px solid var(--separator);
+  color: var(--label-primary);
 }
 
 th {
-  color: #8a8a8e;
+  color: var(--label-secondary);
   font-weight: 500;
   font-size: 11px;
   text-transform: uppercase;
@@ -120,6 +139,9 @@ tr:last-child td {
   font-weight: 500;
 }
 
+/* Role / status badge palette. Dual-tone (background + text) so the same
+ * class works on light and dark surfaces; the dark-mode block at the bottom
+ * shifts to a stronger surface + brighter text pairing per UI-SPEC §Color. */
 .role-managed {
   background: #efeaff;
   color: #6336c9;
@@ -138,9 +160,9 @@ tr:last-child td {
 }
 
 .mono {
-  font-family: "SF Mono", ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
-  color: #515156;
+  color: var(--label-secondary);
 }
 
 .ok {
@@ -159,4 +181,42 @@ tr:last-child td {
   color: #99201a;
   border-radius: 10px;
   padding: 14px 16px;
+}
+
+/* ── Dark-mode shifts for tokens.css-orthogonal surfaces ───────────────────
+ * The token system covers neutral surface + label colors. The semantic
+ * tints below (role badges, .ok/.warn/.err, .error-banner) need their own
+ * dark counterparts because their meaning is tied to a specific hue.
+ */
+@media (prefers-color-scheme: dark) {
+  .role-managed {
+    background: rgba(125, 90, 245, 0.18);
+    color: #b9a3ff;
+  }
+  .role-synced {
+    background: rgba(48, 209, 88, 0.16);
+    color: #6dd590;
+  }
+  .role-source {
+    background: rgba(255, 159, 10, 0.18);
+    color: #ffc777;
+  }
+  .role-target {
+    background: rgba(10, 132, 255, 0.20);
+    color: #7cb8ff;
+  }
+  .ok {
+    color: #6dd590;
+  }
+  .warn {
+    color: #ffc777;
+  }
+  .err {
+    color: #ff7a72;
+  }
+  .error-banner {
+    background: rgba(255, 69, 58, 0.10);
+    border-color: rgba(255, 69, 58, 0.35);
+    color: #ff7a72;
+  }
 }
