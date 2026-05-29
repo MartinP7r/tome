@@ -1,0 +1,139 @@
+# Perf bench workflow — NF-01 (Phase 26 plan 26-08 Task 3).
+#
+# Runs the Playwright 60fps-search bench against a 2000-skill synthetic
+# fixture on macos-latest (Apple Silicon since the 2024 migration —
+# Assumption A12 in 26-RESEARCH.md). Triggers only on PRs touching the
+# UI bundle, the perf-bench harness, the tome-desktop crate, or the
+# core `list`/`discover` modules that feed the Skills view — so the
+# bench doesn't add minutes to every doc-only PR.
+#
+# This workflow is INDEPENDENT of `ci.yml` (CLAUDE.md constraint 11 —
+# `make ci` must NOT run the perf bench). The bench is run-on-demand:
+# narrow-path PR trigger + manual `workflow_dispatch`.
+#
+# Time budget per run: ~3-5 min total.
+#   - Cargo fetch + rust-cache: ~30s warm, ~90s cold.
+#   - Fixture generator (2000 SKILL.md writes + manifest + JSON):
+#     ~5s on macos-latest SSD.
+#   - npm ci: ~20s warm, ~60s cold.
+#   - Playwright chromium download: ~60s cold (cached for the
+#     duration of the runner).
+#   - npm run build (Vite + tsc): ~30s.
+#   - Bench run (Vite dev server boot + 2s sampling window + report):
+#     ~30s.
+
+name: perf-bench
+
+on:
+  pull_request:
+    paths:
+      - "crates/tome-desktop/ui/**"
+      - "crates/tome-desktop/tests/perf/**"
+      - "crates/tome-desktop/src/**"
+      - "crates/tome/src/list.rs"
+      - "crates/tome/src/discover.rs"
+      - "crates/tome/src/manifest.rs"
+      - ".github/workflows/perf.yml"
+  # `workflow_dispatch` enables manual runs from the Actions tab —
+  # useful for verifying after a token-color or design-system retune
+  # that the perf budget is still met without waiting for the next PR.
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: 60fps search-as-you-type (2000 skills)
+    # macos-latest only — Phase 26 GUI is macOS-only (D-GUI-06), and
+    # the perf budget is calibrated to dedicated Apple Silicon
+    # (Assumption A12). Running on Linux would test irrelevant render
+    # paths.
+    runs-on: macos-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: crates/tome-desktop/ui/package-lock.json
+
+      # Step 1: generate the 2000-skill synthetic fixture under /tmp.
+      # The test self-gates on PERF_FIXTURE_OUT so this is the only
+      # invocation path that materialises the fixture.
+      - name: Generate synthetic fixture (2000 skills)
+        env:
+          PERF_FIXTURE_OUT: /tmp/tome-perf-fixture
+        run: cargo test -p tome-desktop --test synthetic_skills -- --nocapture
+
+      # Step 2: install the UI deps. `npm ci` is the deterministic
+      # install path the lockfile commits to.
+      - name: Install UI deps
+        working-directory: crates/tome-desktop/ui
+        run: npm ci
+
+      # Step 3: install Playwright's bundled Chromium. `--with-deps`
+      # pulls the OS-level libs the runner doesn't ship preinstalled
+      # (no-op on macos-latest, but cheap belt-and-braces).
+      - name: Install Playwright browsers
+        working-directory: crates/tome-desktop/ui
+        run: npx playwright install --with-deps chromium
+
+      # Step 4: copy the real 2000-skill perf-skills.json over the
+      # in-tree 3-skill stub. The mock module imports the file at Vite
+      # build time, so this step MUST run before any build.
+      - name: Copy perf fixture into UI mocks
+        run: |
+          cp -f /tmp/tome-perf-fixture/perf-skills.json \
+                crates/tome-desktop/ui/src/__mocks__/perf-skills.json
+          # Sanity check — the file should be ~244KB with 2000 skills.
+          wc -c crates/tome-desktop/ui/src/__mocks__/perf-skills.json
+
+      # Step 5: run the bench. `npm run test:perf` invokes
+      # `playwright test --config=../tests/perf/playwright.config.ts`,
+      # which starts the Vite dev server with `PERF_TEST=1`, navigates
+      # to the Skills view, samples FPS, and asserts p95 < 18ms. The
+      # bench writes per-run rows to
+      # `.planning/phases/26-read-only-views-alpha-cut/26-PERF-RUNS.tsv`
+      # (gitignored — the artefact upload below carries it out).
+      - name: Run perf bench
+        working-directory: crates/tome-desktop/ui
+        env:
+          # Belt-and-braces — playwright.config.ts also injects this
+          # into the webServer env, but setting it at the job level
+          # lets `npm run dev:perf`'s leading `PERF_TEST=1` echo through.
+          PERF_TEST: "1"
+        run: npm run test:perf
+
+      # Step 6: upload artefacts on every run (pass OR fail) — the
+      # PERF-REPORT documents the rolling baseline, and the TSV holds
+      # the raw runs. `if: always()` so a failed bench still surfaces
+      # the numbers in the PR's check artefacts.
+      - name: Upload perf report + runs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-report
+          path: |
+            .planning/phases/26-read-only-views-alpha-cut/26-PERF-REPORT.md
+            .planning/phases/26-read-only-views-alpha-cut/26-PERF-RUNS.tsv
+          # If the TSV doesn't exist (bench bailed before writing),
+          # warn rather than failing the upload step.
+          if-no-files-found: warn
+
+      # Step 7: upload the Playwright test-results dir (screenshots,
+      # traces, error context) on failure so the diff against a passing
+      # baseline is visible without needing to re-run the bench.
+      - name: Upload Playwright artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results
+          path: |
+            crates/tome-desktop/ui/test-results/
+            crates/tome-desktop/tests/perf/test-results/
+          if-no-files-found: ignore

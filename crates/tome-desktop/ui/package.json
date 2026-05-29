@@ -7,11 +7,13 @@
   "scripts": {
     "dev": "vite",
     "dev:a11y": "A11Y_TEST=1 vite --port 1420 --strictPort",
+    "dev:perf": "PERF_TEST=1 vite --port 1420 --strictPort",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:a11y": "playwright test --config=../tests/a11y/playwright.config.ts"
+    "test:a11y": "playwright test --config=../tests/a11y/playwright.config.ts",
+    "test:perf": "playwright test --config=../tests/perf/playwright.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
