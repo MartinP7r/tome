@@ -137,21 +137,19 @@ pub fn spawn_watcher(app: tauri::AppHandle, paths: tome::TomePaths) -> Result<()
 /// exercised by real OS-level writes inside a [`tempfile::TempDir`], and the
 /// test sink records the high-level [`WatcherEvent`]s that would be emitted
 /// to the webview in production.
+///
+/// **Sync vs async readiness contract.** This function does NOT return until
+/// the debouncer is constructed and every existing watch root is registered
+/// with the OS. Only the event-receive loop runs on a background thread. This
+/// matters for tests (and any caller that performs a write immediately after
+/// spawn): if the watch registration were deferred to the bg thread, the
+/// caller would race against `thread::spawn` scheduling latency + debouncer
+/// init + FSEvents stream creation, and any write performed before that work
+/// completes would be silently lost (notify/FSEvents do not deliver
+/// retroactive events for writes that happened before a watch was registered).
 pub fn spawn_watcher_with_sink<F>(paths: WatcherPaths, sink: F) -> Result<()>
 where
     F: Fn(WatcherEvent) + Send + 'static,
-{
-    std::thread::spawn(move || {
-        if let Err(e) = run_watcher_with_sink(paths, sink) {
-            eprintln!("warning: watcher thread exited: {e:#}");
-        }
-    });
-    Ok(())
-}
-
-fn run_watcher_with_sink<F>(paths: WatcherPaths, sink: F) -> Result<()>
-where
-    F: Fn(WatcherEvent),
 {
     let WatcherPaths {
         manifest_path,
@@ -205,7 +203,10 @@ where
     // Watch PARENT dirs (always exist or are creatable), not file paths
     // themselves — Pitfall 5. Recursive only for the library root, where skill
     // edits live nested inside `<library>/<skill>/SKILL.md`. We filter to the
-    // exact file paths inside the debouncer callback below.
+    // exact file paths inside the debouncer callback below. This loop runs
+    // synchronously on the caller's thread so the function does not return
+    // until every watch root is registered with FSEvents — see the
+    // sync-readiness contract on the doc comment above.
     let watch_targets: Vec<(PathBuf, RecursiveMode)> = vec![
         (manifest_parent_canon.clone(), RecursiveMode::NonRecursive),
         (lockfile_parent_canon.clone(), RecursiveMode::NonRecursive),
@@ -220,40 +221,46 @@ where
         }
     }
 
-    while let Ok(events) = rx.recv() {
-        let mut saw_manifest = false;
-        let mut saw_lockfile = false;
-        let mut saw_library = false;
-        let mut saw_machine = false;
-        for ev in events {
-            for path in &ev.paths {
-                if path == &manifest_canon {
-                    saw_manifest = true;
-                }
-                if path == &lockfile_canon {
-                    saw_lockfile = true;
-                }
-                if path == &machine_canon {
-                    saw_machine = true;
-                }
-                if path.starts_with(&library_canon) {
-                    saw_library = true;
+    // Move the debouncer (so it stays alive) and the receive end into the bg
+    // thread. The debouncer drops when the thread exits, which is what we want
+    // for graceful shutdown when the app handle / sink goes away.
+    std::thread::spawn(move || {
+        let _debouncer = debouncer;
+        while let Ok(events) = rx.recv() {
+            let mut saw_manifest = false;
+            let mut saw_lockfile = false;
+            let mut saw_library = false;
+            let mut saw_machine = false;
+            for ev in events {
+                for path in &ev.paths {
+                    if path == &manifest_canon {
+                        saw_manifest = true;
+                    }
+                    if path == &lockfile_canon {
+                        saw_lockfile = true;
+                    }
+                    if path == &machine_canon {
+                        saw_machine = true;
+                    }
+                    if path.starts_with(&library_canon) {
+                        saw_library = true;
+                    }
                 }
             }
+            if saw_manifest {
+                sink(WatcherEvent::Manifest);
+            }
+            if saw_lockfile {
+                sink(WatcherEvent::Lockfile);
+            }
+            if saw_library {
+                sink(WatcherEvent::Library);
+            }
+            if saw_machine {
+                sink(WatcherEvent::MachinePrefs);
+            }
         }
-        if saw_manifest {
-            sink(WatcherEvent::Manifest);
-        }
-        if saw_lockfile {
-            sink(WatcherEvent::Lockfile);
-        }
-        if saw_library {
-            sink(WatcherEvent::Library);
-        }
-        if saw_machine {
-            sink(WatcherEvent::MachinePrefs);
-        }
-    }
+    });
 
     Ok(())
 }
