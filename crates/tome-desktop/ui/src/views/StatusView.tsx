@@ -93,7 +93,17 @@ export function StatusView() {
         <KeyValueRow
           label="LAST SYNC"
           value={formatRelative(status.last_sync)}
-          trailing={showUpdatedPill ? <Pill variant="updated">Updated</Pill> : null}
+          trailing={
+            showUpdatedPill ? (
+              // `key={updatedAt}` force-remounts the Pill on every
+              // watcher-driven refetch (plan 26-06) so the CSS fade
+              // animation restarts cleanly even when refetches arrive
+              // in rapid succession.
+              <Pill key={updatedAt} variant="updated">
+                Updated
+              </Pill>
+            ) : null
+          }
         />
         <KeyValueRow
           label="LOCKFILE"

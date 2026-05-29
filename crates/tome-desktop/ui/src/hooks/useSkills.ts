@@ -1,13 +1,15 @@
 // useSkills — Skills view data hook.
 //
-// Fetches `commands.listSkills()` once on mount. Stores skills, warnings,
-// and error state independently. No event subscriptions in this plan; the
-// file-watcher refetch lands in plan 26-06 — the hook surface accepts the
-// extension without breaking changes (matching the useStatus shape).
+// Fetches `commands.listSkills()` on mount, then refetches on file-watcher
+// events that affect the discovered skill list shape. Plan 26-06 added the
+// event subscriptions; lockfile changes are intentionally NOT subscribed —
+// they don't shift the list shape (NF-05 contract; matrix in plan 26-06
+// §interfaces).
 
 import { useCallback, useEffect, useState } from "react";
-import { commands } from "../bindings";
+import { commands, events } from "../bindings";
 import type { DiscoveredSkill, TomeError } from "../bindings";
+import { useTauriEvent } from "./useTauriEvent";
 
 export interface UseSkillsResult {
   skills: DiscoveredSkill[] | null;
@@ -37,6 +39,12 @@ export function useSkills(): UseSkillsResult {
   useEffect(() => {
     refetch();
   }, [refetch]);
+
+  // Plan 26-06 event-subscription matrix — Skills depends on manifest +
+  // library + machine-prefs. Lockfile changes don't affect the list shape.
+  useTauriEvent(events.manifestChanged, refetch);
+  useTauriEvent(events.libraryChanged, refetch);
+  useTauriEvent(events.machinePrefsChanged, refetch);
 
   return { skills, warnings, err, refetch };
 }

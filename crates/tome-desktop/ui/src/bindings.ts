@@ -26,6 +26,10 @@ export const commands = {
 
 /** Events */
 export const events = {
+	libraryChanged: makeEvent<LibraryChanged>("library-changed"),
+	lockfileChanged: makeEvent<LockfileChanged>("lockfile-changed"),
+	machinePrefsChanged: makeEvent<MachinePrefsChanged>("machine-prefs-changed"),
+	manifestChanged: makeEvent<ManifestChanged>("manifest-changed"),
 	syncProgress: makeEvent<SyncProgress>("sync-progress"),
 };
 
@@ -208,6 +212,14 @@ export type ErrorCode =
 "Internal";
 
 /**
+ *  Library directory contents changed (skill add/remove/edit).
+ * 
+ *  React hooks that depend on library content (status, skills list, detail,
+ *  doctor) refetch on this event. Recursive mode for `<tome_home>/skills/`.
+ */
+export type LibraryChanged = null;
+
+/**
  *  The structured result of `tome list`: every discovered skill (sorted by
  *  name) plus any non-fatal discovery warnings.
  * 
@@ -226,6 +238,15 @@ export type ListReport = {
 	 */
 	warnings: string[],
 };
+
+/**
+ *  The lockfile (`tome.lock`) was rewritten.
+ * 
+ *  React hooks that surface lockfile state (status, doctor) refetch on this
+ *  event. Skills/detail views do NOT subscribe because lockfile changes don't
+ *  affect the discovered skill list shape (NF-05 contract).
+ */
+export type LockfileChanged = null;
 
 /**
  *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
@@ -252,6 +273,15 @@ export type LockfileState =
 { kind: "missing" };
 
 /**
+ *  Per-machine preferences (`machine.toml`) were rewritten.
+ * 
+ *  Fires for own-process writes too (Phase-26 mutation D-06 — verified by the
+ *  integration test in `tests/watcher_smoke.rs`). React hooks whose render
+ *  branches on disabled/enabled state (status, skills, detail) refetch.
+ */
+export type MachinePrefsChanged = null;
+
+/**
  *  Per-machine prefs summary shown in the Status view (VIEW-01).
  * 
  *  Surfaces the integer counts the Status view's `MACHINE` row renders
@@ -270,6 +300,14 @@ export type MachinePrefsSummary = {
 	 */
 	disabled_directory_count: number,
 };
+
+/**
+ *  The on-disk manifest (`.tome-manifest.json`) was rewritten.
+ * 
+ *  React hooks that derive from manifest state (skill list, status, doctor)
+ *  refetch on this event.
+ */
+export type ManifestChanged = null;
 
 /**
  *  A validated skill name.
