@@ -102,6 +102,7 @@ export const events = {
 	lockfileChanged: makeEvent<LockfileChanged>("lockfile-changed"),
 	machinePrefsChanged: makeEvent<MachinePrefsChanged>("machine-prefs-changed"),
 	manifestChanged: makeEvent<ManifestChanged>("manifest-changed"),
+	menuAction: makeEvent<MenuAction>("menu-action"),
 	syncProgress: makeEvent<SyncProgress>("sync-progress"),
 };
 
@@ -585,6 +586,27 @@ export type MachinePrefsSummary = {
  *  refetch on this event.
  */
 export type ManifestChanged = null;
+
+/**
+ *  Typed event fired when a custom (non-Predefined) menu item is
+ *  activated. The React side (`useMenuActions`) listens via the
+ *  generated `events.menuAction` binding and routes to the router
+ *  (`JumpStatus` / `JumpSkills` / `JumpHealth`) or focuses the
+ *  SearchField (`FocusSearch`).
+ * 
+ *  Phase 27+ Library actions (e.g. `SyncNow`, `AddDirectory`) are NOT
+ *  added here — they belong to the milestone that ships them, alongside
+ *  the matching Rust command + UI surface.
+ */
+export type MenuAction = 
+/**  View → Status (⌘1). */
+{ kind: "JumpStatus" } | 
+/**  View → Skills (⌘2). */
+{ kind: "JumpSkills" } | 
+/**  View → Health (⌘3). */
+{ kind: "JumpHealth" } | 
+/**  View → Focus Search (⌘F). Scoped to the Skills view client-side. */
+{ kind: "FocusSearch" };
 
 /**
  *  Categorises the auto-repair available for a [`DiagnosticIssue`]

@@ -37,6 +37,23 @@ import { useSkillDetail } from "../hooks/useSkillDetail";
 import { useSkills } from "../hooks/useSkills";
 import styles from "./SkillsView.module.css";
 
+/** Pitfall 9 / T-26-07-01 guard — when the user has a text input focused
+ *  (the SearchField is the only such surface in Skills view today), the
+ *  Predefined Edit > Copy menu item already routes ⌘C to the OS copy
+ *  handler. The skill-scoped ⌘C handler below abstains in that case so
+ *  the two never collide. Re-detects via `aria-label="Search skills"` on
+ *  the parent `[role="searchbox"]` for the react-aria-components shape
+ *  (the actual `<input>` is nested inside the labelled group). */
+function isTextInputFocused(): boolean {
+  const el = document.activeElement;
+  if (!(el instanceof HTMLElement)) return false;
+  const tag = el.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA") return true;
+  if (el.isContentEditable) return true;
+  const role = el.getAttribute("role");
+  return role === "searchbox" || role === "textbox";
+}
+
 type SortMode = "name" | "source" | "recent";
 type GroupMode = "none" | "source" | "role";
 
@@ -98,20 +115,14 @@ export function SkillsView() {
   // (TODO 26-03+: implement grouped rendering once perf bench is green.)
   void group;
 
-  // ⌘F → focus the SearchField (UI-SPEC §Keyboard Map). Scoped to the
-  // Skills view; ⌘1/⌘2/⌘3 stay global. Esc inside the SearchField is
+  // ⌘F → focus the SearchField is now dispatched by the native macOS
+  // menu (plan 26-07's View → Focus Search item) through the typed
+  // `MenuAction::FocusSearch` event, handled in `useMenuActions`. The
+  // duplicate document-level listener that lived here pre-26-07 was
+  // removed to avoid a double-binding conflict with the menu
+  // accelerator (Pitfall 9). Esc inside the SearchField is still
   // handled by React Aria SearchField's default behaviour (clears the
   // query — which we observe via the controlled `onChange`).
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (event.metaKey && event.key === "f") {
-        event.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
 
   // Look up the disabled flag for the selected row from the in-list skill
   // record — this drives both the context-menu label and the ⌘D shortcut
@@ -233,35 +244,46 @@ function DetailColumn({ name }: { name: string }) {
     refetch,
   });
 
-  // ⌘C / ⌘O / ⌘D (UI-SPEC §Keyboard Map) — scoped to "a skill is selected".
-  // We bind at the window level so the shortcuts work even when focus is on
-  // the list (the common case). HIG audit deferred to plan 26-07 — Pitfall 9
-  // flags ⌘D for "Don't Save" conflicts; if 26-07 finds a conflict we'll
-  // rebind here.
+  // Phase 26 plan 26-07 HIG + Pitfall 9 audit (26-A11Y-AUDIT.md §"Keyboard
+  // shortcut audit results"):
+  //
+  // * **⌘C** — Edit menu's Predefined Copy already handles text-input copy.
+  //   When the focus is on a text field (the SearchField is the only one
+  //   in Skills view today) the OS routes ⌘C to that control automatically.
+  //   We gate the skill-scoped ⌘C handler on `activeElement` so the
+  //   Predefined item wins on text inputs (Pitfall 9, T-26-07-01) and our
+  //   "copy source path" only fires when the list/detail has focus.
+  // * **⌘O** — bare ⌘O is the macOS HIG convention for "Open…" dialog.
+  //   Rebound to **⌘⇧O** ("Open source folder in Finder") so the
+  //   convention stays available for a future Phase 27+ Open dialog.
+  // * **⌘D** — bare ⌘D is "Don't Save" / "Duplicate" / "Bookmarks" in
+  //   most macOS apps. Removed entirely: the "Disable on this machine"
+  //   button in the DetailHeader is one click away and the action is
+  //   deliberate; promoting it to a keyboard shortcut overlaps too many
+  //   conventions to keep safe. (UI-SPEC §Keyboard Map amended in the
+  //   same commit.)
   useEffect(() => {
     if (!detail) return;
     const handler = (event: KeyboardEvent) => {
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey)
-        return;
-      if (event.key === "c") {
+      if (!event.metaKey || event.ctrlKey || event.altKey) return;
+      // ⌘C — skill-scoped copy, but only when no text input owns focus.
+      // The Predefined Edit > Copy item handles the input case.
+      if (!event.shiftKey && event.key === "c" && !isTextInputFocused()) {
         event.preventDefault();
         void actions.onCopyPath();
-      } else if (event.key === "o") {
+        return;
+      }
+      // ⌘⇧O — rebound from bare ⌘O after the macOS-HIG conflict audit.
+      if (event.shiftKey && event.key.toLowerCase() === "o") {
         event.preventDefault();
         void actions.onOpenSource();
-      } else if (event.key === "d") {
-        event.preventDefault();
-        void actions.onDisableToggle();
+        return;
       }
+      // ⌘D removed by 26-07 audit — no keyboard shortcut for Disable.
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [
-    detail,
-    actions.onCopyPath,
-    actions.onOpenSource,
-    actions.onDisableToggle,
-  ]);
+  }, [detail, actions.onCopyPath, actions.onOpenSource]);
 
   const surfacedErr = err ?? actions.err;
 

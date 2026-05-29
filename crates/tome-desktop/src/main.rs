@@ -41,7 +41,15 @@ fn main() {
             // if the FSEvents backend cannot init.
             let handle = app.handle().clone();
             let (_config, paths) = tome_desktop::commands::load_context()?;
-            tome_desktop::watcher::spawn_watcher(handle, paths)?;
+            tome_desktop::watcher::spawn_watcher(handle.clone(), paths)?;
+
+            // Phase 26 plan 26-07 — NF-03. Install the native macOS
+            // menu bar (tome / File / Edit / View / Library / Help)
+            // alongside the watcher. `install_menu` is a cross-platform
+            // shim: a no-op on non-macOS (D-GUI-06), so we don't need a
+            // `#[cfg]` here. Failure surfaces as a setup error — the
+            // same posture as the watcher above.
+            tome_desktop::menu::install_menu(&handle)?;
             Ok(())
         })
         .run(tauri::generate_context!())
