@@ -37,11 +37,14 @@
 }
 
 .detailColumn {
+  /* Non-scrolling outer flex: DetailHeader stays pinned at top; MarkdownBody
+   * takes the remaining height and scrolls internally (UI-SPEC §Skills
+   * "Detail column: DetailHeader (fixed) above MarkdownBody (scrolls)").
+   * The header/body each bring their own padding. */
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: var(--space-6);
-  overflow: auto;
+  overflow: hidden;
 }
 
 .placeholder {
