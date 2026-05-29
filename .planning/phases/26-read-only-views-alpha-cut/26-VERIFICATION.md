@@ -1,46 +1,31 @@
 ---
 phase: 26-read-only-views-alpha-cut
-verified: 2026-05-29T12:00:00Z
-status: gaps_found
-score: 14/17 must-haves verified
+verified: 2026-05-29T14:00:00Z
+status: human_needed
+score: 15/17 must-haves verified
 overrides_applied: 0
 
-gaps:
-  - truth: "cargo fmt --all -- --check passes on all phase-modified files"
-    status: failed
-    reason: "doctor.rs (4 spots), skill.rs (3 spots), commands.rs (1 spot) fail cargo fmt --check. All three files were modified by phase-26 commits (17e022d, fcf3bba, 8c021da). The deferred-items.md attributes this to 'pre-existing drift' but git log confirms all drift-bearing files were touched by this phase's commits. CI includes cargo fmt --all -- --check and would fail on merge."
-    artifacts:
-      - path: "crates/tome/src/doctor.rs"
-        issue: "4 formatting drift spots (FindingId struct literal brace placement, lines 1483/1526/1566/3687)"
-      - path: "crates/tome/src/skill.rs"
-        issue: "3 formatting drift spots (Ok(json) arm collapse, lines 180/285/430)"
-      - path: "crates/tome-desktop/src/commands.rs"
-        issue: "1 formatting drift spot (import sort order, line 10)"
-    missing:
-      - "Run `cargo fmt --all` and commit the formatting fix before merging"
-
-  - truth: "Skill list view group-by (none / source / role) visually renders grouped sections"
-    status: partial
-    reason: "The Group PopupMenu toolbar is wired (shows None/Source/Role options) but renders flat in all modes — no section headers are produced. The 26-02 SUMMARY documents this as 'open follow-up pending the 26-08 perf bench result' but it is not captured in deferred-items.md or explicitly assigned to a later ROADMAP phase. VIEW-02 in REQUIREMENTS.md requires 'group-by (none / source / role)' without qualification."
-    artifacts:
-      - path: "crates/tome-desktop/ui/src/views/SkillsView.tsx"
-        issue: "Line 115: `void group;` — group variable consumed as no-op; comment says TODO 26-03+"
-    missing:
-      - "Implement section-header rendering for source/role grouping, OR formally defer this sub-feature to a later ROADMAP phase with an explicit entry in deferred-items.md"
-
-  - truth: "Skill list view 'recent' sort mode sorts by last-sync timestamp"
-    status: partial
-    reason: "Recent sort falls back to alphabetical name sort. 26-02 SUMMARY documents the fallback (DiscoveredSkill has no synced_at field; that's a discovery-time projection). Not captured in deferred-items.md, not assigned to a later ROADMAP phase. VIEW-02 requires 'sort modes (name / source / recent)'."
-    artifacts:
-      - path: "crates/tome-desktop/ui/src/views/SkillsView.tsx"
-        issue: "sortSkills() falls back to name sort for 'recent' mode with a code comment"
-    missing:
-      - "Either implement recent sort by extending DiscoveredSkill with a manifest-sourced timestamp, OR formally defer to a later ROADMAP phase"
+re_verification:
+  previous_status: gaps_found
+  previous_score: 14/17
+  gaps_closed:
+    - "cargo fmt --all -- --check passes on all phase-modified files (commit 965fd0f)"
+  gaps_remaining: []
+  gaps_deferred:
+    - "VIEW-02 group-by toolbar is a no-op → formally deferred to Phase 27 (commit 1f68169)"
+    - "VIEW-02 'Recent' sort silently falls back to alphabetical → formally deferred to Phase 27 (commit 1f68169)"
+  regressions: []
 
 deferred:
-  - truth: "NF-01 perf bench passes (p95 < 18ms on 2000-skill list, search-as-you-type)"
-    addressed_in: "Phase 27 or later (OQ-1 evaluation in 26-PERF-REPORT.md — CI on macos-latest is the source of truth)"
-    evidence: "Local runs land p95 at 18.10–18.40ms (0.1–0.4ms over). p50 is exactly 60fps. 26-PERF-REPORT.md §OQ-1 explicitly documents that TanStack Virtual swap is on-the-table if CI also shows boundary failure. Plan instructions prohibited auto-fixing this."
+  - truth: "NF-01 p95 < 18ms on dedicated CI hardware"
+    addressed_in: "Phase 27 or later (CI run)"
+    evidence: "26-PERF-REPORT.md §OQ-1: local runs land p95 18.10–18.40ms; CI on macos-latest is source-of-truth; TanStack Virtual swap is fallback if CI confirms regression"
+  - truth: "Skill list view group-by (none / source / role) visually renders grouped sections"
+    addressed_in: "Phase 27"
+    evidence: "deferred-items.md §'VIEW-02 group-by toolbar is a no-op': Phase 27 sync/triage UI needs identical section-header abstraction; REQUIREMENTS.md VIEW-02 prefixed [~] with inline note pointing to deferred-items.md"
+  - truth: "Skill list view 'Recent' sort mode sorts by last-sync timestamp"
+    addressed_in: "Phase 27"
+    evidence: "deferred-items.md §'VIEW-02 Recent sort silently falls back': needs synced_at field on DiscoveredSkill; Phase 27 is already extending manifest with sync provenance; REQUIREMENTS.md VIEW-02 prefixed [~] with inline note"
 
 human_verification:
   - test: "Launch cargo tauri dev and visually verify the 3-column NavigationSplitView shell"
@@ -87,9 +72,30 @@ human_verification:
 # Phase 26: Read-only views — alpha cut — Verification Report
 
 **Phase Goal:** Ship the read-only half of the GUI: status dashboard, virtualised skill list, detail pane with markdown preview, doctor health view, and on-disk file watcher. After this phase, the desktop app is useful for inspection but does not mutate state. First user-visible UI; built on the React scaffold chosen in Phase 25.
-**Verified:** 2026-05-29
-**Status:** GAPS FOUND
-**Re-verification:** No — initial verification
+**Verified:** 2026-05-29 (initial) / 2026-05-29 (re-verification after gap closure)
+**Status:** HUMAN NEEDED
+**Re-verification:** Yes — after gap closure (3 gaps from initial run)
+
+---
+
+## Re-Verification Summary (2026-05-29)
+
+Three gaps were identified in the initial verification (status: `gaps_found`, score 14/17). The orchestrator resolved all three before requesting re-verification:
+
+| Gap | Resolution | Evidence |
+|-----|-----------|----------|
+| Gap 1 (BLOCKER): `cargo fmt --all -- --check` failed on `doctor.rs`, `skill.rs`, `commands.rs` | **RESOLVED** — `cargo fmt --all` applied and committed | Commit `965fd0f` `style(phase-26): cargo fmt phase-26 surfaces`; `cargo fmt --all -- --check` exits 0 confirmed in re-verification |
+| Gap 2 (WARNING): VIEW-02 group-by toolbar is a no-op (no section headers) | **DEFERRED** to Phase 27 — formally recorded | Commit `1f68169`; `deferred-items.md` §"VIEW-02 group-by toolbar is a no-op" with rationale, Phase 27 acceptance criteria; `REQUIREMENTS.md` VIEW-02 now prefixed `[~]` with inline note |
+| Gap 3 (WARNING): VIEW-02 "Recent" sort silently falls back to alphabetical | **DEFERRED** to Phase 27 — formally recorded | Commit `1f68169`; `deferred-items.md` §"VIEW-02 'Recent' sort silently falls back" with rationale, Phase 27 acceptance criteria; `REQUIREMENTS.md` VIEW-02 now prefixed `[~]` with inline note |
+
+**Re-verification spot-checks run:**
+- `cargo fmt --all -- --check` → exit 0
+- `cargo clippy --workspace --all-targets -- -D warnings` → exit 0 (no regressions from fmt commit)
+- `cargo test --workspace --lib --no-run` → exit 0 (compile-check only; full test suite was green in initial run, nothing in that domain changed)
+
+**Resulting status: `human_needed`** — all automated checks pass and all gaps are either resolved or formally deferred. 10 human-verification items remain (visual layout, system integration, accessibility live-walk); these warrant a UAT file before the alpha cut is called real.
+
+---
 
 ## Goal Achievement
 
@@ -103,8 +109,8 @@ human_verification:
 | 4 | MachinePrefsSummary exposes disabled_count and disabled_directory_count | ✓ VERIFIED | MachinePrefsSummary struct in status.rs; gather() populates from machine::load |
 | 5 | cargo test -p tome passes; existing CLI snapshot tests updated in lock-step | ✓ VERIFIED | 909 unit tests + 44 cli tests pass; cli_status__status_empty_library.snap intentionally re-blessed |
 | 6 | Skill list renders ≥2000 skills at 60fps with fuzzy search as-you-type | ? UNCERTAIN (human needed) | React Aria Virtualizer + fuse.js wired and substantive; local perf runs land p95 18.1–18.4ms (documented boundary); CI on dedicated macos-latest is source of truth |
-| 7 | Skill list sort modes (name / source / recent) work | ✗ FAILED (partial) | name + source sort implemented; recent sort falls back to name — see gap #3 |
-| 8 | Skill list group-by (none / source / role) renders grouped sections | ✗ FAILED (partial) | Group toolbar wired; renders flat in all modes — see gap #2 |
+| 7 | Skill list sort modes (name / source / recent) work | ✓ DEFERRED (partial) | name + source sort verified; recent sort falls back to name — formally deferred to Phase 27 in deferred-items.md; REQUIREMENTS.md VIEW-02 marked [~] |
+| 8 | Skill list group-by (none / source / role) renders grouped sections | ✓ DEFERRED (partial) | Group toolbar wired; renders flat in all modes — formally deferred to Phase 27 in deferred-items.md; REQUIREMENTS.md VIEW-02 marked [~] |
 | 9 | Detail pane renders frontmatter, source path, hash, last sync, managed/local badge, disabled state + 3 actions | ✓ VERIFIED | DetailHeader.tsx with 3-row layout; 4 Tauri commands (get_skill_detail, set_skill_disabled, open_source_folder, copy_path); SkillDetail struct in skill.rs |
 | 10 | Markdown preview renders SC#4 subset (H1-H3, p, bold/italic/code, ul/ol/li, links, pre/code blocks) | ✓ VERIFIED | MarkdownBody.tsx with 12-element ALLOWED list; react-markdown + remark-gfm; 5 Vitest tests covering allow-list + scheme guard |
 | 11 | Health pane lists doctor findings with one-click fix actions through real repair handlers | ✓ VERIFIED | HealthView.tsx; FindingId enum + repair_one() in doctor.rs; PreviewPopover NF-04 confirm flow; 2 Tauri commands (get_doctor_report, doctor_repair_one) |
@@ -113,9 +119,11 @@ human_verification:
 | 14 | Every interactive element is keyboard-accessible (NF-02) | ? UNCERTAIN (human needed) | React Aria primitives provide free keyboard nav; axe-core gate passes (4/4 with color-contrast deferred); VoiceOver checklist in 26-A11Y-AUDIT.md §2 not yet walked against live app |
 | 15 | Native macOS menu bar (NF-03): tome/File/Edit/View/Library/Help | ✓ VERIFIED | menu.rs with 6 submenus; MenuAction typed event; install_menu() wired in main.rs::setup; CI a11y job confirmed |
 | 16 | Disable on this machine mutation works (D-06) | ✓ VERIFIED | set_skill_disabled command routes through actions::set_skill_disabled; atomic machine.toml write; browse TUI apply_toggle Global scope refactored to same helper |
-| 17 | cargo fmt --all -- --check passes on all phase-modified files | ✗ FAILED | doctor.rs (4 spots), skill.rs (3 spots), commands.rs (1 spot) fail fmt check; all three touched by phase-26 commits (17e022d, fcf3bba, 8c021da); CI fmt-check gate would fail on merge |
+| 17 | cargo fmt --all -- --check passes on all phase-modified files | ✓ VERIFIED | Commit 965fd0f: `cargo fmt --all` applied to doctor.rs (4 spots), skill.rs (3 spots), commands.rs (1 spot). Re-verification confirms exit 0. |
 
-**Score:** 14/17 truths verified (12 VERIFIED, 2 FAILED/partial, 1 UNCERTAIN/human, 2 FAILED on sub-features)
+**Score:** 15/17 truths verified (13 VERIFIED, 2 DEFERRED/formally recorded, 2 UNCERTAIN/human needed)
+
+_Note: Truths #7 and #8 were FAILED in the initial run (score 14/17). They are now DEFERRED with formal entries in deferred-items.md and REQUIREMENTS.md updated to `[~]`. They count as resolved for the alpha cut score — their Phase 27 closure criteria are recorded. Truth #17 moved from FAILED to VERIFIED. Net: +1 verified._
 
 ### Deferred Items
 
@@ -124,6 +132,8 @@ Items not yet met but explicitly addressed in later milestone phases.
 | # | Item | Addressed In | Evidence |
 |---|------|-------------|---------|
 | 1 | NF-01 p95 < 18ms on dedicated CI hardware | Phase 27 or later (CI run) | 26-PERF-REPORT.md §OQ-1: local runs land p95 18.10–18.40ms; CI on macos-latest is source-of-truth; TanStack Virtual swap is fallback if CI confirms regression |
+| 2 | VIEW-02 group-by renders grouped section headers | Phase 27 | deferred-items.md §"VIEW-02 group-by toolbar is a no-op"; REQUIREMENTS.md VIEW-02 marked [~]; Phase 27 acceptance criteria: SectionHeader rows with VoiceOver heading landmark + totals |
+| 3 | VIEW-02 "Recent" sort by synced_at timestamp | Phase 27 | deferred-items.md §"VIEW-02 'Recent' sort silently falls back"; REQUIREMENTS.md VIEW-02 marked [~]; Phase 27 acceptance criteria: stable ordering on manifest per-skill synced_at |
 
 ### Required Artifacts
 
@@ -131,7 +141,7 @@ Items not yet met but explicitly addressed in later milestone phases.
 |----------|----------|--------|---------|
 | `crates/tome/src/status.rs` | LockfileState + MachinePrefsSummary added to StatusReport | ✓ VERIFIED | Both types present, specta-gated, with POLISH-04 sentinel |
 | `crates/tome-desktop/ui/src/views/StatusView.tsx` | Renders all StatusReport fields via atoms | ✓ VERIFIED | 5 KeyValueRows + DirectoryTable; imports useStatus + relativeTime |
-| `crates/tome-desktop/ui/src/views/SkillsView.tsx` | Virtualised list + fuzzy search + sort + group | ✓ VERIFIED (partial) | React Aria Virtualizer + fuse.js; group-by toolbar present but renders flat |
+| `crates/tome-desktop/ui/src/views/SkillsView.tsx` | Virtualised list + fuzzy search + sort + group | ✓ VERIFIED (partial — group-by deferred) | React Aria Virtualizer + fuse.js; group-by toolbar present but renders flat; deferred to Phase 27 |
 | `crates/tome-desktop/ui/src/views/HealthView.tsx` | Doctor findings + PreviewPopover fixes | ✓ VERIFIED | Grouped AUTO-FIXABLE/NEEDS ATTENTION; all-clear state; inline failure disclosure |
 | `crates/tome-desktop/ui/src/components/MarkdownBody.tsx` | SC#4 allow-list + scheme guard | ✓ VERIFIED | 12-element ALLOWED const; https:// gate in onClick |
 | `crates/tome-desktop/src/watcher.rs` | notify 8.2 file watcher + 4 typed events | ✓ VERIFIED | ManifestChanged/LockfileChanged/LibraryChanged/MachinePrefsChanged; 200ms debounce |
@@ -176,15 +186,18 @@ Items not yet met but explicitly addressed in later milestone phases.
 
 ### Behavioral Spot-Checks
 
+Re-verification (2026-05-29) — only checks affected by gap closure commits re-run; others carried forward from initial run.
+
 | Behavior | Command | Result | Status |
 |----------|---------|--------|--------|
-| cargo build workspace | `cargo build --workspace` | Finished dev profile in 13.78s | ✓ PASS |
-| cargo clippy -D warnings | `cargo clippy --workspace --all-targets -- -D warnings` | Clean (no output) | ✓ PASS |
-| cargo test workspace | `cargo test --workspace` | 909 lib + 13 cli_status + 9 cli_status_details + 10 cli_doctor + 2 watcher_smoke + 3 cli_sync + others — all pass | ✓ PASS |
-| cargo fmt check | `cargo fmt --all -- --check` | FAILS on doctor.rs (4 spots), skill.rs (3 spots), commands.rs (1 spot) | ✗ FAIL |
-| tsc --noEmit | `cd crates/tome-desktop/ui && npx tsc --noEmit` | Exit 0 | ✓ PASS |
-| npm test (Vitest) | `cd crates/tome-desktop/ui && npm test` | 5 passed in 715ms | ✓ PASS |
-| gen-bindings idempotency | `cargo run -p tome-desktop --bin gen-bindings && git diff --exit-code -- crates/tome-desktop/ui/src/bindings.ts` | Exit 0 — bindings fresh | ✓ PASS |
+| cargo build workspace | `cargo build --workspace` | Finished dev profile in 13.78s | ✓ PASS (initial run) |
+| cargo clippy -D warnings | `cargo clippy --workspace --all-targets -- -D warnings` | Clean (no output), exit 0 | ✓ PASS (re-verification — regression check after fmt commit) |
+| cargo test workspace | `cargo test --workspace` | 909 lib + 13 cli_status + 9 cli_status_details + 10 cli_doctor + 2 watcher_smoke + 3 cli_sync + others — all pass | ✓ PASS (initial run) |
+| cargo fmt check | `cargo fmt --all -- --check` | Exit 0 — clean after commit 965fd0f | ✓ PASS (re-verification — was FAIL in initial run) |
+| cargo test --lib --no-run (compile check) | `cargo test --workspace --lib --no-run` | Compiled — exit 0 | ✓ PASS (re-verification — regression check) |
+| tsc --noEmit | `cd crates/tome-desktop/ui && npx tsc --noEmit` | Exit 0 | ✓ PASS (initial run) |
+| npm test (Vitest) | `cd crates/tome-desktop/ui && npm test` | 5 passed in 715ms | ✓ PASS (initial run) |
+| gen-bindings idempotency | `cargo run -p tome-desktop --bin gen-bindings && git diff --exit-code -- crates/tome-desktop/ui/src/bindings.ts` | Exit 0 — bindings fresh | ✓ PASS (initial run) |
 
 ### Probe Execution
 
@@ -195,26 +208,30 @@ Step 7c: SKIPPED — no probe-*.sh scripts exist for this phase. Verification co
 | Requirement | Source Plan | Description | Status | Evidence |
 |-------------|-------------|-------------|--------|---------|
 | VIEW-01 | 26-01 | Status dashboard with all StatusReport fields | ✓ SATISFIED | StatusView.tsx + extended StatusReport + bindings regen |
-| VIEW-02 | 26-02 | Virtualised skill list, fuzzy search, sort, group-by | ✗ PARTIAL | Virtualizer + fuzzy search VERIFIED; group-by renders flat; recent sort falls back to name |
+| VIEW-02 | 26-02 | Virtualised skill list, fuzzy search, sort, group-by | [~] PARTIAL (deferred) | Virtualizer + fuzzy search + name/source sort VERIFIED; group-by and recent sort formally deferred to Phase 27 with acceptance criteria; REQUIREMENTS.md [~] prefix applied |
 | VIEW-03 | 26-03 | Skill detail pane + 3 actions | ✓ SATISFIED | DetailHeader + 4 Tauri commands; actions module shared with TUI |
 | VIEW-04 | 26-04 | Markdown preview, SC#4 subset | ✓ SATISFIED | MarkdownBody + 12-element allow-list; REQUIREMENTS.md updated |
 | VIEW-05 | 26-05 | Doctor health pane + one-click fixes | ✓ SATISFIED | HealthView + FindingId + repair_one + DoctorView |
 | VIEW-06 | 26-06 | File watcher auto-refresh | ✓ SATISFIED | watcher.rs + 4 events + per-hook subscriptions + integration tests |
-| NF-01 | 26-02 + 26-08 | 2000 skills at 60fps | ? UNCERTAIN | React Aria Virtualizer wired + bench harness deployed; local runs show p95 18.1–18.4ms (boundary); CI macos-latest is source of truth |
+| NF-01 | 26-02 + 26-08 | 2000 skills at 60fps | ? UNCERTAIN | React Aria Virtualizer wired + bench harness deployed; local runs show p95 18.1–18.4ms (boundary); CI macos-latest is source of truth; deferred OQ-1 |
 | NF-02 | 26-07 | Keyboard-navigable + VoiceOver labels | ? UNCERTAIN | axe-core passes (non-color rules); keyboard audit applied (⌘C guard, ⌘⇧O, ⌘D removed); VoiceOver checklist not walked on live app |
 | NF-03 | 26-07 | Native macOS menu bar | ✓ SATISFIED | menu.rs with 6 submenus; MenuAction event; install_menu in main.rs |
 | NF-05 | 26-06 | Shared tome.lock + manifest; watcher on external change | ✓ SATISFIED | watcher_smoke tests prove external writes fire events; no GUI-private state |
 
 ### Anti-Patterns Found
 
+Re-verification: the three BLOCKER fmt entries from the initial run are now resolved (commit 965fd0f). The `void group;` warning remains — it is the intentional stub marker for the deferred group-by feature, now formally tracked.
+
 | File | Line | Pattern | Severity | Impact |
 |------|------|---------|----------|--------|
-| `crates/tome/src/doctor.rs` | 1483, 1526, 1566, 3687 | cargo fmt brace-placement drift in FindingId struct literals | ✗ BLOCKER | CI fmt-check gate fails; blocks PR merge |
-| `crates/tome/src/skill.rs` | 180, 285, 430 | cargo fmt single-line match-arm formatting drift | ✗ BLOCKER | CI fmt-check gate fails; blocks PR merge |
-| `crates/tome-desktop/src/commands.rs` | 10 | cargo fmt import sort order drift | ✗ BLOCKER | CI fmt-check gate fails; blocks PR merge |
-| `crates/tome-desktop/ui/src/views/SkillsView.tsx` | 115 | `void group;` with TODO comment — group-by no-op | ⚠ WARNING | VIEW-02 partially unimplemented |
+| `crates/tome/src/doctor.rs` | 1483, 1526, 1566, 3687 | cargo fmt brace-placement drift | ✓ RESOLVED | Fixed in commit 965fd0f |
+| `crates/tome/src/skill.rs` | 180, 285, 430 | cargo fmt single-line match-arm formatting drift | ✓ RESOLVED | Fixed in commit 965fd0f |
+| `crates/tome-desktop/src/commands.rs` | 10 | cargo fmt import sort order drift | ✓ RESOLVED | Fixed in commit 965fd0f |
+| `crates/tome-desktop/ui/src/views/SkillsView.tsx` | 115 | `void group;` with TODO comment — group-by no-op | ℹ INFO (deferred) | Intentional placeholder for deferred VIEW-02 group-by; formally tracked in deferred-items.md |
 
 ### Human Verification Required
+
+10 items need live-app testing before the alpha cut is complete. These feed directly into a HUMAN-UAT.md file.
 
 ### 1. Visual Shell Layout
 
@@ -264,21 +281,34 @@ Step 7c: SKIPPED — no probe-*.sh scripts exist for this phase. Verification co
 **Expected:** ⌘C in SearchField copies text (Predefined Edit wins); ⌘C on list/detail copies source path. ⌘⇧O opens Finder to skill source dir.
 **Why human:** isTextInputFocused() guard behavior requires live interaction to confirm correct scoping.
 
+### 9. 60fps Performance Under Load (NF-01 — CI source of truth)
+
+**Test:** Push the branch and wait for the perf.yml CI workflow to complete on macos-latest.
+**Expected:** Playwright 60fps-search.spec.ts reports p95 < 18ms on the dedicated macos-latest runner. If p95 >= 18ms, the TanStack Virtual fallback documented in 26-PERF-REPORT.md §OQ-1 must be evaluated.
+**Why human (CI-gated):** Local runs land p95 18.10–18.40ms (0.1–0.4ms over budget). Dedicated CI hardware is required for a definitive pass/fail verdict. This is a human-monitored CI check, not a live-app check.
+
+### 10. Skills View 60fps Smoke (Live App)
+
+**Test:** With a library of 50+ skills, open the Skills view and type rapidly into the SearchField.
+**Expected:** No visible frame-drop or jank. Scroll the virtualised list through all skills. No missed renders or blank rows.
+**Why human:** Subjective smoothness under real data requires live app observation — the Playwright bench uses a synthetic fixture and does not substitute for organic interaction.
+
 ---
 
 ### Gaps Summary
 
-**Three gaps block goal achievement:**
+**All three gaps from the initial verification are closed:**
 
-**Gap 1 (BLOCKER): cargo fmt failure on phase-modified files.** `doctor.rs`, `skill.rs`, and `commands.rs` were all modified by phase-26 commits but have formatting drift that fails `cargo fmt --all -- --check`. The CI workflow includes this check and would fail on PR merge. The deferred-items.md incorrectly attributed this drift as pre-existing — git log shows all three files were touched by phase commits (17e022d, fcf3bba, 8c021da respectively). Fix is trivial: `cargo fmt --all` and commit.
+- Gap 1 (BLOCKER): `cargo fmt --all -- --check` failure — **RESOLVED** by commit `965fd0f`. Re-verification confirms exit 0.
+- Gap 2 (WARNING): VIEW-02 group-by toolbar is a no-op — **FORMALLY DEFERRED** to Phase 27 by commit `1f68169`. Entry in `deferred-items.md` with rationale and Phase 27 acceptance criteria. `REQUIREMENTS.md` VIEW-02 prefixed `[~]`.
+- Gap 3 (WARNING): VIEW-02 "Recent" sort falls back to alphabetical — **FORMALLY DEFERRED** to Phase 27 by commit `1f68169`. Entry in `deferred-items.md` with rationale and Phase 27 acceptance criteria. `REQUIREMENTS.md` VIEW-02 prefixed `[~]`.
 
-**Gap 2 (WARNING): VIEW-02 group-by renders flat.** The Group PopupMenu shows None/Source/Role options but all three modes produce a flat list with no section headers. The 26-02 SUMMARY calls this an "open follow-up" pending the 26-08 perf bench, but it is not formally deferred to a later phase in ROADMAP.md or deferred-items.md. REQUIREMENTS.md VIEW-02 requires "group-by (none / source / role)" without qualification.
+No new gaps introduced. Clippy regression check (post-fmt commit) and lib compile-check are clean.
 
-**Gap 3 (WARNING): VIEW-02 recent sort falls back to alphabetical.** "Recent" sort silently falls back to name sort because DiscoveredSkill has no synced_at field. The 26-02 SUMMARY documents this as an open follow-up (manifest-sourced timestamp needed), but it is not formally deferred to a later phase.
-
-Gaps 2 and 3 are sub-features of VIEW-02 that the executor deliberately deferred with documented rationale, but without a formal ROADMAP entry. They may warrant treatment as follow-up issues on the Phase 27 backlog rather than blocking the alpha cut — the planner should decide.
+**Remaining gate before alpha cut is real:** 10 human-verification items need a live-app UAT pass. The `human_needed` status reflects this — it is not a blocker on proceeding to Phase 27 planning, but the UAT file should be worked through before marking Phase 26 as fully shipped.
 
 ---
 
-_Verified: 2026-05-29T12:00:00Z_
+_Initial verification: 2026-05-29T12:00:00Z_
+_Re-verification: 2026-05-29T14:00:00Z_
 _Verifier: Claude (gsd-verifier)_
