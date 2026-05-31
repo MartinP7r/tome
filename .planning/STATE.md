@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: executing
-stopped_at: Phase 26 UI-SPEC approved
-last_updated: "2026-05-29T03:25:28.092Z"
+status: milestone_complete
+stopped_at: Milestone complete (Phase 26 was final phase)
+last_updated: 2026-05-31T07:39:30.816Z
 last_activity: 2026-05-29 -- Phase 26 execution started
 progress:
   total_phases: 2
   completed_phases: 1
   total_plans: 14
-  completed_plans: 7
+  completed_plans: 93
   percent: 50
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 26 — read-only-views-alpha-cut
+**Current focus:** Milestone complete
 
 ## Current Position
 
-Phase: 26 (read-only-views-alpha-cut) — EXECUTING
-Plan: 1 of 8
-Status: Executing Phase 26
-Last activity: 2026-05-29 -- Phase 26 execution started
+Phase: 26
+Plan: Not started
+Status: Milestone complete
+Last activity: 2026-05-31
 
 **v1.0 phase shape (Phases 25–31):**
 

@@ -38,12 +38,12 @@ The Rust crate must be reshaped to support both the existing CLI and the new GUI
 
 Replacement for `tome status` + `tome list` + `tome browse`. First user-visible value; ships in the alpha cut.
 
-- [ ] **VIEW-01**: Status dashboard window shows: resolved `tome_home`, library directory, configured directories (with role/type badges), skill count, last sync time, lockfile state, and machine pref summary — equivalent to `tome status --json` rendered as a UI.
+- [x] **VIEW-01**: Status dashboard window shows: resolved `tome_home`, library directory, configured directories (with role/type badges), skill count, last sync time, lockfile state, and machine pref summary — equivalent to `tome status --json` rendered as a UI.
 - [~] **VIEW-02** _(partial — Phase 26 alpha cut)_: Skill list view with virtualised rendering (handles ≥2000 skills at 60 fps), fuzzy search (matches `nucleo`-style ranking from the CLI), sort modes (name / source / recent), and group-by (none / source / role). _Phase 26 ships virtualised render + fuse.js fuzzy search + name + source sort. **Deferred to Phase 27**: "recent" sort (needs `synced_at` field on `DiscoveredSkill`) and group-by visual section headers — see `.planning/phases/26-read-only-views-alpha-cut/deferred-items.md`._
-- [ ] **VIEW-03**: Skill detail pane shows frontmatter (parsed via existing `lint.rs` logic), source directory path, content hash, last sync timestamp, managed/local status, and disabled state — clicking actions (open source dir / copy path / disable on this machine) match the existing browse TUI.
-- [ ] **VIEW-04**: Markdown preview pane renders SKILL.md body (post-frontmatter) with the SC#4 markdown subset: headings (H1–H3), paragraphs, inline emphasis (bold/italic/inline code), lists (ordered + unordered), links (open in system browser), and fenced code blocks. **Supersedes** the original `browse/markdown.rs` reference — that hand-rolled ratatui-only renderer covers only headers + horizontal rules + inline bold/italic/code and cannot be reused for a webview (D-08 / Phase 26 UI-SPEC Open Item 4).
-- [ ] **VIEW-05**: Health pane surfaces `tome doctor` findings (orphan dirs, broken symlinks, missing manifest entries, missing source paths) with one-click "fix" actions that call into the same repair handlers used by the CLI's interactive `tome doctor`.
-- [ ] **VIEW-06**: All read-only views auto-refresh when the file watcher (CORE-04 event channel) detects manifest, lockfile, or library changes — the GUI cannot drift from on-disk state.
+- [x] **VIEW-03**: Skill detail pane shows frontmatter (parsed via existing `lint.rs` logic), source directory path, content hash, last sync timestamp, managed/local status, and disabled state — clicking actions (open source dir / copy path / disable on this machine) match the existing browse TUI.
+- [x] **VIEW-04**: Markdown preview pane renders SKILL.md body (post-frontmatter) with the SC#4 markdown subset: headings (H1–H3), paragraphs, inline emphasis (bold/italic/inline code), lists (ordered + unordered), links (open in system browser), and fenced code blocks. **Supersedes** the original `browse/markdown.rs` reference — that hand-rolled ratatui-only renderer covers only headers + horizontal rules + inline bold/italic/code and cannot be reused for a webview (D-08 / Phase 26 UI-SPEC Open Item 4).
+- [x] **VIEW-05**: Health pane surfaces `tome doctor` findings (orphan dirs, broken symlinks, missing manifest entries, missing source paths) with one-click "fix" actions that call into the same repair handlers used by the CLI's interactive `tome doctor`.
+- [x] **VIEW-06**: All read-only views auto-refresh when the file watcher (CORE-04 event channel) detects manifest, lockfile, or library changes — the GUI cannot drift from on-disk state.
 
 ### Sync + triage (SYNC)
 
@@ -97,11 +97,11 @@ Code signing, notarization, auto-update, and packaging required for a shippable 
 
 Cross-cutting requirements that apply to multiple phases.
 
-- [ ] **NF-01**: Skill list with 2000 skills renders search-as-you-type at 60 fps on M1 (8 GB) — chosen as the perf budget; verified via a synthetic-skills bench.
-- [ ] **NF-02**: All views are keyboard-navigable; primary actions have keyboard shortcuts (matching macOS HIG conventions: ⌘N add, ⌘R sync, ⌘F search, etc.). VoiceOver labels on every interactive element.
-- [ ] **NF-03**: Native macOS menu bar with File / Edit / View / Library / Help menus. App responds to system appearance changes (light/dark) — no in-app theme switcher initially.
+- [x] **NF-01**: Skill list with 2000 skills renders search-as-you-type at 60 fps on M1 (8 GB) — chosen as the perf budget; verified via a synthetic-skills bench.
+- [x] **NF-02**: All views are keyboard-navigable; primary actions have keyboard shortcuts (matching macOS HIG conventions: ⌘N add, ⌘R sync, ⌘F search, etc.). VoiceOver labels on every interactive element.
+- [x] **NF-03**: Native macOS menu bar with File / Edit / View / Library / Help menus. App responds to system appearance changes (light/dark) — no in-app theme switcher initially.
 - [ ] **NF-04**: All destructive operations surface their plan and require explicit confirmation (no "always confirm" toggle that bypasses this in v1.0). Undo via `tome backup restore` is documented in confirmations where relevant.
-- [ ] **NF-05**: The desktop app and CLI share a single `tome.lock` and `.tome-manifest.json`. Concurrent CLI usage while the app is open does not corrupt either file (file watcher reloads on external change).
+- [x] **NF-05**: The desktop app and CLI share a single `tome.lock` and `.tome-manifest.json`. Concurrent CLI usage while the app is open does not corrupt either file (file watcher reloads on external change).
 
 ## v2 Requirements
 
