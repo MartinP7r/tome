@@ -328,6 +328,26 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
 - [x] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
+### Phase 27: Sync + triage UI
+**Goal**: Replace `tome sync`'s CLI flow (and `update.rs`'s interactive triage prompt) with a visual flow showing per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` writes, cancellation, and failure-summary + retry. Highest-UX-risk phase of the v1.0 milestone — first cross-stage *mutating* pipeline rendered in the GUI.
+**Depends on**: Phase 26 (file watcher for post-sync reloads, Health-pane patterns for failure surfacing, alpha shell + 3-column layout for the new sidebar section, virtualised list primitives for the triage panel). Built on the Phase 25 substrate: `ProgressSink` / `ProgressEvent` / `SyncStage` / `CancellationToken` (`crates/tome/src/progress.rs`), `TauriEventSink` (`crates/tome-desktop/src/`), `TomeError` boundary, committed `bindings.ts` + CI freshness gate.
+**Requirements**: SYNC-01, SYNC-02, SYNC-03, SYNC-04, SYNC-05
+**Phase 26 carryovers folded in** (see `.planning/phases/26-read-only-views-alpha-cut/deferred-items.md`): VIEW-02 group-by (Source/Role) section headers + VIEW-02 "Recent" sort via a new `synced_at` field on the manifest's per-skill provenance. Closing these alongside SYNC-02's "sectioned pending changes" surface keeps the section-header abstraction one implementation, not two; the `synced_at` field also feeds SYNC-02's per-skill diff metadata.
+**Success Criteria** (what must be TRUE):
+  1. "Sync" action runs the full pipeline (discover → consolidate → distribute → cleanup → save) with per-stage progress and a current-directory indicator. The CLI's interactive triage is *not* invoked — the GUI's triage panel replaces it (SYNC-01).
+  2. Lockfile diff produces a triage panel listing new / changed / removed skills with diff metadata (source, hash, timestamp). Per-skill default action is "keep"; alternates are "disable on this machine" and (for git-sourced skills) "view source". Bulk actions (e.g. "disable all new from `<directory>`") work (SYNC-02).
+  3. Triage decisions render as a `machine.toml` diff before save. User clicks "apply" to write; "cancel" abandons without side-effects. No silent writes (SYNC-03).
+  4. Cancel action during sync stops the pipeline at the current stage boundary and leaves library state consistent (no half-written manifest, no partial lockfile). Verified via integration test (SYNC-04).
+  5. Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` SAFE-01 semantics) with a retry action that resumes from the failed stage where possible — re-running discover + consolidate is acceptable; rerunning distribute on a partial manifest is not (SYNC-05).
+  6. VIEW-02 carryover closure: picking `Group = Source` or `Group = Role` renders `SectionHeader` rows between skill spans (VoiceOver heading landmarks, per-group totals); picking `Sort = Recent` produces a stable ordering keyed on the per-skill `synced_at` timestamp (most-recent first, alphabetical-name tiebreaker). REQUIREMENTS.md VIEW-02 flips from `partial` → `complete`.
+**Cut**: none (v1.0-beta cut lands at the end of Phase 28).
+**Plans**: 5 plans (Wave 1: 27-01 — progress channel + `synced_at` manifest extension unblocks UI plans; Wave 2: 27-02, 27-03 — triage panel + `machine.toml` diff preview in parallel, both depend on 27-01's event shape; Wave 3: 27-04 — cancellation wiring depends on GUI driving the pipeline; Wave 4: 27-05 — failure summary + retry depends on cancellation semantics)
+- [ ] 27-01-PLAN.md — Per-stage progress channel + UI; `synced_at` manifest extension + bindings.ts refresh (SYNC-01, VIEW-02 carryover #2)
+- [ ] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions + reusable `SectionHeader` primitive (SYNC-02, VIEW-02 carryover #1)
+- [ ] 27-03-PLAN.md — `machine.toml` diff preview component routed through the machine-prefs write boundary (SYNC-03)
+- [ ] 27-04-PLAN.md — Cancellation wiring + integration tests for consistent-state-on-abort (SYNC-04)
+- [ ] 27-05-PLAN.md — Per-stage failure summary + retry-from-failed-stage handler (SYNC-05)
+
 ## Backlog
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
