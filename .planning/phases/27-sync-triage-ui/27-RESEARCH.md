@@ -605,22 +605,19 @@ pub async fn start_sync(
 
 **Planner action on A4 + A5:** add a verification task in 27-01 that runs the existing `RecordingSink` tests under a real `cargo test` AND adds two new tests: (1) `SyncStageStarted { Reconcile }` precedes `GitCloneProgress`; (2) the Save stage emits the manifest/lockfile writes correctly when watched.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-These map 1:1 to the UI-SPEC §"Open Items" — the researcher is surfacing them again because they reach into research territory in addition to design territory.
+These map 1:1 to the UI-SPEC §"Open Items" — the researcher surfaced them because they reach into research territory in addition to design territory. All nine were resolved during planning; the chosen direction and its plan home are recorded inline.
 
-1. **`SyncOutcome` shape (wrapping struct vs error-attached).** Recommendation: wrapping struct. Planner picks during 27-04 / 27-05.
-2. **Dark-mode token completion.** Phase 26 carry-forward; no Phase 27 introductions.
-3. **`⌘1..⌘4` re-anchoring release note.** Single sentence in 27-01. Help → Keyboard Shortcuts cheatsheet (Phase 26 26-07 artifact) needs the matching update.
-4. **`Sync` NavItem SF-symbol substitute.** Whatever the Phase 26 icon library shipped (`lucide-react` filtered subset, or hand-curated SVGs). Planner picks in 27-01 — `Refresh` or `RefreshCw` in lucide should be close enough to `arrow.triangle.2.circlepath`.
-5. **`MachineTomlPreview` line-diff algorithm.** Recommendation: `similar::TextDiff::from_lines` Myers diff. Planner picks in 27-03.
-
-**Additional questions surfaced by this research (NOT in the UI-SPEC's five):**
-
-6. **Should `GitCloneProgress` carry a `stage: SyncStage` field?** Pitfall 4. Recommendation: NO — leave the sink-side fold in place; verify the event-order test in 27-01.
-7. **Toast implementation strategy.** Pitfall 2. Recommendation: hand-rolled `role="status"` live region, 5s setTimeout.
-8. **`PreviewPopover` content-slot refactor.** Pitfall 3. Sized at ~20 LOC; lands in 27-03 alongside `MachineTomlDiff`.
-9. **`useSync` event-subscription discipline during sync run.** Pitfall 6. Recommendation: ignore `ManifestChanged`/`LockfileChanged` while `isRunning === true`.
+1. **`SyncOutcome` shape (wrapping struct vs error-attached).** → RESOLVED: wrapping struct. 27-05 Task 1 defines `SyncOutcome { result: Result<(), TomeError>, retry_from: Option<SyncStage>, partial_failures: Vec<PartialFailure> }` in `crates/tome/src/sync_outcome.rs`; the boundary mirror lives in 27-05 Task 2 as `SyncOutcomeWire`. Reference: this RESEARCH §Summary §3 + §Architectural Responsibility Map / Retry-from-stage gating row.
+2. **Dark-mode token completion.** → RESOLVED: no Phase 27 introductions; Phase 26 carry-forward. Plan home: none (status quo). The three line-background tokens MachineTomlDiff needs (added/removed/unchanged) are defined in 27-03 Task 4 against existing Phase 26 design tokens.
+3. **`⌘1..⌘4` re-anchoring release note.** → RESOLVED: 27-01b Task 2 re-anchors `⌘3 → Sync`, `⌘4 → Health` in `crates/tome-desktop/src/menu.rs` (full 6-step checklist per Pitfall 7). Help → Keyboard Shortcuts cheatsheet update lands in the same task's release-note step.
+4. **`Sync` NavItem SF-symbol substitute.** → RESOLVED: `RefreshCw` from the existing `lucide-react` filter (closest analog to `arrow.triangle.2.circlepath`). 27-01b Task 3 wires it into `Sidebar.tsx`.
+5. **`MachineTomlPreview` line-diff algorithm.** → RESOLVED: `similar::TextDiff::from_lines` Myers diff (`similar 3.1.1`, MIT, mitsuhiko). 27-03 Task 2 lands the dep behind a package-legitimacy human-verify checkpoint and `cargo deny check`.
+6. **Should `GitCloneProgress` carry a `stage: SyncStage` field?** → RESOLVED: NO. Sink-side fold stays in place (`TauriEventSink::emit` routes `GitCloneProgress → SyncStage::Reconcile`). 27-01a Task 1 adds a `RecordingSink` ordering test asserting `SyncStageStarted{Reconcile}` precedes the first `GitCloneProgress` (Pitfall 4 / Assumption A4 verification anchor).
+7. **Toast implementation strategy.** → RESOLVED: hand-rolled `role="status" aria-live="polite"` live region with a 5s setTimeout. 27-04 Task 2 ships `SyncToast.tsx` per this contract; NO `react-aria-components::UNSTABLE_ToastRegion` adoption (Pitfall 2).
+8. **`PreviewPopover` content-slot refactor.** → RESOLVED: 27-03 Task 4 replaces `dryRunDescription: string` with `children: ReactNode` + optional `width`/`helperText`/`trigger`/`triggerLabel`/`triggerAriaLabel`; the existing Doctor's Fix caller in `FindingRow.tsx` is updated atomically in the same task (~20 LOC refactor + caller swap; Pitfall 3).
+9. **`useSync` event-subscription discipline during sync run.** → RESOLVED: `useSync` subscribes ONLY to `syncProgress`. It does NOT subscribe to `ManifestChanged` / `LockfileChanged` / `LibraryChanged` / `MachinePrefsChanged`. Idle-state hooks (`useStatus`, `useSkills`, `useLockfileDiff`) keep their existing subscriptions and refresh AFTER `SyncOutcome` resolution. 27-01b Task 3 implements the hook; 27-02 Task 1 carries the discipline into `useLockfileDiff` via an `isRunningRef` gate (Pitfall 6).
 
 ## Environment Availability
 
