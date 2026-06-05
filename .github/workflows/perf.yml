@@ -100,7 +100,18 @@ jobs:
       # bench writes per-run rows to
       # `.planning/phases/26-read-only-views-alpha-cut/26-PERF-RUNS.tsv`
       # (gitignored — the artefact upload below carries it out).
+      #
+      # Advisory-only: `continue-on-error: true` keeps a missed p95
+      # budget from blocking PRs because GitHub-hosted macos-15 arm64
+      # runners are shared-VM and produce false-positive p95 misses
+      # (see PR #560: measured p95=33ms vs 18ms target on a green
+      # phase). Real perf regressions get caught at release time via
+      # the Discord notification pipeline (#564), which diffs p50/p95
+      # vs the previous tag. The check still SURFACES the numbers —
+      # the artefact uploads below run regardless — it just doesn't
+      # gate the merge.
       - name: Run perf bench
+        continue-on-error: true
         working-directory: crates/tome-desktop/ui
         env:
           # Belt-and-braces — playwright.config.ts also injects this
