@@ -341,12 +341,14 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   5. Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` SAFE-01 semantics) with a retry action that resumes from the failed stage where possible — re-running discover + consolidate is acceptable; rerunning distribute on a partial manifest is not (SYNC-05).
   6. VIEW-02 carryover closure: picking `Group = Source` or `Group = Role` renders `SectionHeader` rows between skill spans (VoiceOver heading landmarks, per-group totals); picking `Sort = Recent` produces a stable ordering keyed on the per-skill `synced_at` timestamp (most-recent first, alphabetical-name tiebreaker). REQUIREMENTS.md VIEW-02 flips from `partial` → `complete`.
 **Cut**: none (v1.0-beta cut lands at the end of Phase 28).
-**Plans**: 5 plans (Wave 1: 27-01 — progress channel + `synced_at` manifest extension unblocks UI plans; Wave 2: 27-02, 27-03 — triage panel + `machine.toml` diff preview in parallel, both depend on 27-01's event shape; Wave 3: 27-04 — cancellation wiring depends on GUI driving the pipeline; Wave 4: 27-05 — failure summary + retry depends on cancellation semantics)
-- [ ] 27-01-PLAN.md — Per-stage progress channel + UI; `synced_at` manifest extension + bindings.ts refresh (SYNC-01, VIEW-02 carryover #2)
-- [ ] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions + reusable `SectionHeader` primitive (SYNC-02, VIEW-02 carryover #1)
-- [ ] 27-03-PLAN.md — `machine.toml` diff preview component routed through the machine-prefs write boundary (SYNC-03)
-- [ ] 27-04-PLAN.md — Cancellation wiring + integration tests for consistent-state-on-abort (SYNC-04)
-- [ ] 27-05-PLAN.md — Per-stage failure summary + retry-from-failed-stage handler (SYNC-05)
+**Plans**: 7 plans (Wave 1: 27-01a — Rust domain types (`item: Option<String>` + `synced_at` + sink fold-in); Wave 2: 27-01b — Tauri boundary commands + React skeleton + `bindings.ts` regen + axe scan; Wave 3: 27-02 (triage panel + `SectionHeader` extension), 27-02b (SkillsView VIEW-02 closure), 27-03 (`machine.toml` diff preview + similar crate) — three plans in parallel; Wave 4: 27-04 — cancellation invariant integration test + StageStepper + SyncToast; Wave 5: 27-05 — `SyncOutcome` wrapping struct + partial-failure rendering + retry handlers)
+- [ ] 27-01a-PLAN.md — Rust domain types: `item: Option<String>` on `ProgressEvent::SyncStageProgress` (D-08), `synced_at: Option<String>` on `DiscoveredSkill` (D-16), sink-side D-09 fold-in, Pitfall 4 ordering test (SYNC-01)
+- [ ] 27-01b-PLAN.md — Tauri boundary `start_sync` (spawn_blocking) + `cancel_sync` + `MenuAction::JumpSync` (⌘3 re-anchor); React `SyncView` skeleton + `useSync` hook (Pitfall 6 discipline); Sidebar 4th NavItem; `bindings.ts` regen; axe scan (SYNC-01)
+- [ ] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions on NEW only + GridList primitive + reusable `SectionHeader` extension (SYNC-02)
+- [ ] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
+- [ ] 27-03-PLAN.md — `machine.toml` diff preview + `similar` crate + `PreviewPopover` slot refactor + `MachineTomlDiff` component (SYNC-03)
+- [ ] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
+- [ ] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
 
 ## Backlog
 
