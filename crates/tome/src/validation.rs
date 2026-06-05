@@ -24,6 +24,9 @@ pub(crate) fn validate_identifier(name: &str, kind: &str) -> Result<()> {
 
 /// A validated SHA-256 content hash (64 hex characters).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+// Transparent newtype-over-String → TS `type ContentHash = string` (Pitfall 6).
+#[cfg_attr(feature = "bindings", specta(transparent))]
 #[serde(transparent)]
 pub struct ContentHash(String);
 

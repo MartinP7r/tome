@@ -1,0 +1,36 @@
+/* ContentPane — right region (UI-SPEC §Shell §ContentPane). */
+
+.pane {
+  background: var(--bg-window);
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-6) var(--space-6) var(--space-4);
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--text-title-size);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  color: var(--label-primary);
+  margin: 0;
+}
+
+.trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.body {
+  overflow: auto;
+  padding: 0 var(--space-6) var(--space-6);
+}

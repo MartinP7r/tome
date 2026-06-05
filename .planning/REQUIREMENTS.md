@@ -28,22 +28,22 @@ Requirements for the v1.0 release. Grouped by category; each maps to a roadmap p
 
 The Rust crate must be reshaped to support both the existing CLI and the new GUI without duplicating domain logic. This is the foundation; every other GUI requirement depends on it.
 
-- [ ] **CORE-01**: Domain operations (`sync`, `status::collect`, `list::collect`, `lint::run`, `doctor::diagnose`, `remove::plan`, `reassign::plan`, `fork::plan`, `relocate::plan`, `eject::plan`, `backup::*`) return structured Rust types — not formatted strings — and are callable from any front-end. Existing `lib.rs::run` is decomposed into a thin CLI wrapper that calls these and formats output; the GUI calls them directly.
-- [ ] **CORE-02**: A new crate `crates/tome-desktop` is added to the workspace alongside `crates/tome` and depends on it as a path dependency. The Tauri app lives in this crate. The CLI continues to ship from `crates/tome` unchanged.
-- [ ] **CORE-03**: All structured types crossing the Rust↔JS boundary (`StatusReport`, `SkillSummary`, `LockfileDiff`, `RemovePlan`, `Config`, `MachinePrefs`, etc.) generate matching TypeScript types via `specta` + `tauri-specta`, exposed to the front-end as a generated `bindings.ts`. No hand-rolled type definitions on the JS side.
-- [ ] **CORE-04**: Long-running operations (`sync`, git clone in `add`, backup snapshot/restore) emit progress events via Tauri's event system; the front-end subscribes and renders progress without blocking the IPC reply.
-- [ ] **CORE-05**: All Rust errors crossing into the front-end carry a stable `code` (enum) and `message` (`anyhow` chain) — the GUI can render targeted error UI ("permissions" / "not found" / "validation") without string-matching messages.
+- [x] **CORE-01**: Domain operations (`sync`, `status::gather`, `list::collect`, `lint::lint_library`/`lint_skill`, `doctor::diagnose`, `remove::plan`, `reassign::plan` (covers fork via `is_fork: true` — no separate `fork.rs`), `relocate::plan`, `eject::plan`, `backup::*`) return structured Rust types — not formatted strings — and are callable from any front-end. Existing `lib.rs::run` is decomposed into a thin CLI wrapper that calls these and formats output; the GUI calls them directly.
+- [x] **CORE-02**: A new crate `crates/tome-desktop` is added to the workspace alongside `crates/tome` and depends on it as a path dependency. The Tauri app lives in this crate. The CLI continues to ship from `crates/tome` unchanged.
+- [x] **CORE-03**: All structured types crossing the Rust↔JS boundary (`StatusReport`, `SkillSummary`, `LockfileDiff`, `RemovePlan`, `Config`, `MachinePrefs`, etc.) generate matching TypeScript types via `specta` + `tauri-specta`, exposed to the front-end as a generated `bindings.ts`. No hand-rolled type definitions on the JS side.
+- [x] **CORE-04**: Long-running operations (`sync`, git clone in `add`, backup snapshot/restore) emit progress events via Tauri's event system; the front-end subscribes and renders progress without blocking the IPC reply.
+- [x] **CORE-05**: All Rust errors crossing into the front-end carry a stable `code` (enum) and `message` (`anyhow` chain) — the GUI can render targeted error UI ("permissions" / "not found" / "validation") without string-matching messages.
 
 ### Read-only views (VIEW)
 
 Replacement for `tome status` + `tome list` + `tome browse`. First user-visible value; ships in the alpha cut.
 
-- [ ] **VIEW-01**: Status dashboard window shows: resolved `tome_home`, library directory, configured directories (with role/type badges), skill count, last sync time, lockfile state, and machine pref summary — equivalent to `tome status --json` rendered as a UI.
-- [ ] **VIEW-02**: Skill list view with virtualised rendering (handles ≥2000 skills at 60 fps), fuzzy search (matches `nucleo`-style ranking from the CLI), sort modes (name / source / recent), and group-by (none / source / role).
-- [ ] **VIEW-03**: Skill detail pane shows frontmatter (parsed via existing `lint.rs` logic), source directory path, content hash, last sync timestamp, managed/local status, and disabled state — clicking actions (open source dir / copy path / disable on this machine) match the existing browse TUI.
-- [ ] **VIEW-04**: Markdown preview pane renders SKILL.md body (post-frontmatter) with the same Markdown subset the existing `browse/markdown.rs` supports.
-- [ ] **VIEW-05**: Health pane surfaces `tome doctor` findings (orphan dirs, broken symlinks, missing manifest entries, missing source paths) with one-click "fix" actions that call into the same repair handlers used by the CLI's interactive `tome doctor`.
-- [ ] **VIEW-06**: All read-only views auto-refresh when the file watcher (CORE-04 event channel) detects manifest, lockfile, or library changes — the GUI cannot drift from on-disk state.
+- [x] **VIEW-01**: Status dashboard window shows: resolved `tome_home`, library directory, configured directories (with role/type badges), skill count, last sync time, lockfile state, and machine pref summary — equivalent to `tome status --json` rendered as a UI.
+- [~] **VIEW-02** _(partial — Phase 26 alpha cut)_: Skill list view with virtualised rendering (handles ≥2000 skills at 60 fps), fuzzy search (matches `nucleo`-style ranking from the CLI), sort modes (name / source / recent), and group-by (none / source / role). _Phase 26 ships virtualised render + fuse.js fuzzy search + name + source sort. **Deferred to Phase 27**: "recent" sort (needs `synced_at` field on `DiscoveredSkill`) and group-by visual section headers — see `.planning/phases/26-read-only-views-alpha-cut/deferred-items.md`._
+- [x] **VIEW-03**: Skill detail pane shows frontmatter (parsed via existing `lint.rs` logic), source directory path, content hash, last sync timestamp, managed/local status, and disabled state — clicking actions (open source dir / copy path / disable on this machine) match the existing browse TUI.
+- [x] **VIEW-04**: Markdown preview pane renders SKILL.md body (post-frontmatter) with the SC#4 markdown subset: headings (H1–H3), paragraphs, inline emphasis (bold/italic/inline code), lists (ordered + unordered), links (open in system browser), and fenced code blocks. **Supersedes** the original `browse/markdown.rs` reference — that hand-rolled ratatui-only renderer covers only headers + horizontal rules + inline bold/italic/code and cannot be reused for a webview (D-08 / Phase 26 UI-SPEC Open Item 4).
+- [x] **VIEW-05**: Health pane surfaces `tome doctor` findings (orphan dirs, broken symlinks, missing manifest entries, missing source paths) with one-click "fix" actions that call into the same repair handlers used by the CLI's interactive `tome doctor`.
+- [x] **VIEW-06**: All read-only views auto-refresh when the file watcher (CORE-04 event channel) detects manifest, lockfile, or library changes — the GUI cannot drift from on-disk state.
 
 ### Sync + triage (SYNC)
 
@@ -97,11 +97,11 @@ Code signing, notarization, auto-update, and packaging required for a shippable 
 
 Cross-cutting requirements that apply to multiple phases.
 
-- [ ] **NF-01**: Skill list with 2000 skills renders search-as-you-type at 60 fps on M1 (8 GB) — chosen as the perf budget; verified via a synthetic-skills bench.
-- [ ] **NF-02**: All views are keyboard-navigable; primary actions have keyboard shortcuts (matching macOS HIG conventions: ⌘N add, ⌘R sync, ⌘F search, etc.). VoiceOver labels on every interactive element.
-- [ ] **NF-03**: Native macOS menu bar with File / Edit / View / Library / Help menus. App responds to system appearance changes (light/dark) — no in-app theme switcher initially.
+- [x] **NF-01**: Skill list with 2000 skills renders search-as-you-type at 60 fps on M1 (8 GB) — chosen as the perf budget; verified via a synthetic-skills bench.
+- [x] **NF-02**: All views are keyboard-navigable; primary actions have keyboard shortcuts (matching macOS HIG conventions: ⌘N add, ⌘R sync, ⌘F search, etc.). VoiceOver labels on every interactive element.
+- [x] **NF-03**: Native macOS menu bar with File / Edit / View / Library / Help menus. App responds to system appearance changes (light/dark) — no in-app theme switcher initially.
 - [ ] **NF-04**: All destructive operations surface their plan and require explicit confirmation (no "always confirm" toggle that bypasses this in v1.0). Undo via `tome backup restore` is documented in confirmations where relevant.
-- [ ] **NF-05**: The desktop app and CLI share a single `tome.lock` and `.tome-manifest.json`. Concurrent CLI usage while the app is open does not corrupt either file (file watcher reloads on external change).
+- [x] **NF-05**: The desktop app and CLI share a single `tome.lock` and `.tome-manifest.json`. Concurrent CLI usage while the app is open does not corrupt either file (file watcher reloads on external change).
 
 ## v2 Requirements
 
@@ -143,7 +143,7 @@ Deferred to post-v1.0.
 | **D-GUI-01** | Tauri 2 over Electron + napi-rs | Existing Rust core; ~8 MB vs ~150 MB bundle; no N-API ABI layer; built-in code-signed auto-update; reuses Developer ID flow. |
 | **D-GUI-02** | New `crates/tome-desktop` workspace member, not a feature flag in `crates/tome` | Isolates Tauri / webview deps from the CLI; CLI binary stays slim; CI can build either independently. |
 | **D-GUI-03** | `specta` + `tauri-specta` for TS type generation | First-class Tauri 2 integration; generates `bindings.ts` at build time; eliminates JS-side type drift. |
-| **D-GUI-04** | Frontend framework: **TBD in Phase 25 spike** — shortlist React, Solid, Svelte | Decision deferred to spike: React for ecosystem, Solid for performance/size, Svelte for ergonomics. Pick one and commit; no multi-framework UI. |
+| **D-GUI-04** | Frontend framework: **React** (chosen in Phase 25 spike, 25-06) | Built 3-way spike (React/Solid/Svelte) scored 1-5 across four criteria; React + Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization / NF-02 a11y / NF-03 HIG). Irreversible from Phase 26. See `.planning/research/v1.0-frontend-framework-decision.md`. |
 | **D-GUI-05** | Auto-update via `tauri-plugin-updater` + GitHub Releases manifest | Built into Tauri 2; signed updates; no third-party service dependency. |
 | **D-GUI-06** | macOS only for v1.0; Linux behind v0.8 carry-over | Linux runtime UAT items still pending hardware; GUI adds the same surface. Defer to v2. |
 | **D-GUI-07** | App and CLI share `tome.lock` + `.tome-manifest.json`; file watcher in app reloads on external change | Single source of truth; no GUI-private state files. |

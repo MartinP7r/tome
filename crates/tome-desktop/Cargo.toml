@@ -1,0 +1,87 @@
+[package]
+name = "tome-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Desktop GUI shell for tome (Tauri 2)"
+# Never publish the GUI crate to crates.io — it is a workspace-local app.
+publish = false
+# Two bins live here (the app + the gen-bindings CI helper). `cargo tauri dev`
+# and bare `cargo run -p tome-desktop` must launch the app, not error on the
+# ambiguity — pin the default run target.
+default-run = "tome-desktop"
+
+# Exclude tome-desktop from cargo-dist release artifacts (RESEARCH Pitfall 4 /
+# A1). cargo-dist 0.30.3 reads `[package.metadata.dist] dist = false` as the
+# per-package opt-out; `dist plan` is the self-check (must list only `tome`).
+[package.metadata.dist]
+dist = false
+
+[[bin]]
+name = "tome-desktop"
+path = "src/main.rs"
+
+# CI runs this bin to regenerate bindings.ts and `git diff --exit-code` it
+# (D-07 corrected — build.rs cannot see the registered #[tauri::command] fns,
+# so the export happens here, sharing make_builder() with main.rs).
+[[bin]]
+name = "gen-bindings"
+path = "src/bin/gen-bindings.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+# Path dep on the canonical domain library with the `bindings` feature on so
+# the cross-boundary types derive `specta::Type`. Default CLI builds keep the
+# feature OFF (zero specta cost).
+tome = { path = "../tome", features = ["bindings"] }
+tauri = { version = "2.11", features = [] }
+# specta trio — pinned EXACTLY with `=` (they move in lockstep; tauri-specta
+# 2.0.0-rc.25 depends on specta =2.0.0-rc.25). Verified specta-rs ownership +
+# crates.io (supply-chain checkpoint approved).
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "0.0.12"
+serde = { workspace = true }
+serde_json = { workspace = true }
+# File-watcher stack for VIEW-06 / NF-05 (Phase 26 plan 26-06). Caret-pinned to
+# the latest stable lines (8.2.x / 0.7.x) — 9.0.0-rc.x and 0.8.0-rc.x exist on
+# crates.io but the caret range excludes them; cargo resolves stable only.
+# Package-legitimacy gate: notify-rs canonical (CC0-1.0 / MIT OR Apache-2.0).
+notify = "8.2"
+notify-debouncer-full = "0.7"
+
+# Tauri plugin stack for Phase 26 plan 26-03 (VIEW-03 / D-07). Caret-pinned to
+# the 2.x line — both plugins live in tauri-apps/plugins-workspace and move in
+# lockstep with the core Tauri 2.x ABI. Package-legitimacy gate cleared at
+# Task 0 (canonical @tauri-apps repo, Apache-2.0 OR MIT).
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+
+[dev-dependencies]
+tempfile = "3"
+# Perf-bench fixture (Phase 26 plan 26-08 — NF-01). Seeded RNG keeps the
+# 2000-skill synthetic fixture deterministic across runs so p95 deltas in
+# the Playwright bench reflect render-pipeline changes, not RNG noise.
+# `rand` 0.9 chosen for the workspace-current API (`StdRng::seed_from_u64`
+# + `random_range`); we don't pull `rand` into the production tome crate
+# so the synthetic fixture is the only consumer in this workspace.
+# Content hashes come from the canonical `tome::hash_directory` re-export
+# (manifest.rs) so we don't need a direct `sha2` dev-dep here.
+rand = "0.9"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# Explicit test target — Cargo's auto-discovery doesn't traverse
+# `tests/perf/`, so we declare the perf-bench fixture generator by hand.
+# Keeping it under `tests/perf/` (rather than `tests/`) groups the perf
+# files alongside the Playwright spec + sampler that drive against it.
+[[test]]
+name = "synthetic_skills"
+path = "tests/perf/synthetic_skills.rs"
+# Don't run as part of `cargo test --all` — the test self-gates on
+# PERF_FIXTURE_OUT, so this is belt + braces. But declaring it as a
+# normal target keeps `cargo check --tests` honest.
+harness = true

@@ -15,6 +15,11 @@ use crate::discover::SkillName;
 ///
 /// Rejects empty names and path separators, matching the `SkillName` validation pattern.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+// Mirror the `#[serde(transparent)]` newtype-over-String for specta so the
+// TS binding is `type DirectoryName = string`, not a tuple/opaque struct
+// (Pitfall 6 — verified in the spike).
+#[cfg_attr(feature = "bindings", specta(transparent))]
 #[serde(transparent)]
 pub struct DirectoryName(String);
 
@@ -150,6 +155,7 @@ impl DirectoryType {
 /// The `clap::ValueEnum` derive lets `tome add --role <ROLE>` accept these
 /// variants in their kebab-case form (matching the `tome.toml` wire format).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 #[serde(rename_all = "kebab-case")]
 #[clap(rename_all = "kebab-case")]
 pub enum DirectoryRole {

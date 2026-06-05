@@ -1,0 +1,32 @@
+/* Window — Phase 26 root shell (UI-SPEC §Shell). */
+
+.window {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) 1fr;
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-app);
+  color: var(--label-primary);
+  font-family: var(--font-system);
+  overflow: hidden;
+}
+
+/* Body sits below the fixed-height titlebar. The columns differ by mode:
+ * - single: sidebar + one content pane (Status, Health).
+ * - split:  sidebar + middle list column + detail column (Skills).
+ */
+.body {
+  display: grid;
+  min-height: 0; /* allow children to scroll */
+}
+
+.body.single {
+  grid-template-columns: var(--sidebar-width) 1fr;
+}
+
+.body.split {
+  grid-template-columns:
+    var(--sidebar-width)
+    minmax(var(--list-column-min), var(--list-column-max))
+    1fr;
+}

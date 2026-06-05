@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
+use crate::errors::{DomainErrorKind, WithDomainKind};
+use crate::progress::{CancelToken, ProgressEvent, ProgressSink};
+
 /// Run a git command in the given directory with env clearing, returning raw output.
 fn git_command(repo_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     std::process::Command::new("git")
@@ -74,16 +77,57 @@ pub(crate) fn ref_spec_for_config<'a>(
 ///
 /// Uses `--depth 1` for bandwidth efficiency. Supports branch/tag pinning via `--branch`,
 /// and SHA pinning via a post-clone `fetch + reset` flow.
+///
+/// `sink` receives a [`ProgressEvent::GitCloneProgress`] when the clone begins
+/// (D-11: the git long-op family adopts the [`ProgressSink`] vocabulary now).
+/// `cancel` is checked before the clone subprocess launches so a cancellation
+/// requested at the previous stage boundary is honored before any network I/O
+/// (D-12). `git` itself is a blocking subprocess — we emit a coarse
+/// "started clone" event rather than streaming git's byte counter; the typed
+/// event shape (`received: u64`) is ready for a future packet-progress parser
+/// without changing the signature.
 pub(crate) fn clone_repo(
     url: &str,
     dest: &Path,
     branch: Option<&str>,
     tag: Option<&str>,
     rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<()> {
+    // Tag every failure of this op with the `Git` sentinel (CORE-05 / D-14) so
+    // the GUI boundary classifies it as `ErrorCode::Git` via downcast. The tag
+    // is transparent — the human-readable `{e:#}` chain (and the CLI's
+    // warn-and-continue messages) are unchanged.
+    clone_repo_inner(url, dest, branch, tag, rev, sink, cancel)
+        .with_domain_kind(DomainErrorKind::Git)
+}
+
+fn clone_repo_inner(
+    url: &str,
+    dest: &Path,
+    branch: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
+    if cancel.is_cancelled() {
+        anyhow::bail!("git clone cancelled before start");
+    }
+
     let dest_str = dest
         .to_str()
         .context("clone destination path is not valid UTF-8")?;
+
+    // Derive a stable directory label from the cache path so the GUI can
+    // associate the byte counter with the directory being cloned. The cache
+    // dir basename is the SHA-256 of the URL (see `repo_cache_dir`); the URL
+    // itself is the most human-meaningful identifier, so emit that.
+    sink.emit(ProgressEvent::GitCloneProgress {
+        directory: url.to_string(),
+        received: 0,
+    });
 
     let ref_spec = ref_spec_for_config(branch, tag, rev);
 
@@ -120,12 +164,39 @@ pub(crate) fn clone_repo(
 ///
 /// Determines the fetch ref based on config: branch name, tag name, SHA, or HEAD.
 /// Uses `git fetch --depth 1 origin <ref> && git reset --hard FETCH_HEAD`.
+///
+/// Mirrors [`clone_repo`]'s progress + cancellation contract (D-11/D-12):
+/// emits a [`ProgressEvent::GitCloneProgress`] when the fetch begins and
+/// checks `cancel` before launching the subprocess.
 pub(crate) fn update_repo(
     repo_dir: &Path,
     branch: Option<&str>,
     tag: Option<&str>,
     rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<()> {
+    // Tag every failure with the `Git` sentinel (CORE-05 / D-14); transparent to
+    // the CLI's `{e:#}` output (mirrors `clone_repo`).
+    update_repo_inner(repo_dir, branch, tag, rev, sink, cancel)
+        .with_domain_kind(DomainErrorKind::Git)
+}
+
+fn update_repo_inner(
+    repo_dir: &Path,
+    branch: Option<&str>,
+    tag: Option<&str>,
+    rev: Option<&str>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
+    if cancel.is_cancelled() {
+        anyhow::bail!("git update cancelled before start");
+    }
+    sink.emit(ProgressEvent::GitCloneProgress {
+        directory: repo_dir.to_string_lossy().into_owned(),
+        received: 0,
+    });
     let fetch_ref = branch.or(tag).or(rev).unwrap_or("HEAD");
     git_success(repo_dir, &["fetch", "--depth", "1", "origin", fetch_ref])?;
     git_success(repo_dir, &["reset", "--hard", "FETCH_HEAD"])?;

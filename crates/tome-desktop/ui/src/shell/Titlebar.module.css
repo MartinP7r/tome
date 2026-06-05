@@ -1,0 +1,28 @@
+/* Titlebar — Phase 26 unified macOS chrome (UI-SPEC §Shell §Titlebar). */
+
+.titlebar {
+  height: var(--titlebar-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-app);
+  /* The traffic lights sit on the left edge of the OS-owned overlay. We
+   * still reserve space here so the centred title text doesn't shift when
+   * the user drags the window over high-contrast content.
+   */
+  padding: 0 var(--space-4);
+  /* Make the entire titlebar draggable — the Tauri overlay style does not
+   * automatically expose the empty regions as drag handles. Buttons inside
+   * the titlebar (none in Phase 26) would need `app-region: no-drag`.
+   */
+  -webkit-app-region: drag;
+  user-select: none;
+  border-bottom: 1px solid var(--separator);
+}
+
+.title {
+  font-size: var(--text-body-size);
+  font-weight: 600;
+  color: var(--label-primary);
+  line-height: 1;
+}
