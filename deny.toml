@@ -7,7 +7,49 @@ feature-depth = 1
 
 # Deny known vulnerabilities in dependencies
 [advisories]
-ignore = []
+# Carve-outs for transitive `unmaintained` advisories surfaced after Phase 26
+# added the macOS-only `tome-desktop` Tauri crate. None of these are actual
+# vulnerabilities — they are upstream crates flagged as "no longer maintained"
+# that we cannot remove without forking Tauri, dialoguer, ratatui, or
+# tauri-specta.
+#
+# Review cadence: revisit when Tauri migrates off GTK3 (see #560), and when
+# tauri-specta / dialoguer / ratatui drop their unmaintained transitive deps.
+ignore = [
+    # --- gtk-rs GTK3 family (transitive via tauri/wry on Linux only) ---
+    # These cover the individual gtk-rs sys/binding crates (atk-sys, gdk,
+    # gdk-sys, gio-sys, glib-sys, gobject-sys, gtk, gtk-sys, pango, pango-sys).
+    # They are unreachable on macOS (the only platform we ship the GUI on per
+    # D-GUI-06) but appear in the dep graph because `wry` declares them
+    # unconditionally. Will be resolved when Tauri migrates to GTK4 upstream.
+    { id = "RUSTSEC-2024-0411", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0412", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0413", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0414", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0416", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0417", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0418", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
+
+    # --- Singletons ---
+    # `proc-macro-error` — replacement `proc-macro-error2` is already in the
+    # tree but the older crate co-exists until dialoguer/console upgrade.
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error (transitive via dialoguer/console)" },
+    # `paste` — transitive via ratatui macro expansion.
+    { id = "RUSTSEC-2024-0436", reason = "paste (transitive via ratatui macros)" },
+
+    # --- unic-* family (transitive via tauri-specta / unic-langid) ---
+    # Powers locale-tag parsing for Tauri's i18n surface. Functionally
+    # complete; tauri-specta will need to swap to `icu_*` upstream before
+    # these carve-outs can be removed.
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range (transitive via tauri-specta/unic-langid)" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common (transitive via tauri-specta/unic-langid)" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property (transitive via tauri-specta/unic-langid)" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version (transitive via tauri-specta/unic-langid)" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident (transitive via tauri-specta/unic-langid)" },
+]
 
 # Allowed dependency licenses — all common OSI-approved licenses
 [licenses]
