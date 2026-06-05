@@ -354,7 +354,35 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
 
-_(Empty — v0.12 dogfooding backlog 999.1-999.5 all promoted and shipped in v0.14-v0.16.)_
+### Phase 999.1: Per-project local config (`.tome.toml`) (BACKLOG)
+
+**Goal:** [Captured for future planning] Let projects ship their own committed `tome` config so a `git clone` of a project pulls down a known-good skill manifest without manual `tome init` ceremony. Analogous to `Cargo.toml` for `cargo`, `package.json` for `npm`, or `.nvmrc` for `nvm` — the project declares what it needs, the tool picks it up.
+
+**Why it matters:**
+- **Team consistency** — everyone working on the same repo gets the same baseline skill set, with pinned versions.
+- **Onboarding** — new contributor runs `tome <some-command>` in the repo, gets the project's expected AI coding skills installed locally without reading docs.
+- **Per-project scope** — a Rust project pulls in Rust-focused skills; a TypeScript project pulls in TS-focused skills, without polluting either's neighbor.
+- **Reproducibility** — the committed config + lockfile snapshot mean "what skills was this repo built with on date X" is answerable.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.1`):
+1. **Filename:** `.tome.toml`? `.tomerc`? `tome.toml` (no dot, Cargo-style)? User flagged both `.tomerc` and `.tome.toml` as candidates.
+2. **Discovery mechanism:** Walk-up-from-cwd (git-style automatic), explicit `tome use <path>` command, or hybrid (automatic in the project dir + explicit command for non-cwd projects)? User explicitly raised "with some command?" — discovery contract is undecided.
+3. **Scope of the local config:** Just additional skill sources? Or also overrides for global directory roles, disabled-skill lists, or wholesale tome-home redirection?
+4. **Merge semantics vs `~/.tome/tome.toml`:** Project augments global (additive), project overrides global (replacement), or layered (project precedence with explicit opt-out for "ignore global entirely")?
+5. **Interaction with the existing per-machine `~/.config/tome/machine.toml`:** Where do per-machine *overrides* sit when a project-local config also exists? Three-layer model (global → project → machine) needs careful precedence rules.
+6. **Lockfile handling:** Does the project config get its own `tome.lock` committed alongside? Or does it inherit the global lockfile?
+7. **Multi-project on one machine:** Can two projects with conflicting local configs coexist? Single-active-project model vs. simultaneous-projects model.
+
+**Related context:**
+- v0.6 unified directory model already supports per-directory `enabled`/`disabled` skill lists in `machine.toml` — that pattern can extend, but is currently per-machine, not per-project.
+- v0.9 cross-machine path overrides (`[directory_overrides.<name>]`) addresses a different axis (path portability across machines for the *same* user); per-project config addresses portability across *users* of the same repo.
+- The v1.0 Tauri GUI milestone is the natural moment to surface "currently active project" in the UI if discovery is automatic.
+
+**Requirements:** TBD (to be derived during `/gsd:discuss-phase 999.1`)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
 
 ## Progress
 
