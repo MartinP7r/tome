@@ -15,7 +15,17 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        # `tome-desktop` is a macOS-only Tauri crate (D-GUI-06, mirrored by the
+        # macOS-only `desktop-build`, `bindings`, and `a11y` jobs below). On
+        # ubuntu it would pull glib-sys / webkit2gtk-sys system libs that aren't
+        # installed — and even if they were, the resulting build would exercise
+        # a render path the project doesn't ship. Excluding it from the ubuntu
+        # slice keeps coverage where it matters without paying the GTK3 tax.
+        include:
+          - os: ubuntu-latest
+            scope: --workspace --exclude tome-desktop
+          - os: macos-latest
+            scope: --workspace
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -25,11 +35,11 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy ${{ matrix.scope }} --all-targets -- -D warnings
       - name: Test
-        run: cargo test --all
+        run: cargo test ${{ matrix.scope }}
       - name: Build
-        run: cargo build --release
+        run: cargo build ${{ matrix.scope }} --release
 
   # Bindings freshness gate (D-07). Regenerate ui/src/bindings.ts from the
   # shared make_builder() and fail if the committed file is stale. Runs on
