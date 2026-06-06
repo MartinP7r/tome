@@ -345,7 +345,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 27-01a-PLAN.md — Rust domain types: `item: Option<String>` on `ProgressEvent::SyncStageProgress` (D-08), `synced_at: Option<String>` on `DiscoveredSkill` (D-16), sink-side D-09 fold-in, Pitfall 4 ordering test (SYNC-01)
 - [x] 27-01b-PLAN.md — Tauri boundary `start_sync` (spawn_blocking) + `cancel_sync` + `MenuAction::JumpSync` (⌘3 re-anchor); React `SyncView` skeleton + `useSync` hook (Pitfall 6 discipline); Sidebar 4th NavItem; `bindings.ts` regen; axe scan (SYNC-01)
 - [x] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions on NEW only + GridList primitive + reusable `SectionHeader` extension (SYNC-02)
-- [ ] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
+- [x] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
 - [ ] 27-03-PLAN.md — `machine.toml` diff preview + `similar` crate + `PreviewPopover` slot refactor + `MachineTomlDiff` component (SYNC-03)
 - [ ] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
 - [ ] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
