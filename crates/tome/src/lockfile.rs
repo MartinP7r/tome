@@ -306,6 +306,7 @@ mod tests {
             source_name: DirectoryName::new(source).unwrap(),
             origin,
             frontmatter: None,
+            synced_at: None,
         }
     }
 
