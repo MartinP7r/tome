@@ -1,37 +1,93 @@
-// SyncView — Phase 27 plan 27-01b skeleton (SYNC-01).
+// SyncView — Phase 27 plan 27-01b skeleton + 27-02 triage panel.
 //
 // Three render shapes corresponding to the useSync state machine:
 //
 //   isRunning === false && outcome === null   →  idle hero
 //                                                ↺ glyph + headline +
 //                                                "Run sync" CTA
+//                                              + post-Reconcile triage panel
+//                                                (only if diff is non-empty —
+//                                                rendered in a split layout)
 //   isRunning === true                        →  in-progress placeholder
-//                                                "Sync running…" + Cancel
+//                                                stepper placeholder +
+//                                                TriagePanel (when diff
+//                                                non-empty) in the middle
+//                                                column; TriageDetail in
+//                                                the right column.
 //   isRunning === false && outcome !== null   →  terminal summary
 //                                                "Sync complete" or
 //                                                inline error
 //
-// **Skeleton scope.** Plan 27-01b only ships the substrate. The full surface
-// lands across:
+// **Plan 27-02 split-layout note.** The UI-SPEC §"In-progress" wireframe
+// shows the stepper + triage panel in the middle column with TriageDetail
+// in the right column. ContentPane is currently single-column; for plan
+// 27-02 we render the triage flow inside a flex split inside SyncView
+// itself (the real ContentPane split-mode lands when the broader spatial
+// shell wave catches up — 27-04 will graduate the stepper). The flex
+// split here keeps the split visually correct without a shell refactor.
 //
-//   27-02 — Recent changes disclosure + triage panel population.
-//   27-03 — Apply flow + PreviewPopover.
-//   27-04 — Real StageStepper (the in-progress placeholder graduates).
-//   27-05 — SyncOutcomeWire + partial-failure rendering.
-//
-// UI-SPEC §Per-view Design — Sync covers the idle / running / terminal
-// composition; this skeleton lays the visual grammar without the polish.
+// **Plan 27-02 Apply seam.** TriagePanel's `onApply` is a `// TODO 27-03`
+// no-op stub — plan 27-03 wires the PreviewPopover (preview_machine_toml
+// command + machine.toml diff render). The button still renders with the
+// correct disabled state today; clicking it does nothing.
 
 import { useStatus } from "../hooks/useStatus";
 import { useSync } from "../hooks/useSync";
 import { formatRelative } from "../lib/relativeTime";
+import { TriagePanel } from "../components/TriagePanel";
+import { TriageDetail } from "../components/TriageDetail";
+import type { TriageEntry } from "../bindings";
+import styles from "./SyncView.module.css";
+
+function findEntry(
+  diff: NonNullable<ReturnType<typeof useSync>["diff"]>,
+  skill: string,
+): TriageEntry | null {
+  for (const e of diff.added) {
+    if (e.name === skill) return e;
+  }
+  for (const e of diff.changed) {
+    if (e.name === skill) return e;
+  }
+  for (const e of diff.removed) {
+    if (e.name === skill) return e;
+  }
+  return null;
+}
 
 export function SyncView() {
-  const { isRunning, outcome, start, cancel, dismiss } = useSync();
+  const {
+    isRunning,
+    outcome,
+    start,
+    cancel,
+    dismiss,
+    diff,
+    decisions,
+    selectedTriageSkill,
+    pendingDiffCount,
+    onDecisionChange,
+    onBulkAction,
+    selectTriageSkill,
+  } = useSync();
   const { status } = useStatus();
 
+  // The triage panel is rendered whenever the diff is non-empty
+  // (UI-SPEC §"In-progress state": panel hidden until non-empty). For
+  // plan 27-02 we render it across both idle AND in-progress views so
+  // the user can review pending changes pre-sync. 27-04 will refine
+  // this gating once the stepper / cancellation states settle.
+  const showTriage = diff !== null && pendingDiffCount > 0;
+  const selectedEntry =
+    showTriage && selectedTriageSkill !== null
+      ? findEntry(diff, selectedTriageSkill)
+      : null;
+  const selectedDecision = selectedTriageSkill !== null
+    ? decisions.get(selectedTriageSkill) ?? "keep"
+    : "keep";
+
   if (!isRunning && outcome === null) {
-    // -------- Idle hero --------
+    // -------- Idle hero (+ inline triage when changes pending) --------
     const lastSync = status?.last_sync ?? null;
     const headline =
       lastSync === null
@@ -39,61 +95,129 @@ export function SyncView() {
         : `Last synced ${formatRelative(lastSync)}`;
 
     return (
-      <section role="status" aria-label="Sync status">
-        <RefreshGlyph />
-        <h1>{headline}</h1>
-        {/* Plan 27-02 will replace this with `${new} new · ${changed}
-         * changed · ${removed} removed since last sync`, populated from
-         * the lockfile diff feed. */}
-        {lastSync !== null && (
-          <p>Run a sync to refresh the library.</p>
+      <div className={styles.idle}>
+        <section role="status" aria-label="Sync status" className={styles.hero}>
+          <RefreshGlyph />
+          <h1>{headline}</h1>
+          {showTriage ? (
+            <p>
+              {diff.added.length} new · {diff.changed.length} changed ·{" "}
+              {diff.removed.length} removed since last sync
+            </p>
+          ) : lastSync !== null ? (
+            <p>0 new · 0 changed · 0 removed since last sync</p>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              void start();
+            }}
+            aria-label="Run sync"
+          >
+            Run sync
+          </button>
+          <details>
+            <summary>Recent changes</summary>
+            <p>No changes recorded in the previous sync.</p>
+          </details>
+        </section>
+        {showTriage && (
+          <div className={styles.splitBody}>
+            <div className={styles.triageColumn}>
+              <TriagePanel
+                diff={diff}
+                decisions={decisions}
+                onDecisionChange={onDecisionChange}
+                selectedSkill={selectedTriageSkill}
+                onSelect={selectTriageSkill}
+                onBulkAction={onBulkAction}
+                onApply={() => {
+                  /* TODO 27-03: open PreviewPopover */
+                }}
+              />
+            </div>
+            <div className={styles.detailColumn}>
+              <TriageDetail
+                entry={selectedEntry}
+                decision={selectedDecision}
+                onDecisionChange={(d) => {
+                  if (selectedTriageSkill !== null) {
+                    onDecisionChange(selectedTriageSkill, d);
+                  }
+                }}
+                onViewSource={() => {
+                  /* Plan 27-03 will wire open_source_folder via the
+                   * Phase 26 command — for 27-02, no-op stub. */
+                }}
+              />
+            </div>
+          </div>
         )}
-        <button
-          type="button"
-          onClick={() => {
-            void start();
-          }}
-          aria-label="Run sync"
-        >
-          Run sync
-        </button>
-        <details>
-          <summary>Recent changes</summary>
-          {/* Plan 27-02 owns the population of this disclosure. */}
-          <p>No changes recorded in the previous sync.</p>
-        </details>
-      </section>
+      </div>
     );
   }
 
   if (isRunning) {
-    // -------- In-progress placeholder --------
-    // Plan 27-04 swaps this for the real StageStepper component. The
-    // aria-busy + aria-live="polite" pairing announces stage transitions
-    // to VoiceOver in the meantime.
+    // -------- In-progress placeholder + triage panel --------
+    // Plan 27-04 swaps the placeholder for the real StageStepper. The
+    // triage panel renders inside the split-pane middle column once the
+    // diff is non-empty (after Reconcile completes).
     return (
       <section
         role="region"
         aria-busy="true"
         aria-live="polite"
         aria-label="Sync pipeline"
+        className={styles.inProgress}
       >
-        <p>Sync running…</p>
-        <button
-          type="button"
-          onClick={() => {
-            void cancel();
-          }}
-          aria-label="Cancel sync"
-        >
-          Cancel sync
-        </button>
+        <div className={styles.stepperPlaceholder}>
+          <p>Sync running…</p>
+          <button
+            type="button"
+            onClick={() => {
+              void cancel();
+            }}
+            aria-label="Cancel sync"
+          >
+            Cancel sync
+          </button>
+        </div>
+        {showTriage && (
+          <div className={styles.splitBody}>
+            <div className={styles.triageColumn}>
+              <TriagePanel
+                diff={diff}
+                decisions={decisions}
+                onDecisionChange={onDecisionChange}
+                selectedSkill={selectedTriageSkill}
+                onSelect={selectTriageSkill}
+                onBulkAction={onBulkAction}
+                onApply={() => {
+                  /* TODO 27-03: open PreviewPopover */
+                }}
+              />
+            </div>
+            <div className={styles.detailColumn}>
+              <TriageDetail
+                entry={selectedEntry}
+                decision={selectedDecision}
+                onDecisionChange={(d) => {
+                  if (selectedTriageSkill !== null) {
+                    onDecisionChange(selectedTriageSkill, d);
+                  }
+                }}
+                onViewSource={() => {
+                  /* 27-03 wires this. */
+                }}
+              />
+            </div>
+          </div>
+        )}
       </section>
     );
   }
 
   // -------- Terminal summary --------
-  // outcome is non-null and isRunning is false.
   if (outcome?.kind === "err") {
     return (
       <section role="status" aria-label="Sync result">

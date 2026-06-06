@@ -176,17 +176,17 @@ pub use migration_v010::MigrationPartialOrFailed;
 /// `WithDomainKind::with_domain_kind`; the domain itself stays `anyhow::Result`.
 pub use errors::{DomainErrorKind, DomainTagged};
 
+/// Per-machine preferences (re-exported from the `pub(crate)` `machine`
+/// module so external consumers — the Tauri `start_sync` command in
+/// `crates/tome-desktop/src/commands.rs`, plan 27-01b — can load and pass
+/// `MachinePrefs` into `sync()` without depending on the module path.
+pub use machine::MachinePrefs;
 /// Phase 26 plan 26-06 (VIEW-06 / NF-05) — the `tome-desktop` file watcher
 /// reads the canonical `machine.toml` path here without forcing the whole
 /// `machine` module to become part of the public API. Keep the re-export
 /// narrow (single function — no `MachinePrefs` etc.) so the GUI watcher's
 /// dependency surface stays small.
 pub use machine::default_machine_path;
-/// Per-machine preferences (re-exported from the `pub(crate)` `machine`
-/// module so external consumers — the Tauri `start_sync` command in
-/// `crates/tome-desktop/src/commands.rs`, plan 27-01b — can load and pass
-/// `MachinePrefs` into `sync()` without depending on the module path.
-pub use machine::MachinePrefs;
 /// Load `machine.toml` from the given path. Re-exported alongside
 /// [`MachinePrefs`] for the same reason (plan 27-01b).
 pub use machine::load as load_machine_prefs;

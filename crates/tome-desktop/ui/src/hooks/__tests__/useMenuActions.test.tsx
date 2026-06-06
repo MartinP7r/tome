@@ -20,15 +20,26 @@ vi.mock("../../bindings", () => ({
         return Promise.resolve(() => undefined);
       },
     },
-    // Sync provider also subscribes to syncProgress; stub it so the
-    // provider mounts cleanly.
+    // Sync provider also subscribes to syncProgress + (via 27-02
+    // useLockfileDiff) lockfileChanged; stub both so the provider
+    // mounts cleanly.
     syncProgress: {
+      listen: () => Promise.resolve(() => undefined),
+    },
+    lockfileChanged: {
       listen: () => Promise.resolve(() => undefined),
     },
   },
   commands: {
     startSync: () => Promise.resolve({ status: "ok", data: null }),
     cancelSync: () => Promise.resolve({ status: "ok", data: null }),
+    // Plan 27-02 — useSync composes useLockfileDiff which calls
+    // commands.getLockfileDiff on mount.
+    getLockfileDiff: () =>
+      Promise.resolve({
+        status: "ok",
+        data: { added: [], changed: [], removed: [] },
+      }),
   },
 }));
 

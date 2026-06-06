@@ -128,10 +128,7 @@ impl LockfileDiff {
 /// The `BTreeMap` iteration in [`UpdateDiff::changes`] yields entries in
 /// alphabetical order by skill name, so each bucket's Vec inherits that
 /// order without an explicit sort.
-pub fn lockfile_diff_projection(
-    diff: &UpdateDiff,
-    manifest: &Manifest,
-) -> LockfileDiff {
+pub fn lockfile_diff_projection(diff: &UpdateDiff, manifest: &Manifest) -> LockfileDiff {
     let mut added = Vec::new();
     let mut changed = Vec::new();
     let mut removed = Vec::new();
@@ -144,7 +141,11 @@ pub fn lockfile_diff_projection(
                     change_kind: TriageEntryChangeKind::Added,
                     source_name: new.source_name.clone(),
                     previous_source: new.previous_source.clone(),
-                    origin: classify_origin(new.registry_id.as_deref(), new.version.clone(), new.git_commit_sha.clone()),
+                    origin: classify_origin(
+                        new.registry_id.as_deref(),
+                        new.version.clone(),
+                        new.git_commit_sha.clone(),
+                    ),
                     content_hash_old: None,
                     content_hash_new: Some(new.content_hash.as_str().to_string()),
                     registry_id: new.registry_id.clone(),
@@ -162,7 +163,11 @@ pub fn lockfile_diff_projection(
                     change_kind: TriageEntryChangeKind::Changed,
                     source_name: new.source_name.clone(),
                     previous_source: new.previous_source.clone(),
-                    origin: classify_origin(new.registry_id.as_deref(), new.version.clone(), new.git_commit_sha.clone()),
+                    origin: classify_origin(
+                        new.registry_id.as_deref(),
+                        new.version.clone(),
+                        new.git_commit_sha.clone(),
+                    ),
                     content_hash_old: Some(old.content_hash.as_str().to_string()),
                     content_hash_new: Some(new.content_hash.as_str().to_string()),
                     registry_id: new.registry_id.clone(),
@@ -179,7 +184,11 @@ pub fn lockfile_diff_projection(
                     change_kind: TriageEntryChangeKind::Removed,
                     source_name: old.source_name.clone(),
                     previous_source: old.previous_source.clone(),
-                    origin: classify_origin(old.registry_id.as_deref(), old.version.clone(), old.git_commit_sha.clone()),
+                    origin: classify_origin(
+                        old.registry_id.as_deref(),
+                        old.version.clone(),
+                        old.git_commit_sha.clone(),
+                    ),
                     content_hash_old: Some(old.content_hash.as_str().to_string()),
                     content_hash_new: None,
                     registry_id: old.registry_id.clone(),
@@ -193,7 +202,11 @@ pub fn lockfile_diff_projection(
         }
     }
 
-    LockfileDiff { added, changed, removed }
+    LockfileDiff {
+        added,
+        changed,
+        removed,
+    }
 }
 
 /// Classify the lockfile entry's origin for the boundary payload.
@@ -253,7 +266,13 @@ mod tests {
         }
     }
 
-    fn lock_entry_managed(source: &str, hash_seed: &str, registry: &str, version: &str, sha: &str) -> LockEntry {
+    fn lock_entry_managed(
+        source: &str,
+        hash_seed: &str,
+        registry: &str,
+        version: &str,
+        sha: &str,
+    ) -> LockEntry {
         LockEntry {
             source_name: Some(DirectoryName::new(source).unwrap()),
             previous_source: None,
@@ -323,7 +342,10 @@ mod tests {
         let entry = &proj.added[0];
         assert_eq!(entry.name.as_str(), "new-skill");
         assert_eq!(entry.change_kind, TriageEntryChangeKind::Added);
-        assert_eq!(entry.source_name.as_ref().map(|d| d.as_str()), Some("plugins"));
+        assert_eq!(
+            entry.source_name.as_ref().map(|d| d.as_str()),
+            Some("plugins")
+        );
         assert!(entry.content_hash_old.is_none());
         assert!(entry.content_hash_new.is_some());
         assert!(entry.synced_at.is_none());
@@ -380,7 +402,10 @@ mod tests {
             entry.previous_source.as_ref().map(|d| d.as_str()),
             Some("plugins"),
         );
-        assert!(entry.source_name.is_none(), "Unowned removed entry has no current source");
+        assert!(
+            entry.source_name.is_none(),
+            "Unowned removed entry has no current source"
+        );
     }
 
     /// Managed skills surface the registry_id / version / git_commit_sha on
@@ -404,7 +429,9 @@ mod tests {
         assert_eq!(entry.git_commit_sha_new.as_deref(), Some("abc1234"));
         // Origin carries the provenance — the React side reads it directly.
         match &entry.origin {
-            SkillOrigin::Managed { provenance: Some(p) } => {
+            SkillOrigin::Managed {
+                provenance: Some(p),
+            } => {
                 assert_eq!(p.registry_id, "axiom@npm");
                 assert_eq!(p.version.as_deref(), Some("1.2.3"));
                 assert_eq!(p.git_commit_sha.as_deref(), Some("abc1234"));
@@ -421,14 +448,14 @@ mod tests {
     #[test]
     fn mixed_diff_buckets_remain_alphabetical() {
         let old = lockfile_with(vec![
-            ("apple", lock_entry_local("plugins", "aa")),     // changed
-            ("banana", lock_entry_local("plugins", "bb")),    // removed
-            ("cherry", lock_entry_local("plugins", "cc")),    // unchanged
+            ("apple", lock_entry_local("plugins", "aa")),  // changed
+            ("banana", lock_entry_local("plugins", "bb")), // removed
+            ("cherry", lock_entry_local("plugins", "cc")), // unchanged
         ]);
         let new = lockfile_with(vec![
-            ("apple", lock_entry_local("plugins", "ff")),     // changed (different hash)
-            ("cherry", lock_entry_local("plugins", "cc")),    // unchanged (same hash)
-            ("durian", lock_entry_local("plugins", "dd")),    // added
+            ("apple", lock_entry_local("plugins", "ff")), // changed (different hash)
+            ("cherry", lock_entry_local("plugins", "cc")), // unchanged (same hash)
+            ("durian", lock_entry_local("plugins", "dd")), // added
             ("elderberry", lock_entry_local("plugins", "ee")), // added
         ]);
         let d = diff(&old, &new);

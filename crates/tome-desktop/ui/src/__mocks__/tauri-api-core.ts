@@ -125,6 +125,86 @@ const SKILL_DETAIL_BY_NAME: Record<string, any> = {
   },
 };
 
+/** Triage fixture — exercises GridList + nested SectionHeader + the
+ *  TriageRow chip-toggle + the RadioGroup canonical picker. Two added
+ *  entries (one managed-git, one local) + one changed + one removed
+ *  covers every branch the triage UI renders. */
+const TRIAGE_DIFF = {
+  added: [
+    {
+      name: "axiom-build",
+      change_kind: "added" as const,
+      source_name: "plugins",
+      previous_source: null,
+      origin: {
+        kind: "managed" as const,
+        provenance: {
+          registry_id: "axiom@npm",
+          version: "1.2.0",
+          git_commit_sha: "abc1234",
+        },
+      },
+      content_hash_old: null,
+      content_hash_new: "b".repeat(64),
+      registry_id: "axiom@npm",
+      version_old: null,
+      version_new: "1.2.0",
+      git_commit_sha_old: null,
+      git_commit_sha_new: "abc1234",
+      synced_at: null,
+    },
+    {
+      name: "axiom-swiftui",
+      change_kind: "added" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: null,
+      content_hash_new: "c".repeat(64),
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: null,
+    },
+  ],
+  changed: [
+    {
+      name: "rust-helper",
+      change_kind: "changed" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: "a".repeat(64),
+      content_hash_new: "d".repeat(64),
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: "2026-05-29T08:00:00Z",
+    },
+  ],
+  removed: [
+    {
+      name: "deprecated-skill",
+      change_kind: "removed" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: "e".repeat(64),
+      content_hash_new: null,
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: "2026-05-28T08:00:00Z",
+    },
+  ],
+};
+
 const DOCTOR_REPORT = {
   findings: [
     {
@@ -190,10 +270,15 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
     case "cancel_sync":
       return null;
     // Phase 27 plan 27-02 — SYNC-02 triage panel projection. The a11y gate
-    // doesn't visit the in-progress state today, but the mock returns an
-    // empty diff so if it does, the panel collapses to nothing rather than
-    // raising "unknown command".
+    // has two scans: the default empty-diff path (nothing renders besides
+    // the idle hero) and a "triage" path that surfaces a representative
+    // sample diff so axe can scan the GridList / sectioned headings /
+    // RadioGroup composition. The triage path is selected by setting the
+    // `?triage=1` query param on the loaded page.
     case "get_lockfile_diff":
+      if (typeof window !== "undefined" && window.location?.search?.includes("triage=1")) {
+        return TRIAGE_DIFF;
+      }
       return { added: [], changed: [], removed: [] };
     default:
       throw new Error(`a11y mock: unknown command '${cmd}'`);

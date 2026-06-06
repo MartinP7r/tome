@@ -296,7 +296,13 @@ mod tests {
         assert_eq!(MenuAction::ALL.len(), 5);
         assert_eq!(
             MenuAction::ALL,
-            ["JumpStatus", "JumpSkills", "JumpSync", "JumpHealth", "FocusSearch"]
+            [
+                "JumpStatus",
+                "JumpSkills",
+                "JumpSync",
+                "JumpHealth",
+                "FocusSearch"
+            ]
         );
     }
 }

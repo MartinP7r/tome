@@ -225,11 +225,9 @@ pub fn get_lockfile_diff(_app: tauri::AppHandle) -> Result<LockfileDiff, TomeErr
         // lockfile (no network). Discovery warnings are swallowed for this
         // read-only diff — they would otherwise leak into the GUI's triage
         // panel which renders only structured diff data, not warnings.
-        let (resolved_paths, _warnings) =
-            offline_resolved_paths(&config, &paths);
+        let (resolved_paths, _warnings) = offline_resolved_paths(&config, &paths);
         let mut discover_warnings = Vec::new();
-        let skills =
-            tome::discover_all(&config, &resolved_paths, &mut discover_warnings)?;
+        let skills = tome::discover_all(&config, &resolved_paths, &mut discover_warnings)?;
         let new_lockfile = tome::lockfile::generate(&manifest, &skills);
 
         let diff = tome::update::diff(&old_lockfile, &new_lockfile);
@@ -241,8 +239,7 @@ pub fn get_lockfile_diff(_app: tauri::AppHandle) -> Result<LockfileDiff, TomeErr
 /// Type alias for the git-source resolution map that `discover_all`
 /// consumes. Matches `lockfile::resolved_paths_from_lockfile_cache`'s
 /// inner return shape so a future lift to that helper is mechanical.
-type ResolvedGitPaths =
-    BTreeMap<tome::config::DirectoryName, (std::path::PathBuf, Option<String>)>;
+type ResolvedGitPaths = BTreeMap<tome::config::DirectoryName, (std::path::PathBuf, Option<String>)>;
 
 /// Helper: derive git-directory resolved paths from the existing on-disk
 /// lockfile cache. The `lockfile::resolved_paths_from_lockfile_cache`
@@ -252,10 +249,7 @@ type ResolvedGitPaths =
 /// GUI users have at least one local directory, so the panel is useful
 /// even without git diff resolution; full git-diff support requires lifting
 /// the helper, which is a follow-up out of scope for this plan.
-fn offline_resolved_paths(
-    _config: &Config,
-    _paths: &TomePaths,
-) -> (ResolvedGitPaths, Vec<String>) {
+fn offline_resolved_paths(_config: &Config, _paths: &TomePaths) -> (ResolvedGitPaths, Vec<String>) {
     (BTreeMap::new(), Vec::new())
 }
 
