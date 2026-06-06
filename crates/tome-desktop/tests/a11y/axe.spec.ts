@@ -93,6 +93,39 @@ test("skills view passes axe WCAG-AA", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
+test("skills view group-by Source passes axe WCAG-AA (Phase 27 plan 27-02b)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-02b — VIEW-02 carryover closure. Toggle the Group
+  // menu to "Source" and confirm the rendered SectionHeader-between-
+  // groups composition has no nested-interactive or heading-order
+  // violations. The Skills view keeps its existing ListBox primitive
+  // (rows have no inline buttons; the GridList vs ListBox decision in
+  // TriagePanel does NOT carry over here).
+  await page
+    .getByRole("option", { name: /^Skills, Skills section/ })
+    .click();
+  await page
+    .getByRole("searchbox", { name: "Search skills" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // Click the Group menu trigger ("Group: None" is the closed-state
+  // label rendered by PopupMenu) and select "Source".
+  await page.getByRole("button", { name: "Group skills" }).click();
+  await page.getByRole("menuitemradio", { name: "Source" }).click();
+  // Wait for the SectionHeader(s) the grouped render emits. The a11y
+  // mock fixture has skills under `claude-plugins` and `personal`, so
+  // both labels render as level-2 <h2>s (uppercase per UI-SPEC).
+  await page
+    .getByRole("heading", { level: 2, name: /^PERSONAL/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
 test("sync view passes axe WCAG-AA", async ({ page }) => {
   // Phase 27 plan 27-01b — Sync route a11y. Click the Sidebar's Sync
   // NavItem (a React Aria ListBoxItem → role="option") and wait for the
