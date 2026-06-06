@@ -15,6 +15,7 @@ pub mod error;
 pub mod menu;
 pub mod sink;
 pub mod sync_state;
+pub mod sync_types;
 pub mod watcher;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -43,6 +44,9 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             // with double-fire mitigation via the managed `SyncState`.
             commands::start_sync,
             commands::cancel_sync,
+            // Phase 27 plan 27-02 (SYNC-02) — read-only lockfile-diff
+            // projection for the triage panel.
+            commands::get_lockfile_diff,
         ])
         .events(collect_events![
             sink::SyncProgress,

@@ -189,6 +189,12 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
       return null;
     case "cancel_sync":
       return null;
+    // Phase 27 plan 27-02 — SYNC-02 triage panel projection. The a11y gate
+    // doesn't visit the in-progress state today, but the mock returns an
+    // empty diff so if it does, the panel collapses to nothing rather than
+    // raising "unknown command".
+    case "get_lockfile_diff":
+      return { added: [], changed: [], removed: [] };
     default:
       throw new Error(`a11y mock: unknown command '${cmd}'`);
   }

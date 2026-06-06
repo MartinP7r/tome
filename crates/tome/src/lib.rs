@@ -79,7 +79,12 @@ pub(crate) mod lint;
 // CORE-01 collect-shape (gather → render) keeps the surface narrow: only
 // `ListReport` + `collect` are public.
 pub mod list;
-pub(crate) mod lockfile;
+// `lockfile` is `pub` so `tome-desktop` can call `lockfile::load` and consume
+// `Lockfile` + `LockEntry` across the crate boundary for the SYNC-02
+// triage-panel projection (Phase 27 plan 27-02 / get_lockfile_diff command).
+// The CLI's lockfile-writing path stays in-crate via the pipeline; only the
+// read shape + `load` are needed by the GUI for diff projection.
+pub mod lockfile;
 // `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
 // v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
 // test (under `test-support`) needs to construct `MachinePrefs` to
@@ -125,7 +130,11 @@ pub mod skill;
 pub mod status;
 pub(crate) mod summary;
 pub mod tracing_init;
-pub(crate) mod update;
+// `update` is `pub` so `tome-desktop` can call `update::diff` and consume
+// `UpdateDiff`/`SkillChange` for the SYNC-02 lockfile-diff projection (plan
+// 27-02). The CLI's `present_changes` interactive triage stays in-crate
+// (not exported); the GUI substitutes its own visual triage flow.
+pub mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
@@ -188,6 +197,22 @@ pub use machine::load as load_machine_prefs;
 /// the `discover` module's larger surface (`DiscoveredSkill`, scanners) out
 /// of the GUI's import path while making the validated newtype reachable.
 pub use discover::SkillName;
+
+/// Phase 27 plan 27-02 (SYNC-02) — `tome-desktop`'s SYNC-02 triage projection
+/// reconstructs a `SkillOrigin` from lockfile `registry_id`/`version`/
+/// `git_commit_sha` fields so the React side reuses the same discriminator
+/// the Skills view already pattern-matches. The `discover_all` re-export
+/// lets `get_lockfile_diff` build a prospective lockfile from the current
+/// disk state without depending on the `pub(crate)` `discover` module path.
+pub use discover::{SkillOrigin, SkillProvenance, discover_all};
+
+/// Phase 27 plan 27-02 (SYNC-02) — `tome-desktop`'s SYNC-02 triage projection
+/// surfaces lockfile content hashes as boundary strings. Re-exporting
+/// `ContentHash` lets the `sync_types` module's unit tests construct valid
+/// hashes without duplicating the 64-hex validator. The `validation` module
+/// stays `pub(crate)` (the rest of its surface is the internal
+/// `validate_identifier` helper); only `ContentHash` is lifted.
+pub use validation::ContentHash;
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
