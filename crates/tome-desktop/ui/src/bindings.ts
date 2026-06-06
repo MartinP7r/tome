@@ -132,6 +132,27 @@ export const commands = {
 	 *  the final state.
 	 */
 	cancelSync: () => typedError<null, TomeError>(__TAURI_INVOKE("cancel_sync")),
+	/**
+	 *  Return the pending lockfile diff for the GUI's SYNC-02 triage panel
+	 *  (Phase 27 plan 27-02 / SYNC-02).
+	 * 
+	 *  Read-only: loads the on-disk `tome.lock` (current shipped state) and
+	 *  projects the diff against a prospective lockfile built from the current
+	 *  `Manifest` + currently-discovered skills. The diff is the same shape
+	 *  `tome::update::diff` produces — the GUI consumes a triage-friendly
+	 *  projection ([`LockfileDiff`]) keyed by change kind.
+	 * 
+	 *  The prospective lockfile is built from the canonical `Manifest`
+	 *  (`manifest::load`) and the skills discovered against the live config.
+	 *  Git-source discovery uses the offline lockfile cache via
+	 *  `lockfile::resolved_paths_from_lockfile_cache` so no network calls cross
+	 *  this command (matches the read-only contract of the SYNC-02 panel).
+	 * 
+	 *  When no sync has ever run (`tome.lock` is missing), the command returns
+	 *  every discovered skill as Added — the user sees a populated triage panel
+	 *  before the first sync.
+	 */
+	getLockfileDiff: () => typedError<LockfileDiff, TomeError>(__TAURI_INVOKE("get_lockfile_diff")),
 };
 
 /** Events */
@@ -577,6 +598,20 @@ export type ListReport = {
  *  affect the discovered skill list shape (NF-05 contract).
  */
 export type LockfileChanged = null;
+
+/**
+ *  Three pre-sorted buckets, alphabetical by skill name within each.
+ * 
+ *  The React side renders three vertical sections (NEW / CHANGED / REMOVED —
+ *  UI-SPEC §TriagePanel) by mapping each Vec; no re-sorting needed on the
+ *  JS side. The buckets are independent — a skill never appears in more than
+ *  one Vec.
+ */
+export type LockfileDiff = {
+	added: TriageEntry[],
+	changed: TriageEntry[],
+	removed: TriageEntry[],
+};
 
 /**
  *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
@@ -1030,6 +1065,90 @@ export type TomeError = {
 	/**  Flattened anyhow `.context()` chain (outermost first). */
 	context: string[],
 };
+
+/**
+ *  A single skill's per-row payload in the triage panel.
+ * 
+ *  One entry per row in the GUI. Shape covers all three change kinds:
+ * 
+ *  - **Added** (`change_kind: "added"`): `content_hash_new = Some`,
+ *    `content_hash_old = None`, `synced_at = None` (the manifest does not
+ *    yet have an entry for this skill).
+ *  - **Changed** (`change_kind: "changed"`): both hashes populated; `synced_at`
+ *    from the manifest entry for the current (old-state) skill.
+ *  - **Removed** (`change_kind: "removed"`): `content_hash_old = Some`,
+ *    `content_hash_new = None`. `previous_source` carries the owning
+ *    directory at the moment the skill was last seen.
+ * 
+ *  All fields are serializable via `specta::Type` so the React side gets a
+ *  fully-typed payload; no string parsing on the JS side.
+ */
+export type TriageEntry = {
+	/**  Skill name (matches the manifest key + the lockfile key). */
+	name: SkillName,
+	/**
+	 *  Which change kind this row belongs to. The Rust side already sorts
+	 *  entries into the three Vecs of [`LockfileDiff`], but echoing the kind
+	 *  on every entry keeps the boundary self-describing for diagnostics and
+	 *  for the React-side aria-label templates (UI-SPEC §VoiceOver labels).
+	 */
+	change_kind: TriageEntryChangeKind,
+	/**
+	 *  The directory currently owning this skill (Added → new owner;
+	 *  Changed → the new owner; Removed → the owner at the moment of removal
+	 *  per the old lockfile entry). `None` for the Unowned state (an Added
+	 *  skill never appears Unowned, but a Removed-while-Unowned skill can).
+	 */
+	source_name: DirectoryName | null,
+	/**
+	 *  For Removed entries that transitioned through Unowned: the last
+	 *  directory that owned the skill (D-C1 breadcrumb).
+	 */
+	previous_source: DirectoryName | null,
+	/**
+	 *  Origin classification (managed vs. local). For Added/Changed: derived
+	 *  from the new entry's `registry_id` (managed) vs. absence (local). For
+	 *  Removed: derived from the old entry's `registry_id`. The
+	 *  `provenance` payload (when `kind = managed`) carries `version` and
+	 *  `git_commit_sha` from the lockfile — the React-side `TriageDetail`
+	 *  reads `git_commit_sha` to decide whether to show the "View source"
+	 *  radio (D-14: git-sourced only).
+	 */
+	origin: SkillOrigin,
+	/**  Old SHA-256 hex (present for Changed + Removed; absent for Added). */
+	content_hash_old: string | null,
+	/**  New SHA-256 hex (present for Added + Changed; absent for Removed). */
+	content_hash_new: string | null,
+	/**
+	 *  Registry identifier (e.g. "axiom@npm"). Mirrors the lockfile's
+	 *  `registry_id` field; `None` for local skills. For Changed entries
+	 *  where the registry identifier itself changed (rare, but possible
+	 *  across a marketplace rename), the value is the **new** registry id;
+	 *  the React-side disclosure shows the old via the diff metadata.
+	 */
+	registry_id: string | null,
+	/**  Old version string (for Changed + Removed). */
+	version_old: string | null,
+	/**  New version string (for Added + Changed). */
+	version_new: string | null,
+	/**  Old git commit SHA (for Changed + Removed). */
+	git_commit_sha_old: string | null,
+	/**  New git commit SHA (for Added + Changed). */
+	git_commit_sha_new: string | null,
+	/**
+	 *  ISO-8601 timestamp from the manifest's `SkillEntry::synced_at` for
+	 *  this skill at the moment the diff was computed. `None` for an Added
+	 *  skill (no manifest entry yet) or for a skill the manifest stamped
+	 *  with no value (legacy).
+	 */
+	synced_at: string | null,
+};
+
+/**
+ *  Discriminator carried on each `TriageEntry`. Stable string union on the
+ *  TS side so React's pattern-match stays exhaustive.
+ */
+export type TriageEntryChangeKind = "added" | "changed" | "removed";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

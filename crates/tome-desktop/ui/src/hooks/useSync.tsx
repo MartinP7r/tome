@@ -33,12 +33,26 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { commands, events } from "../bindings";
-import type { SyncProgress, SyncStage, TomeError } from "../bindings";
+import type {
+  DirectoryName,
+  LockfileDiff,
+  SkillName,
+  SyncProgress,
+  SyncStage,
+  TomeError,
+} from "../bindings";
+import {
+  type BulkScope,
+} from "../components/TriagePanel";
+import { type TriageDecision } from "../components/TriageRow";
+import { useLockfileDiff } from "./useLockfileDiff";
 
 /** All six pipeline stages, in run order. The pinned ordering matches
  *  `tome::progress::SyncStage::ALL`. */
@@ -81,12 +95,32 @@ export interface UseSyncResult {
   /** True while `commands.startSync()` is in flight (before its Result
    *  resolves). The Sidebar's spinner slot keys off this. */
   isRunning: boolean;
+  /** Stable ref mirror of `isRunning`. Consumers (`useLockfileDiff`)
+   *  that need to gate watcher-driven refetches without triggering
+   *  re-subscriptions read this directly (Pitfall 6 carryover from
+   *  27-01b — narrow surface). */
+  isRunningRef: RefObject<boolean>;
   /** Terminal outcome — `null` while idle or running. */
   outcome: SyncTerminal | null;
-  /** Plan-27-01b stub — always `0`. Plan 27-02 populates from the triage
-   *  panel state; the Sidebar's `syncBadge` reads this. */
-  pendingDecisions: number;
-  /** Plan-27-01b stub — always `0`. Plan 27-05 populates from
+  /** Plan 27-02 — current lockfile diff snapshot driving the triage panel.
+   *  `null` before first fetch resolves; `is_empty()` true when no
+   *  changes are pending. */
+  diff: LockfileDiff | null;
+  /** Plan 27-02 — most recent diff fetch error (cleared on next ok). */
+  diffError: TomeError | null;
+  /** Plan 27-02 — per-skill triage decisions (controlled state). Seeded
+   *  to `"keep"` for every Added/Changed entry on diff load. */
+  decisions: ReadonlyMap<SkillName, TriageDecision>;
+  /** Currently-selected TriageRow (drives TriageDetail in the right
+   *  column). `null` when nothing is selected. */
+  selectedTriageSkill: SkillName | null;
+  /** Plan 27-02 — count of non-default decisions (Added+Changed where
+   *  decision !== "keep"). Drives the [Apply N] button label. */
+  pendingDecisionCount: number;
+  /** Plan 27-02 — count of skills across all three buckets
+   *  (added + changed + removed). Drives the Sidebar Sync badge per D-05. */
+  pendingDiffCount: number;
+  /** Plan-27-01b stub — `0` until plan 27-05 populates from
    *  SyncOutcomeWire.partialFailures.length. */
   failureCount: number;
   /** Kick off a sync. Idempotent against double-fire — the Rust side
@@ -97,6 +131,15 @@ export interface UseSyncResult {
   cancel: () => Promise<void>;
   /** Reset to idle from the terminal state. */
   dismiss: () => void;
+  /** Plan 27-02 — set the decision for a single skill. */
+  onDecisionChange: (skill: SkillName, decision: TriageDecision) => void;
+  /** Plan 27-02 — apply a bulk-action scope to a decision. */
+  onBulkAction: (scope: BulkScope, decision: TriageDecision) => void;
+  /** Plan 27-02 — set or clear the selected TriageRow. */
+  selectTriageSkill: (skill: SkillName | null) => void;
+  /** Plan 27-02 — manually refetch the lockfile diff. The triage panel's
+   *  Apply flow (27-03) will trigger this once it lands. */
+  refetchDiff: () => Promise<void>;
 }
 
 /** Build a fresh stages Map with every stage as `{ kind: "pending" }`. */
@@ -132,6 +175,88 @@ function useSyncInternal(): UseSyncResult {
   // we flip `isRunning` (and we also flip on the result branch so the
   // tail-end events after the last SyncStageFinished don't surprise us).
   const isRunningRef = useRef(false);
+
+  // Plan 27-02 — triage state. The lockfile diff and the per-skill
+  // decisions live here so the Sidebar (via pendingDiffCount) and the
+  // SyncView (via diff + decisions) share the same source of truth.
+  const { diff, err: diffError, refetch: refetchDiff } =
+    useLockfileDiff(isRunningRef);
+  const [decisions, setDecisions] = useState<Map<SkillName, TriageDecision>>(
+    () => new Map(),
+  );
+  const [selectedTriageSkill, setSelectedTriageSkill] =
+    useState<SkillName | null>(null);
+
+  // Seed decisions from the diff once on first non-null load. Re-seed
+  // when the diff identity changes AND the decisions map is empty (so
+  // we don't clobber in-progress edits when the watcher refetches).
+  useEffect(() => {
+    if (diff === null) return;
+    if (decisions.size > 0) return;
+    const seeded = new Map<SkillName, TriageDecision>();
+    for (const entry of diff.added) seeded.set(entry.name, "keep");
+    for (const entry of diff.changed) seeded.set(entry.name, "keep");
+    // Removed entries are implicit per D-13; not seeded.
+    setDecisions(seeded);
+  }, [diff, decisions.size]);
+
+  const onDecisionChange = useCallback(
+    (skill: SkillName, decision: TriageDecision) => {
+      setDecisions((prev) => {
+        const next = new Map(prev);
+        next.set(skill, decision);
+        return next;
+      });
+    },
+    [],
+  );
+
+  const onBulkAction = useCallback(
+    (scope: BulkScope, decision: TriageDecision) => {
+      setDecisions((prev) => {
+        if (diff === null) return prev;
+        const next = new Map(prev);
+        // D-13 invariant: bulk actions apply only to the NEW section.
+        const newEntries = diff.added;
+        const matches = (sourceName: DirectoryName | null): boolean => {
+          if (scope.kind === "section") return true;
+          // source-group scope — match the source_name (or "unowned").
+          const key = sourceName ?? "unowned";
+          return key === scope.source;
+        };
+        for (const entry of newEntries) {
+          if (matches(entry.source_name)) {
+            next.set(entry.name, decision);
+          }
+        }
+        return next;
+      });
+    },
+    [diff],
+  );
+
+  const selectTriageSkill = useCallback((skill: SkillName | null) => {
+    setSelectedTriageSkill(skill);
+  }, []);
+
+  // Counts derived from diff + decisions. `useMemo` keeps the badge +
+  // Apply button label stable across renders that don't touch either.
+  const pendingDecisionCount = useMemo(() => {
+    if (diff === null) return 0;
+    let n = 0;
+    for (const entry of diff.added) {
+      if ((decisions.get(entry.name) ?? "keep") !== "keep") n += 1;
+    }
+    for (const entry of diff.changed) {
+      if ((decisions.get(entry.name) ?? "keep") !== "keep") n += 1;
+    }
+    return n;
+  }, [diff, decisions]);
+
+  const pendingDiffCount = useMemo(() => {
+    if (diff === null) return 0;
+    return diff.added.length + diff.changed.length + diff.removed.length;
+  }, [diff]);
 
   const handleProgress = useCallback((payload: SyncProgress) => {
     // Tail-end / replay defense — events arriving after we've already
@@ -257,17 +382,33 @@ function useSyncInternal(): UseSyncResult {
     setStages(initialStages());
     stageStartAt.current.clear();
     setOutcome(null);
+    // Plan 27-02: reset the triage state too so the post-Apply / post-
+    // cancel idle view returns to a clean slate. The diff itself will be
+    // refetched by the watcher (lockfileChanged fires from sync's Save
+    // stage) — the seed effect will re-populate decisions on next load.
+    setDecisions(new Map());
+    setSelectedTriageSkill(null);
   }, []);
 
   return {
     stages,
     isRunning,
+    isRunningRef,
     outcome,
-    pendingDecisions: 0, // Stub — 27-02 populates.
+    diff,
+    diffError,
+    decisions,
+    selectedTriageSkill,
+    pendingDecisionCount,
+    pendingDiffCount,
     failureCount: 0, // Stub — 27-05 populates.
     start,
     cancel,
     dismiss,
+    onDecisionChange,
+    onBulkAction,
+    selectTriageSkill,
+    refetchDiff,
   };
 }
 

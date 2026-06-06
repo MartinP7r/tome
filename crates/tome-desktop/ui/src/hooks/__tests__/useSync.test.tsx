@@ -25,6 +25,7 @@ const listenSpies = {
 
 const startSyncSpy = vi.fn();
 const cancelSyncSpy = vi.fn();
+const getLockfileDiffSpy = vi.fn();
 
 vi.mock("../../bindings", () => ({
   events: {
@@ -68,6 +69,7 @@ vi.mock("../../bindings", () => ({
   commands: {
     startSync: () => startSyncSpy(),
     cancelSync: () => cancelSyncSpy(),
+    getLockfileDiff: () => getLockfileDiffSpy(),
   },
 }));
 
@@ -105,11 +107,16 @@ describe("useSync — Pitfall 6 watcher-feedback discipline", () => {
     listenSpies.menuAction.mockReset();
     startSyncSpy.mockReset();
     cancelSyncSpy.mockReset();
+    getLockfileDiffSpy.mockReset();
     startSyncSpy.mockResolvedValue({ status: "ok", data: null });
     cancelSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    getLockfileDiffSpy.mockResolvedValue({
+      status: "ok",
+      data: { added: [], changed: [], removed: [] },
+    });
   });
 
-  it("subscribes ONLY to events.syncProgress", () => {
+  it("subscribes to events.syncProgress and (via useLockfileDiff) events.lockfileChanged, but to nothing else", () => {
     render(
       <SyncProvider>
         <Probe />
@@ -117,11 +124,16 @@ describe("useSync — Pitfall 6 watcher-feedback discipline", () => {
     );
 
     expect(listenSpies.syncProgress).toHaveBeenCalledTimes(1);
-    // The critical Pitfall 6 invariants — none of the watcher events
-    // are subscribed to by useSync (only the idle-state hooks like
-    // useStatus subscribe to those).
+    // Plan 27-02 — useSync now composes useLockfileDiff to drive the
+    // triage panel, which subscribes to lockfileChanged. The Pitfall 6
+    // discipline is upheld inside useLockfileDiff: the handler gates on
+    // isRunningRef.current so a mid-sync rewrite does NOT trigger a
+    // refetch loop (verified by useLockfileDiff's own test suite).
+    expect(listenSpies.lockfileChanged).toHaveBeenCalledTimes(1);
+    // The remaining watcher events MUST stay unobserved by useSync —
+    // manifest / library / machine-prefs writes that don't reach the
+    // lockfile have no effect on the diff payload.
     expect(listenSpies.manifestChanged).not.toHaveBeenCalled();
-    expect(listenSpies.lockfileChanged).not.toHaveBeenCalled();
     expect(listenSpies.libraryChanged).not.toHaveBeenCalled();
     expect(listenSpies.machinePrefsChanged).not.toHaveBeenCalled();
     // menuAction is unrelated — useSync should not own it either.
@@ -146,7 +158,12 @@ describe("useSync — Pitfall 6 watcher-feedback discipline", () => {
 describe("useSync — cancel handler", () => {
   beforeEach(() => {
     cancelSyncSpy.mockReset();
+    getLockfileDiffSpy.mockReset();
     cancelSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    getLockfileDiffSpy.mockResolvedValue({
+      status: "ok",
+      data: { added: [], changed: [], removed: [] },
+    });
   });
 
   it("clicking [Cancel sync] calls commands.cancelSync exactly once", async () => {
@@ -167,7 +184,12 @@ describe("useSync — cancel handler", () => {
 describe("useSync — start handler", () => {
   beforeEach(() => {
     startSyncSpy.mockReset();
+    getLockfileDiffSpy.mockReset();
     startSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    getLockfileDiffSpy.mockResolvedValue({
+      status: "ok",
+      data: { added: [], changed: [], removed: [] },
+    });
   });
 
   it("clicking [Run sync] calls commands.startSync exactly once", async () => {

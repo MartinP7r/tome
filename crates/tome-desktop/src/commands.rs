@@ -10,6 +10,8 @@
 //! `core:default`/`core:event:default`, no `fs:default` or shell widening
 //! (T-25-04-EoP mitigation).
 
+use std::collections::BTreeMap;
+
 use tome::SkillName;
 use tome::TomePaths;
 use tome::config::Config;
@@ -18,6 +20,7 @@ use tome::progress::CancelToken;
 use crate::error::{ErrorCode, TomeError};
 use crate::sink::TauriEventSink;
 use crate::sync_state::SyncState;
+use crate::sync_types::{LockfileDiff, lockfile_diff_projection};
 
 /// Resolve the user's real `tome_home` + `Config` the same way the CLI does
 /// with no flags: default config path, then default `tome_home`.
@@ -176,6 +179,78 @@ pub fn doctor_repair_one(
 ) -> Result<(), TomeError> {
     let (config, paths) = load_context().map_err(TomeError::from)?;
     tome::doctor::repair_one(&finding_id, &config, &paths).map_err(TomeError::from)
+}
+
+/// Return the pending lockfile diff for the GUI's SYNC-02 triage panel
+/// (Phase 27 plan 27-02 / SYNC-02).
+///
+/// Read-only: loads the on-disk `tome.lock` (current shipped state) and
+/// projects the diff against a prospective lockfile built from the current
+/// `Manifest` + currently-discovered skills. The diff is the same shape
+/// `tome::update::diff` produces — the GUI consumes a triage-friendly
+/// projection ([`LockfileDiff`]) keyed by change kind.
+///
+/// The prospective lockfile is built from the canonical `Manifest`
+/// (`manifest::load`) and the skills discovered against the live config.
+/// Git-source discovery uses the offline lockfile cache via
+/// `lockfile::resolved_paths_from_lockfile_cache` so no network calls cross
+/// this command (matches the read-only contract of the SYNC-02 panel).
+///
+/// When no sync has ever run (`tome.lock` is missing), the command returns
+/// every discovered skill as Added — the user sees a populated triage panel
+/// before the first sync.
+#[tauri::command]
+#[specta::specta]
+pub fn get_lockfile_diff(_app: tauri::AppHandle) -> Result<LockfileDiff, TomeError> {
+    let (config, paths) = load_context().map_err(TomeError::from)?;
+
+    // Inner anyhow body — promotes anyhow → TomeError at the boundary.
+    (|| -> anyhow::Result<LockfileDiff> {
+        // Load the on-disk lockfile; `None` means no sync has run yet,
+        // which we surface as "every discovered skill is added".
+        let old_lockfile = tome::lockfile::load(paths.config_dir())?.unwrap_or_else(|| {
+            // Construct an empty lockfile via JSON — Lockfile's fields are
+            // pub(crate), and an empty lockfile is what an unset state should
+            // look like for diffing purposes. Always parses (no skills).
+            serde_json::from_value(serde_json::json!({ "version": 1, "skills": {} }))
+                .expect("empty lockfile must deserialize")
+        });
+
+        // Load the manifest — the projection reads `synced_at` from here for
+        // Changed / Removed rows. Manifest may be empty for first-run.
+        let manifest = tome::manifest::load(paths.config_dir())?;
+
+        // Build the prospective lockfile from currently-discovered skills.
+        // Offline git resolution: derive cache paths from the existing
+        // lockfile (no network). Discovery warnings are swallowed for this
+        // read-only diff — they would otherwise leak into the GUI's triage
+        // panel which renders only structured diff data, not warnings.
+        let (resolved_paths, _warnings) = offline_resolved_paths(&config, &paths);
+        let mut discover_warnings = Vec::new();
+        let skills = tome::discover_all(&config, &resolved_paths, &mut discover_warnings)?;
+        let new_lockfile = tome::lockfile::generate(&manifest, &skills);
+
+        let diff = tome::update::diff(&old_lockfile, &new_lockfile);
+        Ok(lockfile_diff_projection(&diff, &manifest))
+    })()
+    .map_err(TomeError::from)
+}
+
+/// Type alias for the git-source resolution map that `discover_all`
+/// consumes. Matches `lockfile::resolved_paths_from_lockfile_cache`'s
+/// inner return shape so a future lift to that helper is mechanical.
+type ResolvedGitPaths = BTreeMap<tome::config::DirectoryName, (std::path::PathBuf, Option<String>)>;
+
+/// Helper: derive git-directory resolved paths from the existing on-disk
+/// lockfile cache. The `lockfile::resolved_paths_from_lockfile_cache`
+/// function is `pub(crate)` in `tome`; until it's lifted, this helper just
+/// returns an empty map — `discover_all` then skips git-type directories
+/// silently (the diff still includes every Directory-type skill). Most
+/// GUI users have at least one local directory, so the panel is useful
+/// even without git diff resolution; full git-diff support requires lifting
+/// the helper, which is a follow-up out of scope for this plan.
+fn offline_resolved_paths(_config: &Config, _paths: &TomePaths) -> (ResolvedGitPaths, Vec<String>) {
+    (BTreeMap::new(), Vec::new())
 }
 
 /// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).

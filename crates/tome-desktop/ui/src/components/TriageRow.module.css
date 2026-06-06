@@ -1,0 +1,113 @@
+/* TriageRow — UI-SPEC §TriageRow (Phase 27 plan 27-02).
+ * 52px-tall row matches Phase 26 SkillListRow rhythm. */
+
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--space-2);
+  height: 52px;
+  padding: 0 var(--space-3);
+  margin: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  cursor: default;
+  outline: none;
+}
+
+.row[data-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-on);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.primary {
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  line-height: var(--text-body-line);
+  color: var(--label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-selected="true"] .primary {
+  font-weight: 600;
+  color: var(--accent-on);
+}
+
+.secondary {
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row[data-selected="true"] .secondary {
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.trailing {
+  flex: 0 0 auto;
+}
+
+/* Chip — UI-SPEC §TriageRow trailing slot. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  border: 1px solid var(--separator);
+  background: var(--bg-window);
+  color: var(--label-secondary);
+  white-space: nowrap;
+}
+
+button.chip {
+  cursor: pointer;
+}
+
+button.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* keep state — neutral chip. */
+.chipKeep {
+  color: var(--label-secondary);
+  background: var(--bg-subtle);
+}
+
+/* disable state — amber (Badge--override family per UI-SPEC §Color). */
+.chipDisable {
+  color: var(--badge-override-fg);
+  background: var(--badge-override-bg);
+  border-color: var(--badge-override-fg);
+}
+
+/* implicit-remove static chip — 50% opacity, non-interactive. */
+.chipRemoved {
+  opacity: 0.5;
+}
+
+/* When the row is selected, chips re-color for contrast against accent. */
+.row[data-selected="true"] .chip {
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--accent-on);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.row[data-selected="true"] .chipDisable {
+  color: var(--accent-on);
+}

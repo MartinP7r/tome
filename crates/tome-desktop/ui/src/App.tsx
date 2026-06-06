@@ -50,15 +50,15 @@ export default function App() {
   const { report: doctorReport } = useDoctorReport();
   const badgeCount = doctorReport?.findings.length ?? 0;
 
-  // Plan 27-01b — Sidebar Sync NavItem spinner + dual-meaning badge slot.
-  // The badge counts are stubs until 27-02 (pendingDecisions) and 27-05
-  // (failureCount) wire the real values; the spinner already reflects
-  // the live `isRunning` flag.
+  // Plan 27-02 — Sidebar Sync NavItem spinner + dual-meaning badge slot.
+  // Pre-sync badge: `pendingDiffCount` = added + changed + removed (D-05).
+  // Post-sync failure badge: `failureCount` (stub until 27-05). The two
+  // are mutually exclusive — pre-sync clears on Apply.
   const sync = useSync();
   const syncBadge = sync.failureCount > 0
     ? { kind: "failures" as const, count: sync.failureCount }
-    : sync.pendingDecisions > 0
-      ? { kind: "pending" as const, count: sync.pendingDecisions }
+    : sync.pendingDiffCount > 0
+      ? { kind: "pending" as const, count: sync.pendingDiffCount }
       : { kind: "none" as const };
 
   const isSkills = view === "skills";

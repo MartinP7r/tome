@@ -123,6 +123,39 @@ test("sync view passes axe WCAG-AA", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
+test("sync view triage panel passes axe WCAG-AA (Phase 27 plan 27-02)", async ({ page }) => {
+  // Phase 27 plan 27-02 — SYNC-02 triage panel a11y scan. The mock
+  // returns a populated LockfileDiff when `?triage=1` is set on the
+  // URL, so loading the page with that param mounts the triage panel
+  // (GridList + nested SectionHeader + TriageRow chip + RadioGroup) so
+  // axe can scan every interactive surface.
+  await page.goto("/?triage=1");
+  // Wait for the shell to land on Status (default route), then navigate
+  // to Sync.
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  // Wait for the populated triage panel — the NEW outer SectionHeader
+  // is the entry-point landmark (h2 with "NEW (2)").
+  await page
+    .getByRole("heading", { level: 2, name: /^NEW/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // The Apply N decisions button is the canonical action affordance.
+  await page
+    .getByRole("button", { name: /Apply \d+ triage decisions/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
 test("health view passes axe WCAG-AA", async ({ page }) => {
   await page
     .getByRole("option", { name: /^Health, Health section/ })
