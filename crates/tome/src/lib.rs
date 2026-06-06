@@ -1484,6 +1484,29 @@ pub(crate) fn cmd_backup(sub: cli::BackupCommand, paths: &TomePaths, dry_run: bo
     Ok(())
 }
 
+/// D-16: populate `DiscoveredSkill::synced_at` from the manifest.
+///
+/// The discover layer cannot read the manifest (the manifest is owned by
+/// `sync()` and lives outside the discover module), so the orchestrator joins
+/// the per-skill `synced_at` timestamp at the post-discover boundary. Skills
+/// with no matching `SkillEntry` in the manifest remain `synced_at: None`
+/// (they haven't been synced yet). Cost: one hashmap lookup per discovered
+/// skill — negligible compared to discovery's filesystem traversal.
+///
+/// Extracted from `sync()` so the join semantic is directly unit-testable
+/// without spinning a full TempDir+config+manifest fixture; pinned by tests
+/// in `mod tests` below (`join_synced_at_*`).
+fn join_synced_at_from_manifest(
+    skills: &mut [discover::DiscoveredSkill],
+    manifest: &manifest::Manifest,
+) {
+    for skill in skills {
+        skill.synced_at = manifest
+            .get(skill.name.as_str())
+            .map(|entry| entry.synced_at.clone());
+    }
+}
+
 /// Warn about `disabled_directories` entries in machine.toml that don't match any
 /// configured directory name. Helps catch typos and stale entries.
 fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
@@ -1958,7 +1981,12 @@ fn sync(
 
         // 1. Discover
         let mut warnings = Vec::new();
-        let discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        let mut discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+
+        // D-16: join in the manifest's per-skill `synced_at` timestamp.
+        // Extracted into `join_synced_at_from_manifest` so the join logic is
+        // directly unit-testable without spinning a full sync fixture.
+        join_synced_at_from_manifest(&mut discovered, &manifest_for_reconcile);
 
         sink.emit(ProgressEvent::SyncStageFinished {
             stage: SyncStage::Discover,
@@ -2984,6 +3012,62 @@ mod tests {
                 "sync() must emit a SyncStageStarted for {stage:?}; got {started:?}",
             );
         }
+    }
+
+    /// D-16: the manifest join populates `synced_at` from the
+    /// `SkillEntry::synced_at` field for skills present in the manifest.
+    /// Skills with no manifest entry remain `None`. Directly exercises the
+    /// extracted `join_synced_at_from_manifest` helper so we don't need a
+    /// full sync-fixture roundtrip.
+    #[test]
+    fn join_synced_at_populates_known_skills_and_leaves_others_none() {
+        use crate::discover::{DiscoveredSkill, SkillName, SkillOrigin};
+        use crate::manifest::{Manifest, SkillEntry};
+        use std::path::PathBuf;
+
+        let mut manifest = Manifest::default();
+        // SkillEntry::new stamps a current timestamp, so override the
+        // `synced_at` field to a deterministic value the assertion can
+        // compare against.
+        let mut entry = SkillEntry::new(
+            PathBuf::from("/tmp/known"),
+            DirectoryName::new("test").unwrap(),
+            crate::validation::ContentHash::new("a".repeat(64)).unwrap(),
+            false,
+        );
+        entry.synced_at = "2026-06-05T10:00:00Z".to_string();
+        manifest.insert(SkillName::new("known").unwrap(), entry);
+
+        let mut skills = vec![
+            DiscoveredSkill {
+                name: SkillName::new("known").unwrap(),
+                path: PathBuf::from("/tmp/known"),
+                source_name: DirectoryName::new("test").unwrap(),
+                origin: SkillOrigin::Local,
+                frontmatter: None,
+                synced_at: None,
+            },
+            DiscoveredSkill {
+                name: SkillName::new("unknown").unwrap(),
+                path: PathBuf::from("/tmp/unknown"),
+                source_name: DirectoryName::new("test").unwrap(),
+                origin: SkillOrigin::Local,
+                frontmatter: None,
+                synced_at: None,
+            },
+        ];
+
+        join_synced_at_from_manifest(&mut skills, &manifest);
+
+        assert_eq!(
+            skills[0].synced_at.as_deref(),
+            Some("2026-06-05T10:00:00Z"),
+            "manifest-resident skill must inherit its synced_at",
+        );
+        assert!(
+            skills[1].synced_at.is_none(),
+            "skill with no manifest entry must remain None",
+        );
     }
 
     #[test]

@@ -223,6 +223,19 @@ pub struct DiscoveredSkill {
     #[serde(skip)]
     #[cfg_attr(feature = "bindings", specta(skip))]
     pub frontmatter: Option<crate::skill::SkillFrontmatter>,
+    /// RFC-3339 timestamp of the last manifest sync for this skill (D-16).
+    ///
+    /// Populated by `lib.rs::sync` (post-discover, pre-ListReport) from the
+    /// library manifest's `SkillEntry::synced_at` when an entry exists; `None`
+    /// for skills not yet in the manifest. `discover_all` itself leaves this
+    /// `None` — the manifest is loaded by `sync()` and lives outside the
+    /// discover layer (HARD-05-style layering: discovery scans the filesystem,
+    /// the orchestrator joins in manifest metadata).
+    ///
+    /// Closes the Phase-26 VIEW-02 carryover plumbing for Recent-sort on the
+    /// Skills view (D-16). The sort semantic itself lives in plan 27-02b.
+    #[serde(default)]
+    pub synced_at: Option<String>,
 }
 
 /// Discover all skills from configured directories.
@@ -673,6 +686,11 @@ fn scan_for_skills(
                         source_name: source_name.clone(),
                         origin,
                         frontmatter,
+                        // D-16: discovery cannot populate synced_at — the
+                        // manifest is loaded by sync(). Left None here;
+                        // lib.rs::sync joins in the manifest value after
+                        // discover_all returns.
+                        synced_at: None,
                     });
                 }
                 Err(e) => {
@@ -1381,6 +1399,36 @@ mod tests {
         assert!(
             warning.contains("Verify the path") || warning.contains("verify the path"),
             "generic warning should suggest verifying the path"
+        );
+    }
+
+    // -- D-16: synced_at plumbing --
+    //
+    // discover_all() itself leaves synced_at = None — the layering rule is
+    // that the manifest join happens at the sync() orchestrator boundary.
+    // The end-to-end "synced_at populated from manifest" test lives in
+    // lib.rs (sync_populates_synced_at_from_manifest) because it needs the
+    // sync() entry point in scope; this test just pins the discover-side
+    // invariant that the field defaults to None.
+
+    #[test]
+    fn discover_all_leaves_synced_at_none() {
+        let tmp = TempDir::new().unwrap();
+        create_skill(tmp.path(), "fresh-skill");
+
+        let config = config_with_dirs(vec![(
+            "test",
+            tmp.path().to_path_buf(),
+            DirectoryType::Directory,
+            Some(DirectoryRole::Source),
+        )]);
+
+        let skills = discover_all(&config, &BTreeMap::new(), &mut Vec::new()).unwrap();
+        assert_eq!(skills.len(), 1);
+        assert!(
+            skills[0].synced_at.is_none(),
+            "D-16 layering: discover_all must leave synced_at = None; \
+             the sync() orchestrator joins in manifest values."
         );
     }
 
