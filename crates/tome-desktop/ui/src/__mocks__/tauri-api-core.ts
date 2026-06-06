@@ -58,7 +58,13 @@ const STATUS_REPORT = {
   health: { count: 2, error: null },
 };
 
-/** A11y fixture — 3 representative skills (1 managed, 2 local). */
+/** A11y fixture — 3 representative skills (1 managed, 2 local).
+ *
+ *  Phase 27 plan 27-02b adds `synced_at` (D-16) to each row so the
+ *  new "skills view group-by Source passes axe WCAG-AA" subtest
+ *  exercises the same field the Sort=Recent comparator keys on.
+ *  Mixed null + populated values mirror the real-world shape (a skill
+ *  freshly discovered but not yet synced has `synced_at = null`). */
 const A11Y_LIST_REPORT = {
   skills: [
     {
@@ -67,22 +73,27 @@ const A11Y_LIST_REPORT = {
       source_name: "claude-plugins",
       origin: {
         kind: "managed",
-        registry_id: "axiom",
-        version: "1.2.3",
-        git_commit_sha: null,
+        provenance: {
+          registry_id: "axiom",
+          version: "1.2.3",
+          git_commit_sha: null,
+        },
       },
+      synced_at: "2026-05-29T08:00:00Z",
     },
     {
       name: "rust-helper",
       path: "/Users/test/skills/rust-helper",
       source_name: "personal",
       origin: { kind: "local" },
+      synced_at: "2026-05-28T08:00:00Z",
     },
     {
       name: "deprecated-skill",
       path: "/Users/test/skills/deprecated-skill",
       source_name: "personal",
       origin: { kind: "local" },
+      synced_at: null,
     },
   ],
   warnings: [],

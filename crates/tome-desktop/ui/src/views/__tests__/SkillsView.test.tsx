@@ -34,9 +34,11 @@ function managedSkill(
     source_name: source,
     origin: {
       kind: "managed",
-      registry_id: "fixture@npm",
-      version: "1.0.0",
-      git_commit_sha: null,
+      provenance: {
+        registry_id: "fixture@npm",
+        version: "1.0.0",
+        git_commit_sha: null,
+      },
     },
     synced_at,
   };
