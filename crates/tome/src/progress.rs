@@ -126,6 +126,15 @@ pub enum ProgressEvent {
         current: usize,
         /// Total units in this stage (0 if unknown).
         total: usize,
+        /// Optional human-readable subtitle for the unit currently in flight
+        /// (D-08). Per-stage semantics: Discover → directory name being
+        /// scanned; Consolidate/Distribute → skill name being processed;
+        /// Cleanup → path being removed; Save → filename being persisted;
+        /// Reconcile → `None` (git-clone subtitles are folded sink-side from
+        /// `GitCloneProgress` per D-09, not emitted from the domain). The
+        /// GUI surfaces this as a per-row subtitle; the CLI's
+        /// `IndicatifSink` ignores it (counts-only spinner message).
+        item: Option<String>,
     },
     /// A pipeline stage has completed.
     SyncStageFinished {
@@ -282,6 +291,7 @@ mod tests {
             stage: SyncStage::Discover,
             current: 3,
             total: 7,
+            item: None,
         });
         dyn_sink.emit(ProgressEvent::SyncStageFinished {
             stage: SyncStage::Discover,
@@ -297,6 +307,7 @@ mod tests {
                     stage: SyncStage::Discover,
                     current: 3,
                     total: 7,
+                    item: None,
                 },
                 ProgressEvent::SyncStageFinished {
                     stage: SyncStage::Discover
@@ -321,5 +332,103 @@ mod tests {
             received: 4096,
         });
         // If we reach here without panicking, NullSink behaved correctly.
+    }
+
+    /// D-08 round-trip: a SyncStageProgress carrying a Some(item) subtitle
+    /// flows through a RecordingSink and back via `events()` byte-for-byte.
+    /// Pin the value semantics of the new field so a future refactor that
+    /// e.g. swaps in a `&str` or accidentally drops the field in a manual
+    /// `Clone` impl fails loudly.
+    #[test]
+    fn recording_sink_round_trips_sync_stage_progress_item_some() {
+        let sink = RecordingSink::new();
+        let dyn_sink: &dyn ProgressSink = &sink;
+
+        dyn_sink.emit(ProgressEvent::SyncStageProgress {
+            stage: SyncStage::Discover,
+            current: 5,
+            total: 10,
+            item: Some("axiom-build".to_string()),
+        });
+
+        assert_eq!(
+            sink.events(),
+            vec![ProgressEvent::SyncStageProgress {
+                stage: SyncStage::Discover,
+                current: 5,
+                total: 10,
+                item: Some("axiom-build".to_string()),
+            }],
+            "RecordingSink must round-trip the new `item` field verbatim",
+        );
+    }
+
+    /// D-08 None case: stages with no per-unit subtitle (e.g. Reconcile —
+    /// git-clone bytes fold in sink-side per D-09) emit `item: None` and
+    /// round-trip as None.
+    #[test]
+    fn recording_sink_round_trips_sync_stage_progress_item_none() {
+        let sink = RecordingSink::new();
+        let dyn_sink: &dyn ProgressSink = &sink;
+
+        dyn_sink.emit(ProgressEvent::SyncStageProgress {
+            stage: SyncStage::Reconcile,
+            current: 0,
+            total: 0,
+            item: None,
+        });
+
+        assert_eq!(
+            sink.events(),
+            vec![ProgressEvent::SyncStageProgress {
+                stage: SyncStage::Reconcile,
+                current: 0,
+                total: 0,
+                item: None,
+            }],
+        );
+    }
+
+    /// Pitfall 4 / Assumption A4 anchor: the sink-side fold-in in
+    /// `TauriEventSink::emit` routes `GitCloneProgress` to
+    /// `SyncStage::Reconcile`. That routing is only semantically correct if
+    /// the domain has already announced the Reconcile stage by the time the
+    /// first git-clone byte arrives — otherwise the GUI would receive a
+    /// Reconcile-stage `current` count for a stage it had never seen
+    /// `SyncStageStarted` for. The real-pipeline version of this assertion
+    /// lives in 27-04's `sync_cancel.rs`; this fixture-only test pins the
+    /// event-order contract at the sink-input level so a sink-side
+    /// re-routing refactor (e.g. someone routing GitCloneProgress to
+    /// Discover instead) is the only change needed to update it.
+    #[test]
+    fn recording_sink_pins_reconcile_start_before_git_clone_progress() {
+        let sink = RecordingSink::new();
+        let dyn_sink: &dyn ProgressSink = &sink;
+
+        dyn_sink.emit(ProgressEvent::SyncStageStarted {
+            stage: SyncStage::Reconcile,
+        });
+        dyn_sink.emit(ProgressEvent::GitCloneProgress {
+            directory: "my-repo".to_string(),
+            received: 4_200_000,
+        });
+
+        let events = sink.events();
+        assert_eq!(events.len(), 2, "expected exactly two events");
+        assert!(
+            matches!(
+                events[0],
+                ProgressEvent::SyncStageStarted {
+                    stage: SyncStage::Reconcile
+                }
+            ),
+            "index 0 must be SyncStageStarted{{Reconcile}}, got {:?}",
+            events[0],
+        );
+        assert!(
+            matches!(events[1], ProgressEvent::GitCloneProgress { .. }),
+            "index 1 must be GitCloneProgress, got {:?}",
+            events[1],
+        );
     }
 }

@@ -306,6 +306,10 @@ impl ProgressSink for IndicatifSink {
                 stage,
                 current: done,
                 total,
+                item: _, // D-08: the per-unit subtitle is a GUI affordance;
+                         // the CLI spinner keeps a counts-only message so the
+                         // captured-output contract (no per-skill chrome in
+                         // `insta`/`assert_cmd` snapshots) holds byte-for-byte.
             } => {
                 if let Some(sp) = current.as_ref()
                     && total > 0
@@ -2101,6 +2105,13 @@ fn sync(
                 stage: SyncStage::Distribute,
                 current: idx,
                 total,
+                // D-08: per-stage subtitle. Distribute iterates per
+                // distribution directory; the current `name` is the
+                // DirectoryName receiving symlinks. Per-skill emission inside
+                // distribute::distribute_to_directory is a future-plan
+                // expansion — when it lands, set `item: Some(skill_name.to_string())`
+                // there instead.
+                item: Some(name.to_string()),
             });
             let result = distribute::distribute_to_directory(
                 paths.library_dir(),
