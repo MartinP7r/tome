@@ -11,13 +11,16 @@
 //!   to the focused webview control automatically; never bind these as
 //!   menu-level custom shortcuts).
 //! - **View** — Jump-to-Status (⌘1), Jump-to-Skills (⌘2),
-//!   Jump-to-Health (⌘3), Focus Search (⌘F). Each emits a typed
-//!   [`MenuAction`] event the React side subscribes to via
-//!   `useMenuActions`. Reload (⌘R) is rendered disabled — placeholder
-//!   for a Phase 27+ "refetch" surface.
-//! - **Library** — Sync / Add Directory… (both disabled with tooltips
-//!   pointing at Phase 27/28). Renders the breadcrumb so users discover
-//!   the surface; actions are intentionally inert in alpha.
+//!   Jump-to-Sync (⌘3, Phase 27 plan 27-01b), Jump-to-Health (⌘4,
+//!   re-anchored from ⌘3 in Phase 27), Focus Search (⌘F). Each emits
+//!   a typed [`MenuAction`] event the React side subscribes to via
+//!   `useMenuActions`. The Phase-26 disabled `Reload` (⌘R) item is
+//!   removed; its accelerator is reclaimed by Library → Sync (Pitfall
+//!   7 re-anchoring + D-02 ⌘R reclaim).
+//! - **Library** — Sync (⌘R, Phase 27 plan 27-01b — enabled; routes a
+//!   `JumpSync` event; the React side then triggers the in-flight sync
+//!   via the global ⌘R keybinding wired in `useMenuActions`) /
+//!   Add Directory… (still disabled — Phase 28).
 //! - **Help** — Documentation / Report Issue. Open the project's
 //!   GitHub repo / issues page through `tauri-plugin-opener`.
 //!
@@ -32,12 +35,16 @@ use tauri::{AppHandle, Wry};
 /// Typed event fired when a custom (non-Predefined) menu item is
 /// activated. The React side (`useMenuActions`) listens via the
 /// generated `events.menuAction` binding and routes to the router
-/// (`JumpStatus` / `JumpSkills` / `JumpHealth`) or focuses the
-/// SearchField (`FocusSearch`).
+/// (`JumpStatus` / `JumpSkills` / `JumpSync` / `JumpHealth`) or focuses
+/// the SearchField (`FocusSearch`).
 ///
-/// Phase 27+ Library actions (e.g. `SyncNow`, `AddDirectory`) are NOT
-/// added here — they belong to the milestone that ships them, alongside
-/// the matching Rust command + UI surface.
+/// `JumpSync` was added in Phase 27 plan 27-01b alongside the Sync
+/// view substrate. The Library → Sync menu item dispatches `JumpSync`
+/// too (no separate `SyncNow` variant) — the React side handles the
+/// "Sync was activated, kick off a run" intent through a parallel
+/// global ⌘R keybinding in `useMenuActions`. Adding two events for
+/// what the user perceives as a single action would let the menu and
+/// keybinding drift; one event keeps the routing single-source.
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
 #[serde(tag = "kind")]
 pub enum MenuAction {
@@ -45,7 +52,11 @@ pub enum MenuAction {
     JumpStatus,
     /// View → Skills (⌘2).
     JumpSkills,
-    /// View → Health (⌘3).
+    /// View → Sync (⌘3) — Phase 27 plan 27-01b. Also dispatched by
+    /// Library → Sync (⌘R).
+    JumpSync,
+    /// View → Health (⌘4) — re-anchored from ⌘3 in Phase 27 plan 27-01b
+    /// (Pitfall 7).
     JumpHealth,
     /// View → Focus Search (⌘F). Scoped to the Skills view client-side.
     FocusSearch,
@@ -56,9 +67,15 @@ impl MenuAction {
     /// (POLISH-04). Updating this constant alongside the `match` arm
     /// in `_menu_action_exhaustiveness_sentinel` is the contract that
     /// keeps `bindings.ts`, `useMenuActions` switch, and Rust enum in
-    /// lockstep — adding a 5th variant fails compile until ALL is
+    /// lockstep — adding a 6th variant fails compile until ALL is
     /// extended too.
-    pub const ALL: [&'static str; 4] = ["JumpStatus", "JumpSkills", "JumpHealth", "FocusSearch"];
+    pub const ALL: [&'static str; 5] = [
+        "JumpStatus",
+        "JumpSkills",
+        "JumpSync",
+        "JumpHealth",
+        "FocusSearch",
+    ];
 }
 
 #[allow(dead_code)]
@@ -66,12 +83,13 @@ const fn _menu_action_exhaustiveness_sentinel(a: MenuAction) {
     match a {
         MenuAction::JumpStatus => {}
         MenuAction::JumpSkills => {}
+        MenuAction::JumpSync => {}
         MenuAction::JumpHealth => {}
         MenuAction::FocusSearch => {}
     }
 }
 const _: () = {
-    assert!(MenuAction::ALL.len() == 4);
+    assert!(MenuAction::ALL.len() == 5);
 };
 
 /// Install the native menu + menu-event handler.
@@ -151,6 +169,10 @@ mod macos {
             .select_all()
             .build()?;
 
+        // View menu — Phase 27 plan 27-01b re-anchors ⌘3 from Health to
+        // Sync and moves Health to ⌘4 (Pitfall 7). The previous Phase-26
+        // disabled `Reload` (⌘R) item is REMOVED — its accelerator slot is
+        // reclaimed by Library → Sync below.
         let view_menu = SubmenuBuilder::new(app, "View")
             .item(
                 &MenuItemBuilder::with_id("jump-status", "Status")
@@ -163,8 +185,13 @@ mod macos {
                     .build(app)?,
             )
             .item(
-                &MenuItemBuilder::with_id("jump-health", "Health")
+                &MenuItemBuilder::with_id("jump-sync", "Sync")
                     .accelerator("CmdOrCtrl+3")
+                    .build(app)?,
+            )
+            .item(
+                &MenuItemBuilder::with_id("jump-health", "Health")
+                    .accelerator("CmdOrCtrl+4")
                     .build(app)?,
             )
             .separator()
@@ -173,28 +200,17 @@ mod macos {
                     .accelerator("CmdOrCtrl+F")
                     .build(app)?,
             )
-            .separator()
-            // Reload is reserved for a Phase 27+ explicit-refetch
-            // surface; disabled now so the accelerator is announced but
-            // the click is a no-op (Tauri 2.11 MenuItemBuilder::enabled
-            // verified against ~/.cargo/registry tauri-2.11.2 source —
-            // Assumption A5 resolved positive).
-            .item(
-                &MenuItemBuilder::with_id("reload", "Reload")
-                    .accelerator("CmdOrCtrl+R")
-                    .enabled(false)
-                    .build(app)?,
-            )
             .build()?;
 
-        // Library menu — every item disabled in alpha. The breadcrumb
-        // still appears so users discover the surface; click is a no-op
-        // handled by the `_ => return` arm in
-        // `install_menu_event_handler`.
+        // Library menu — Sync is enabled in Phase 27 plan 27-01b. Click
+        // emits `MenuAction::JumpSync`; the React `useMenuActions` hook
+        // routes to the Sync view AND a parallel ⌘R global keybinding
+        // starts the in-flight sync when idle (see hook for the full
+        // intent split). `add-directory` stays disabled — Phase 28.
         let library_menu = SubmenuBuilder::new(app, "Library")
             .item(
                 &MenuItemBuilder::with_id("sync", "Sync")
-                    .enabled(false)
+                    .accelerator("CmdOrCtrl+R")
                     .build(app)?,
             )
             .item(
@@ -233,6 +249,12 @@ mod macos {
             let action = match id {
                 "jump-status" => MenuAction::JumpStatus,
                 "jump-skills" => MenuAction::JumpSkills,
+                // Phase 27 plan 27-01b — Library → Sync (⌘R) and
+                // View → Sync (⌘3) both dispatch JumpSync. The React
+                // side splits "navigate to view" (always) from "kick
+                // off a run" (parallel ⌘R global keybinding); see
+                // `useMenuActions` for the intent split.
+                "jump-sync" | "sync" => MenuAction::JumpSync,
                 "jump-health" => MenuAction::JumpHealth,
                 "focus-search" => MenuAction::FocusSearch,
                 "docs" => {
@@ -243,8 +265,8 @@ mod macos {
                     let _ = open_url(&app_handle, ISSUES_URL);
                     return;
                 }
-                // Disabled items (sync, add-directory, reload) +
-                // unknown IDs: harmless no-op (T-26-07-02).
+                // Disabled items (add-directory) + unknown IDs:
+                // harmless no-op (T-26-07-02).
                 _ => return,
             };
             let _ = action.emit(&app_handle);
@@ -257,5 +279,24 @@ mod macos {
             .open_url(url, None::<&str>)
             .map_err(|e| anyhow::anyhow!(e.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Phase 27 plan 27-01b — pin the runtime contract that `MenuAction::ALL`
+    /// lists exactly the five variants in the order the UI announces them.
+    /// The const-time length assertion above guarantees the count; this pins
+    /// the actual labels + ordering so a future re-ordering refactor in the
+    /// enum (or a renamed variant) trips here, not in the React side.
+    #[test]
+    fn all_lists_five_variants_in_jump_order() {
+        assert_eq!(MenuAction::ALL.len(), 5);
+        assert_eq!(
+            MenuAction::ALL,
+            ["JumpStatus", "JumpSkills", "JumpSync", "JumpHealth", "FocusSearch"]
+        );
     }
 }
