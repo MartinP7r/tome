@@ -1,6 +1,7 @@
-// axe-core/playwright WCAG-AA gate (Phase 26 plan 26-07 Task 3 / NF-02).
+// axe-core/playwright WCAG-AA gate (Phase 26 plan 26-07 Task 3 / NF-02 +
+// Phase 27 plan 27-01b Task 4 — Sync route added).
 //
-// Scans the four Phase-26 surfaces — Status, Skills, Health, PreviewPopover
+// Scans the five GUI surfaces — Status, Skills, Sync, Health, PreviewPopover
 // — against `wcag2a` + `wcag2aa` and fails the build on any violation.
 //
 // Architecture (Path A from the plan):
@@ -83,6 +84,36 @@ test("skills view passes axe WCAG-AA", async ({ page }) => {
   // aria-labels are present.
   await page
     .getByRole("listbox", { name: "Skills" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view passes axe WCAG-AA", async ({ page }) => {
+  // Phase 27 plan 27-01b — Sync route a11y. Click the Sidebar's Sync
+  // NavItem (a React Aria ListBoxItem → role="option") and wait for the
+  // idle hero's <h1> to render before scanning.
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  // The idle hero headline is either "You haven't synced yet." (no last
+  // sync recorded in StatusReport) or "Last synced …" (the a11y mock
+  // ships a `last_sync` value, so this is the rendered string). Wait
+  // for the <h1> shape rather than the literal string so the test stays
+  // robust if the mock's last_sync drifts later.
+  await page
+    .getByRole("heading", { level: 1 })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // [Run sync] is the primary CTA — wait for it so axe scans the full
+  // idle composition (button + glyph + heading + recent-changes
+  // disclosure).
+  await page
+    .getByRole("button", { name: "Run sync" })
     .waitFor({ state: "visible", timeout: 10_000 });
 
   const results = await new AxeBuilder({ page })

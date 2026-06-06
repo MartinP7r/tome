@@ -37,22 +37,13 @@ import { useSkillDetail } from "../hooks/useSkillDetail";
 import { useSkills } from "../hooks/useSkills";
 import styles from "./SkillsView.module.css";
 
-/** Pitfall 9 / T-26-07-01 guard — when the user has a text input focused
- *  (the SearchField is the only such surface in Skills view today), the
- *  Predefined Edit > Copy menu item already routes ⌘C to the OS copy
- *  handler. The skill-scoped ⌘C handler below abstains in that case so
- *  the two never collide. Re-detects via `aria-label="Search skills"` on
- *  the parent `[role="searchbox"]` for the react-aria-components shape
- *  (the actual `<input>` is nested inside the labelled group). */
-function isTextInputFocused(): boolean {
-  const el = document.activeElement;
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return true;
-  if (el.isContentEditable) return true;
-  const role = el.getAttribute("role");
-  return role === "searchbox" || role === "textbox";
-}
+// Phase 27 plan 27-01b extracted the text-input-focused guard into
+// `lib/textInputFocus.ts` so useMenuActions (which binds global ⌘R / ⌘.
+// in 27-01b) can share the same abstain-when-typing logic. The Pitfall 9
+// / T-26-07-01 rationale stays the same: a focused SearchField (or any
+// text input) routes ⌘C to the OS Edit menu, and skill-scoped handlers
+// must not collide.
+import { isTextInputFocused } from "../lib/textInputFocus";
 
 type SortMode = "name" | "source" | "recent";
 type GroupMode = "none" | "source" | "role";

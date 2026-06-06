@@ -95,6 +95,65 @@
   font-weight: 600;
 }
 
+/* Phase 27 plan 27-01b — dual-meaning Sync NavItem badge. Pending state
+ * uses the managed accent (same visual weight as the danger badge but
+ * blue, so the user reads "Sync has things waiting on you" without
+ * implying failure). Failures (kind: "failures") reuses the .badge
+ * danger fill above. */
+.badgePending {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  background: var(--accent);
+  color: var(--accent-on);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-small-size);
+  font-weight: 600;
+}
+
+/* Phase 27 plan 27-01b — Sync row spinner. The icon sits in front of the
+ * label (visual order: spinner, label, optional badge). CSS animation
+ * is the spinner — no JS / no React state needed. */
+.syncSpinner {
+  flex-shrink: 0;
+  margin-right: var(--space-2);
+  color: var(--label-secondary);
+  animation: syncSpinnerSpin 1s linear infinite;
+}
+
+.navItem[data-selected="true"] .syncSpinner {
+  color: var(--accent-on);
+}
+
+@keyframes syncSpinnerSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Honor prefers-reduced-motion — pause the spin and rely on a faint
+ * opacity-pulse so the user still sees activity. */
+@media (prefers-reduced-motion: reduce) {
+  .syncSpinner {
+    animation: syncSpinnerPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes syncSpinnerPulse {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 1;
+    }
+  }
+}
+
 .footer {
   padding: var(--space-2) var(--space-4) 0;
   border-top: 1px solid var(--separator);

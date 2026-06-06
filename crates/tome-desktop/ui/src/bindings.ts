@@ -94,6 +94,44 @@ export const commands = {
 	 *  refetches on those.
 	 */
 	doctorRepairOne: (findingId: FindingId) => typedError<null, TomeError>(__TAURI_INVOKE("doctor_repair_one", { findingId })),
+	/**
+	 *  Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).
+	 * 
+	 *  `async` by design — the synchronous `tome::sync` body runs inside
+	 *  [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
+	 *  responsive (RESEARCH §"Pitfall 5"; T-27-01b-06 mitigation). Progress is
+	 *  streamed via the [`TauriEventSink`] over `SyncProgress` events; the
+	 *  React side subscribes through `useSync`.
+	 * 
+	 *  **Double-fire guard (T-27-01b-07).** If a sync is already in flight
+	 *  (the managed [`SyncState::cancel`] slot is `Some(_)`), this returns
+	 *  `ErrorCode::Conflict` immediately without overwriting the live token.
+	 *  The React `useSync` hook prevents concurrent invocations under normal
+	 *  usage; this guard catches the race window between two near-simultaneous
+	 *  menu / keyboard events.
+	 * 
+	 *  On entry the slot is filled with a fresh [`CancelToken`]; on return
+	 *  (success OR error) the slot is cleared so the next run can start.
+	 *  Plan 27-05 will swap the return type for a `SyncOutcomeWire`
+	 *  structured payload; today the React side observes the run purely
+	 *  through the `SyncProgress` event stream and a final success / error
+	 *  signal carried by this command's `Result`.
+	 */
+	startSync: () => typedError<null, TomeError>(__TAURI_INVOKE("start_sync")),
+	/**
+	 *  Request cancellation of an in-flight sync (Phase 27 plan 27-01b / SYNC-01).
+	 * 
+	 *  Synchronous + idempotent. Flips the shared [`CancelToken`] (an
+	 *  `Arc<AtomicBool>`) so `tome::sync` exits at the next stage boundary.
+	 *  Calling this when no sync is running, or calling it twice in a row, is
+	 *  a no-op (the second cancel observes an already-flipped bool).
+	 * 
+	 *  Returns immediately — actual cancellation occurs at the next stage
+	 *  boundary check inside `tome::sync`. The React side does NOT need to
+	 *  wait for confirmation; the `start_sync` command's `Result` carries
+	 *  the final state.
+	 */
+	cancelSync: () => typedError<null, TomeError>(__TAURI_INVOKE("cancel_sync")),
 };
 
 /** Events */
@@ -262,6 +300,20 @@ export type DiscoveredSkill = {
 	source_name: DirectoryName,
 	/**  How this skill was sourced (managed vs local), with optional provenance metadata. */
 	origin: SkillOrigin,
+	/**
+	 *  RFC-3339 timestamp of the last manifest sync for this skill (D-16).
+	 * 
+	 *  Populated by `lib.rs::sync` (post-discover, pre-ListReport) from the
+	 *  library manifest's `SkillEntry::synced_at` when an entry exists; `None`
+	 *  for skills not yet in the manifest. `discover_all` itself leaves this
+	 *  `None` — the manifest is loaded by `sync()` and lives outside the
+	 *  discover layer (HARD-05-style layering: discovery scans the filesystem,
+	 *  the orchestrator joins in manifest metadata).
+	 * 
+	 *  Closes the Phase-26 VIEW-02 carryover plumbing for Recent-sort on the
+	 *  Skills view (D-16). The sort semantic itself lives in plan 27-02b.
+	 */
+	synced_at?: string | null,
 };
 
 /**
@@ -591,19 +643,31 @@ export type ManifestChanged = null;
  *  Typed event fired when a custom (non-Predefined) menu item is
  *  activated. The React side (`useMenuActions`) listens via the
  *  generated `events.menuAction` binding and routes to the router
- *  (`JumpStatus` / `JumpSkills` / `JumpHealth`) or focuses the
- *  SearchField (`FocusSearch`).
+ *  (`JumpStatus` / `JumpSkills` / `JumpSync` / `JumpHealth`) or focuses
+ *  the SearchField (`FocusSearch`).
  * 
- *  Phase 27+ Library actions (e.g. `SyncNow`, `AddDirectory`) are NOT
- *  added here — they belong to the milestone that ships them, alongside
- *  the matching Rust command + UI surface.
+ *  `JumpSync` was added in Phase 27 plan 27-01b alongside the Sync
+ *  view substrate. The Library → Sync menu item dispatches `JumpSync`
+ *  too (no separate `SyncNow` variant) — the React side handles the
+ *  "Sync was activated, kick off a run" intent through a parallel
+ *  global ⌘R keybinding in `useMenuActions`. Adding two events for
+ *  what the user perceives as a single action would let the menu and
+ *  keybinding drift; one event keeps the routing single-source.
  */
 export type MenuAction = 
 /**  View → Status (⌘1). */
 { kind: "JumpStatus" } | 
 /**  View → Skills (⌘2). */
 { kind: "JumpSkills" } | 
-/**  View → Health (⌘3). */
+/**
+ *  View → Sync (⌘3) — Phase 27 plan 27-01b. Also dispatched by
+ *  Library → Sync (⌘R).
+ */
+{ kind: "JumpSync" } | 
+/**
+ *  View → Health (⌘4) — re-anchored from ⌘3 in Phase 27 plan 27-01b
+ *  (Pitfall 7).
+ */
 { kind: "JumpHealth" } | 
 /**  View → Focus Search (⌘F). Scoped to the Skills view client-side. */
 { kind: "FocusSearch" };
@@ -912,6 +976,21 @@ export type SyncProgress = {
 	current: number,
 	/**  Total units in this stage (0 when unknown / not applicable). */
 	total: number,
+	/**
+	 *  Optional human-readable subtitle for the unit currently in flight
+	 *  (D-08). Comes from one of three places:
+	 * 
+	 *  - `ProgressEvent::SyncStageProgress.item` — pass-through from the
+	 *    domain (per-stage assignment owned by the emission site).
+	 *  - `ProgressEvent::GitCloneProgress` — D-09 sink-side fold-in:
+	 *    `Some(format!("git: {dir} ({})", format_bytes(received)))`. The
+	 *    domain emits raw bytes; the sink owns the human-readable format.
+	 *  - `ProgressEvent::BackupSnapshot` — D-09 sink-side fold-in: the
+	 *    `message` field becomes the subtitle verbatim.
+	 * 
+	 *  `None` for `SyncStageStarted` / `SyncStageFinished` events.
+	 */
+	item: string | null,
 };
 
 /**
