@@ -14,6 +14,7 @@ pub mod commands;
 pub mod error;
 pub mod menu;
 pub mod sink;
+pub mod sync_state;
 pub mod watcher;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -38,6 +39,10 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             // Phase 26 plan 26-05 (VIEW-05 / D-09/D-10/D-11/D-12).
             commands::get_doctor_report,
             commands::doctor_repair_one,
+            // Phase 27 plan 27-01b (SYNC-01) — long-running sync pipeline
+            // with double-fire mitigation via the managed `SyncState`.
+            commands::start_sync,
+            commands::cancel_sync,
         ])
         .events(collect_events![
             sink::SyncProgress,

@@ -173,6 +173,14 @@ pub use errors::{DomainErrorKind, DomainTagged};
 /// narrow (single function — no `MachinePrefs` etc.) so the GUI watcher's
 /// dependency surface stays small.
 pub use machine::default_machine_path;
+/// Per-machine preferences (re-exported from the `pub(crate)` `machine`
+/// module so external consumers — the Tauri `start_sync` command in
+/// `crates/tome-desktop/src/commands.rs`, plan 27-01b — can load and pass
+/// `MachinePrefs` into `sync()` without depending on the module path.
+pub use machine::MachinePrefs;
+/// Load `machine.toml` from the given path. Re-exported alongside
+/// [`MachinePrefs`] for the same reason (plan 27-01b).
+pub use machine::load as load_machine_prefs;
 
 /// Phase 26 plan 26-03 (VIEW-03) — `tome-desktop` accepts `SkillName` as the
 /// input arg for the 4 new commands (`get_skill_detail`, `set_skill_disabled`,
@@ -1521,22 +1529,28 @@ fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, conf
 }
 
 /// Options for the sync pipeline.
-struct SyncOptions<'a> {
-    dry_run: bool,
-    force: bool,
-    no_triage: bool,
-    no_input: bool,
-    no_install: bool,
-    verbose: bool,
-    quiet: bool,
+///
+/// Made `pub` in plan 27-01b (Wave 2 of Phase 27): the Tauri `start_sync`
+/// command in `crates/tome-desktop/src/commands.rs` constructs `SyncOptions`
+/// at the IPC boundary so the GUI can drive `sync()` the same way `cmd_sync`
+/// does. All fields are `pub` so callers can populate them inline; the public
+/// shape mirrors what `cmd_sync` was already passing internally.
+pub struct SyncOptions<'a> {
+    pub dry_run: bool,
+    pub force: bool,
+    pub no_triage: bool,
+    pub no_input: bool,
+    pub no_install: bool,
+    pub verbose: bool,
+    pub quiet: bool,
     /// Path where `machine.toml` should be saved after triage. Loaded once
     /// at `run()` entry alongside `machine_prefs` so the override-apply step
     /// in `Config::load_with_overrides` and the disabled-skill filtering
     /// inside `sync()` see identical prefs.
-    machine_path: &'a Path,
+    pub machine_path: &'a Path,
     /// Per-machine preferences already loaded by the caller. `sync()` clones
     /// these locally so triage can mutate without affecting the caller's copy.
-    machine_prefs: &'a machine::MachinePrefs,
+    pub machine_prefs: &'a machine::MachinePrefs,
 }
 
 /// Pre-discovery step: clone or update git-type directories.
@@ -1786,7 +1800,21 @@ fn apply_edit_decisions(
 /// command. A cancellation observed between stages bails *before* any
 /// half-written manifest/lockfile (T-25-03a: cancel checks sit at stage
 /// boundaries, never mid-write, so the atomic temp+rename invariant holds).
-fn sync(
+/// Run the full sync pipeline.
+///
+/// Made `pub` in plan 27-01b: the Tauri `start_sync` command in
+/// `crates/tome-desktop/src/commands.rs` invokes this directly (wrapped in
+/// `tauri::async_runtime::spawn_blocking` so the synchronous body does not
+/// stall the async IPC reactor — RESEARCH Pitfall 5). The CLI's `cmd_sync`
+/// is the other caller. Both paths share a single implementation; the
+/// front-end-specific behavior (CLI spinner vs GUI typed event stream)
+/// is supplied by `sink`.
+///
+/// Return type stays `Result<()>` for plan 27-01b — 27-05 will swap this
+/// for a `Result<SyncOutcomeWire>` shape that crosses the IPC boundary
+/// with structured per-stage outcomes. Today the GUI consumes progress
+/// purely through `SyncProgress` events on `sink`.
+pub fn sync(
     config: &Config,
     paths: &TomePaths,
     opts: SyncOptions<'_>,

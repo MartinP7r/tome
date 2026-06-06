@@ -13,8 +13,11 @@
 use tome::SkillName;
 use tome::TomePaths;
 use tome::config::Config;
+use tome::progress::CancelToken;
 
-use crate::error::TomeError;
+use crate::error::{ErrorCode, TomeError};
+use crate::sink::TauriEventSink;
+use crate::sync_state::SyncState;
 
 /// Resolve the user's real `tome_home` + `Config` the same way the CLI does
 /// with no flags: default config path, then default `tome_home`.
@@ -173,4 +176,229 @@ pub fn doctor_repair_one(
 ) -> Result<(), TomeError> {
     let (config, paths) = load_context().map_err(TomeError::from)?;
     tome::doctor::repair_one(&finding_id, &config, &paths).map_err(TomeError::from)
+}
+
+/// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).
+///
+/// `async` by design — the synchronous `tome::sync` body runs inside
+/// [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
+/// responsive (RESEARCH §"Pitfall 5"; T-27-01b-06 mitigation). Progress is
+/// streamed via the [`TauriEventSink`] over `SyncProgress` events; the
+/// React side subscribes through `useSync`.
+///
+/// **Double-fire guard (T-27-01b-07).** If a sync is already in flight
+/// (the managed [`SyncState::cancel`] slot is `Some(_)`), this returns
+/// `ErrorCode::Conflict` immediately without overwriting the live token.
+/// The React `useSync` hook prevents concurrent invocations under normal
+/// usage; this guard catches the race window between two near-simultaneous
+/// menu / keyboard events.
+///
+/// On entry the slot is filled with a fresh [`CancelToken`]; on return
+/// (success OR error) the slot is cleared so the next run can start.
+/// Plan 27-05 will swap the return type for a `SyncOutcomeWire`
+/// structured payload; today the React side observes the run purely
+/// through the `SyncProgress` event stream and a final success / error
+/// signal carried by this command's `Result`.
+#[tauri::command]
+#[specta::specta]
+pub async fn start_sync(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SyncState>,
+) -> Result<(), TomeError> {
+    // Double-fire guard (T-27-01b-07). Take the mutex briefly, check the
+    // slot, install a fresh token if idle. The guard is dropped before the
+    // blocking call so the future doesn't hold a non-Send guard across an
+    // `.await` (defensive — std::sync::MutexGuard is !Send by default).
+    let cancel = {
+        let mut slot = state.cancel.lock().expect("SyncState mutex poisoned");
+        if slot.is_some() {
+            return Err(TomeError {
+                code: ErrorCode::Conflict,
+                message: "sync already in progress".into(),
+                context: vec![],
+            });
+        }
+        let token = CancelToken::new();
+        *slot = Some(token.clone());
+        token
+    };
+
+    // Resolve all sync inputs OUTSIDE the spawn_blocking move so failures
+    // surface as immediate IPC errors (the React side renders them via the
+    // result branch of `useSync.start`) without spinning a worker thread.
+    let setup = (|| -> anyhow::Result<_> {
+        let (config, paths) = load_context()?;
+        let machine_path = tome::default_machine_path()?;
+        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
+        Ok((config, paths, machine_path, machine_prefs))
+    })();
+
+    let (config, paths, machine_path, machine_prefs) = match setup {
+        Ok(parts) => parts,
+        Err(e) => {
+            // Setup failed before the run even started — clear the slot
+            // so a subsequent retry can proceed.
+            *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+            return Err(TomeError::from(e));
+        }
+    };
+
+    // Build the GUI's event-emitting sink. `AppHandle` is Clone + Send + Sync
+    // (RESEARCH Pitfall 5), so it's sound to ship into the worker thread.
+    let sink = TauriEventSink::new(app.clone());
+
+    // Run the synchronous sync body off-reactor. `spawn_blocking` returns a
+    // JoinHandle whose `.await` yields `Result<T, JoinError>` (panic / cancel
+    // signal); we treat a JoinError as an internal failure.
+    let join_handle = tauri::async_runtime::spawn_blocking(move || {
+        // Build SyncOptions inside the closure so the borrowed `&Path` /
+        // `&MachinePrefs` references live for the duration of the call.
+        let opts = tome::SyncOptions {
+            dry_run: false,
+            force: false,
+            // no_triage: the GUI's triage panel lands in 27-02; until then
+            // we run with triage disabled to match the watcher's silent-
+            // refetch posture (no interactive prompts in the GUI flow).
+            no_triage: true,
+            no_input: true,
+            no_install: false,
+            verbose: false,
+            // Quiet mode silences CLI-only `println!` chatter; the GUI's
+            // primary output is the SyncProgress event stream emitted via
+            // the TauriEventSink.
+            quiet: true,
+            machine_path: &machine_path,
+            machine_prefs: &machine_prefs,
+        };
+        tome::sync(&config, &paths, opts, &sink, &cancel)
+    });
+
+    let join_result = join_handle.await;
+
+    // Whatever happened on the worker, clear the slot so the next run can
+    // proceed. We do this BEFORE returning the result so an error path can't
+    // leave the state wedged into "sync in progress" forever.
+    *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+
+    match join_result {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(TomeError::from(e)),
+        Err(join_err) => Err(TomeError::from(anyhow::anyhow!(
+            "sync task did not complete: {join_err}"
+        ))),
+    }
+}
+
+/// Request cancellation of an in-flight sync (Phase 27 plan 27-01b / SYNC-01).
+///
+/// Synchronous + idempotent. Flips the shared [`CancelToken`] (an
+/// `Arc<AtomicBool>`) so `tome::sync` exits at the next stage boundary.
+/// Calling this when no sync is running, or calling it twice in a row, is
+/// a no-op (the second cancel observes an already-flipped bool).
+///
+/// Returns immediately — actual cancellation occurs at the next stage
+/// boundary check inside `tome::sync`. The React side does NOT need to
+/// wait for confirmation; the `start_sync` command's `Result` carries
+/// the final state.
+#[tauri::command]
+#[specta::specta]
+pub fn cancel_sync(state: tauri::State<'_, SyncState>) -> Result<(), TomeError> {
+    if let Some(token) = state
+        .cancel
+        .lock()
+        .expect("SyncState mutex poisoned")
+        .as_ref()
+    {
+        token.cancel();
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// T-27-01b-07: cancel_sync with no in-flight sync is a no-op + returns Ok.
+    #[test]
+    fn cancel_sync_with_no_token_returns_ok() {
+        // We can't easily construct a `tauri::State` directly without an
+        // App harness, so exercise the underlying logic via the SyncState
+        // helper (the command body is one-line over this contract).
+        let state = SyncState::new();
+        // Mirror the command's body: read the slot, cancel if Some, return.
+        if let Some(token) = state.cancel.lock().expect("poisoned").as_ref() {
+            token.cancel();
+        }
+        // No panic, no token was present.
+        assert!(state.cancel.lock().expect("poisoned").is_none());
+    }
+
+    /// T-27-01b-07: cancel_sync is idempotent — double cancel = single cancel.
+    #[test]
+    fn cancel_sync_is_idempotent() {
+        let state = SyncState::new();
+        let token = CancelToken::new();
+        let outside = token.clone();
+        *state.cancel.lock().expect("poisoned") = Some(token);
+
+        // First call — flips the bool.
+        if let Some(t) = state.cancel.lock().expect("poisoned").as_ref() {
+            t.cancel();
+        }
+        assert!(outside.is_cancelled());
+
+        // Second call — already-flipped bool, still Ok.
+        if let Some(t) = state.cancel.lock().expect("poisoned").as_ref() {
+            t.cancel();
+        }
+        // Idempotent: state unchanged.
+        assert!(outside.is_cancelled());
+    }
+
+    /// T-27-01b-07 double-fire guard: a second concurrent start_sync while a
+    /// token is in the SyncState observes Some(_) and would return
+    /// ErrorCode::Conflict. We exercise the guard logic directly because the
+    /// real `start_sync` requires a Tauri AppHandle to build the sink.
+    #[test]
+    fn double_fire_guard_rejects_concurrent_start() {
+        let state = SyncState::new();
+        // First "in-flight" sync installs a token.
+        let token = CancelToken::new();
+        *state.cancel.lock().expect("poisoned") = Some(token.clone());
+
+        // Mirror the guard body from `start_sync`.
+        let result: Result<(), TomeError> = {
+            let slot = state.cancel.lock().expect("poisoned");
+            if slot.is_some() {
+                Err(TomeError {
+                    code: ErrorCode::Conflict,
+                    message: "sync already in progress".into(),
+                    context: vec![],
+                })
+            } else {
+                Ok(())
+            }
+        };
+
+        match result {
+            Err(e) => {
+                assert_eq!(e.code, ErrorCode::Conflict);
+                assert_eq!(e.message, "sync already in progress");
+            }
+            Ok(()) => panic!("expected Conflict, got Ok"),
+        }
+
+        // The original token is still in the slot — the guard did NOT
+        // overwrite it (T-27-01b-07 critical invariant: the second
+        // invocation must not steal cancellation from the first).
+        assert!(state.cancel.lock().expect("poisoned").is_some());
+        // And the original token is still cancellable.
+        token.cancel();
+        // Read it back through the slot to confirm it's the same token.
+        if let Some(t) = state.cancel.lock().expect("poisoned").as_ref() {
+            assert!(t.is_cancelled());
+        } else {
+            panic!("token slot must still hold the original token");
+        }
+    }
 }
