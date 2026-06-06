@@ -179,6 +179,16 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
       return DOCTOR_REPORT;
     case "doctor_repair_one":
       return null;
+    // Phase 27 plan 27-01b — long-running sync pipeline commands.
+    // The axe-core gate only scans the initial render tree; it never
+    // exercises an actual sync. start_sync returns immediately with a
+    // success unit so the SyncView's terminal-state placeholder renders
+    // if the gate happens to click [Run sync]. cancel_sync is idempotent
+    // on the Rust side and returns unit too.
+    case "start_sync":
+      return null;
+    case "cancel_sync":
+      return null;
     default:
       throw new Error(`a11y mock: unknown command '${cmd}'`);
   }

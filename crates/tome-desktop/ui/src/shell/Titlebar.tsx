@@ -7,7 +7,7 @@
 
 import styles from "./Titlebar.module.css";
 
-export type SectionLabel = "Status" | "Skills" | "Health";
+export type SectionLabel = "Status" | "Skills" | "Sync" | "Health";
 
 export interface TitlebarProps {
   section: SectionLabel;
