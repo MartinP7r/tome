@@ -390,6 +390,159 @@ pub fn cancel_sync(state: tauri::State<'_, SyncState>) -> Result<(), TomeError> 
 }
 
 #[cfg(test)]
+mod machine_toml_apply_tests {
+    //! Behavior tests for the SYNC-03 preview/apply flow (`preview_machine_toml`
+    //! + `apply_machine_toml`). The Tauri command bodies require an `AppHandle`
+    //! to invoke directly, so we exercise the underlying decision-applying
+    //! logic against a tempdir machine.toml via the shared
+    //! `apply_decisions_to_machine_toml` helper. The IPC commands themselves
+    //! are thin wrappers around the same helper, so coverage transfers.
+
+    use super::*;
+
+    fn skill(name: &str) -> SkillName {
+        SkillName::new(name).expect("test skill name must validate")
+    }
+
+    /// preview_save: a `Disable` decision for a new skill surfaces an added
+    /// `"foo"` line in the diff (the machine.toml gains a `disabled = [...]`
+    /// entry containing `foo`).
+    #[test]
+    fn preview_disable_adds_disabled_line() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Seed an empty machine.toml so preview compares to an existing file.
+        tome::machine::save(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        let preview = preview_decisions(&decisions, &machine_path).unwrap();
+        assert!(
+            preview.added_count >= 1,
+            "expected at least one added line, got {preview:?}"
+        );
+        assert!(
+            preview
+                .lines
+                .iter()
+                .any(|l| matches!(l.kind, tome::machine::DiffLineKind::Added)
+                    && l.content.contains("foo")),
+            "expected an Added line containing 'foo', got {preview:?}"
+        );
+    }
+
+    /// apply: writes the proposed machine.toml via atomic save; the file
+    /// contains the new disabled skill on disk after the call returns.
+    #[test]
+    fn apply_writes_machine_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Start with an empty machine.toml.
+        tome::machine::save(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        // Round-trip the file: the new prefs must hold `foo` in `disabled`.
+        let reloaded = tome::machine::load(&machine_path).unwrap();
+        assert!(
+            reloaded.is_disabled("foo"),
+            "apply must persist the Disable decision to disk"
+        );
+    }
+
+    /// apply preserves unrelated pre-existing entries — the apply path adds
+    /// the chosen Disable decisions to whatever is already on disk, not
+    /// replaces wholesale.
+    #[test]
+    fn apply_preserves_existing_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Pre-seed the file with `existing` already disabled.
+        let mut existing = tome::MachinePrefs::default();
+        existing.disable(skill("existing"));
+        tome::machine::save(&existing, &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("new-one"),
+            decision: TriageDecisionKind::Disable,
+        }];
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        let reloaded = tome::machine::load(&machine_path).unwrap();
+        assert!(
+            reloaded.is_disabled("existing"),
+            "apply must preserve pre-existing disabled entries"
+        );
+        assert!(
+            reloaded.is_disabled("new-one"),
+            "apply must add the new Disable decision"
+        );
+    }
+
+    /// apply is idempotent: calling it twice with the same decisions yields
+    /// the same file content byte-for-byte.
+    #[test]
+    fn apply_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        tome::machine::save(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        apply_decisions(&decisions, &machine_path).unwrap();
+        let first = std::fs::read(&machine_path).unwrap();
+        apply_decisions(&decisions, &machine_path).unwrap();
+        let second = std::fs::read(&machine_path).unwrap();
+        assert_eq!(
+            first, second,
+            "two applies of the same decision set must yield byte-identical machine.toml"
+        );
+    }
+
+    /// `Keep` decisions are no-ops — they don't add anything to the
+    /// disabled set. apply with a Keep-only decision list leaves the file
+    /// unchanged.
+    #[test]
+    fn keep_decision_is_noop() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        tome::machine::save(&tome::MachinePrefs::default(), &machine_path).unwrap();
+        let before = std::fs::read(&machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Keep,
+        }];
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        let after = std::fs::read(&machine_path).unwrap();
+        assert_eq!(
+            before, after,
+            "Keep-only decisions must not change machine.toml"
+        );
+        let reloaded = tome::machine::load(&machine_path).unwrap();
+        assert!(
+            !reloaded.is_disabled("foo"),
+            "Keep must NOT mark a skill as disabled"
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
