@@ -3,17 +3,16 @@ status: testing
 phase: 27-sync-triage-ui
 source: [27-01a-SUMMARY.md, 27-01b-SUMMARY.md, 27-02-SUMMARY.md, 27-02b-SUMMARY.md, 27-03-SUMMARY.md, 27-04-SUMMARY.md, 27-05-SUMMARY.md]
 started: 2026-06-07T04:35:00Z
-updated: 2026-06-07T04:35:00Z
+updated: 2026-06-07T04:41:00Z
 ---
 
 ## Current Test
 
-number: 1
-name: Cold Start Smoke Test
+number: 4
+name: Run Sync — In-Progress UI
 expected: |
-  Launch the desktop app from a clean state (e.g. `cd crates/tome-desktop && cargo tauri dev`, or run the built `.app`).
-  Window opens, sidebar shows four nav items in order: Status / Skills / Sync / Health.
-  No error in the dev console; no red squiggles in the sidebar.
+  Click "Run sync". StageStepper appears with rows for Discover / Reconcile / Distribute / Cleanup / Save.
+  Active stage shows a spinner + current item (skill name or path). Sidebar Sync NavItem shows a spinner badge while running.
 awaiting: user response
 
 ## Tests
@@ -21,20 +20,25 @@ awaiting: user response
 ### 1. Cold Start Smoke Test
 expected: |
   Desktop app boots; sidebar shows 4 nav items in order: Status / Skills / Sync / Health. No console errors.
-result: [pending]
+result: pass
 
 ### 2. Sync NavItem + ⌘3/⌘4 Re-anchoring
 expected: |
   Sync is the 4th sidebar item (after Status, Skills) but reachable via ⌘3.
   ⌘3 jumps to Sync, ⌘4 jumps to Health (note: Phase 26's ⌘3 used to go to Health — that mapping has moved).
   Health is still reachable, just via ⌘4 now.
-result: [pending]
+result: pass
 
 ### 3. Sync Idle State
 expected: |
   Click Sync in the sidebar (or ⌘3). The view shows an idle hero with "Last synced X ago" (or "You haven't synced yet" if first time),
   a prominent "Run sync" button, and a recent-changes disclosure section below.
-result: [pending]
+result: pass
+observation: |
+  Spec elements all present, but user noted the screen feels empty — "no information about past runs."
+  The recent-changes disclosure is present but conveys little signal on a no-history machine.
+  Filed as backlog 999.2 (Sync idle state — surface past-run history more prominently).
+  NOT reopening test 3 (the contract was met); this is a UX improvement candidate for a future phase.
 
 ### 4. Run Sync — In-Progress UI
 expected: |
@@ -98,9 +102,9 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 0
+passed: 3
 issues: 0
-pending: 10
+pending: 7
 skipped: 0
 blocked: 0
 
