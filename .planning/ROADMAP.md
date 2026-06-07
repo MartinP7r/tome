@@ -270,7 +270,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 - [x] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.** (completed 2026-05-27)
 - [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
-- [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
+- [x] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase. (completed 2026-06-07)
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
 - [ ] **Phase 30: Backup UI — rc cut** (BAK-01..04 + NF-04) — Backup history view, snapshot action, diff view, restore flow with automatic post-restore sync. **v1.0-rc cut.**
@@ -348,7 +348,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
 - [x] 27-03-PLAN.md — `machine.toml` diff preview + `similar` crate + `PreviewPopover` slot refactor + `MachineTomlDiff` component (SYNC-03)
 - [x] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
-- [ ] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
+- [x] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
 
 ## Backlog
 
