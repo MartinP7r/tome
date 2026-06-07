@@ -37,6 +37,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 sha2 = "0.11"
 walkdir = "2"
 serde_yaml = "0.9"
+# Myers line-diff for the Tauri Desktop GUI machine.toml preview-then-apply flow
+# (SYNC-03 / D-GUI-09). Package legitimacy: MIT, mitsuhiko/similar (Armin
+# Ronacher), ~5 years on crates.io, present in insta + cargo-mutants reverse-dep
+# graph. Audit in `.planning/phases/27-sync-triage-ui/27-RESEARCH.md`
+# §"Package Legitimacy Audit". Approved by the user at the 27-03 Task 1
+# human-verify checkpoint. Pinned with `=` so a silent upgrade can't happen
+# without a planner review.
+similar = { version = "=3.1.1", default-features = false, features = ["text"] }
 
 # TUI
 ratatui = "0.30"

@@ -257,6 +257,116 @@ pub fn load(path: &Path) -> Result<MachinePrefs> {
     Ok(prefs)
 }
 
+/// Single line in a `MachineTomlPreview`. Surfaces the side it lives on as a
+/// 1-indexed line number (against the OLD side for `Removed`, against the NEW
+/// side for `Added` + `Unchanged`) plus the literal content of the line
+/// (trailing `\n` stripped — the diff renderer reintroduces the newline visually).
+///
+/// Produced by [`preview_save`] and consumed by the Desktop GUI's
+/// `MachineTomlDiff` component via the `preview_machine_toml` Tauri command.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct DiffLine {
+    /// 1-indexed line number on the side this line lives on.
+    pub line_number: u32,
+    /// Whether this line was removed, added, or unchanged in the diff.
+    pub kind: DiffLineKind,
+    /// Literal text of the line, without the trailing newline character.
+    pub content: String,
+}
+
+/// Kind of change for a [`DiffLine`]. Serializes as the lowercase tag names
+/// (`"unchanged"`, `"removed"`, `"added"`) for direct consumption by the React
+/// `MachineTomlDiff` component (see `27-UI-SPEC.md` §MachineTomlDiff).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub enum DiffLineKind {
+    Unchanged,
+    Removed,
+    Added,
+}
+
+/// Structured Myers line-diff between the on-disk `machine.toml` and the
+/// canonical `toml::to_string_pretty(proposed)` serialization.
+///
+/// Returned by [`preview_save`]; consumed by the Desktop GUI's
+/// `preview_machine_toml` Tauri command. The companion `apply_machine_toml`
+/// command commits the proposed prefs via the existing atomic [`save`] —
+/// `preview_save` itself is a pure (no-write) helper.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct MachineTomlPreview {
+    /// Every line of the diff in display order: Equal/Removed/Added.
+    pub lines: Vec<DiffLine>,
+    /// Number of [`DiffLineKind::Added`] entries in `lines`.
+    pub added_count: usize,
+    /// Number of [`DiffLineKind::Removed`] entries in `lines`.
+    pub removed_count: usize,
+}
+
+/// Compute a Myers line-diff between the current on-disk `machine.toml`
+/// content and the canonical serialization of `proposed`. A missing
+/// `current_path` is treated as empty current text — the very first Apply
+/// shows every proposed line as Added.
+///
+/// This is the "preview" half of the Desktop GUI's preview-then-apply flow
+/// (SYNC-03 / SC#3). It performs **no filesystem writes** — the apply step
+/// uses the existing atomic [`save`] when the user explicitly confirms in
+/// the PreviewPopover. The diff is computed via `similar::TextDiff::from_lines`
+/// (MIT, mitsuhiko — see workspace `Cargo.toml` for the audit reference).
+pub fn preview_save(proposed: &MachinePrefs, current_path: &Path) -> Result<MachineTomlPreview> {
+    let current_text = std::fs::read_to_string(current_path).unwrap_or_default();
+    let proposed_text =
+        toml::to_string_pretty(proposed).context("failed to serialize proposed machine prefs")?;
+
+    let diff = similar::TextDiff::from_lines(&current_text, &proposed_text);
+    let mut lines = Vec::new();
+    let mut added_count = 0usize;
+    let mut removed_count = 0usize;
+    let mut current_line: u32 = 1;
+    let mut proposed_line: u32 = 1;
+
+    for change in diff.iter_all_changes() {
+        let (kind, line_number) = match change.tag() {
+            similar::ChangeTag::Equal => {
+                let n = proposed_line;
+                proposed_line += 1;
+                current_line += 1;
+                (DiffLineKind::Unchanged, n)
+            }
+            similar::ChangeTag::Delete => {
+                removed_count += 1;
+                let n = current_line;
+                current_line += 1;
+                (DiffLineKind::Removed, n)
+            }
+            similar::ChangeTag::Insert => {
+                added_count += 1;
+                let n = proposed_line;
+                proposed_line += 1;
+                (DiffLineKind::Added, n)
+            }
+        };
+        // `Change<&str>::to_string_lossy()` yields the line's literal text
+        // (with the trailing newline preserved) as a Cow<str>. We strip the
+        // trailing `\n` because the renderer reintroduces newlines visually
+        // — keeping it in `content` would double up on display.
+        let content = change.to_string_lossy().trim_end_matches('\n').to_string();
+        lines.push(DiffLine {
+            line_number,
+            kind,
+            content,
+        });
+    }
+
+    Ok(MachineTomlPreview {
+        lines,
+        added_count,
+        removed_count,
+    })
+}
+
 /// Save machine preferences to a TOML file using atomic temp+rename,
 /// creating parent directories as needed.
 pub fn save(prefs: &MachinePrefs, path: &Path) -> Result<()> {
