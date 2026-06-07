@@ -140,6 +140,15 @@ export interface UseSyncResult {
   /** Plan 27-02 — manually refetch the lockfile diff. The triage panel's
    *  Apply flow (27-03) will trigger this once it lands. */
   refetchDiff: () => Promise<void>;
+  /** Phase 27 plan 27-03 — invoked by the TriagePanel's Apply flow after
+   *  `applyMachineToml` resolves successfully. Clears all triage state
+   *  back to the all-keep idle so the user sees a fresh slate and the
+   *  Sidebar `pendingDecisionCount` badge returns to zero. The watcher
+   *  fires MachinePrefsChanged for free; idle hooks (useSkills,
+   *  useDoctorReport) refetch on their own. The lockfile diff itself is
+   *  NOT re-fetched here — the diff only changes when the lockfile does,
+   *  and a machine.toml write doesn't touch the lockfile. */
+  applyComplete: () => void;
 }
 
 /** Build a fresh stages Map with every stage as `{ kind: "pending" }`. */
@@ -390,6 +399,17 @@ function useSyncInternal(): UseSyncResult {
     setSelectedTriageSkill(null);
   }, []);
 
+  // Plan 27-03 — Apply-success handler. Clears the decisions Map so the
+  // [Apply N] button label drops back to 0 and the Sidebar badge clears.
+  // We do NOT call refetchDiff() here because writing machine.toml doesn't
+  // change the lockfile — the diff stays the same; only the user's
+  // decisions are reset. The seed effect re-populates decisions to
+  // all-keep on the next render (since `decisions.size === 0`).
+  const applyComplete = useCallback((): void => {
+    setDecisions(new Map());
+    setSelectedTriageSkill(null);
+  }, []);
+
   return {
     stages,
     isRunning,
@@ -409,6 +429,7 @@ function useSyncInternal(): UseSyncResult {
     onBulkAction,
     selectTriageSkill,
     refetchDiff,
+    applyComplete,
   };
 }
 

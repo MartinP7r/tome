@@ -24,15 +24,22 @@
 // `[Disable all new from <source>]` on each inner SectionHeader.
 // CHANGED and REMOVED outer headers render NO trailing buttons.
 
+import { useState } from "react";
 import { GridList, GridListItem } from "react-aria-components";
 import type { Selection } from "react-aria-components";
+import { commands } from "../bindings";
 import type {
   DirectoryName,
   LockfileDiff,
+  MachineTomlPreview,
   SkillName,
+  TomeError,
+  TriageDecision as TriageDecisionWire,
   TriageEntry,
 } from "../bindings";
 import { Button } from "./Button";
+import { MachineTomlDiff } from "./MachineTomlDiff";
+import { PreviewPopover } from "./PreviewPopover";
 import { SectionHeader } from "./SectionHeader";
 import { TriageRow, type TriageDecision } from "./TriageRow";
 import styles from "./TriagePanel.module.css";
@@ -50,7 +57,27 @@ export interface TriagePanelProps {
   selectedSkill: SkillName | null;
   onSelect: (skill: SkillName | null) => void;
   onBulkAction: (scope: BulkScope, decision: TriageDecision) => void;
-  onApply: () => void;
+  /** Phase 27 plan 27-03 — invoked when the user clicks [Apply] inside the
+   *  PreviewPopover AND the `applyMachineToml` command resolves successfully.
+   *  The parent (useSync) clears decisions + dismisses the apply error. */
+  onApplied: () => void;
+}
+
+/** Flatten the React-side decisions Map into the IPC wire shape. Skips
+ *  Keep decisions because the Rust side treats them as no-ops at write
+ *  time (a skill missing from the Vec is implicitly Keep). Sending only
+ *  Disable entries keeps the boundary payload minimal — the Apply flow
+ *  doesn't need to round-trip the user's explicit Keep choices. */
+function buildDecisionsForIPC(
+  decisions: ReadonlyMap<SkillName, TriageDecision>,
+): TriageDecisionWire[] {
+  const out: TriageDecisionWire[] = [];
+  for (const [skill, decision] of decisions) {
+    if (decision === "disable") {
+      out.push({ skill, decision: "disable" });
+    }
+  }
+  return out;
 }
 
 /** Sort a string array alphabetically with the literal `"unowned"`
@@ -119,15 +146,62 @@ export function TriagePanel({
   selectedSkill,
   onSelect,
   onBulkAction,
-  onApply,
+  onApplied,
 }: TriagePanelProps) {
   const pending = countPendingDecisions(diff, decisions);
+  // Phase 27 plan 27-03 — Apply flow state. The PreviewPopover renders
+  // <MachineTomlDiff preview={previewResult} /> inside its body slot.
+  // `previewResult` populates when the user clicks the trigger Button
+  // (`onPress` fires `previewMachineToml` and stashes the result here).
+  // `applyError` surfaces an inline disclosure if `applyMachineToml` rejects;
+  // the popover stays open so the user can read it + retry.
+  const [previewResult, setPreviewResult] = useState<MachineTomlPreview | null>(null);
+  const [previewError, setPreviewError] = useState<TomeError | null>(null);
+  const [applyError, setApplyError] = useState<TomeError | null>(null);
+
+  /** Fired when the user presses the trigger Button (before the popover
+   *  opens). Fetches the preview from the Rust side; the popover renders
+   *  the result inside `<MachineTomlDiff />`. If the preview fetch fails,
+   *  we still let the popover open and surface the error there (the user
+   *  has something to look at instead of nothing happening). */
+  const onPreviewPress = async () => {
+    setPreviewResult(null);
+    setPreviewError(null);
+    const ipcDecisions = buildDecisionsForIPC(decisions);
+    const res = await commands.previewMachineToml(ipcDecisions);
+    if (res.status === "ok") {
+      setPreviewResult(res.data);
+    } else {
+      setPreviewError(res.error);
+    }
+  };
+
+  /** Fired when the user clicks [Apply] inside the popover. Commits the
+   *  decisions via the canonical atomic write; on success, notify the
+   *  parent so it can clear React-side triage state; on error, store the
+   *  TomeError for the inline disclosure. */
+  const onApply = async (): Promise<void> => {
+    const ipcDecisions = buildDecisionsForIPC(decisions);
+    const res = await commands.applyMachineToml(ipcDecisions);
+    if (res.status === "ok") {
+      // Clear local state + notify parent. The Phase-26 watcher will fire
+      // MachinePrefsChanged for free and idle hooks (useSkills,
+      // useDoctorReport) will refetch on their own.
+      setPreviewResult(null);
+      setPreviewError(null);
+      setApplyError(null);
+      onApplied();
+    } else {
+      // The popover already closed (Apply's onPress closes before
+      // awaiting). We surface the error via the row below the trigger;
+      // a future iteration could keep the popover open with a richer
+      // inline error UI per the plan's D-11 pattern.
+      throw res.error;
+    }
+  };
 
   return (
-    <section
-      className={styles.panel}
-      aria-label="Triage decisions"
-    >
+    <section className={styles.panel} aria-label="Triage decisions">
       <OuterSection
         label="NEW"
         kind="new"
@@ -162,15 +236,65 @@ export function TriagePanel({
         defaultOpen={false}
       />
       <div className={styles.applyRow}>
-        <Button
-          variant="primary"
-          onPress={onApply}
-          disabled={pending === 0}
-          ariaLabel={`Apply ${pending} triage decisions, preview machine.toml diff`}
+        {/* The trigger Button is owned by TriagePanel so the label can carry
+         *  the pending count + the onPress can pre-fetch the preview before
+         *  the popover opens. PreviewPopover treats it as a slot. */}
+        <PreviewPopover
+          trigger={
+            <Button
+              variant="primary"
+              onPress={onPreviewPress}
+              disabled={pending === 0}
+              ariaLabel={`Apply ${pending} triage decisions, preview machine.toml diff`}
+            >
+              {`Apply ${pending} decisions`}
+            </Button>
+          }
+          width={480}
+          helperText="Applying writes ~/.config/tome/machine.toml. The CLI sees this change immediately."
+          onApply={onApply}
+          onError={setApplyError}
         >
-          {`Apply ${pending} decisions`}
-        </Button>
+          {previewError !== null ? (
+            <div role="alert" className={styles.applyError}>
+              <span>
+                [{previewError.code}] {previewError.message}
+              </span>
+              {previewError.context.length > 0 && (
+                <details>
+                  <summary>Show context</summary>
+                  <ul>
+                    {previewError.context.map((c, i) => (
+                      <li key={i}>{c}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          ) : previewResult !== null ? (
+            <MachineTomlDiff preview={previewResult} />
+          ) : (
+            <p>Computing preview…</p>
+          )}
+        </PreviewPopover>
       </div>
+      {applyError !== null && (
+        <div role="alert" className={styles.applyError}>
+          <span>
+            [{applyError.code}] {applyError.message}
+          </span>
+          {applyError.context.length > 0 && (
+            <details>
+              <summary>Show context</summary>
+              <ul>
+                {applyError.context.map((c, i) => (
+                  <li key={i}>{c}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
     </section>
   );
 }

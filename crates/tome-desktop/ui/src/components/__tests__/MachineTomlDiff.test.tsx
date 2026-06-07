@@ -52,8 +52,11 @@ describe("MachineTomlDiff — table semantics", () => {
   });
 
   it("emits a row per DiffLine", () => {
-    render(<MachineTomlDiff preview={previewWithLines()} />);
-    const rows = screen.getAllByRole("row");
+    const { container } = render(<MachineTomlDiff preview={previewWithLines()} />);
+    // Raw DOM <tr> count — getAllByRole would exclude the unchanged row
+    // because it carries aria-hidden=true (the next test pins this
+    // behavior). Three lines → three DOM rows.
+    const rows = container.querySelectorAll("tr");
     expect(rows.length).toBe(3);
   });
 });

@@ -1,0 +1,113 @@
+/* MachineTomlDiff — UI-SPEC §MachineTomlDiff + §"Color §MachineTomlDiff
+ * line-background tokens" + §"Spacing exceptions" (480px popover variant).
+ *
+ * Three-column table inside the PreviewPopover body slot:
+ *   col 1 (gutter):  line number, right-aligned, monospace, label-secondary
+ *   col 2 (gutter):  change glyph (+/−/blank), weighted, colored per kind
+ *   col 3 (content): literal TOML text, left-aligned, monospace, wrap
+ *
+ * Long lines wrap inside the popover bounds (no horizontal scroll on the
+ * table itself; the popover body's max-height keeps a very tall diff
+ * scrollable via overflow-y).
+ */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Summary header — small caps style matching the PREVIEW heading above
+ * it. Uses label-secondary so it doesn't compete with the body content. */
+.summary {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  margin: 0;
+}
+
+/* Table layout — fixed column widths for the two gutters, content
+ * stretches. Border-collapse so the per-row backgrounds tile cleanly. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
+  font-size: var(--text-small-size);
+  line-height: 1.4;
+}
+
+/* Line-background tokens (UI-SPEC §Color §MachineTomlDiff line-background tokens).
+ * Soft fills so the diff scans without overwhelming the popover chrome. */
+.row--unchanged {
+  background: var(--bg-window);
+  color: var(--label-primary);
+}
+
+.row--removed {
+  /* Light scheme: rgba(255, 60, 80, 0.10) — soft red tint.
+   * Dark scheme: rgba(255, 80, 100, 0.18) — slightly stronger so the row
+   * shows up against the darker window background. The UA's
+   * prefers-color-scheme query picks the right pair automatically. */
+  background: rgba(255, 60, 80, 0.10);
+  color: var(--label-primary);
+}
+
+.row--added {
+  background: rgba(36, 192, 96, 0.12);
+  color: var(--label-primary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .row--removed {
+    background: rgba(255, 80, 100, 0.18);
+  }
+  .row--added {
+    background: rgba(36, 192, 96, 0.22);
+  }
+}
+
+/* Column 1 — line number gutter. 32px wide, right-aligned so the digits
+ * line up across rows. */
+.lineNumber {
+  width: 32px;
+  min-width: 32px;
+  padding: 2px var(--space-2) 2px 0;
+  text-align: right;
+  color: var(--label-secondary);
+  user-select: none;
+  vertical-align: top;
+}
+
+/* Column 2 — change glyph gutter. 16px wide, centered, weighted; the
+ * danger/success colors come from the per-row class so the glyph matches
+ * the row background semantics. */
+.glyph {
+  width: 16px;
+  min-width: 16px;
+  padding: 2px 0;
+  text-align: center;
+  font-weight: 600;
+  user-select: none;
+  vertical-align: top;
+}
+
+.row--removed .glyph {
+  color: var(--danger, #d83a52);
+}
+.row--added .glyph {
+  color: var(--success, #1f9d55);
+}
+.row--unchanged .glyph {
+  color: var(--label-secondary);
+}
+
+/* Column 3 — content. Left-aligned monospace; word-break so long values
+ * wrap without a horizontal scrollbar. */
+.content {
+  padding: 2px 0 2px var(--space-2);
+  text-align: left;
+  vertical-align: top;
+  word-break: break-all;
+  white-space: pre-wrap;
+}

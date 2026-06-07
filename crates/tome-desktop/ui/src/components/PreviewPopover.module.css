@@ -37,7 +37,11 @@
 }
 
 /* Popover container — React Aria handles positioning; we just style the
- * card chrome. 320px max width per UI-SPEC. */
+ * card chrome. 320px max width per UI-SPEC §Spacing (Doctor variant). The
+ * wider 480px variant is hooked via data-width="480" (set by the
+ * `width` prop on the React component) — UI-SPEC §"Spacing exceptions"
+ * pins the MachineTomlDiff Apply flow at 480px max-width / 360px max body
+ * height so the line-diff has horizontal breathing room. */
 .popover {
   max-width: 320px;
   background: var(--bg-window);
@@ -48,9 +52,23 @@
    * the transition lightweight so rapid Cancel/Apply doesn't churn. */
 }
 
+.popover[data-width="480"] {
+  max-width: 480px;
+}
+
 .dialog {
   padding: var(--space-3) var(--space-4) var(--space-3);
   outline: none;
+}
+
+/* When the dialog is in the wide variant (Apply flow), cap the body's
+ * scroll height so a long machine.toml diff doesn't push the Apply/Cancel
+ * actions off-screen. The data-width attribute is duplicated on the
+ * Dialog so a child `.body` selector can hook the constraint without
+ * needing a global attribute selector. */
+.dialog[data-width="480"] .body {
+  max-height: 360px;
+  overflow-y: auto;
 }
 
 .heading {
