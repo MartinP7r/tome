@@ -347,7 +347,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions on NEW only + GridList primitive + reusable `SectionHeader` extension (SYNC-02)
 - [x] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
 - [x] 27-03-PLAN.md — `machine.toml` diff preview + `similar` crate + `PreviewPopover` slot refactor + `MachineTomlDiff` component (SYNC-03)
-- [ ] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
+- [x] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
 - [ ] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
 
 ## Backlog
