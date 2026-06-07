@@ -61,9 +61,12 @@ describe("StageStepper — A11y contract", () => {
   });
 });
 
-describe("StageStepper — idle / all-pending", () => {
-  it("renders no action buttons when every stage is pending", () => {
-    render(<StageStepper stages={pendingStages()} onDismiss={vi.fn()} />);
+describe("StageStepper — idle / all-pending (no handlers)", () => {
+  it("renders no action buttons when no handlers are provided", () => {
+    // Idle path: SyncView doesn't mount the stepper at all when idle,
+    // so 'all pending without any handlers' is the contract we pin
+    // here — passing no onCancel / no onDismiss yields no buttons.
+    render(<StageStepper stages={pendingStages()} />);
     expect(
       screen.queryByRole("button", { name: /Cancel sync/i }),
     ).not.toBeInTheDocument();
@@ -73,6 +76,20 @@ describe("StageStepper — idle / all-pending", () => {
     expect(
       screen.queryByRole("button", { name: /Retry/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("renders [Cancel sync] when onCancel is provided (the SyncView in-progress path before the first event)", () => {
+    // SyncView passes onCancel while isRunning is true. The very first
+    // moment after [Run sync] but BEFORE the first SyncStageStarted{Reconcile}
+    // event arrives has stages all-pending — but the cancel affordance
+    // must still appear (D-17 "always visible during the pipeline run").
+    const onCancel = vi.fn();
+    render(<StageStepper stages={pendingStages()} onCancel={onCancel} />);
+    const cancel = screen.getByRole("button", {
+      name: "Cancel sync at next stage boundary",
+    });
+    cancel.click();
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 });
 

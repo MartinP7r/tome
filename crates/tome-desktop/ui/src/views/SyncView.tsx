@@ -1,46 +1,59 @@
-// SyncView — Phase 27 plan 27-01b skeleton + 27-02 triage panel.
+// SyncView — Phase 27 plan 27-04 / SYNC-04 terminal-state wiring.
 //
-// Three render shapes corresponding to the useSync state machine:
+// Renders the four shapes of the sync section per useSync's state
+// machine + the UI-SPEC §Per-view Design wireframes:
 //
-//   isRunning === false && outcome === null   →  idle hero
-//                                                ↺ glyph + headline +
-//                                                "Run sync" CTA
-//                                              + post-Reconcile triage panel
-//                                                (only if diff is non-empty —
-//                                                rendered in a split layout)
-//   isRunning === true                        →  in-progress placeholder
-//                                                stepper placeholder +
-//                                                TriagePanel (when diff
-//                                                non-empty) in the middle
-//                                                column; TriageDetail in
-//                                                the right column.
-//   isRunning === false && outcome !== null   →  terminal summary
-//                                                "Sync complete" or
-//                                                inline error
+//   isRunning === false && terminalKind === null     →  idle hero +
+//                                                       triage (if pending)
+//   isRunning === true                               →  StageStepper
+//                                                       (active variants) +
+//                                                       TriagePanel +
+//                                                       TriageDetail in
+//                                                       split-pane
+//   terminalKind === "success"                       →  SyncToast +
+//                                                       auto-dismiss to idle
+//   terminalKind === "cancelled"                     →  StageStepper with
+//                                                       cancelled rows +
+//                                                       summary block
+//                                                       ("Sync cancelled" +
+//                                                       sub-line + Run sync +
+//                                                       Dismiss)
+//   terminalKind === "failed" / "partial"            →  StageStepper placeholder
+//                                                       for 27-05 to fully wire
 //
-// **Plan 27-02 split-layout note.** The UI-SPEC §"In-progress" wireframe
-// shows the stepper + triage panel in the middle column with TriageDetail
-// in the right column. ContentPane is currently single-column; for plan
-// 27-02 we render the triage flow inside a flex split inside SyncView
-// itself (the real ContentPane split-mode lands when the broader spatial
-// shell wave catches up — 27-04 will graduate the stepper). The flex
-// split here keeps the split visually correct without a shell refactor.
+// **D-18 supersedes D-06 cancellation phrasing.** Cancellation surfaces
+// INLINE in the StageStepper's terminal branch (heading + sub-line + Run
+// sync + Dismiss buttons), NOT as a SyncToast. Only success uses
+// SyncToast.
 //
-// **Plan 27-03 Apply flow (now wired).** TriagePanel owns its own
-// PreviewPopover + MachineTomlDiff + applyError state internally; the
-// only seam SyncView passes down is `onApplied={applyComplete}` from
-// useSync, which clears decisions + selected triage skill on success.
-// The watcher's MachinePrefsChanged event fires for free on the atomic
-// machine.toml write; idle hooks (useStatus, useSkills, useDoctorReport)
-// refetch on their own.
+// **Layout note.** The middle column hosts the stepper + (when diff is
+// non-empty) the TriagePanel; the right column hosts TriageDetail. The
+// SyncView's existing flex-split CSS keeps the visual contract from
+// 27-02; 27-04 only swaps the in-progress placeholder for the real
+// StageStepper and adds the terminal-state summary block.
 
+import { useMemo } from "react";
 import { useStatus } from "../hooks/useStatus";
-import { useSync } from "../hooks/useSync";
+import { SYNC_STAGES, useSync } from "../hooks/useSync";
 import { formatRelative } from "../lib/relativeTime";
+import type { StageState } from "../components/StageStepper";
+import { StageStepper } from "../components/StageStepper";
+import { SyncToast } from "../components/SyncToast";
 import { TriagePanel } from "../components/TriagePanel";
 import { TriageDetail } from "../components/TriageDetail";
-import type { TriageEntry } from "../bindings";
+import { Button } from "../components/Button";
+import type { SyncStage, TriageEntry } from "../bindings";
 import styles from "./SyncView.module.css";
+
+/** Verbatim per-stage labels used by the stepper (UI-SPEC §StageStepper). */
+const STAGE_LABELS: Record<SyncStage, string> = {
+  Reconcile: "Reconcile",
+  Discover: "Discover",
+  Consolidate: "Consolidate",
+  Distribute: "Distribute",
+  Cleanup: "Cleanup",
+  Save: "Save",
+};
 
 function findEntry(
   diff: NonNullable<ReturnType<typeof useSync>["diff"]>,
@@ -62,6 +75,8 @@ export function SyncView() {
   const {
     isRunning,
     outcome,
+    terminalKind,
+    stages,
     start,
     cancel,
     dismiss,
@@ -76,11 +91,20 @@ export function SyncView() {
   } = useSync();
   const { status } = useStatus();
 
-  // The triage panel is rendered whenever the diff is non-empty
-  // (UI-SPEC §"In-progress state": panel hidden until non-empty). For
-  // plan 27-02 we render it across both idle AND in-progress views so
-  // the user can review pending changes pre-sync. 27-04 will refine
-  // this gating once the stepper / cancellation states settle.
+  // Build the StageState[] from useSync's stages Map in pipeline order.
+  // Memoised so the StageStepper's prop identity is stable across
+  // renders that don't touch the stages Map.
+  const stageStates: StageState[] = useMemo(
+    () =>
+      SYNC_STAGES.map((stage) => ({
+        stage,
+        label: STAGE_LABELS[stage],
+        status: stages.get(stage) ?? { kind: "pending" },
+      })),
+    [stages],
+  );
+
+  // The triage panel is rendered whenever the diff is non-empty.
   const showTriage = diff !== null && pendingDiffCount > 0;
   const selectedEntry =
     showTriage && selectedTriageSkill !== null
@@ -90,7 +114,70 @@ export function SyncView() {
     ? decisions.get(selectedTriageSkill) ?? "keep"
     : "keep";
 
-  if (!isRunning && outcome === null) {
+  // -------- Terminal: success → SyncToast over idle hero --------
+  // Render the success toast on top of the idle hero. The toast's
+  // onDismiss fires after 5s OR when the user clicks [Dismiss] inside
+  // it; both paths call useSync.dismiss() which resets the state machine
+  // back to idle.
+  const showSuccessToast = terminalKind === "success";
+
+  // -------- Terminal: cancelled summary block --------
+  // Rendered ABOVE the stepper via the StageStepper.summary slot. The
+  // copywriting is verbatim from UI-SPEC §Terminal cancelled.
+  const cancelledSummary =
+    terminalKind === "cancelled" ? (
+      <div className={styles.cancelledSummary}>
+        <h1 className={styles.cancelledHeading}>Sync cancelled</h1>
+        <p className={styles.cancelledSubline}>
+          The library is in a consistent state. You can run sync again at
+          any time.
+        </p>
+        <div className={styles.cancelledActions}>
+          <Button
+            variant="primary"
+            onPress={() => {
+              void start();
+            }}
+            ariaLabel="Run sync"
+          >
+            Run sync
+          </Button>
+          <Button
+            variant="secondary"
+            onPress={dismiss}
+            ariaLabel="Dismiss sync summary"
+          >
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    ) : null;
+
+  // -------- Terminal: failed / partial (27-05 stubs) --------
+  const failedSummary =
+    terminalKind === "failed" ? (
+      <div className={styles.cancelledSummary}>
+        <h1>Sync failed</h1>
+        {outcome?.kind === "err" && (
+          <p>
+            <strong>[{outcome.error.code}]</strong> {outcome.error.message}
+          </p>
+        )}
+        <div className={styles.cancelledActions}>
+          <Button
+            variant="secondary"
+            onPress={dismiss}
+            ariaLabel="Dismiss sync summary"
+          >
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    ) : null;
+
+  // ===== Render branches =====
+
+  if (!isRunning && terminalKind === null) {
     // -------- Idle hero (+ inline triage when changes pending) --------
     const lastSync = status?.last_sync ?? null;
     const headline =
@@ -159,99 +246,73 @@ export function SyncView() {
     );
   }
 
-  if (isRunning) {
-    // -------- In-progress placeholder + triage panel --------
-    // Plan 27-04 swaps the placeholder for the real StageStepper. The
-    // triage panel renders inside the split-pane middle column once the
-    // diff is non-empty (after Reconcile completes).
+  // -------- Success — SyncToast over idle hero --------
+  if (showSuccessToast) {
+    const lastSync = status?.last_sync ?? null;
+    const headline =
+      lastSync === null
+        ? "You haven't synced yet."
+        : `Last synced ${formatRelative(lastSync)}`;
     return (
-      <section
-        role="region"
-        aria-busy="true"
-        aria-live="polite"
-        aria-label="Sync pipeline"
-        className={styles.inProgress}
-      >
-        <div className={styles.stepperPlaceholder}>
-          <p>Sync running…</p>
-          <button
-            type="button"
-            onClick={() => {
-              void cancel();
-            }}
-            aria-label="Cancel sync"
-          >
-            Cancel sync
-          </button>
-        </div>
-        {showTriage && (
-          <div className={styles.splitBody}>
-            <div className={styles.triageColumn}>
-              <TriagePanel
-                diff={diff}
-                decisions={decisions}
-                onDecisionChange={onDecisionChange}
-                selectedSkill={selectedTriageSkill}
-                onSelect={selectTriageSkill}
-                onBulkAction={onBulkAction}
-                onApplied={applyComplete}
-              />
-            </div>
-            <div className={styles.detailColumn}>
-              <TriageDetail
-                entry={selectedEntry}
-                decision={selectedDecision}
-                onDecisionChange={(d) => {
-                  if (selectedTriageSkill !== null) {
-                    onDecisionChange(selectedTriageSkill, d);
-                  }
-                }}
-                onViewSource={() => {
-                  /* 27-03 wires this. */
-                }}
-              />
-            </div>
-          </div>
-        )}
-      </section>
+      <div className={styles.idle}>
+        <section role="status" aria-label="Sync status" className={styles.hero}>
+          <RefreshGlyph />
+          <h1>{headline}</h1>
+        </section>
+        <SyncToast message="Sync complete" onDismiss={dismiss} />
+      </div>
     );
   }
 
-  // -------- Terminal summary --------
-  if (outcome?.kind === "err") {
-    return (
-      <section role="status" aria-label="Sync result">
-        <p>
-          <strong>[{outcome.error.code}]</strong> {outcome.error.message}
-        </p>
-        {outcome.error.context.length > 0 && (
-          <ul>
-            {outcome.error.context.map((c, i) => (
-              <li key={i}>{c}</li>
-            ))}
-          </ul>
-        )}
-        <button
-          type="button"
-          onClick={dismiss}
-          aria-label="Dismiss sync result"
-        >
-          Dismiss
-        </button>
-      </section>
-    );
-  }
+  // -------- In-progress / terminal-with-stepper branches --------
+  // The stepper renders for: running, cancelled, failed, partial. It
+  // accepts a summary slot that the cancelled / failed branches use to
+  // surface their verbatim copy (Run sync / Dismiss) above the rows.
+  const summary =
+    cancelledSummary ?? failedSummary ?? null;
 
   return (
-    <section role="status" aria-label="Sync result">
-      <p>Sync complete</p>
-      <button
-        type="button"
-        onClick={dismiss}
-        aria-label="Dismiss sync result"
-      >
-        Dismiss
-      </button>
+    <section
+      role="region"
+      aria-busy={isRunning}
+      aria-label="Sync pipeline"
+      className={styles.inProgress}
+    >
+      <StageStepper
+        stages={stageStates}
+        onCancel={isRunning ? cancel : undefined}
+        onDismiss={!isRunning ? dismiss : undefined}
+        summary={summary ?? undefined}
+      />
+      {showTriage && (
+        <div className={styles.splitBody}>
+          <div className={styles.triageColumn}>
+            <TriagePanel
+              diff={diff}
+              decisions={decisions}
+              onDecisionChange={onDecisionChange}
+              selectedSkill={selectedTriageSkill}
+              onSelect={selectTriageSkill}
+              onBulkAction={onBulkAction}
+              onApplied={applyComplete}
+            />
+          </div>
+          <div className={styles.detailColumn}>
+            <TriageDetail
+              entry={selectedEntry}
+              decision={selectedDecision}
+              onDecisionChange={(d) => {
+                if (selectedTriageSkill !== null) {
+                  onDecisionChange(selectedTriageSkill, d);
+                }
+              }}
+              onViewSource={() => {
+                /* 27-03 wires this. */
+              }}
+            />
+          </div>
+        </div>
+      )}
     </section>
   );
 }

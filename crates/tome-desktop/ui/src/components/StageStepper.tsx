@@ -101,7 +101,15 @@ export function StageStepper({
         <div className={styles.summary}>{summary}</div>
       )}
       <div className={styles.actionRow}>
-        {anyActive && onCancel !== undefined && (
+        {/* Cancel button is rendered whenever the parent passes onCancel
+         * — typically while `isRunning` per useSync. Per UI-SPEC §StageStepper
+         * the button is "rendered above the stepper outer container when at
+         * least one stage is `active`", but the parent owns the
+         * "any active OR isRunning" predicate (the brief gap between
+         * [Run sync] and the first SyncStageStarted event should still
+         * surface the cancel affordance — D-17 promises cancel is "always
+         * visible during the pipeline run"). */}
+        {!terminal && onCancel !== undefined && (
           <Button
             variant="secondary"
             onPress={onCancel}

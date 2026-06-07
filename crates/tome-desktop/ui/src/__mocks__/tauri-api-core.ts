@@ -276,7 +276,38 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
     // success unit so the SyncView's terminal-state placeholder renders
     // if the gate happens to click [Run sync]. cancel_sync is idempotent
     // on the Rust side and returns unit too.
+    //
+    // Phase 27 plan 27-04 — the `?sync_cancelled=1` query param flag
+    // makes start_sync return the cancel-shaped error
+    // (ErrorCode::Internal + "sync cancelled" message) so the axe scan
+    // can drive the cancelled terminal-state branch without needing a
+    // real CancelToken poll. The React side's cancelRequestedRef must
+    // ALREADY be set by the time start_sync resolves — the test clicks
+    // [Run sync] then [Cancel sync] before the mock returns.
     case "start_sync":
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_cancelled=1")
+      ) {
+        // Generous delay so the playwright axe test has time to do BOTH
+        // an in-progress axe scan AND click [Cancel sync] between
+        // [Run sync] and this Promise resolving. The axe scan itself
+        // can take several hundred ms; 3s margin covers it.
+        return new Promise((_resolve, reject) =>
+          setTimeout(() => {
+            // Reject with the cancel-shaped TomeError. The typedError
+            // wrapper in bindings.ts wraps non-Error rejections into
+            // `{ status: "error", error: e }` — we deliberately throw a
+            // plain object (NOT an Error instance) so the wrapper
+            // doesn't re-throw.
+            reject({
+              code: "Internal",
+              message: "sync cancelled",
+              context: [],
+            });
+          }, 3000),
+        );
+      }
       return null;
     case "cancel_sync":
       return null;
