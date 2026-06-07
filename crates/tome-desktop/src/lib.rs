@@ -14,6 +14,7 @@ pub mod commands;
 pub mod error;
 pub mod menu;
 pub mod sink;
+pub mod sync_outcome_wire;
 pub mod sync_state;
 pub mod sync_types;
 pub mod watcher;
@@ -42,8 +43,13 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             commands::doctor_repair_one,
             // Phase 27 plan 27-01b (SYNC-01) — long-running sync pipeline
             // with double-fire mitigation via the managed `SyncState`.
+            // Plan 27-05 (SYNC-05) extends start_sync's return shape to
+            // SyncOutcomeWire and adds retry_sync_from + retry_failed_items
+            // for the terminal-state retry affordances.
             commands::start_sync,
             commands::cancel_sync,
+            commands::retry_sync_from,
+            commands::retry_failed_items,
             // Phase 27 plan 27-02 (SYNC-02) — read-only lockfile-diff
             // projection for the triage panel.
             commands::get_lockfile_diff,

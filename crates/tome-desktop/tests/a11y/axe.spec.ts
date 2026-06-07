@@ -342,3 +342,82 @@ test("sync view in-progress + cancelled terminal state passes axe WCAG-AA (Phase
     .analyze();
   expect(results.violations).toEqual([]);
 });
+
+test("sync view terminal-failed-with-retry passes axe WCAG-AA (Phase 27 plan 27-05)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-05 — SYNC-05 terminal-failed-with-retry rendering.
+  // The mock returns a SyncOutcomeWire with result.code=Permission +
+  // retry_from=Discover when `?sync_failed=1` is set. The React tree
+  // renders the "Sync failed" summary + [Retry from Discover] + [Dismiss].
+  await page.goto("/?sync_failed=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Kick off the run. The mock resolves immediately with the failed
+  // SyncOutcomeWire shape; the React side classifies as terminalKind =
+  // "failed" and renders the summary + retry-from-Discover button.
+  await page.getByRole("button", { name: "Run sync" }).click();
+  await page
+    .getByRole("heading", { level: 1, name: "Sync failed" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // [Retry from Discover] surfaces in the summary block (and the
+  // stepper's trailing action row redundantly per UI-SPEC).
+  await page
+    .getByRole("button", { name: "Retry from Discover" })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view terminal-partial-failure passes axe WCAG-AA (Phase 27 plan 27-05)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-05 — SYNC-05 terminal-partial-failure (D-20)
+  // rendering. The mock returns a SyncOutcomeWire with result=null +
+  // partial_failures=[2 Distribute failures] when `?sync_partial=1` is
+  // set. The React tree renders "Sync complete with 2 issues" + the
+  // [Retry failed items] + [Dismiss] action triplet, AND the stepper's
+  // Distribute row carries the amber [⚠ 2 issues] badge + the inline
+  // FindingRow list.
+  await page.goto("/?sync_partial=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Run sync" }).click();
+  // Heading + retry action surface from the summary block.
+  await page
+    .getByRole("heading", { level: 1, name: "Sync complete with 2 issues" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: "Retry failed items" })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});

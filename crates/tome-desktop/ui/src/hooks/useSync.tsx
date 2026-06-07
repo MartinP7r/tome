@@ -43,7 +43,9 @@ import { commands, events } from "../bindings";
 import type {
   DirectoryName,
   LockfileDiff,
+  PartialFailureWire,
   SkillName,
+  SyncOutcomeWire,
   SyncProgress,
   SyncStage,
   TomeError,
@@ -87,22 +89,47 @@ export type StageStatus =
   | { kind: "cancelled" };
 
 /** Per-operation failure inside an otherwise-successful stage (D-20).
- *  Plan 27-05 will populate this from `SyncOutcomeWire.partialFailures`. */
+ *  Phase 27 plan 27-05: shape mirrors `PartialFailureWire` from bindings
+ *  (the IPC wire-side mirror of `tome::PartialFailure`). The StageRow
+ *  renders one FindingRow per entry below the per-stage row.
+ *
+ *  `itemName` is derived from `pf.skill` (or "operation" fallback) for
+ *  the StageRow's `<strong>` rendering — 27-04 shipped the renderer
+ *  expecting an `itemName` field, so we keep the wider shape so the
+ *  render code is untouched. */
 export interface PartialFailure {
   itemName: string;
   error: TomeError;
 }
 
+/** Build a UI-facing `PartialFailure` from a `PartialFailureWire`
+ *  payload. The wire shape exposes `skill: Option<String>` + `error:
+ *  TomeError`; the StageRow expects `itemName: string`. We collapse
+ *  None into the literal string "operation" so the renderer never
+ *  shows an empty placeholder. */
+export function partialFailureFromWire(pf: PartialFailureWire): PartialFailure {
+  return {
+    itemName: pf.skill ?? "operation",
+    error: pf.error,
+  };
+}
+
 export type SyncTerminal =
-  /** Sync finished successfully. Plan 27-05 swaps for a structured
-   *  SyncOutcomeWire. */
-  | { kind: "ok" }
+  /** Sync finished. Phase 27 plan 27-05: the outcome wire payload is
+   *  carried verbatim so the partial-failure terminal branch
+   *  ("Sync complete with K issues") reads `outcome.kind === "ok" &&
+   *  outcome.wire.partial_failures.length > 0`. */
+  | { kind: "ok"; wire: SyncOutcomeWire }
   /** User clicked Cancel; the pipeline bailed at the next stage
    *  boundary. The library is in a consistent state (SC#4). */
   | { kind: "cancelled" }
-  /** Sync returned an error from `commands.startSync()` (including the
-   *  T-27-01b-07 Conflict from a double-fire). */
-  | { kind: "err"; error: TomeError };
+  /** Sync returned an error. Plan 27-05: when the structured
+   *  `SyncOutcomeWire.result` is non-null we wrap it here AND carry
+   *  the `retry_from` hint so SyncView's terminal-failed branch can
+   *  surface the `[Retry from <stage>]` action. The outer Tauri-level
+   *  Result Err (setup / JoinError / T-27-01b-07 Conflict) maps to a
+   *  `retry_from: null` value. */
+  | { kind: "err"; error: TomeError; retry_from: SyncStage | null };
 
 /** Derived classification of the in-flight run's outcome. Drives
  *  SyncView's terminal-state branch selection. `null` while idle or
@@ -152,6 +179,13 @@ export interface UseSyncResult {
   /** Plan-27-01b stub — `0` until plan 27-05 populates from
    *  SyncOutcomeWire.partialFailures.length. */
   failureCount: number;
+  /** Phase 27 plan 27-05: Sidebar Sync-NavItem post-sync failure-badge
+   *  count. Persists across `dismiss()` so a user who closes the
+   *  partial-failure summary still sees the badge — only a successful
+   *  retry that clears all issues resets it. Computed from the stages
+   *  Map (partialFailures + failed kinds); supersedes `failureCount`'s
+   *  ephemeral-only semantics. */
+  unresolvedFailureCount: number;
   /** Kick off a sync. Idempotent against double-fire — the Rust side
    *  returns ErrorCode::Conflict if a sync is already in flight; the
    *  hook surfaces that as the outcome (T-27-01b-07). */
@@ -160,6 +194,14 @@ export interface UseSyncResult {
   cancel: () => Promise<void>;
   /** Reset to idle from the terminal state. */
   dismiss: () => void;
+  /** Phase 27 plan 27-05: resume the pipeline from a named stage.
+   *  Wired to the StageStepper's `[Retry from <stage>]` button in the
+   *  terminal-failed branch. The stage argument is the `retry_from`
+   *  value carried by the prior outcome. */
+  retryFromStage: (stage: SyncStage) => Promise<void>;
+  /** Phase 27 plan 27-05: retry the per-skill partial failures from a
+   *  prior partial-success run. Wired to `[Retry failed items]`. */
+  retryFailedItems: () => Promise<void>;
   /** Plan 27-02 — set the decision for a single skill. */
   onDecisionChange: (skill: SkillName, decision: TriageDecision) => void;
   /** Plan 27-02 — apply a bulk-action scope to a decision. */
@@ -394,6 +436,106 @@ function useSyncInternal(): UseSyncResult {
     };
   }, [handleProgress]);
 
+  /** Internal helper — finalize the outcome of a sync / retry call. The
+   *  three callers (start, retryFromStage, retryFailedItems) share the
+   *  same terminal-state classification: cancelled-vs-failed
+   *  disambiguation via cancelRequestedRef, partial-failure population
+   *  into the stages Map, error-vs-success branch. Keeping this in one
+   *  place ensures the three retry entry points cannot drift. */
+  const finalizeOutcome = useCallback(
+    (
+      res:
+        | { status: "ok"; data: SyncOutcomeWire }
+        | { status: "error"; error: TomeError },
+    ) => {
+      isRunningRef.current = false;
+      setIsRunning(false);
+
+      if (res.status === "error") {
+        // The outer command Result is Err — setup / JoinError / Conflict.
+        if (cancelRequestedRef.current) {
+          // Plan 27-04: user clicked Cancel mid-run. The Rust side
+          // returned Err("sync cancelled"). Classify as cancelled rather
+          // than as a generic error and transform the stages Map so any
+          // still-active or still-pending stage renders as cancelled in
+          // the stepper (D-18: stepper transforms in place).
+          setStages((prev) => {
+            const next = new Map<SyncStage, StageStatus>();
+            for (const [stage, status] of prev) {
+              if (status.kind === "active" || status.kind === "pending") {
+                next.set(stage, { kind: "cancelled" });
+              } else {
+                next.set(stage, status);
+              }
+            }
+            return next;
+          });
+          setOutcome({ kind: "cancelled" });
+        } else {
+          // Outer Err: no retry_from hint available.
+          setOutcome({ kind: "err", error: res.error, retry_from: null });
+        }
+        return;
+      }
+
+      // Inner success: SyncOutcomeWire shape.
+      const wire = res.data;
+      if (wire.result !== null) {
+        // Plan 27-05: structured stage-level failure. Surface retry_from
+        // so SyncView's terminal-failed branch can render the
+        // [Retry from <stage>] action.
+        setOutcome({
+          kind: "err",
+          error: wire.result,
+          retry_from: wire.retry_from,
+        });
+        return;
+      }
+
+      // Plan 27-05: partial-failure population. Bucket each wire
+      // partial-failure into its stage's complete row so StageRow's
+      // amber [⚠ K issues] badge + FindingRow list render automatically
+      // (D-20). Stages not present in the partial-failure list keep
+      // their existing complete status from the progress events.
+      if (wire.partial_failures.length > 0) {
+        setStages((prev) => {
+          const next = new Map<SyncStage, StageStatus>();
+          // Group partial failures by stage.
+          const byStage = new Map<SyncStage, PartialFailure[]>();
+          for (const pf of wire.partial_failures) {
+            const list = byStage.get(pf.stage) ?? [];
+            list.push(partialFailureFromWire(pf));
+            byStage.set(pf.stage, list);
+          }
+          for (const [stage, status] of prev) {
+            const failures = byStage.get(stage) ?? [];
+            if (status.kind === "complete" && failures.length > 0) {
+              next.set(stage, {
+                ...status,
+                partialFailures: [...status.partialFailures, ...failures],
+              });
+            } else if (failures.length > 0 && status.kind !== "complete") {
+              // Defensive: failure recorded for a stage that didn't
+              // emit a complete event. Synthesize a zero-duration
+              // complete row so the badge + FindingRows still surface.
+              next.set(stage, {
+                kind: "complete",
+                durationMs: 0,
+                partialFailures: failures,
+              });
+            } else {
+              next.set(stage, status);
+            }
+          }
+          return next;
+        });
+      }
+
+      setOutcome({ kind: "ok", wire });
+    },
+    [],
+  );
+
   const start = useCallback(async (): Promise<void> => {
     // Reset per-run state.
     setStages(initialStages());
@@ -404,36 +546,58 @@ function useSyncInternal(): UseSyncResult {
     cancelRequestedRef.current = false;
 
     const res = await commands.startSync();
+    finalizeOutcome(res);
+  }, [finalizeOutcome]);
 
-    // The terminal flip + outcome write happen together so the UI doesn't
-    // briefly render the in-progress placeholder past the actual stop.
-    isRunningRef.current = false;
-    setIsRunning(false);
-    if (res.status === "ok") {
-      setOutcome({ kind: "ok" });
-    } else if (cancelRequestedRef.current) {
-      // Plan 27-04: user clicked Cancel mid-run. The Rust side returned
-      // Err("sync cancelled"). Classify as cancelled rather than as a
-      // generic error and transform the stages Map so any still-active
-      // or still-pending stage renders as cancelled in the stepper
-      // (D-18: stepper transforms in place). The library is in a
-      // consistent state per SC#4 — the integration test pin.
-      setStages((prev) => {
-        const next = new Map<SyncStage, StageStatus>();
-        for (const [stage, status] of prev) {
-          if (status.kind === "active" || status.kind === "pending") {
-            next.set(stage, { kind: "cancelled" });
-          } else {
-            next.set(stage, status);
-          }
+  const retryFromStage = useCallback(
+    async (stage: SyncStage): Promise<void> => {
+      setStages(initialStages());
+      stageStartAt.current.clear();
+      setOutcome(null);
+      setIsRunning(true);
+      isRunningRef.current = true;
+      cancelRequestedRef.current = false;
+
+      const res = await commands.retrySyncFrom(stage);
+      finalizeOutcome(res);
+    },
+    [finalizeOutcome],
+  );
+
+  const retryFailedItems = useCallback(async (): Promise<void> => {
+    // Collect the wire shapes from the current stages Map so the
+    // boundary sees a fresh-from-React payload (the prior outcome state
+    // may have been cleared by a dismiss). Each partial failure carries
+    // enough info for the Rust side to re-run that operation.
+    const failures: PartialFailureWire[] = [];
+    for (const [stage, status] of stages) {
+      if (status.kind === "complete") {
+        for (const pf of status.partialFailures) {
+          failures.push({
+            stage,
+            // Domain operation defaults to Distribution; future plans
+            // that surface per-operation provenance on the partial
+            // failure will fold the real op through here. Today the
+            // domain dispatch reads only stage + skill — the operation
+            // tag is informational on the retry path.
+            operation: "Distribution",
+            skill: pf.itemName,
+            error: pf.error,
+          });
         }
-        return next;
-      });
-      setOutcome({ kind: "cancelled" });
-    } else {
-      setOutcome({ kind: "err", error: res.error });
+      }
     }
-  }, []);
+
+    setStages(initialStages());
+    stageStartAt.current.clear();
+    setOutcome(null);
+    setIsRunning(true);
+    isRunningRef.current = true;
+    cancelRequestedRef.current = false;
+
+    const res = await commands.retryFailedItems(failures);
+    finalizeOutcome(res);
+  }, [finalizeOutcome, stages]);
 
   const cancel = useCallback(async (): Promise<void> => {
     // Plan 27-04: flip the local cancel-requested flag so the start()
@@ -451,8 +615,10 @@ function useSyncInternal(): UseSyncResult {
     if (res.status === "error") {
       // Defensive — cancel_sync never returns an error today, but if it
       // ever did we'd surface it through the outcome state so the user
-      // sees something happened. Keep silent otherwise.
-      setOutcome({ kind: "err", error: res.error });
+      // sees something happened. Keep silent otherwise. No retry_from
+      // hint is available for cancel-command errors (they don't carry a
+      // failed_stage tag).
+      setOutcome({ kind: "err", error: res.error, retry_from: null });
     }
   }, []);
 
@@ -480,16 +646,19 @@ function useSyncInternal(): UseSyncResult {
     setSelectedTriageSkill(null);
   }, []);
 
-  // Plan 27-04: derived classification of the run's outcome. Drives
-  // SyncView's terminal-branch selection (success → SyncToast; cancelled
-  // → inline summary in the stepper; failed → stub for 27-05; partial →
-  // stub for 27-05). `null` while idle or running.
+  // Plan 27-04 + 27-05: derived classification of the run's outcome.
+  // Drives SyncView's terminal-branch selection (success → SyncToast;
+  // cancelled → inline summary in the stepper; failed → "Sync failed"
+  // summary + Retry from <stage> + Dismiss; partial → "Sync complete
+  // with K issues" + Retry failed items + Dismiss). `null` while idle
+  // or running.
   const terminalKind: SyncTerminalKind = useMemo(() => {
     if (outcome === null || isRunning) return null;
     if (outcome.kind === "cancelled") return "cancelled";
     if (outcome.kind === "err") return "failed";
-    // outcome.kind === "ok" — could still be a partial-failure path
-    // (D-20) once 27-05 populates partialFailures. Until then, ok = success.
+    // outcome.kind === "ok" — partial failures live on each stage's
+    // complete row (populated by finalizeOutcome from
+    // SyncOutcomeWire.partial_failures). Plan 27-05 D-20.
     let totalPartialFailures = 0;
     for (const status of stages.values()) {
       if (status.kind === "complete") {
@@ -499,9 +668,8 @@ function useSyncInternal(): UseSyncResult {
     return totalPartialFailures > 0 ? "partial" : "success";
   }, [outcome, isRunning, stages]);
 
-  // Plan 27-04: failure count derived from stages' partialFailures.
-  // Plan 27-05 will widen this to count true failed stages + partial
-  // failures together.
+  // Plan 27-04 + 27-05: failure count derived from stages'
+  // partialFailures + failed-stage rows.
   const failureCount = useMemo(() => {
     let n = 0;
     for (const status of stages.values()) {
@@ -510,6 +678,21 @@ function useSyncInternal(): UseSyncResult {
     }
     return n;
   }, [stages]);
+
+  // Plan 27-05: post-sync failure-badge count. The Sidebar Sync NavItem
+  // reads this to render its danger-fill failure badge. Semantics:
+  // count = partial failures in the most recent terminal state, or 1
+  // for a failed run, or 0 for clean success. Persists across
+  // `dismiss()` so a user who closes the summary still sees the badge;
+  // resets only when a fresh sync run completes cleanly. The
+  // `failureCount` derivation above already gives us the cumulative
+  // count; we add the err-without-partial branch on top so a fatal
+  // failure also surfaces.
+  const unresolvedFailureCount = useMemo(() => {
+    if (failureCount > 0) return failureCount;
+    if (outcome?.kind === "err") return 1;
+    return 0;
+  }, [failureCount, outcome]);
 
   return {
     stages,
@@ -524,9 +707,12 @@ function useSyncInternal(): UseSyncResult {
     pendingDecisionCount,
     pendingDiffCount,
     failureCount,
+    unresolvedFailureCount,
     start,
     cancel,
     dismiss,
+    retryFromStage,
+    retryFailedItems,
     onDecisionChange,
     onBulkAction,
     selectTriageSkill,

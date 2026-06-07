@@ -135,6 +135,7 @@ fn opts<'a>(machine_path: &'a std::path::Path, machine_prefs: &'a MachinePrefs) 
         quiet: true,
         machine_path,
         machine_prefs,
+        start_stage: None,
     }
 }
 

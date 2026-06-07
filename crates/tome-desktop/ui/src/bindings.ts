@@ -95,10 +95,11 @@ export const commands = {
 	 */
 	doctorRepairOne: (findingId: FindingId) => typedError<null, TomeError>(__TAURI_INVOKE("doctor_repair_one", { findingId })),
 	/**
-	 *  Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).
+	 *  Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01,
+	 *  extended in plan 27-05 / SYNC-05 to return a `SyncOutcomeWire`).
 	 * 
-	 *  `async` by design — the synchronous `tome::sync` body runs inside
-	 *  [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
+	 *  `async` by design — the synchronous `tome::sync_with_outcome` body runs
+	 *  inside [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
 	 *  responsive (RESEARCH §"Pitfall 5"; T-27-01b-06 mitigation). Progress is
 	 *  streamed via the [`TauriEventSink`] over `SyncProgress` events; the
 	 *  React side subscribes through `useSync`.
@@ -106,18 +107,16 @@ export const commands = {
 	 *  **Double-fire guard (T-27-01b-07).** If a sync is already in flight
 	 *  (the managed [`SyncState::cancel`] slot is `Some(_)`), this returns
 	 *  `ErrorCode::Conflict` immediately without overwriting the live token.
-	 *  The React `useSync` hook prevents concurrent invocations under normal
-	 *  usage; this guard catches the race window between two near-simultaneous
-	 *  menu / keyboard events.
 	 * 
-	 *  On entry the slot is filled with a fresh [`CancelToken`]; on return
-	 *  (success OR error) the slot is cleared so the next run can start.
-	 *  Plan 27-05 will swap the return type for a `SyncOutcomeWire`
-	 *  structured payload; today the React side observes the run purely
-	 *  through the `SyncProgress` event stream and a final success / error
-	 *  signal carried by this command's `Result`.
+	 *  **Return shape (Plan 27-05 / SYNC-05).** Returns a [`SyncOutcomeWire`]
+	 *  on success carrying `{ result, retry_from, partial_failures }` so the
+	 *  React side can render every SYNC-05 terminal state from one shape:
+	 *  clean success, partial success ("K issues"), failed-with-retry,
+	 *  failed-no-retry. The outer `Result<_, TomeError>` Err is reserved for
+	 *  setup / JoinError failures (Pitfall 5) that happen BEFORE the sync
+	 *  pipeline produces a structured outcome.
 	 */
-	startSync: () => typedError<null, TomeError>(__TAURI_INVOKE("start_sync")),
+	startSync: () => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("start_sync")),
 	/**
 	 *  Request cancellation of an in-flight sync (Phase 27 plan 27-01b / SYNC-01).
 	 * 
@@ -132,6 +131,38 @@ export const commands = {
 	 *  the final state.
 	 */
 	cancelSync: () => typedError<null, TomeError>(__TAURI_INVOKE("cancel_sync")),
+	/**
+	 *  Resume the sync pipeline from a named stage (Phase 27 plan 27-05 /
+	 *  SYNC-05).
+	 * 
+	 *  Invoked by the React side's `[Retry from <stage>]` button in
+	 *  `StageStepper`'s terminal-failed branch. The stage argument is the
+	 *  `retry_from` value returned by a prior `start_sync` outcome — server-
+	 *  side, today the inner pipeline still runs the full sequence (later
+	 *  stages depend on earlier stages' data). `start_stage` is carried
+	 *  through as an advisory tag so future plans can specialize.
+	 * 
+	 *  Shares the double-fire guard, setup chain, and JoinError handling
+	 *  with [`start_sync`]; the only delta is the `start_stage` option.
+	 */
+	retrySyncFrom: (stage: SyncStage) => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("retry_sync_from", { stage })),
+	/**
+	 *  Retry a list of per-skill partial failures from a prior sync (Phase 27
+	 *  plan 27-05 / SYNC-05).
+	 * 
+	 *  Invoked by the React side's `[Retry failed items]` button in
+	 *  `StageStepper`'s terminal-partial branch. Each `PartialFailureWire`
+	 *  describes a single sub-operation that failed (distribution symlink,
+	 *  cleanup-symlink remove, plugin install). The server-side helper
+	 *  [`tome::retry_partial_failures`] dispatches one operation per failure
+	 *  and aggregates residual failures into the returned `partial_failures`
+	 *  Vec — so a partial-retry that hits half the originals leaves only
+	 *  those half in the outcome.
+	 * 
+	 *  Shares the double-fire guard, setup chain, and JoinError handling
+	 *  with [`start_sync`].
+	 */
+	retryFailedItems: (failures: PartialFailureWire[]) => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("retry_failed_items", { failures })),
 	/**
 	 *  Return the pending lockfile diff for the GUI's SYNC-02 triage panel
 	 *  (Phase 27 plan 27-02 / SYNC-02).
@@ -787,6 +818,60 @@ export type MenuAction =
 { kind: "FocusSearch" };
 
 /**
+ *  Which sub-operation produced a per-skill partial failure inside an
+ *  otherwise-successful stage.
+ * 
+ *  Mirrors the three places the sync pipeline aggregates per-skill /
+ *  per-operation failures today:
+ * 
+ *  - [`PartialFailureOp::Distribution`] — a single skill failed to be linked
+ *    into a distribution directory (D-09 / SAFE-01). The skill name is the
+ *    symlink filename; the directory is captured in the error context.
+ *  - [`PartialFailureOp::Cleanup`] — a stale distribution symlink could not
+ *    be removed (cleanup_disabled_from_target's per-symlink failure). The
+ *    skill name is the symlink filename.
+ *  - [`PartialFailureOp::Install`] — a managed-source install/update failed
+ *    inside the Reconcile stage (RESEARCH OQ-6). The skill name is the
+ *    plugin identifier.
+ *  - [`PartialFailureOp::Other`] — defensive fallback for partial failures
+ *    that don't map cleanly onto the above (e.g., a future SyncReport field).
+ */
+export type PartialFailureOp = 
+/**  Distribute stage per-skill symlink failure. */
+"Distribution" | 
+/**  Cleanup stage per-symlink remove failure. */
+"Cleanup" | 
+/**  Reconcile stage per-plugin install/update failure. */
+"Install" | 
+/**  Reserved fallback. */
+"Other";
+
+/**
+ *  IPC wire-shape mirror of [`tome::PartialFailure`] (Phase 27 plan 27-05).
+ * 
+ *  Same fields; the `message`/`context` already carry the projected error
+ *  payload from the domain side, so this is a structural mirror — no
+ *  reclassification at the boundary. The `code` field is fixed to
+ *  [`crate::error::ErrorCode::Internal`] because per-skill cleanup /
+ *  install failures don't currently carry domain sentinels through the
+ *  SAFE-01 aggregation pipeline; a future plan that threads sentinels
+ *  onto per-skill error sites will narrow this.
+ */
+export type PartialFailureWire = {
+	/**  Which pipeline stage produced this failure. */
+	stage: SyncStage,
+	/**  Which sub-operation failed. */
+	operation: PartialFailureOp,
+	/**
+	 *  Skill name (raw — may not pass `SkillName` validation for a
+	 *  rogue filename on disk). `None` for failures not keyed by a skill.
+	 */
+	skill: string | null,
+	/**  Structured error payload (matches `FindingRow`'s shape). */
+	error: TomeError,
+};
+
+/**
  *  Categorises the auto-repair available for a [`DiagnosticIssue`]
  *  (D-REPAIR-1).
  * 
@@ -1073,6 +1158,42 @@ export type StatusReport_Serialize = {
 	machine_prefs_summary: MachinePrefsSummary,
 	/**  Number of health issues, or an error message. */
 	health: CountOrError_Serialize,
+};
+
+/**
+ *  The IPC wire-shape of a sync outcome (Phase 27 plan 27-05 / SYNC-05).
+ * 
+ *  `result: Option<TomeError>` — `None` on a clean or partial-success run;
+ *  `Some(_)` on a stage-level fatal failure. The React side reads this as
+ *  the discriminator for the SyncView terminal-state branches:
+ * 
+ *  - `result === null && partial_failures.length === 0` → "Sync complete"
+ *  - `result === null && partial_failures.length > 0`  → "Sync complete
+ *    with K issues"
+ *  - `result !== null && retry_from !== null`          → "Sync failed —
+ *    Retry from <stage>"
+ *  - `result !== null && retry_from === null`          → "Sync failed —
+ *    Dismiss only" (Save errors)
+ */
+export type SyncOutcomeWire = {
+	/**
+	 *  Fatal stage-level error; `None` on Ok runs (even with K partial
+	 *  failures). The Tauri tagged-Result projection would normally split
+	 *  the success/error states; we collapse them into one field so the
+	 *  React side reads ONE shape regardless of which terminal branch
+	 *  renders.
+	 */
+	result: TomeError | null,
+	/**
+	 *  Safe stage to resume from when `result` is Some. `None` when retry
+	 *  is not safe (Save errors, unknown stage) or when `result` is None.
+	 */
+	retry_from: SyncStage | null,
+	/**
+	 *  Per-skill failures observed during an otherwise-successful run.
+	 *  Empty when `result` is Some (the full failure is in `result`).
+	 */
+	partial_failures: PartialFailureWire[],
 };
 
 /**

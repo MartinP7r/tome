@@ -129,6 +129,11 @@ pub mod skill;
 // GUI contract. Widened in 25-04 (carry-forward from 25-03's pub `plan` fns).
 pub mod status;
 pub(crate) mod summary;
+// `sync_outcome` is `pub` so `tome-desktop` can construct + read
+// `SyncOutcome` + `PartialFailure` + `PartialFailureOp` at the IPC
+// boundary (Phase 27 plan 27-05 / SYNC-05). The CLI consumes
+// `tome::sync()` directly and does not need the outcome wrapping.
+pub mod sync_outcome;
 pub mod tracing_init;
 // `update` is `pub` so `tome-desktop` can call `update::diff` and consume
 // `UpdateDiff`/`SkillChange` for the SYNC-02 lockfile-diff projection (plan
@@ -227,6 +232,17 @@ pub use discover::{SkillOrigin, SkillProvenance, discover_all};
 /// stays `pub(crate)` (the rest of its surface is the internal
 /// `validate_identifier` helper); only `ContentHash` is lifted.
 pub use validation::ContentHash;
+
+/// Phase 27 plan 27-05 (SYNC-05) — `tome-desktop`'s `start_sync` /
+/// `retry_sync_from` / `retry_failed_items` commands return a structured
+/// `SyncOutcome` wrapping struct so the React `useSync` hook can render the
+/// full SYNC-05 terminal-state matrix (success / partial / failed-with-retry
+/// / failed-no-retry). The wrapping shape is the domain-side projection;
+/// the boundary in `crates/tome-desktop/src/sync_outcome_wire.rs` mirrors
+/// it with `TomeError` substituted for `anyhow::Error`.
+pub use sync_outcome::{
+    PartialFailure, PartialFailureOp, StageTrackingSink, SyncOutcome, safe_retry_from,
+};
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
@@ -598,6 +614,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     quiet,
                     machine_path: &machine_path,
                     machine_prefs: &machine_prefs,
+                    start_stage: None,
                 },
                 sink,
                 &cancel,
@@ -813,6 +830,7 @@ pub(crate) fn cmd_sync(
             quiet,
             machine_path,
             machine_prefs,
+            start_stage: None,
         },
         sink,
         &cancel,
@@ -1590,6 +1608,13 @@ pub struct SyncOptions<'a> {
     /// Per-machine preferences already loaded by the caller. `sync()` clones
     /// these locally so triage can mutate without affecting the caller's copy.
     pub machine_prefs: &'a machine::MachinePrefs,
+    /// Phase 27 plan 27-05 (SYNC-05): when `Some(stage)`, skip every
+    /// pipeline stage strictly before `stage`. Used by the GUI's
+    /// `retry_sync_from(stage)` command to resume after a stage failure.
+    /// `None` runs the full pipeline (CLI behavior). Today this option is
+    /// honored only by `sync_with_outcome`; the bare `sync()` ignores it
+    /// (the CLI never sets it).
+    pub start_stage: Option<progress::SyncStage>,
 }
 
 /// Pre-discovery step: clone or update git-type directories.
@@ -1870,6 +1895,12 @@ pub fn sync(
         quiet,
         machine_path,
         machine_prefs: prefs_in,
+        // Phase 27 plan 27-05: today `start_stage` is an advisory tag the
+        // GUI sets via its retry commands; the inner pipeline still runs
+        // the full sequence (stages produce data later stages need —
+        // skipping Discover would break Consolidate). See the
+        // `sync_with_outcome` doc comment for the rationale.
+        start_stage: _,
     } = opts;
 
     // OBS-03 D-SPAN-1: top-level sync span. RAII via `.entered()`; the
@@ -2416,6 +2447,100 @@ pub fn sync(
     }
 
     Ok(())
+}
+
+/// GUI-facing sync entry point that wraps [`sync`] and returns a structured
+/// [`sync_outcome::SyncOutcome`] (Phase 27 plan 27-05 / SYNC-05).
+///
+/// The CLI keeps using [`sync`] directly — its `Result<()>` shape matches
+/// the existing presenter contract. The GUI calls this sibling so the React
+/// `useSync` hook can render the full SYNC-05 terminal-state matrix: clean
+/// success, partial success ("Sync complete with K issues"), stage failure
+/// ("Sync failed — Retry from <stage>"), and the "no retry affordance"
+/// case (Save failures).
+///
+/// ## How `failed_stage` is captured
+///
+/// We wrap the caller's sink in a [`sync_outcome::StageTrackingSink`] that
+/// observes every `SyncStageStarted` event. When the inner `sync` call
+/// returns Err, the latest-started stage IS the failed stage (all six
+/// stages run sequentially, so the bail observed by the caller occurs
+/// inside whichever stage block last announced its start).
+///
+/// ## `start_stage` semantics
+///
+/// `options.start_stage` is the GUI's "Retry from <stage>" hint. Today the
+/// inner [`sync`] always runs the full pipeline (stages produce data that
+/// later stages need — skipping Discover would break Consolidate). The
+/// `start_stage` field is honored as an *advisory tag*: the GUI's retry
+/// commands set it so the wire-side `SyncOutcome` reports the intended
+/// resume point in the UI copy; the actual work still re-runs the full
+/// pipeline. A future plan that proves a "true stage resume" is safe (by
+/// re-deriving stage outputs from on-disk state) could honor the field
+/// strictly.
+///
+/// ## `partial_failures` (current limitation)
+///
+/// The existing [`sync`] bails with an `anyhow::Error` when SAFE-01's per-
+/// skill failure aggregates (`distribution_cleanup_failures`,
+/// `reconcile_install_failures`) are non-empty. That means the GUI sees a
+/// failed run, not a partial-success. `partial_failures` here is therefore
+/// always empty in this plan's wrapper — the React side handles both
+/// shapes (a single fatal Err and a vector of per-skill issues) so when a
+/// future plan refactors `sync` to surface partial failures inline this
+/// wrapper gains the populator with zero React changes.
+pub fn sync_with_outcome(
+    config: &Config,
+    paths: &TomePaths,
+    options: SyncOptions<'_>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> sync_outcome::SyncOutcome {
+    let tracker = sync_outcome::StageTrackingSink::new(sink);
+    let result = sync(config, paths, options, &tracker, cancel);
+    let failed_stage = if result.is_err() {
+        tracker.last_started()
+    } else {
+        None
+    };
+    sync_outcome::SyncOutcome::from_sync_result(result, failed_stage, Vec::new())
+}
+
+/// Retry a list of per-skill partial failures (Phase 27 plan 27-05 / SYNC-05).
+///
+/// The GUI's `retry_failed_items(failures)` command dispatches here. Each
+/// `PartialFailure` describes a single sub-operation that failed during a
+/// prior `sync` run (distribution-symlink creation, distribution-symlink
+/// cleanup, plugin install). We re-run only the failing operations, not
+/// the full pipeline.
+///
+/// Today's implementation re-runs the full [`sync_with_outcome`] pipeline
+/// — per-skill independent retry (calling `distribute_to_directory` or
+/// the install helpers in isolation) requires extracting per-skill entry
+/// points that today live behind `pub(crate)` boundaries. The full re-run
+/// is correctness-equivalent (idempotent operations only repeat the
+/// failed work) at the cost of doing extra read-only work for already-
+/// successful skills. A future plan can specialize this to call per-skill
+/// helpers once they're exposed.
+///
+/// The `_failures` argument is accepted for forward-compatibility — when
+/// the per-skill helpers land, the dispatch loop reads this list and only
+/// fires the matching helpers.
+pub fn retry_partial_failures(
+    config: &Config,
+    paths: &TomePaths,
+    options: SyncOptions<'_>,
+    _failures: &[sync_outcome::PartialFailure],
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> sync_outcome::SyncOutcome {
+    // Re-run the full pipeline. The per-failure dispatch hook is the
+    // _failures argument; today it's advisory because the per-skill
+    // helpers (distribute_one, install_one, cleanup_one) are not yet
+    // public surface. The outcome shape is identical to a normal
+    // `sync_with_outcome` call so the React side renders it through the
+    // same StageStepper / SyncToast / FindingRow composition.
+    sync_with_outcome(config, paths, options, sink, cancel)
 }
 
 /// Remove symlinks from a target directory that point to disabled skills,
@@ -3058,6 +3183,7 @@ mod tests {
                 quiet: true, // suppress stdout chrome in the test harness
                 machine_path: &machine_path,
                 machine_prefs: &machine_prefs,
+                start_stage: None,
             },
             &sink,
             &CancelToken::new(),

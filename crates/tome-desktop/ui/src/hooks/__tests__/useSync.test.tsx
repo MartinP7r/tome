@@ -108,7 +108,12 @@ describe("useSync — Pitfall 6 watcher-feedback discipline", () => {
     startSyncSpy.mockReset();
     cancelSyncSpy.mockReset();
     getLockfileDiffSpy.mockReset();
-    startSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    // Plan 27-05: startSync now returns a SyncOutcomeWire on success
+    // (clean: result=null, retry_from=null, partial_failures=[]).
+    startSyncSpy.mockResolvedValue({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
     cancelSyncSpy.mockResolvedValue({ status: "ok", data: null });
     getLockfileDiffSpy.mockResolvedValue({
       status: "ok",
@@ -185,7 +190,12 @@ describe("useSync — start handler", () => {
   beforeEach(() => {
     startSyncSpy.mockReset();
     getLockfileDiffSpy.mockReset();
-    startSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    // Plan 27-05: startSync now returns a SyncOutcomeWire on success
+    // (clean: result=null, retry_from=null, partial_failures=[]).
+    startSyncSpy.mockResolvedValue({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
     getLockfileDiffSpy.mockResolvedValue({
       status: "ok",
       data: { added: [], changed: [], removed: [] },

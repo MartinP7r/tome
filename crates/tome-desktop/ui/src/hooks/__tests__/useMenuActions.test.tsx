@@ -31,7 +31,12 @@ vi.mock("../../bindings", () => ({
     },
   },
   commands: {
-    startSync: () => Promise.resolve({ status: "ok", data: null }),
+    // Plan 27-05: startSync now returns SyncOutcomeWire on success.
+    startSync: () =>
+      Promise.resolve({
+        status: "ok",
+        data: { result: null, retry_from: null, partial_failures: [] },
+      }),
     cancelSync: () => Promise.resolve({ status: "ok", data: null }),
     // Plan 27-02 — useSync composes useLockfileDiff which calls
     // commands.getLockfileDiff on mount.

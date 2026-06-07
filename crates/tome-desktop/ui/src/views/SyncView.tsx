@@ -77,9 +77,12 @@ export function SyncView() {
     outcome,
     terminalKind,
     stages,
+    failureCount,
     start,
     cancel,
     dismiss,
+    retryFromStage,
+    retryFailedItems,
     diff,
     decisions,
     selectedTriageSkill,
@@ -153,17 +156,74 @@ export function SyncView() {
       </div>
     ) : null;
 
-  // -------- Terminal: failed / partial (27-05 stubs) --------
+  // -------- Terminal: failed (D-19 — Plan 27-05 / SYNC-05) --------
+  // "Sync failed" heading + sub-line + [Retry from <stage>] (when
+  // retry_from is non-null) + [Dismiss]. The retry button is gated on
+  // the structured `retry_from` value carried by the outcome: Save
+  // errors don't carry a retry hint (the user must clear the underlying
+  // issue), so the action triplet collapses to just [Dismiss].
+  const failedRetryFrom =
+    outcome?.kind === "err" ? outcome.retry_from : null;
   const failedSummary =
     terminalKind === "failed" ? (
       <div className={styles.cancelledSummary}>
-        <h1>Sync failed</h1>
+        <h1 className={styles.cancelledHeading}>Sync failed</h1>
         {outcome?.kind === "err" && (
-          <p>
+          <p className={styles.cancelledSubline}>
             <strong>[{outcome.error.code}]</strong> {outcome.error.message}
           </p>
         )}
         <div className={styles.cancelledActions}>
+          {failedRetryFrom !== null && (
+            <Button
+              variant="primary"
+              onPress={() => {
+                void retryFromStage(failedRetryFrom);
+              }}
+              ariaLabel={`Retry from ${STAGE_LABELS[failedRetryFrom]}`}
+            >
+              Retry from {STAGE_LABELS[failedRetryFrom]}
+            </Button>
+          )}
+          <Button
+            variant="secondary"
+            onPress={dismiss}
+            ariaLabel="Dismiss sync summary"
+          >
+            Dismiss
+          </Button>
+        </div>
+      </div>
+    ) : null;
+
+  // -------- Terminal: partial-failure (D-20 — Plan 27-05 / SYNC-05) --------
+  // "Sync complete with K issues" heading + sub-line + [Retry failed
+  // items] + [Dismiss]. The stage rows themselves carry the amber
+  // [⚠ K issues] badge + auto-expanded FindingRow list (StageRow's
+  // complete-with-partialFailures variant from 27-04).
+  const partialSummary =
+    terminalKind === "partial" ? (
+      <div className={styles.cancelledSummary}>
+        <h1 className={styles.cancelledHeading}>
+          Sync complete with {failureCount}{" "}
+          {failureCount === 1 ? "issue" : "issues"}
+        </h1>
+        <p className={styles.cancelledSubline}>
+          Library and lockfile are saved. {failureCount}{" "}
+          {failureCount === 1
+            ? "individual operation failed."
+            : "individual operations failed."}
+        </p>
+        <div className={styles.cancelledActions}>
+          <Button
+            variant="primary"
+            onPress={() => {
+              void retryFailedItems();
+            }}
+            ariaLabel="Retry failed items"
+          >
+            Retry failed items
+          </Button>
           <Button
             variant="secondary"
             onPress={dismiss}
@@ -269,7 +329,7 @@ export function SyncView() {
   // accepts a summary slot that the cancelled / failed branches use to
   // surface their verbatim copy (Run sync / Dismiss) above the rows.
   const summary =
-    cancelledSummary ?? failedSummary ?? null;
+    cancelledSummary ?? failedSummary ?? partialSummary ?? null;
 
   return (
     <section
@@ -282,6 +342,19 @@ export function SyncView() {
         stages={stageStates}
         onCancel={isRunning ? cancel : undefined}
         onDismiss={!isRunning ? dismiss : undefined}
+        // Plan 27-05: thread the retry handlers so the stepper's trailing
+        // action row also surfaces [Retry from <stage>] / [Retry failed
+        // items]. The summary block in SyncView is the user's primary
+        // affordance; the stepper buttons are a redundant convenience
+        // (UI-SPEC §StageStepper §action row).
+        onRetryFromStage={
+          terminalKind === "failed" && failedRetryFrom !== null
+            ? retryFromStage
+            : undefined
+        }
+        onRetryFailedItems={
+          terminalKind === "partial" ? retryFailedItems : undefined
+        }
         summary={summary ?? undefined}
       />
       {showTriage && (
