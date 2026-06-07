@@ -66,8 +66,9 @@ const NOOP_DECISION = () => {
 const NOOP_BULK = () => {
   /* no-op */
 };
-const NOOP_APPLY = () => {
-  /* no-op */
+const NOOP_APPLIED = () => {
+  /* no-op — Phase 27 plan 27-03: TriagePanel renamed onApply→onApplied;
+     the new prop is invoked AFTER applyMachineToml resolves successfully. */
 };
 
 describe("TriagePanel — three vertical sections (D-11)", () => {
@@ -80,7 +81,7 @@ describe("TriagePanel — three vertical sections (D-11)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     // Outer headers are h2 — find by role+name.
@@ -100,7 +101,7 @@ describe("TriagePanel — three vertical sections (D-11)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     const innerHeadings = screen.getAllByRole("heading", { level: 3 });
@@ -120,7 +121,7 @@ describe("TriagePanel — Pitfall 1 (GridList NOT ListBox)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     // GridList has role="grid"; ListBox has role="listbox".
@@ -144,7 +145,7 @@ describe("TriagePanel — bulk action scope (D-13)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     expect(
@@ -161,7 +162,7 @@ describe("TriagePanel — bulk action scope (D-13)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     // No "Disable all changed" or "Disable all removed" buttons exist.
@@ -179,7 +180,7 @@ describe("TriagePanel — bulk action scope (D-13)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={onBulkAction}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     fireEvent.click(
@@ -201,7 +202,7 @@ describe("TriagePanel — bulk action scope (D-13)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     expect(
@@ -222,7 +223,7 @@ describe("TriagePanel — inline chip toggle (D-12)", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     // The chip button is labelled by the toggle-aria pattern.
@@ -245,7 +246,7 @@ describe("TriagePanel — Apply button", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     // The Apply button is disabled when no pending decisions exist.
@@ -273,7 +274,7 @@ describe("TriagePanel — Apply button", () => {
         selectedSkill={null}
         onSelect={NOOP}
         onBulkAction={NOOP_BULK}
-        onApply={NOOP_APPLY}
+        onApplied={NOOP_APPLIED}
       />,
     );
     expect(

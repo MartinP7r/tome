@@ -291,6 +291,24 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
         return TRIAGE_DIFF;
       }
       return { added: [], changed: [], removed: [] };
+    // Phase 27 plan 27-03 — SYNC-03 Apply flow mocks. The a11y gate opens
+    // the PreviewPopover by clicking [Apply N decisions], so the mock
+    // returns a representative MachineTomlPreview the
+    // MachineTomlDiff component renders inside the popover. Apply is a
+    // no-op success that returns null — the popover closes and the
+    // Sidebar badge clears.
+    case "preview_machine_toml":
+      return {
+        lines: [
+          { kind: "unchanged", line_number: 1, content: "[machine_prefs]" },
+          { kind: "removed", line_number: 2, content: "disabled = []" },
+          { kind: "added", line_number: 2, content: "disabled = [\"alpha\"]" },
+        ],
+        added_count: 1,
+        removed_count: 1,
+      };
+    case "apply_machine_toml":
+      return null;
     default:
       throw new Error(`a11y mock: unknown command '${cmd}'`);
   }

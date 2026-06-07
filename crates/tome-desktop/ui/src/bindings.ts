@@ -153,6 +153,42 @@ export const commands = {
 	 *  before the first sync.
 	 */
 	getLockfileDiff: () => typedError<LockfileDiff, TomeError>(__TAURI_INVOKE("get_lockfile_diff")),
+	/**
+	 *  Compute the machine.toml line-diff for a list of pending triage
+	 *  decisions (Phase 27 plan 27-03 / SYNC-03).
+	 * 
+	 *  Read-only: never writes to disk. Reads the current `~/.config/tome/machine.toml`,
+	 *  applies the decisions to a cloned [`tome::MachinePrefs`], then runs
+	 *  [`tome::machine::preview_save`] to produce a structured Myers line-diff
+	 *  the React `MachineTomlDiff` component renders inside `PreviewPopover`.
+	 * 
+	 *  The companion [`apply_machine_toml`] command commits the same proposed
+	 *  prefs via atomic temp+rename when the user explicitly clicks `[Apply]`
+	 *  inside the popover. The two commands re-read the current machine.toml at
+	 *  each call — no caching between Preview and Apply. If the file changes
+	 *  externally in the gap, Apply overwrites (T-27-03-07 disposition: accept;
+	 *  single-user app).
+	 * 
+	 *  Path resolution happens server-side via [`tome::default_machine_path`];
+	 *  the React side never passes a path (T-27-03-01 mitigation).
+	 */
+	previewMachineToml: (decisions: TriageDecision[]) => typedError<MachineTomlPreview, TomeError>(__TAURI_INVOKE("preview_machine_toml", { decisions })),
+	/**
+	 *  Commit a list of pending triage decisions to `machine.toml` (Phase 27
+	 *  plan 27-03 / SYNC-03).
+	 * 
+	 *  Writes via the canonical [`tome::machine::save`] (atomic temp+rename),
+	 *  which fires the Phase-26 watcher's `MachinePrefsChanged` event for free —
+	 *  the React `useSkills` / `useSkillDetail` hooks observe the change and
+	 *  refetch automatically (no manual refresh signal needed).
+	 * 
+	 *  Path resolution is server-side via [`tome::default_machine_path`];
+	 *  the React side never passes a path. The double-confirmation contract
+	 *  (T-27-03-06 / SC#3 "no silent writes") is enforced at the UI layer —
+	 *  this command MUST be reached only through the explicit `[Apply]` button
+	 *  inside the `PreviewPopover`.
+	 */
+	applyMachineToml: (decisions: TriageDecision[]) => typedError<null, TomeError>(__TAURI_INVOKE("apply_machine_toml", { decisions })),
 };
 
 /** Events */
@@ -183,6 +219,31 @@ export type CountOrError_Serialize = {
 	count: number | null,
 	error?: string | null,
 };
+
+/**
+ *  Single line in a `MachineTomlPreview`. Surfaces the side it lives on as a
+ *  1-indexed line number (against the OLD side for `Removed`, against the NEW
+ *  side for `Added` + `Unchanged`) plus the literal content of the line
+ *  (trailing `\n` stripped — the diff renderer reintroduces the newline visually).
+ * 
+ *  Produced by [`preview_save`] and consumed by the Desktop GUI's
+ *  `MachineTomlDiff` component via the `preview_machine_toml` Tauri command.
+ */
+export type DiffLine = {
+	/**  1-indexed line number on the side this line lives on. */
+	line_number: number,
+	/**  Whether this line was removed, added, or unchanged in the diff. */
+	kind: DiffLineKind,
+	/**  Literal text of the line, without the trailing newline character. */
+	content: string,
+};
+
+/**
+ *  Kind of change for a [`DiffLine`]. Serializes as the lowercase tag names
+ *  (`"unchanged"`, `"removed"`, `"added"`) for direct consumption by the React
+ *  `MachineTomlDiff` component (see `27-UI-SPEC.md` §MachineTomlDiff).
+ */
+export type DiffLineKind = "unchanged" | "removed" | "added";
 
 /**
  *  A validated directory name.
@@ -667,6 +728,24 @@ export type MachinePrefsSummary = {
 };
 
 /**
+ *  Structured Myers line-diff between the on-disk `machine.toml` and the
+ *  canonical `toml::to_string_pretty(proposed)` serialization.
+ * 
+ *  Returned by [`preview_save`]; consumed by the Desktop GUI's
+ *  `preview_machine_toml` Tauri command. The companion `apply_machine_toml`
+ *  command commits the proposed prefs via the existing atomic [`save`] —
+ *  `preview_save` itself is a pure (no-write) helper.
+ */
+export type MachineTomlPreview = {
+	/**  Every line of the diff in display order: Equal/Removed/Added. */
+	lines: DiffLine[],
+	/**  Number of [`DiffLineKind::Added`] entries in `lines`. */
+	added_count: number,
+	/**  Number of [`DiffLineKind::Removed`] entries in `lines`. */
+	removed_count: number,
+};
+
+/**
  *  The on-disk manifest (`.tome-manifest.json`) was rewritten.
  * 
  *  React hooks that derive from manifest state (skill list, status, doctor)
@@ -1065,6 +1144,39 @@ export type TomeError = {
 	/**  Flattened anyhow `.context()` chain (outermost first). */
 	context: string[],
 };
+
+/**
+ *  A single triage decision sent from the GUI's Sync route to the Rust
+ *  `preview_machine_toml` / `apply_machine_toml` commands.
+ * 
+ *  One entry per skill the user has triaged (the `Map<SkillName, …>` in
+ *  `useSync().decisions` is flattened to `Vec<TriageDecision>` at IPC time).
+ *  A skill missing from the Vec is implicitly Keep — the React side only
+ *  surfaces decisions the user explicitly changed away from the default.
+ * 
+ *  `SkillName`'s `Deserialize` impl validates the name at the IPC boundary
+ *  (T-27-03-02 mitigation — path-separator / empty-name rejection happens
+ *  before the value reaches the mutator).
+ */
+export type TriageDecision = {
+	skill: SkillName,
+	decision: TriageDecisionKind,
+};
+
+/**
+ *  Decision kind for [`TriageDecision`]. Stable lowercase string union on
+ *  the TS side (`"keep"` / `"disable"`) so the React decision-map keeps a
+ *  narrow shape.
+ * 
+ *  - `Keep` — explicit "leave this skill enabled" choice. A no-op at write
+ *    time; the user's intent is recorded in React state so the per-row UI
+ *    reflects it, but `apply_machine_toml` does not touch the on-disk file
+ *    for Keep entries.
+ *  - `Disable` — adds the skill to the global `disabled` set in
+ *    `machine.toml` (the same set toggled by `set_skill_disabled` in the
+ *    Skills view). Idempotent on the disabled set.
+ */
+export type TriageDecisionKind = "keep" | "disable";
 
 /**
  *  A single skill's per-row payload in the triage panel.

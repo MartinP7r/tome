@@ -86,15 +86,25 @@ export function FindingRow({ finding, onApplyFix }: FindingRowProps) {
       </div>
       <div className={styles.trailing}>
         {fixable && finding.dry_run_description != null ? (
+          // Phase 27 plan 27-03 / Pitfall 3 — PreviewPopover's body went from
+          // a `dryRunDescription: string` prop to a `children: ReactNode`
+          // slot so the Apply flow can host a structured MachineTomlDiff.
+          // The Doctor flow renders the same single-sentence body by
+          // wrapping the description in a <p>; everything else
+          // (triggerLabel, helperText, width) keeps its default value so
+          // the rendered output is visually identical to the pre-refactor
+          // shape (UI-SPEC §Components §PreviewPopover unchanged for
+          // Doctor).
           <PreviewPopover
-            dryRunDescription={finding.dry_run_description}
             onApply={async () => {
               // Clear any prior failure so the retry attempt starts clean.
               setLocalError(null);
               await onApplyFix(finding.id);
             }}
             onError={setLocalError}
-          />
+          >
+            <p>{finding.dry_run_description}</p>
+          </PreviewPopover>
         ) : (
           // D-12: non-fixable findings show a verbatim remediation hint and
           // NO button.

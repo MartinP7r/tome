@@ -190,6 +190,20 @@ pub use machine::default_machine_path;
 /// Load `machine.toml` from the given path. Re-exported alongside
 /// [`MachinePrefs`] for the same reason (plan 27-01b).
 pub use machine::load as load_machine_prefs;
+/// Phase 27 plan 27-03 (SYNC-03) — the desktop `apply_machine_toml` command
+/// commits proposed prefs via the canonical atomic temp+rename. Re-exported
+/// alongside [`load_machine_prefs`] so the GUI does not need to know the
+/// `machine` module path; this also keeps the public API symmetric (load /
+/// save) without lifting the whole module to `pub`.
+pub use machine::save as save_machine_prefs;
+/// Phase 27 plan 27-03 (SYNC-03) — the desktop `preview_machine_toml` command
+/// returns a structured Myers diff between the on-disk `machine.toml` and the
+/// proposed prefs, rendered as a `MachineTomlDiff` inside the `PreviewPopover`.
+/// The types ([`MachineTomlPreview`], [`DiffLine`], [`DiffLineKind`]) and the
+/// helper ([`preview_save`](machine::preview_save)) are re-exported here so
+/// `tome-desktop`'s `commands.rs` can use them without touching the gated
+/// `machine` module.
+pub use machine::{DiffLine, DiffLineKind, MachineTomlPreview, preview_save};
 
 /// Phase 26 plan 26-03 (VIEW-03) — `tome-desktop` accepts `SkillName` as the
 /// input arg for the 4 new commands (`get_skill_detail`, `set_skill_disabled`,

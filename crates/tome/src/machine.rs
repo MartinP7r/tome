@@ -257,6 +257,116 @@ pub fn load(path: &Path) -> Result<MachinePrefs> {
     Ok(prefs)
 }
 
+/// Single line in a `MachineTomlPreview`. Surfaces the side it lives on as a
+/// 1-indexed line number (against the OLD side for `Removed`, against the NEW
+/// side for `Added` + `Unchanged`) plus the literal content of the line
+/// (trailing `\n` stripped — the diff renderer reintroduces the newline visually).
+///
+/// Produced by [`preview_save`] and consumed by the Desktop GUI's
+/// `MachineTomlDiff` component via the `preview_machine_toml` Tauri command.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct DiffLine {
+    /// 1-indexed line number on the side this line lives on.
+    pub line_number: u32,
+    /// Whether this line was removed, added, or unchanged in the diff.
+    pub kind: DiffLineKind,
+    /// Literal text of the line, without the trailing newline character.
+    pub content: String,
+}
+
+/// Kind of change for a [`DiffLine`]. Serializes as the lowercase tag names
+/// (`"unchanged"`, `"removed"`, `"added"`) for direct consumption by the React
+/// `MachineTomlDiff` component (see `27-UI-SPEC.md` §MachineTomlDiff).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub enum DiffLineKind {
+    Unchanged,
+    Removed,
+    Added,
+}
+
+/// Structured Myers line-diff between the on-disk `machine.toml` and the
+/// canonical `toml::to_string_pretty(proposed)` serialization.
+///
+/// Returned by [`preview_save`]; consumed by the Desktop GUI's
+/// `preview_machine_toml` Tauri command. The companion `apply_machine_toml`
+/// command commits the proposed prefs via the existing atomic [`save`] —
+/// `preview_save` itself is a pure (no-write) helper.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct MachineTomlPreview {
+    /// Every line of the diff in display order: Equal/Removed/Added.
+    pub lines: Vec<DiffLine>,
+    /// Number of [`DiffLineKind::Added`] entries in `lines`.
+    pub added_count: usize,
+    /// Number of [`DiffLineKind::Removed`] entries in `lines`.
+    pub removed_count: usize,
+}
+
+/// Compute a Myers line-diff between the current on-disk `machine.toml`
+/// content and the canonical serialization of `proposed`. A missing
+/// `current_path` is treated as empty current text — the very first Apply
+/// shows every proposed line as Added.
+///
+/// This is the "preview" half of the Desktop GUI's preview-then-apply flow
+/// (SYNC-03 / SC#3). It performs **no filesystem writes** — the apply step
+/// uses the existing atomic [`save`] when the user explicitly confirms in
+/// the PreviewPopover. The diff is computed via `similar::TextDiff::from_lines`
+/// (MIT, mitsuhiko — see workspace `Cargo.toml` for the audit reference).
+pub fn preview_save(proposed: &MachinePrefs, current_path: &Path) -> Result<MachineTomlPreview> {
+    let current_text = std::fs::read_to_string(current_path).unwrap_or_default();
+    let proposed_text =
+        toml::to_string_pretty(proposed).context("failed to serialize proposed machine prefs")?;
+
+    let diff = similar::TextDiff::from_lines(&current_text, &proposed_text);
+    let mut lines = Vec::new();
+    let mut added_count = 0usize;
+    let mut removed_count = 0usize;
+    let mut current_line: u32 = 1;
+    let mut proposed_line: u32 = 1;
+
+    for change in diff.iter_all_changes() {
+        let (kind, line_number) = match change.tag() {
+            similar::ChangeTag::Equal => {
+                let n = proposed_line;
+                proposed_line += 1;
+                current_line += 1;
+                (DiffLineKind::Unchanged, n)
+            }
+            similar::ChangeTag::Delete => {
+                removed_count += 1;
+                let n = current_line;
+                current_line += 1;
+                (DiffLineKind::Removed, n)
+            }
+            similar::ChangeTag::Insert => {
+                added_count += 1;
+                let n = proposed_line;
+                proposed_line += 1;
+                (DiffLineKind::Added, n)
+            }
+        };
+        // `Change<&str>::to_string_lossy()` yields the line's literal text
+        // (with the trailing newline preserved) as a Cow<str>. We strip the
+        // trailing `\n` because the renderer reintroduces newlines visually
+        // — keeping it in `content` would double up on display.
+        let content = change.to_string_lossy().trim_end_matches('\n').to_string();
+        lines.push(DiffLine {
+            line_number,
+            kind,
+            content,
+        });
+    }
+
+    Ok(MachineTomlPreview {
+        lines,
+        added_count,
+        removed_count,
+    })
+}
+
 /// Save machine preferences to a TOML file using atomic temp+rename,
 /// creating parent directories as needed.
 pub fn save(prefs: &MachinePrefs, path: &Path) -> Result<()> {
@@ -901,6 +1011,103 @@ bogus = "y"
         assert!(
             result.is_err(),
             "expected parse failure for unknown auto_install_plugins value, got: {result:?}"
+        );
+    }
+
+    // === preview_save (SYNC-03 27-03 Task 2) ===
+    //
+    // `preview_save(proposed, current_path) -> Result<MachineTomlPreview>` returns
+    // a line-by-line Myers diff (via the `similar` crate) between the current
+    // on-disk machine.toml text and the canonical `toml::to_string_pretty` of the
+    // proposed prefs. The diff is the load-bearing piece that powers the
+    // PreviewPopover in the Desktop GUI — the user MUST see the diff and click
+    // [Apply] before any write occurs (SC#3 "no silent writes").
+
+    #[test]
+    fn preview_save_diffs_added_disabled_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Step 1: write current state with one disabled skill.
+        let mut current = MachinePrefs::default();
+        current.disable(SkillName::new("foo").unwrap());
+        save(&current, &path).unwrap();
+
+        // Step 2: build proposed state with two disabled skills.
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("foo").unwrap());
+        proposed.disable(SkillName::new("bar").unwrap());
+
+        // Step 3: compute preview.
+        let preview = preview_save(&proposed, &path).unwrap();
+
+        // Should have at least one added line (the new `bar` membership) and at
+        // least one removed line (the old `disabled = ["foo"]` shape).
+        assert!(
+            preview.added_count >= 1,
+            "expected at least one added line, got preview={preview:?}"
+        );
+        assert!(
+            preview.removed_count >= 1,
+            "expected at least one removed line, got preview={preview:?}"
+        );
+        // And the `bar` token must appear in an Added line's content.
+        let added_contains_bar = preview
+            .lines
+            .iter()
+            .any(|l| matches!(l.kind, DiffLineKind::Added) && l.content.contains("bar"));
+        assert!(
+            added_contains_bar,
+            "expected an Added line containing `bar`, got preview={preview:?}"
+        );
+    }
+
+    #[test]
+    fn preview_save_noop_when_proposed_matches_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("only-skill").unwrap());
+
+        // Write the canonical serialization to disk; proposed matches byte-for-byte.
+        let canonical = toml::to_string_pretty(&proposed).unwrap();
+        std::fs::write(&path, &canonical).unwrap();
+
+        let preview = preview_save(&proposed, &path).unwrap();
+        assert_eq!(preview.added_count, 0, "expected no additions, got: {preview:?}");
+        assert_eq!(preview.removed_count, 0, "expected no removals, got: {preview:?}");
+        assert!(
+            preview
+                .lines
+                .iter()
+                .all(|l| matches!(l.kind, DiffLineKind::Unchanged)),
+            "expected all lines Unchanged, got: {preview:?}"
+        );
+    }
+
+    #[test]
+    fn preview_save_missing_current_file_treats_as_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml"); // intentionally absent
+
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("new-skill").unwrap());
+
+        let preview = preview_save(&proposed, &path).unwrap();
+        // Every non-empty proposed line should show as Added; nothing Removed.
+        assert!(preview.added_count >= 1);
+        assert_eq!(preview.removed_count, 0);
+        // Line numbers on Added entries are 1-indexed against the new side.
+        let first_added = preview
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, DiffLineKind::Added))
+            .expect("expected at least one Added line");
+        assert!(
+            first_added.line_number >= 1,
+            "line numbers are 1-indexed, got {}",
+            first_added.line_number
         );
     }
 

@@ -11,7 +11,9 @@
 //! (T-25-04-EoP mitigation).
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
+use tome::MachineTomlPreview;
 use tome::SkillName;
 use tome::TomePaths;
 use tome::config::Config;
@@ -21,6 +23,41 @@ use crate::error::{ErrorCode, TomeError};
 use crate::sink::TauriEventSink;
 use crate::sync_state::SyncState;
 use crate::sync_types::{LockfileDiff, lockfile_diff_projection};
+
+/// A single triage decision sent from the GUI's Sync route to the Rust
+/// `preview_machine_toml` / `apply_machine_toml` commands.
+///
+/// One entry per skill the user has triaged (the `Map<SkillName, …>` in
+/// `useSync().decisions` is flattened to `Vec<TriageDecision>` at IPC time).
+/// A skill missing from the Vec is implicitly Keep — the React side only
+/// surfaces decisions the user explicitly changed away from the default.
+///
+/// `SkillName`'s `Deserialize` impl validates the name at the IPC boundary
+/// (T-27-03-02 mitigation — path-separator / empty-name rejection happens
+/// before the value reaches the mutator).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
+pub struct TriageDecision {
+    pub skill: SkillName,
+    pub decision: TriageDecisionKind,
+}
+
+/// Decision kind for [`TriageDecision`]. Stable lowercase string union on
+/// the TS side (`"keep"` / `"disable"`) so the React decision-map keeps a
+/// narrow shape.
+///
+/// - `Keep` — explicit "leave this skill enabled" choice. A no-op at write
+///   time; the user's intent is recorded in React state so the per-row UI
+///   reflects it, but `apply_machine_toml` does not touch the on-disk file
+///   for Keep entries.
+/// - `Disable` — adds the skill to the global `disabled` set in
+///   `machine.toml` (the same set toggled by `set_skill_disabled` in the
+///   Skills view). Idempotent on the disabled set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "lowercase")]
+pub enum TriageDecisionKind {
+    Keep,
+    Disable,
+}
 
 /// Resolve the user's real `tome_home` + `Config` the same way the CLI does
 /// with no flags: default config path, then default `tome_home`.
@@ -253,6 +290,100 @@ fn offline_resolved_paths(_config: &Config, _paths: &TomePaths) -> (ResolvedGitP
     (BTreeMap::new(), Vec::new())
 }
 
+/// Apply a list of triage decisions to a cloned [`tome::MachinePrefs`].
+///
+/// Shared between `preview_machine_toml` and `apply_machine_toml` — both
+/// commands need the same projection from "live disk state + triage
+/// decisions" to "proposed prefs". Extracted as a free fn so the unit tests
+/// can exercise the same code path the IPC commands hit.
+///
+/// `Keep` decisions are no-ops at write time (the user's explicit "leave
+/// enabled" intent is recorded in React state only). `Disable` decisions
+/// add the skill to the global `disabled` set via the existing public
+/// `MachinePrefs::disable` mutator.
+fn apply_decisions_to_prefs(
+    prefs: &mut tome::MachinePrefs,
+    decisions: &[TriageDecision],
+) {
+    for d in decisions {
+        match d.decision {
+            TriageDecisionKind::Disable => prefs.disable(d.skill.clone()),
+            TriageDecisionKind::Keep => {
+                // No-op — Keep is explicit React state; nothing to write.
+            }
+        }
+    }
+}
+
+/// Internal: load the current machine.toml, apply decisions, return the
+/// preview diff. Pure (no writes) — the apply step is a separate helper.
+fn preview_decisions(
+    decisions: &[TriageDecision],
+    machine_path: &Path,
+) -> anyhow::Result<MachineTomlPreview> {
+    let mut proposed = tome::load_machine_prefs(machine_path)?;
+    apply_decisions_to_prefs(&mut proposed, decisions);
+    tome::preview_save(&proposed, machine_path)
+}
+
+/// Internal: load the current machine.toml, apply decisions, commit via
+/// the canonical atomic `save_machine_prefs` (temp+rename).
+fn apply_decisions(decisions: &[TriageDecision], machine_path: &Path) -> anyhow::Result<()> {
+    let mut proposed = tome::load_machine_prefs(machine_path)?;
+    apply_decisions_to_prefs(&mut proposed, decisions);
+    tome::save_machine_prefs(&proposed, machine_path)
+}
+
+/// Compute the machine.toml line-diff for a list of pending triage
+/// decisions (Phase 27 plan 27-03 / SYNC-03).
+///
+/// Read-only: never writes to disk. Reads the current `~/.config/tome/machine.toml`,
+/// applies the decisions to a cloned [`tome::MachinePrefs`], then runs
+/// [`tome::machine::preview_save`] to produce a structured Myers line-diff
+/// the React `MachineTomlDiff` component renders inside `PreviewPopover`.
+///
+/// The companion [`apply_machine_toml`] command commits the same proposed
+/// prefs via atomic temp+rename when the user explicitly clicks `[Apply]`
+/// inside the popover. The two commands re-read the current machine.toml at
+/// each call — no caching between Preview and Apply. If the file changes
+/// externally in the gap, Apply overwrites (T-27-03-07 disposition: accept;
+/// single-user app).
+///
+/// Path resolution happens server-side via [`tome::default_machine_path`];
+/// the React side never passes a path (T-27-03-01 mitigation).
+#[tauri::command]
+#[specta::specta]
+pub fn preview_machine_toml(
+    _app: tauri::AppHandle,
+    decisions: Vec<TriageDecision>,
+) -> Result<MachineTomlPreview, TomeError> {
+    let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
+    preview_decisions(&decisions, &machine_path).map_err(TomeError::from)
+}
+
+/// Commit a list of pending triage decisions to `machine.toml` (Phase 27
+/// plan 27-03 / SYNC-03).
+///
+/// Writes via the canonical [`tome::machine::save`] (atomic temp+rename),
+/// which fires the Phase-26 watcher's `MachinePrefsChanged` event for free —
+/// the React `useSkills` / `useSkillDetail` hooks observe the change and
+/// refetch automatically (no manual refresh signal needed).
+///
+/// Path resolution is server-side via [`tome::default_machine_path`];
+/// the React side never passes a path. The double-confirmation contract
+/// (T-27-03-06 / SC#3 "no silent writes") is enforced at the UI layer —
+/// this command MUST be reached only through the explicit `[Apply]` button
+/// inside the `PreviewPopover`.
+#[tauri::command]
+#[specta::specta]
+pub fn apply_machine_toml(
+    _app: tauri::AppHandle,
+    decisions: Vec<TriageDecision>,
+) -> Result<(), TomeError> {
+    let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
+    apply_decisions(&decisions, &machine_path).map_err(TomeError::from)
+}
+
 /// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).
 ///
 /// `async` by design — the synchronous `tome::sync` body runs inside
@@ -387,6 +518,160 @@ pub fn cancel_sync(state: tauri::State<'_, SyncState>) -> Result<(), TomeError> 
         token.cancel();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod machine_toml_apply_tests {
+    // Behavior tests for the SYNC-03 preview/apply flow (`preview_machine_toml`
+    // + `apply_machine_toml`). The Tauri command bodies require an `AppHandle`
+    // to invoke directly, so we exercise the underlying decision-applying
+    // logic against a tempdir machine.toml via the shared
+    // `apply_decisions_to_prefs` helper. The IPC commands themselves
+    // are thin wrappers around the same helper, so coverage transfers.
+
+    use super::*;
+
+    fn skill(name: &str) -> SkillName {
+        SkillName::new(name).expect("test skill name must validate")
+    }
+
+    /// preview_save: a `Disable` decision for a new skill surfaces an added
+    /// `"foo"` line in the diff (the machine.toml gains a `disabled = [...]`
+    /// entry containing `foo`).
+    #[test]
+    fn preview_disable_adds_disabled_line() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Seed an empty machine.toml so preview compares to an existing file.
+        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        let preview = preview_decisions(&decisions, &machine_path).unwrap();
+        assert!(
+            preview.added_count >= 1,
+            "expected at least one added line, got {preview:?}"
+        );
+        assert!(
+            preview
+                .lines
+                .iter()
+                .any(|l| matches!(l.kind, tome::DiffLineKind::Added)
+                    && l.content.contains("foo")),
+            "expected an Added line containing 'foo', got {preview:?}"
+        );
+        let _ = tome::DiffLineKind::Unchanged; // smoke-test re-export resolves
+    }
+
+    /// apply: writes the proposed machine.toml via atomic save; the file
+    /// contains the new disabled skill on disk after the call returns.
+    #[test]
+    fn apply_writes_machine_toml() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Start with an empty machine.toml.
+        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        // Round-trip the file: the new prefs must hold `foo` in `disabled`.
+        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
+        assert!(
+            reloaded.is_disabled("foo"),
+            "apply must persist the Disable decision to disk"
+        );
+    }
+
+    /// apply preserves unrelated pre-existing entries — the apply path adds
+    /// the chosen Disable decisions to whatever is already on disk, not
+    /// replaces wholesale.
+    #[test]
+    fn apply_preserves_existing_entries() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+
+        // Pre-seed the file with `existing` already disabled.
+        let mut existing = tome::MachinePrefs::default();
+        existing.disable(skill("existing"));
+        tome::save_machine_prefs(&existing, &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("new-one"),
+            decision: TriageDecisionKind::Disable,
+        }];
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
+        assert!(
+            reloaded.is_disabled("existing"),
+            "apply must preserve pre-existing disabled entries"
+        );
+        assert!(
+            reloaded.is_disabled("new-one"),
+            "apply must add the new Disable decision"
+        );
+    }
+
+    /// apply is idempotent: calling it twice with the same decisions yields
+    /// the same file content byte-for-byte.
+    #[test]
+    fn apply_is_idempotent() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Disable,
+        }];
+
+        apply_decisions(&decisions, &machine_path).unwrap();
+        let first = std::fs::read(&machine_path).unwrap();
+        apply_decisions(&decisions, &machine_path).unwrap();
+        let second = std::fs::read(&machine_path).unwrap();
+        assert_eq!(
+            first, second,
+            "two applies of the same decision set must yield byte-identical machine.toml"
+        );
+    }
+
+    /// `Keep` decisions are no-ops — they don't add anything to the
+    /// disabled set. apply with a Keep-only decision list leaves the file
+    /// unchanged.
+    #[test]
+    fn keep_decision_is_noop() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let machine_path = tmp.path().join("machine.toml");
+        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
+        let before = std::fs::read(&machine_path).unwrap();
+
+        let decisions = vec![TriageDecision {
+            skill: skill("foo"),
+            decision: TriageDecisionKind::Keep,
+        }];
+        apply_decisions(&decisions, &machine_path).unwrap();
+
+        let after = std::fs::read(&machine_path).unwrap();
+        assert_eq!(
+            before, after,
+            "Keep-only decisions must not change machine.toml"
+        );
+        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
+        assert!(
+            !reloaded.is_disabled("foo"),
+            "Keep must NOT mark a skill as disabled"
+        );
+    }
 }
 
 #[cfg(test)]

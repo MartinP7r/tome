@@ -26,10 +26,13 @@
 // shell wave catches up — 27-04 will graduate the stepper). The flex
 // split here keeps the split visually correct without a shell refactor.
 //
-// **Plan 27-02 Apply seam.** TriagePanel's `onApply` is a `// TODO 27-03`
-// no-op stub — plan 27-03 wires the PreviewPopover (preview_machine_toml
-// command + machine.toml diff render). The button still renders with the
-// correct disabled state today; clicking it does nothing.
+// **Plan 27-03 Apply flow (now wired).** TriagePanel owns its own
+// PreviewPopover + MachineTomlDiff + applyError state internally; the
+// only seam SyncView passes down is `onApplied={applyComplete}` from
+// useSync, which clears decisions + selected triage skill on success.
+// The watcher's MachinePrefsChanged event fires for free on the atomic
+// machine.toml write; idle hooks (useStatus, useSkills, useDoctorReport)
+// refetch on their own.
 
 import { useStatus } from "../hooks/useStatus";
 import { useSync } from "../hooks/useSync";
@@ -69,6 +72,7 @@ export function SyncView() {
     onDecisionChange,
     onBulkAction,
     selectTriageSkill,
+    applyComplete,
   } = useSync();
   const { status } = useStatus();
 
@@ -131,9 +135,7 @@ export function SyncView() {
                 selectedSkill={selectedTriageSkill}
                 onSelect={selectTriageSkill}
                 onBulkAction={onBulkAction}
-                onApply={() => {
-                  /* TODO 27-03: open PreviewPopover */
-                }}
+                onApplied={applyComplete}
               />
             </div>
             <div className={styles.detailColumn}>
@@ -192,9 +194,7 @@ export function SyncView() {
                 selectedSkill={selectedTriageSkill}
                 onSelect={selectTriageSkill}
                 onBulkAction={onBulkAction}
-                onApply={() => {
-                  /* TODO 27-03: open PreviewPopover */
-                }}
+                onApplied={applyComplete}
               />
             </div>
             <div className={styles.detailColumn}>

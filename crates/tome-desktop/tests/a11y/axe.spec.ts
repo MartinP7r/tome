@@ -209,6 +209,55 @@ test("health view passes axe WCAG-AA", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
+test("sync apply popover (machine.toml diff) passes axe WCAG-AA (Phase 27 plan 27-03)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-03 — SYNC-03 Apply flow. Open the triage panel via
+  // ?triage=1, change one decision so the [Apply N decisions] button
+  // enables, click it to open the PreviewPopover. The popover renders the
+  // MachineTomlDiff slot (a table with the additions/removals header).
+  // Scope the axe scan to the dialog so it measures the popover
+  // composition (table + glyph gutters + helper + buttons).
+  await page.goto("/?triage=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("heading", { level: 2, name: /^NEW/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // Toggle the first row's [✓ keep] chip to "disable" so the Apply button
+  // enables. The chip is the inline toggle in TriageRow (D-12).
+  await page.getByRole("button", { name: /keep/i }).first().click();
+  // Wait for the Apply button label to update to a non-zero count.
+  await page
+    .getByRole("button", { name: /Apply [1-9]\d* triage decisions/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: /Apply [1-9]\d* triage decisions/ })
+    .click();
+  // PreviewPopover renders as a Dialog. Wait for the machine.toml diff
+  // table to render — its aria-label includes "machine.toml" so we anchor
+  // on that.
+  await page
+    .getByRole("dialog")
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("table", { name: /machine\.toml/i })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Scope axe to the dialog so the scan measures the popover specifically.
+  const results = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
 test("preview popover (Health Fix) passes axe WCAG-AA", async ({ page }) => {
   await page
     .getByRole("option", { name: /^Health, Health section/ })
