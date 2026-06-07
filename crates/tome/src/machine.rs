@@ -904,6 +904,103 @@ bogus = "y"
         );
     }
 
+    // === preview_save (SYNC-03 27-03 Task 2) ===
+    //
+    // `preview_save(proposed, current_path) -> Result<MachineTomlPreview>` returns
+    // a line-by-line Myers diff (via the `similar` crate) between the current
+    // on-disk machine.toml text and the canonical `toml::to_string_pretty` of the
+    // proposed prefs. The diff is the load-bearing piece that powers the
+    // PreviewPopover in the Desktop GUI — the user MUST see the diff and click
+    // [Apply] before any write occurs (SC#3 "no silent writes").
+
+    #[test]
+    fn preview_save_diffs_added_disabled_skill() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        // Step 1: write current state with one disabled skill.
+        let mut current = MachinePrefs::default();
+        current.disable(SkillName::new("foo").unwrap());
+        save(&current, &path).unwrap();
+
+        // Step 2: build proposed state with two disabled skills.
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("foo").unwrap());
+        proposed.disable(SkillName::new("bar").unwrap());
+
+        // Step 3: compute preview.
+        let preview = preview_save(&proposed, &path).unwrap();
+
+        // Should have at least one added line (the new `bar` membership) and at
+        // least one removed line (the old `disabled = ["foo"]` shape).
+        assert!(
+            preview.added_count >= 1,
+            "expected at least one added line, got preview={preview:?}"
+        );
+        assert!(
+            preview.removed_count >= 1,
+            "expected at least one removed line, got preview={preview:?}"
+        );
+        // And the `bar` token must appear in an Added line's content.
+        let added_contains_bar = preview
+            .lines
+            .iter()
+            .any(|l| matches!(l.kind, DiffLineKind::Added) && l.content.contains("bar"));
+        assert!(
+            added_contains_bar,
+            "expected an Added line containing `bar`, got preview={preview:?}"
+        );
+    }
+
+    #[test]
+    fn preview_save_noop_when_proposed_matches_disk() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml");
+
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("only-skill").unwrap());
+
+        // Write the canonical serialization to disk; proposed matches byte-for-byte.
+        let canonical = toml::to_string_pretty(&proposed).unwrap();
+        std::fs::write(&path, &canonical).unwrap();
+
+        let preview = preview_save(&proposed, &path).unwrap();
+        assert_eq!(preview.added_count, 0, "expected no additions, got: {preview:?}");
+        assert_eq!(preview.removed_count, 0, "expected no removals, got: {preview:?}");
+        assert!(
+            preview
+                .lines
+                .iter()
+                .all(|l| matches!(l.kind, DiffLineKind::Unchanged)),
+            "expected all lines Unchanged, got: {preview:?}"
+        );
+    }
+
+    #[test]
+    fn preview_save_missing_current_file_treats_as_empty() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("machine.toml"); // intentionally absent
+
+        let mut proposed = MachinePrefs::default();
+        proposed.disable(SkillName::new("new-skill").unwrap());
+
+        let preview = preview_save(&proposed, &path).unwrap();
+        // Every non-empty proposed line should show as Added; nothing Removed.
+        assert!(preview.added_count >= 1);
+        assert_eq!(preview.removed_count, 0);
+        // Line numbers on Added entries are 1-indexed against the new side.
+        let first_added = preview
+            .lines
+            .iter()
+            .find(|l| matches!(l.kind, DiffLineKind::Added))
+            .expect("expected at least one Added line");
+        assert!(
+            first_added.line_number >= 1,
+            "line numbers are 1-indexed, got {}",
+            first_added.line_number
+        );
+    }
+
     /// HARD-08: rename failure during atomic save must leave the previous
     /// `machine.toml` content untouched. machine.toml carries per-machine
     /// disable/override state — corrupting it would silently desync user
