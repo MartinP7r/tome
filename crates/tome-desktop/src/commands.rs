@@ -475,6 +475,7 @@ pub async fn start_sync(
             quiet: true,
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
+            start_stage: None,
         };
         tome::sync(&config, &paths, opts, &sink, &cancel)
     });
