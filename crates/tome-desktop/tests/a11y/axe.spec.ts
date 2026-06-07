@@ -284,3 +284,61 @@ test("preview popover (Health Fix) passes axe WCAG-AA", async ({ page }) => {
     .analyze();
   expect(results.violations).toEqual([]);
 });
+
+test("sync view in-progress + cancelled terminal state passes axe WCAG-AA (Phase 27 plan 27-04)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-04 — SYNC-04 cancellation invariant + terminal-state
+  // rendering. Drive the cancelled-terminal branch by:
+  //   1. Load with ?sync_cancelled=1 (the mock returns a cancel-shaped
+  //      error 200ms after start_sync is invoked).
+  //   2. Navigate to Sync; click [Run sync] → kicks off start_sync.
+  //   3. Click [Cancel sync] inside the window before the mock resolves
+  //      → sets the cancelRequestedRef.
+  //   4. Wait for the "Sync cancelled" summary heading to appear.
+  //   5. Scan the whole route for axe violations — the stepper has 6
+  //      cancelled rows + the summary block + [Run sync] + [Dismiss].
+  await page.goto("/?sync_cancelled=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Scan A — in-progress state. Click [Run sync], wait for the stepper
+  // to mount (list role appears), then scan.
+  await page.getByRole("button", { name: "Run sync" }).click();
+  await page
+    .getByRole("list", { name: "Sync pipeline progress" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: "Cancel sync at next stage boundary" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  let results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+
+  // Scan B — cancelled terminal state. Click [Cancel sync] (which sets
+  // the cancelRequestedRef), then wait for the mock to resolve with
+  // the cancel-shaped error → the summary heading appears.
+  await page
+    .getByRole("button", { name: "Cancel sync at next stage boundary" })
+    .click();
+  await page
+    .getByRole("heading", { level: 1, name: "Sync cancelled" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});

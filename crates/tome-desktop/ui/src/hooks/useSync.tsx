@@ -65,9 +65,10 @@ export const SYNC_STAGES: readonly SyncStage[] = [
   "Save",
 ] as const;
 
-/** Per-stage status. The shape is intentionally narrow for plan 27-01b —
- *  StageStepper (27-04) and SyncOutcome (27-05) will expand with terminal
- *  flags + partial-failure rows. */
+/** Per-stage status. Plan 27-01b shipped pending/active/complete; plan
+ *  27-04 adds cancelled + failed to support the StageStepper terminal
+ *  rendering (D-18). Plan 27-05 will populate `partialFailures` on the
+ *  complete variant from `SyncOutcomeWire.partialFailures` (D-20). */
 export type StageStatus =
   | { kind: "pending" }
   | {
@@ -79,15 +80,39 @@ export type StageStatus =
   | {
       kind: "complete";
       durationMs: number;
-    };
+      /** D-20 partial-failure rows. Empty until 27-05 populates. */
+      partialFailures: PartialFailure[];
+    }
+  | { kind: "failed"; durationMs: number; error: TomeError }
+  | { kind: "cancelled" };
+
+/** Per-operation failure inside an otherwise-successful stage (D-20).
+ *  Plan 27-05 will populate this from `SyncOutcomeWire.partialFailures`. */
+export interface PartialFailure {
+  itemName: string;
+  error: TomeError;
+}
 
 export type SyncTerminal =
-  /** Sync finished successfully — render the post-sync "Sync complete"
-   *  placeholder. Plan 27-05 swaps for a structured SyncOutcomeWire. */
+  /** Sync finished successfully. Plan 27-05 swaps for a structured
+   *  SyncOutcomeWire. */
   | { kind: "ok" }
+  /** User clicked Cancel; the pipeline bailed at the next stage
+   *  boundary. The library is in a consistent state (SC#4). */
+  | { kind: "cancelled" }
   /** Sync returned an error from `commands.startSync()` (including the
    *  T-27-01b-07 Conflict from a double-fire). */
   | { kind: "err"; error: TomeError };
+
+/** Derived classification of the in-flight run's outcome. Drives
+ *  SyncView's terminal-state branch selection. `null` while idle or
+ *  running. */
+export type SyncTerminalKind =
+  | "success"
+  | "cancelled"
+  | "failed"
+  | "partial"
+  | null;
 
 export interface UseSyncResult {
   /** Per-stage state, in pipeline order. */
@@ -102,6 +127,10 @@ export interface UseSyncResult {
   isRunningRef: RefObject<boolean>;
   /** Terminal outcome — `null` while idle or running. */
   outcome: SyncTerminal | null;
+  /** Plan 27-04 — derived classification of the outcome for SyncView's
+   *  terminal-state branch selection (success / cancelled / failed /
+   *  partial). `null` while idle or running. */
+  terminalKind: SyncTerminalKind;
   /** Plan 27-02 — current lockfile diff snapshot driving the triage panel.
    *  `null` before first fetch resolves; `is_empty()` true when no
    *  changes are pending. */
@@ -176,6 +205,18 @@ function useSyncInternal(): UseSyncResult {
   // Finished handler can compute `durationMs`. Lives in a ref because it's
   // ephemeral per-run state; not part of the render-visible result.
   const stageStartAt = useRef<Map<SyncStage, number>>(new Map());
+
+  // Plan 27-04: cancel-detection ref. Set when the user clicks
+  // [Cancel sync]; read when `commands.startSync()` resolves to decide
+  // whether to classify the outcome as { kind: "cancelled" } (per D-17 /
+  // D-18) versus the generic { kind: "err" } branch (Conflict, etc.).
+  //
+  // Why a ref and not state: this is per-run ephemeral data — the value
+  // only matters during the window between `cancel()` and the
+  // `startSync` Result resolving — and changing it must not trigger a
+  // re-render mid-run. Cleared on `start()` and `dismiss()` so a fresh
+  // run starts from a clean slate.
+  const cancelRequestedRef = useRef(false);
 
   // Pitfall 6 gate. The progress handler reads this to decide whether to
   // accumulate or drop events. Set to true on `start()` BEFORE the
@@ -297,6 +338,7 @@ function useSyncInternal(): UseSyncResult {
           next.set(payload.stage, {
             kind: "complete",
             durationMs: Date.now() - startedAt,
+            partialFailures: [], // Plan 27-05 populates from SyncOutcomeWire.
           });
         }
         return next;
@@ -359,6 +401,7 @@ function useSyncInternal(): UseSyncResult {
     setOutcome(null);
     setIsRunning(true);
     isRunningRef.current = true;
+    cancelRequestedRef.current = false;
 
     const res = await commands.startSync();
 
@@ -368,12 +411,38 @@ function useSyncInternal(): UseSyncResult {
     setIsRunning(false);
     if (res.status === "ok") {
       setOutcome({ kind: "ok" });
+    } else if (cancelRequestedRef.current) {
+      // Plan 27-04: user clicked Cancel mid-run. The Rust side returned
+      // Err("sync cancelled"). Classify as cancelled rather than as a
+      // generic error and transform the stages Map so any still-active
+      // or still-pending stage renders as cancelled in the stepper
+      // (D-18: stepper transforms in place). The library is in a
+      // consistent state per SC#4 — the integration test pin.
+      setStages((prev) => {
+        const next = new Map<SyncStage, StageStatus>();
+        for (const [stage, status] of prev) {
+          if (status.kind === "active" || status.kind === "pending") {
+            next.set(stage, { kind: "cancelled" });
+          } else {
+            next.set(stage, status);
+          }
+        }
+        return next;
+      });
+      setOutcome({ kind: "cancelled" });
     } else {
       setOutcome({ kind: "err", error: res.error });
     }
   }, []);
 
   const cancel = useCallback(async (): Promise<void> => {
+    // Plan 27-04: flip the local cancel-requested flag so the start()
+    // promise's branch can classify the outcome as { kind: "cancelled" }
+    // instead of generic { kind: "err" }. The Rust side returns
+    // Err("sync cancelled") with ErrorCode::Internal (the catch-all)
+    // because the cancellation pathway doesn't carry its own ErrorCode
+    // sentinel; the React-side ref disambiguates.
+    cancelRequestedRef.current = true;
     // Fire-and-forget on the Rust side; the actual stop signal flows via
     // CancelToken which `tome::sync` polls at stage boundaries. The Rust
     // command is idempotent — calling it twice (or while no sync is
@@ -391,6 +460,7 @@ function useSyncInternal(): UseSyncResult {
     setStages(initialStages());
     stageStartAt.current.clear();
     setOutcome(null);
+    cancelRequestedRef.current = false;
     // Plan 27-02: reset the triage state too so the post-Apply / post-
     // cancel idle view returns to a clean slate. The diff itself will be
     // refetched by the watcher (lockfileChanged fires from sync's Save
@@ -410,18 +480,50 @@ function useSyncInternal(): UseSyncResult {
     setSelectedTriageSkill(null);
   }, []);
 
+  // Plan 27-04: derived classification of the run's outcome. Drives
+  // SyncView's terminal-branch selection (success → SyncToast; cancelled
+  // → inline summary in the stepper; failed → stub for 27-05; partial →
+  // stub for 27-05). `null` while idle or running.
+  const terminalKind: SyncTerminalKind = useMemo(() => {
+    if (outcome === null || isRunning) return null;
+    if (outcome.kind === "cancelled") return "cancelled";
+    if (outcome.kind === "err") return "failed";
+    // outcome.kind === "ok" — could still be a partial-failure path
+    // (D-20) once 27-05 populates partialFailures. Until then, ok = success.
+    let totalPartialFailures = 0;
+    for (const status of stages.values()) {
+      if (status.kind === "complete") {
+        totalPartialFailures += status.partialFailures.length;
+      }
+    }
+    return totalPartialFailures > 0 ? "partial" : "success";
+  }, [outcome, isRunning, stages]);
+
+  // Plan 27-04: failure count derived from stages' partialFailures.
+  // Plan 27-05 will widen this to count true failed stages + partial
+  // failures together.
+  const failureCount = useMemo(() => {
+    let n = 0;
+    for (const status of stages.values()) {
+      if (status.kind === "complete") n += status.partialFailures.length;
+      if (status.kind === "failed") n += 1;
+    }
+    return n;
+  }, [stages]);
+
   return {
     stages,
     isRunning,
     isRunningRef,
     outcome,
+    terminalKind,
     diff,
     diffError,
     decisions,
     selectedTriageSkill,
     pendingDecisionCount,
     pendingDiffCount,
-    failureCount: 0, // Stub — 27-05 populates.
+    failureCount,
     start,
     cancel,
     dismiss,

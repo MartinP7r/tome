@@ -1,0 +1,81 @@
+/* SyncToast — Phase 27 plan 27-04.
+ *
+ * Per UI-SPEC §States §Terminal state: top-right anchored, semitransparent
+ * surface, 200ms fade-in / 200ms fade-out around the 5s visible lifetime.
+ * Apple HIG NSAlert transient style.
+ *
+ * The parent decides WHEN to mount this; once mounted, the CSS
+ * `--toast-enter` animation runs once (entrance), and the timer triggered
+ * inside the component fires `onDismiss` after `durationMs`.
+ */
+
+.toast {
+  position: fixed;
+  top: var(--space-6, 24px);
+  right: var(--space-6, 24px);
+
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+
+  padding: var(--space-3, 12px) var(--space-4, 16px);
+  border-radius: 8px;
+  background: var(--bg-elevated, rgb(28 28 30 / 92%));
+  color: var(--label-primary, #ffffff);
+  font: var(--text-body, 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+  font-weight: 500;
+
+  box-shadow:
+    0 6px 16px rgb(0 0 0 / 20%),
+    0 1px 3px rgb(0 0 0 / 12%);
+
+  /* macOS HIG vibrancy: a soft drop-shadow + subtle border so the toast
+   * lifts off the underlying view without competing with content. */
+  border: 1px solid var(--separator, rgb(255 255 255 / 10%));
+
+  z-index: 1000;
+
+  /* Fade-in on mount; CSS handles the entrance, the unmount is owned by
+   * the parent (the setTimeout fires onDismiss → parent stops rendering
+   * the toast). A future enhancement could delay unmount via the
+   * @keyframes outro, but 5s outer + onDismiss is the spec'd shape. */
+  animation: toastFadeIn 200ms ease-out;
+}
+
+@keyframes toastFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message {
+  flex: 1 1 auto;
+}
+
+.dismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: var(--accent, #0a84ff);
+  font: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.dismiss:focus-visible {
+  outline: 2px solid var(--accent, #0a84ff);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    animation: none;
+  }
+}
