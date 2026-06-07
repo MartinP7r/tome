@@ -384,6 +384,36 @@ Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog
 Plans:
 - [ ] TBD (promote with `/gsd:review-backlog` when ready)
 
+### Phase 999.2: Sync idle hero — surface past-run history (BACKLOG)
+
+**Goal:** [Captured for future planning] The Phase-27 Sync idle hero passes its UI contract (last-synced line + "Run sync" CTA + recent-changes disclosure) but feels content-light on a no-history machine. User feedback during 27-UAT (2026-06-07): "the sync screen is a bit empty with no information about past runs." Strengthen the idle state so it conveys signal even before the first sync, and richer signal after.
+
+**Source:** Phase 27 UAT test 3 passed-with-observation.
+
+**Why it matters:**
+- The current recent-changes disclosure relies on a prior run to have content. First-time or freshly-reset machines see an empty disclosure and nothing else of substance.
+- "Past runs" is a natural mental model — users want to see when they synced, what changed, and whether errors were recovered — without leaving the Sync view.
+- The data infrastructure already exists or is one small step away: `synced_at` per-skill (27-01a), `SyncOutcome.partial_failures` (27-05, structurally ready), and `tome.lock` history.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.2`):
+1. **What counts as "past run history"** — last N runs with outcome + timestamp + diff summary? Or just last 1 with a "View all" disclosure?
+2. **Where does the data live?** A new `~/.tome/sync-history.json` log, or derive from `tome.lock` snapshots + manifest timestamps already on disk?
+3. **Persistence policy** — keep all runs, last N, or last 30 days? Rotate vs. never delete?
+4. **First-time UX** — what does the hero say with zero history? Surface info about what sync WILL do (e.g. count of configured directories + estimated skill touch)?
+5. **Inline diff preview from history** — clicking a past run shows its diff? Or just outcome summary?
+6. **Failure recovery affordance** — surface past failed runs prominently with a one-click "retry from where it left off"?
+
+**Related context:**
+- Phase 27 27-01a's `DiscoveredSkill.synced_at: Option<String>` is the per-skill provenance field — already feeds SkillsView's Sort=Recent.
+- Phase 27 27-05's `SyncOutcome` carries `retry_from` + `partial_failures` — the data model for failed-run replay already exists at the IPC boundary.
+- Carry-forward from 27-05-SUMMARY ("`partial_failures` empty until `sync()` inline-surfaces SAFE-01") would benefit from resolution BEFORE this phase ships — past-run failure history is meaningless if the underlying types never populate.
+
+**Requirements:** TBD (to be derived during `/gsd:discuss-phase 999.2`)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
+
 ## Progress
 
 **Execution Order:**
