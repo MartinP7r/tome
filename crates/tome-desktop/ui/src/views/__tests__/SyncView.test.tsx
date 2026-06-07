@@ -22,6 +22,8 @@ const listenSpies = {
 
 const startSyncSpy = vi.fn();
 const cancelSyncSpy = vi.fn();
+const retrySyncFromSpy = vi.fn();
+const retryFailedItemsSpy = vi.fn();
 const getStatusSpy = vi.fn();
 const getLockfileDiffSpy = vi.fn();
 
@@ -68,6 +70,8 @@ vi.mock("../../bindings", () => ({
     getStatus: () => getStatusSpy(),
     startSync: () => startSyncSpy(),
     cancelSync: () => cancelSyncSpy(),
+    retrySyncFrom: (stage: string) => retrySyncFromSpy(stage),
+    retryFailedItems: (failures: unknown) => retryFailedItemsSpy(failures),
     getLockfileDiff: () => getLockfileDiffSpy(),
   },
 }));
@@ -84,6 +88,8 @@ beforeEach(() => {
   listenSpies.menuAction.mockReset();
   startSyncSpy.mockReset();
   cancelSyncSpy.mockReset();
+  retrySyncFromSpy.mockReset();
+  retryFailedItemsSpy.mockReset();
   getStatusSpy.mockReset();
   getLockfileDiffSpy.mockReset();
   cancelSyncSpy.mockResolvedValue({ status: "ok", data: null });
@@ -262,7 +268,11 @@ describe("SyncView — terminal cancelled branch", () => {
 
 describe("SyncView — terminal success branch", () => {
   it("renders the SyncToast 'Sync complete' message when sync succeeds", async () => {
-    startSyncSpy.mockResolvedValueOnce({ status: "ok", data: null });
+    // Plan 27-05: startSync now returns SyncOutcomeWire on success.
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
 
     render(
       <SyncProvider>
@@ -287,5 +297,215 @@ describe("SyncView — terminal success branch", () => {
     const toast = dismissBtn.closest("[role='status']");
     expect(toast).not.toBeNull();
     expect(toast?.textContent).toContain("Sync complete");
+  });
+});
+
+describe("SyncView — terminal failed branch (Plan 27-05)", () => {
+  it("renders the 'Sync failed' summary + [Retry from <stage>] + [Dismiss] when retry_from is set", async () => {
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        result: {
+          code: "Permission",
+          message: "consolidate failed",
+          context: ["permission denied"],
+        },
+        retry_from: "Discover",
+        partial_failures: [],
+      },
+    });
+
+    render(
+      <SyncProvider>
+        <SyncView />
+      </SyncProvider>,
+    );
+    const runButton = await screen.findByRole("button", { name: "Run sync" });
+    await act(async () => {
+      runButton.click();
+    });
+
+    // Heading shape per UI-SPEC §Terminal failed.
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Sync failed" }),
+    ).toBeInTheDocument();
+    // The structured error code is surfaced inline.
+    expect(screen.getByText(/\[Permission\]/)).toBeInTheDocument();
+    // [Retry from Discover] surfaces both in the summary block AND in
+    // the stepper's trailing action row per UI-SPEC §StageStepper.
+    expect(
+      screen.getAllByRole("button", { name: "Retry from Discover" }).length,
+    ).toBeGreaterThanOrEqual(1);
+    // Dismiss is always available as a fallback.
+    expect(
+      screen.getAllByRole("button", { name: "Dismiss sync summary" }).length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders ONLY [Dismiss] when retry_from is null (Save-failure shape)", async () => {
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        result: {
+          code: "Io",
+          message: "disk full",
+          context: ["disk full"],
+        },
+        retry_from: null,
+        partial_failures: [],
+      },
+    });
+
+    render(
+      <SyncProvider>
+        <SyncView />
+      </SyncProvider>,
+    );
+    const runButton = await screen.findByRole("button", { name: "Run sync" });
+    await act(async () => {
+      runButton.click();
+    });
+
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Sync failed" }),
+    ).toBeInTheDocument();
+    // No retry-from button should render.
+    expect(
+      screen.queryByRole("button", { name: /Retry from/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Dismiss sync summary" }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking [Retry from Discover] invokes commands.retrySyncFrom('Discover')", async () => {
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        result: {
+          code: "Permission",
+          message: "consolidate failed",
+          context: [],
+        },
+        retry_from: "Discover",
+        partial_failures: [],
+      },
+    });
+    retrySyncFromSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
+
+    render(
+      <SyncProvider>
+        <SyncView />
+      </SyncProvider>,
+    );
+    const runButton = await screen.findByRole("button", { name: "Run sync" });
+    await act(async () => {
+      runButton.click();
+    });
+    await act(async () => {
+      // Two buttons surface (summary block + stepper trailing slot);
+      // clicking the first one is enough to exercise the wire.
+      screen
+        .getAllByRole("button", { name: "Retry from Discover" })[0]!
+        .click();
+    });
+
+    expect(retrySyncFromSpy).toHaveBeenCalledTimes(1);
+    expect(retrySyncFromSpy).toHaveBeenCalledWith("Discover");
+  });
+});
+
+describe("SyncView — terminal partial branch (Plan 27-05)", () => {
+  it("renders 'Sync complete with K issues' summary + [Retry failed items] + [Dismiss]", async () => {
+    // To classify as 'partial' the stages Map needs a complete row
+    // carrying the partial failure. Drive a Distribute Start + Finish
+    // event before resolving the outcome so finalizeOutcome populates
+    // the existing complete row.
+    let resolveStart: (v: unknown) => void = () => undefined;
+    startSyncSpy.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveStart = resolve;
+      }),
+    );
+
+    render(
+      <SyncProvider>
+        <SyncView />
+      </SyncProvider>,
+    );
+    const runButton = await screen.findByRole("button", { name: "Run sync" });
+    await act(async () => {
+      runButton.click();
+    });
+
+    const handler = listenSpies.syncProgress.mock.calls[0]?.[0] as
+      | ((evt: { payload: unknown }) => void)
+      | undefined;
+    expect(handler).toBeTypeOf("function");
+
+    await act(async () => {
+      handler?.({
+        payload: { stage: "Distribute", current: 0, total: 0, item: null },
+      });
+      handler?.({
+        payload: { stage: "Distribute", current: 0, total: 0, item: null },
+      });
+    });
+
+    await act(async () => {
+      resolveStart({
+        status: "ok",
+        data: {
+          result: null,
+          retry_from: null,
+          partial_failures: [
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "foo",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied"],
+              },
+            },
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "bar",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied"],
+              },
+            },
+          ],
+        },
+      });
+    });
+
+    // Heading + sub-line match UI-SPEC §Terminal partial.
+    expect(
+      screen.getByRole("heading", {
+        level: 1,
+        name: "Sync complete with 2 issues",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 individual operations failed/),
+    ).toBeInTheDocument();
+    // [Retry failed items] surfaces both in the summary block AND in the
+    // stepper's trailing action row (the stepper renders it whenever
+    // onRetryFailedItems is wired). Both are intentional per UI-SPEC
+    // (primary affordance + redundant convenience).
+    expect(
+      screen.getAllByRole("button", { name: "Retry failed items" }).length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByRole("button", { name: "Dismiss sync summary" }).length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });

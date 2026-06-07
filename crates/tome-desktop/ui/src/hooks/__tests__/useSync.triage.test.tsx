@@ -120,7 +120,11 @@ describe("useSync — triage state (Plan 27-02)", () => {
     getLockfileDiffSpy.mockReset();
     startSyncSpy.mockReset();
     cancelSyncSpy.mockReset();
-    startSyncSpy.mockResolvedValue({ status: "ok", data: null });
+    // Plan 27-05: startSync now returns a SyncOutcomeWire on success.
+    startSyncSpy.mockResolvedValue({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
     cancelSyncSpy.mockResolvedValue({ status: "ok", data: null });
   });
 

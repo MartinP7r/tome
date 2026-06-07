@@ -308,9 +308,73 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
           }, 3000),
         );
       }
-      return null;
+      // Phase 27 plan 27-05 — drive the terminal-failed-with-retry
+      // axe scan. Resolves with a SyncOutcomeWire whose `result` is
+      // non-null and `retry_from = "Discover"` so the React tree
+      // renders the "Sync failed" summary + [Retry from Discover] +
+      // [Dismiss] action triplet.
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_failed=1")
+      ) {
+        return {
+          result: {
+            code: "Permission",
+            message: "consolidate failed",
+            context: ["permission denied at /tmp/foo"],
+          },
+          retry_from: "Discover",
+          partial_failures: [],
+        };
+      }
+      // Phase 27 plan 27-05 — drive the terminal-partial-failure axe
+      // scan. Resolves with a SyncOutcomeWire whose `result` is null
+      // (the pipeline technically succeeded) but `partial_failures`
+      // is non-empty so the React tree renders the "Sync complete
+      // with K issues" summary + [Retry failed items] + [Dismiss].
+      // The Distribute stage is targeted because it's the most common
+      // SAFE-01 aggregation site.
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_partial=1")
+      ) {
+        return {
+          result: null,
+          retry_from: null,
+          partial_failures: [
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "axiom-build",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied at /tmp/foo/axiom-build"],
+              },
+            },
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "rust-helper",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied at /tmp/foo/rust-helper"],
+              },
+            },
+          ],
+        };
+      }
+      // Default success: clean SyncOutcomeWire shape (Plan 27-05).
+      return { result: null, retry_from: null, partial_failures: [] };
     case "cancel_sync":
       return null;
+    // Phase 27 plan 27-05 — retry commands. Both resolve with a clean
+    // SyncOutcomeWire so the axe scan can drive the "post-retry success"
+    // path if a future scan exercises the retry click.
+    case "retry_sync_from":
+    case "retry_failed_items":
+      return { result: null, retry_from: null, partial_failures: [] };
     // Phase 27 plan 27-02 — SYNC-02 triage panel projection. The a11y gate
     // has two scans: the default empty-diff path (nothing renders besides
     // the idle hero) and a "triage" path that surfaces a representative

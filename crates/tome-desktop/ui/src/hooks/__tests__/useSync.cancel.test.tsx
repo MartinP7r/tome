@@ -196,7 +196,11 @@ describe("useSync — Plan 27-04 cancel classification", () => {
   });
 
   it("classifies a clean Ok outcome as terminalKind='success'", async () => {
-    startSyncSpy.mockResolvedValueOnce({ status: "ok", data: null });
+    // Plan 27-05: startSync now returns a SyncOutcomeWire on success.
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: { result: null, retry_from: null, partial_failures: [] },
+    });
 
     render(
       <SyncProvider>

@@ -52,13 +52,15 @@ export default function App() {
 
   // Plan 27-02 — Sidebar Sync NavItem spinner + dual-meaning badge slot.
   // Pre-sync badge: `pendingDiffCount` = added + changed + removed (D-05).
-  // Post-sync failure badge: `failureCount` (stub until 27-05). The two
-  // are mutually exclusive — pre-sync clears on Apply.
+  // Post-sync failure badge: `unresolvedFailureCount` (plan 27-05 / D-20).
+  // Pre-sync takes priority: when both counts are positive the user is
+  // still actively triaging, so the pending badge wins. The user must
+  // clear pending decisions (Apply) before the failure badge surfaces.
   const sync = useSync();
-  const syncBadge = sync.failureCount > 0
-    ? { kind: "failures" as const, count: sync.failureCount }
-    : sync.pendingDiffCount > 0
-      ? { kind: "pending" as const, count: sync.pendingDiffCount }
+  const syncBadge = sync.pendingDiffCount > 0
+    ? { kind: "pending" as const, count: sync.pendingDiffCount }
+    : sync.unresolvedFailureCount > 0
+      ? { kind: "failures" as const, count: sync.unresolvedFailureCount }
       : { kind: "none" as const };
 
   const isSkills = view === "skills";

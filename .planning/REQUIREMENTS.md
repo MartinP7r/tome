@@ -49,11 +49,11 @@ Replacement for `tome status` + `tome list` + `tome browse`. First user-visible 
 
 Replacement for `tome sync` and its interactive triage flow. Highest-UX-risk surface; warrants its own phase.
 
-- [ ] **SYNC-01**: A "Sync" action runs the same pipeline as `tome sync` (discover → consolidate → distribute → cleanup → save) and renders progress per stage; the user sees what stage is running and which directory is currently being processed.
-- [ ] **SYNC-02**: When the lockfile diff produces new/changed/removed skills, a triage panel lists them with diff metadata (source, hash, timestamp) and per-skill actions: keep (default), disable on this machine, or for git-sourced skills view-source. Bulk actions (disable all new from `<directory>`) supported.
-- [ ] **SYNC-03**: Triage decisions are previewable: the user sees the resulting `machine.toml` diff before applying. No silent writes.
-- [ ] **SYNC-04**: Sync runs are cancellable. The user can abort discovery or consolidation in progress; the cancel leaves the library in a consistent state (no half-written manifest, no partial lockfile).
-- [ ] **SYNC-05**: Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` semantics shipped in SAFE-01) with a retry action that resumes from the failed stage where possible.
+- [x] **SYNC-01** *(complete in Phase 27 plan 27-01a + 27-01b)*: A "Sync" action runs the same pipeline as `tome sync` (discover → consolidate → distribute → cleanup → save) and renders progress per stage; the user sees what stage is running and which directory is currently being processed.
+- [x] **SYNC-02** *(complete in Phase 27 plans 27-02 + 27-02b)*: When the lockfile diff produces new/changed/removed skills, a triage panel lists them with diff metadata (source, hash, timestamp) and per-skill actions: keep (default), disable on this machine, or for git-sourced skills view-source. Bulk actions (disable all new from `<directory>`) supported.
+- [x] **SYNC-03** *(complete in Phase 27 plan 27-03)*: Triage decisions are previewable: the user sees the resulting `machine.toml` diff before applying. No silent writes.
+- [x] **SYNC-04** *(complete in Phase 27 plan 27-04)*: Sync runs are cancellable. The user can abort discovery or consolidation in progress; the cancel leaves the library in a consistent state (no half-written manifest, no partial lockfile).
+- [x] **SYNC-05** *(complete in Phase 27 plan 27-05)*: Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` semantics shipped in SAFE-01) with a retry action that resumes from the failed stage where possible.
 
 ### Configuration UI (CFG)
 
@@ -162,7 +162,7 @@ Deferred to post-v1.0.
 |-------------|-------|--------------|--------|
 | CORE-01..05 | Phase 25 | TBD | Pending |
 | VIEW-01..06 | Phase 26 | TBD | Pending |
-| SYNC-01..05 | Phase 27 | TBD | Pending |
+| SYNC-01..05 | Phase 27 | TBD | Complete |
 | CFG-01..05 | Phase 28 | TBD | Pending |
 | OPS-01..04 | Phase 29 | TBD | Pending |
 | BAK-01..04 | Phase 30 | TBD | Pending |
