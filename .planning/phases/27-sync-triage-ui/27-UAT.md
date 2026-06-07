@@ -3,16 +3,17 @@ status: testing
 phase: 27-sync-triage-ui
 source: [27-01a-SUMMARY.md, 27-01b-SUMMARY.md, 27-02-SUMMARY.md, 27-02b-SUMMARY.md, 27-03-SUMMARY.md, 27-04-SUMMARY.md, 27-05-SUMMARY.md]
 started: 2026-06-07T04:35:00Z
-updated: 2026-06-07T04:41:00Z
+updated: 2026-06-07T04:48:00Z
 ---
 
 ## Current Test
 
-number: 4
-name: Run Sync — In-Progress UI
+number: 5
+name: Cancel During Sync
 expected: |
-  Click "Run sync". StageStepper appears with rows for Discover / Reconcile / Distribute / Cleanup / Save.
-  Active stage shows a spinner + current item (skill name or path). Sidebar Sync NavItem shows a spinner badge while running.
+  While a sync is in progress, click Cancel. Pipeline stops at the next stage boundary.
+  Stepper enters "cancelled" terminal state inline (no toast — D-18 supersession).
+  After cancel, library state is consistent: no half-written manifest, no partial lockfile.
 awaiting: user response
 
 ## Tests
@@ -45,7 +46,12 @@ expected: |
   Click "Run sync". A StageStepper appears showing each stage (Discover / Reconcile / Distribute / Cleanup / Save) as a row.
   The active stage shows a spinner and the current item being processed (skill name or path).
   Sidebar's Sync NavItem shows a spinner badge while running.
-result: [pending]
+result: pass
+observation: |
+  User feedback: "yes, this shows, though it's disappearing much too fast to have enough meaningful impact."
+  All UI elements render per contract, but on small libraries each stage completes in milliseconds — the user only catches the terminal state. No minimum dwell time on stage transitions; no way to inspect what happened in each stage after the fact.
+  Filed as backlog 999.3 (StageStepper dwell time + post-hoc per-stage inspection).
+  NOT reopening test 4 (contract met); UX improvement candidate.
 
 ### 5. Cancel During Sync
 expected: |
@@ -102,9 +108,9 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 3
+passed: 4
 issues: 0
-pending: 7
+pending: 6
 skipped: 0
 blocked: 0
 

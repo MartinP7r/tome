@@ -414,6 +414,34 @@ Plans:
 Plans:
 - [ ] TBD (promote with `/gsd:review-backlog` when ready)
 
+### Phase 999.3: StageStepper dwell time + post-hoc inspection (BACKLOG)
+
+**Goal:** [Captured for future planning] The Phase-27 StageStepper renders per-stage progress correctly per its UI contract, but on small libraries each stage completes in milliseconds and the user only catches the terminal state. The "what is sync doing" feedback the stepper was supposed to provide isn't actually received. Make per-stage progress legible — either by minimum dwell time during the run, or by post-hoc inspection after the run completes.
+
+**Source:** Phase 27 UAT test 4 passed-with-observation (2026-06-07). User feedback: "yes, this shows, though it's disappearing much too fast to have enough meaningful impact."
+
+**Why it matters:**
+- The stepper is the primary user-facing artifact of "sync is doing something" — when it fails to convey signal, users feel uncertain whether the operation actually happened.
+- The current per-stage `item` field (D-08, shipped in 27-01a) is exactly the per-skill detail that *should* be the most valuable part of the visual feedback, but it flashes through in a single frame on a small library.
+- This is a problem of information density vs. operation speed. The faster the underlying sync gets, the more it needs deliberate UX choices to remain comprehensible.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.3`):
+1. **Minimum dwell time per stage** — enforce e.g. 200ms-400ms minimum visible duration per stage even when underlying work finishes faster? Animation pacing tradeoff: feels deliberate vs. feels slow on power users' machines.
+2. **Post-hoc inspection** — keep the StageStepper visible after the run with stage-by-stage timings + per-skill items processed? Or a dedicated "View run details" disclosure on the SyncSummary?
+3. **Item streaming pacing** — when the active stage processes 50 skills in 200ms, do we show every skill name flashing, or just the final count + a "view all" affordance?
+4. **Skip the stepper for "trivial" runs** — if the whole sync takes <500ms with no changes, do we skip the in-progress UI entirely and just show "No changes" terminal state?
+5. **Per-stage error visibility** — when a stage failed but recovery succeeded, is that captured anywhere the user can see post-run?
+
+**Related context:**
+- The `synced_at` per-skill field (27-01a) + `partial_failures` Vec on `SyncOutcome` (27-05) already provide the data model for post-hoc inspection. The UI is the gap.
+- Cross-pollinates with backlog 999.2 (Sync idle hero past-run history) — both are about making sync's behavior more legible. They might merge or share a "Run details" view.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
+
 ## Progress
 
 **Execution Order:**
