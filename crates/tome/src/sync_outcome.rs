@@ -59,7 +59,7 @@ use std::sync::Mutex;
 ///   plugin identifier.
 /// - [`PartialFailureOp::Other`] — defensive fallback for partial failures
 ///   that don't map cleanly onto the above (e.g., a future SyncReport field).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub enum PartialFailureOp {
     /// Distribute stage per-skill symlink failure.

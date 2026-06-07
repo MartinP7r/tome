@@ -17,10 +17,11 @@ use tome::MachineTomlPreview;
 use tome::SkillName;
 use tome::TomePaths;
 use tome::config::Config;
-use tome::progress::CancelToken;
+use tome::progress::{CancelToken, SyncStage};
 
 use crate::error::{ErrorCode, TomeError};
 use crate::sink::TauriEventSink;
+use crate::sync_outcome_wire::{PartialFailureWire, SyncOutcomeWire};
 use crate::sync_state::SyncState;
 use crate::sync_types::{LockfileDiff, lockfile_diff_projection};
 
@@ -384,10 +385,11 @@ pub fn apply_machine_toml(
     apply_decisions(&decisions, &machine_path).map_err(TomeError::from)
 }
 
-/// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01).
+/// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01,
+/// extended in plan 27-05 / SYNC-05 to return a `SyncOutcomeWire`).
 ///
-/// `async` by design — the synchronous `tome::sync` body runs inside
-/// [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
+/// `async` by design — the synchronous `tome::sync_with_outcome` body runs
+/// inside [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
 /// responsive (RESEARCH §"Pitfall 5"; T-27-01b-06 mitigation). Progress is
 /// streamed via the [`TauriEventSink`] over `SyncProgress` events; the
 /// React side subscribes through `useSync`.
@@ -395,22 +397,20 @@ pub fn apply_machine_toml(
 /// **Double-fire guard (T-27-01b-07).** If a sync is already in flight
 /// (the managed [`SyncState::cancel`] slot is `Some(_)`), this returns
 /// `ErrorCode::Conflict` immediately without overwriting the live token.
-/// The React `useSync` hook prevents concurrent invocations under normal
-/// usage; this guard catches the race window between two near-simultaneous
-/// menu / keyboard events.
 ///
-/// On entry the slot is filled with a fresh [`CancelToken`]; on return
-/// (success OR error) the slot is cleared so the next run can start.
-/// Plan 27-05 will swap the return type for a `SyncOutcomeWire`
-/// structured payload; today the React side observes the run purely
-/// through the `SyncProgress` event stream and a final success / error
-/// signal carried by this command's `Result`.
+/// **Return shape (Plan 27-05 / SYNC-05).** Returns a [`SyncOutcomeWire`]
+/// on success carrying `{ result, retry_from, partial_failures }` so the
+/// React side can render every SYNC-05 terminal state from one shape:
+/// clean success, partial success ("K issues"), failed-with-retry,
+/// failed-no-retry. The outer `Result<_, TomeError>` Err is reserved for
+/// setup / JoinError failures (Pitfall 5) that happen BEFORE the sync
+/// pipeline produces a structured outcome.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, SyncState>,
-) -> Result<(), TomeError> {
+) -> Result<SyncOutcomeWire, TomeError> {
     // Double-fire guard (T-27-01b-07). Take the mutex briefly, check the
     // slot, install a fresh token if idle. The guard is dropped before the
     // blocking call so the future doesn't hold a non-Send guard across an
@@ -477,7 +477,10 @@ pub async fn start_sync(
             machine_prefs: &machine_prefs,
             start_stage: None,
         };
-        tome::sync(&config, &paths, opts, &sink, &cancel)
+        // Plan 27-05: sync_with_outcome wraps sync() with a stage tracker
+        // so the returned SyncOutcome carries the failed_stage + (future)
+        // partial_failures for the React side's StageStepper renderer.
+        tome::sync_with_outcome(&config, &paths, opts, &sink, &cancel)
     });
 
     let join_result = join_handle.await;
@@ -488,10 +491,182 @@ pub async fn start_sync(
     *state.cancel.lock().expect("SyncState mutex poisoned") = None;
 
     match join_result {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(TomeError::from(e)),
+        Ok(outcome) => Ok(SyncOutcomeWire::from(outcome)),
         Err(join_err) => Err(TomeError::from(anyhow::anyhow!(
             "sync task did not complete: {join_err}"
+        ))),
+    }
+}
+
+/// Resume the sync pipeline from a named stage (Phase 27 plan 27-05 /
+/// SYNC-05).
+///
+/// Invoked by the React side's `[Retry from <stage>]` button in
+/// `StageStepper`'s terminal-failed branch. The stage argument is the
+/// `retry_from` value returned by a prior `start_sync` outcome — server-
+/// side, today the inner pipeline still runs the full sequence (later
+/// stages depend on earlier stages' data). `start_stage` is carried
+/// through as an advisory tag so future plans can specialize.
+///
+/// Shares the double-fire guard, setup chain, and JoinError handling
+/// with [`start_sync`]; the only delta is the `start_stage` option.
+#[tauri::command]
+#[specta::specta]
+pub async fn retry_sync_from(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SyncState>,
+    stage: SyncStage,
+) -> Result<SyncOutcomeWire, TomeError> {
+    let cancel = {
+        let mut slot = state.cancel.lock().expect("SyncState mutex poisoned");
+        if slot.is_some() {
+            return Err(TomeError {
+                code: ErrorCode::Conflict,
+                message: "sync already in progress".into(),
+                context: vec![],
+            });
+        }
+        let token = CancelToken::new();
+        *slot = Some(token.clone());
+        token
+    };
+
+    let setup = (|| -> anyhow::Result<_> {
+        let (config, paths) = load_context()?;
+        let machine_path = tome::default_machine_path()?;
+        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
+        Ok((config, paths, machine_path, machine_prefs))
+    })();
+
+    let (config, paths, machine_path, machine_prefs) = match setup {
+        Ok(parts) => parts,
+        Err(e) => {
+            *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+            return Err(TomeError::from(e));
+        }
+    };
+
+    let sink = TauriEventSink::new(app.clone());
+
+    let join_handle = tauri::async_runtime::spawn_blocking(move || {
+        let opts = tome::SyncOptions {
+            dry_run: false,
+            force: false,
+            no_triage: true,
+            no_input: true,
+            no_install: false,
+            verbose: false,
+            quiet: true,
+            machine_path: &machine_path,
+            machine_prefs: &machine_prefs,
+            start_stage: Some(stage),
+        };
+        tome::sync_with_outcome(&config, &paths, opts, &sink, &cancel)
+    });
+
+    let join_result = join_handle.await;
+
+    *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+
+    match join_result {
+        Ok(outcome) => Ok(SyncOutcomeWire::from(outcome)),
+        Err(join_err) => Err(TomeError::from(anyhow::anyhow!(
+            "sync task did not complete: {join_err}"
+        ))),
+    }
+}
+
+/// Retry a list of per-skill partial failures from a prior sync (Phase 27
+/// plan 27-05 / SYNC-05).
+///
+/// Invoked by the React side's `[Retry failed items]` button in
+/// `StageStepper`'s terminal-partial branch. Each `PartialFailureWire`
+/// describes a single sub-operation that failed (distribution symlink,
+/// cleanup-symlink remove, plugin install). The server-side helper
+/// [`tome::retry_partial_failures`] dispatches one operation per failure
+/// and aggregates residual failures into the returned `partial_failures`
+/// Vec — so a partial-retry that hits half the originals leaves only
+/// those half in the outcome.
+///
+/// Shares the double-fire guard, setup chain, and JoinError handling
+/// with [`start_sync`].
+#[tauri::command]
+#[specta::specta]
+pub async fn retry_failed_items(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SyncState>,
+    failures: Vec<PartialFailureWire>,
+) -> Result<SyncOutcomeWire, TomeError> {
+    let cancel = {
+        let mut slot = state.cancel.lock().expect("SyncState mutex poisoned");
+        if slot.is_some() {
+            return Err(TomeError {
+                code: ErrorCode::Conflict,
+                message: "sync already in progress".into(),
+                context: vec![],
+            });
+        }
+        let token = CancelToken::new();
+        *slot = Some(token.clone());
+        token
+    };
+
+    let setup = (|| -> anyhow::Result<_> {
+        let (config, paths) = load_context()?;
+        let machine_path = tome::default_machine_path()?;
+        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
+        Ok((config, paths, machine_path, machine_prefs))
+    })();
+
+    let (config, paths, machine_path, machine_prefs) = match setup {
+        Ok(parts) => parts,
+        Err(e) => {
+            *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+            return Err(TomeError::from(e));
+        }
+    };
+
+    // Convert wire failures back to domain failures. The wire-side
+    // `TomeError` is collapsed into a `message` + `context` Vec — the
+    // domain helper inspects the stage + operation + skill to dispatch,
+    // not the error payload (the error is informational here).
+    let domain_failures: Vec<tome::PartialFailure> = failures
+        .iter()
+        .map(|f| tome::PartialFailure {
+            stage: f.stage,
+            operation: f.operation,
+            skill: f.skill.clone(),
+            message: f.error.message.clone(),
+            context: f.error.context.clone(),
+        })
+        .collect();
+
+    let sink = TauriEventSink::new(app.clone());
+
+    let join_handle = tauri::async_runtime::spawn_blocking(move || {
+        let opts = tome::SyncOptions {
+            dry_run: false,
+            force: false,
+            no_triage: true,
+            no_input: true,
+            no_install: false,
+            verbose: false,
+            quiet: true,
+            machine_path: &machine_path,
+            machine_prefs: &machine_prefs,
+            start_stage: None,
+        };
+        tome::retry_partial_failures(&config, &paths, opts, &domain_failures, &sink, &cancel)
+    });
+
+    let join_result = join_handle.await;
+
+    *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+
+    match join_result {
+        Ok(outcome) => Ok(SyncOutcomeWire::from(outcome)),
+        Err(join_err) => Err(TomeError::from(anyhow::anyhow!(
+            "retry task did not complete: {join_err}"
         ))),
     }
 }

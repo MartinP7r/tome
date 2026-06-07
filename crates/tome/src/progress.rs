@@ -30,13 +30,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Mirrors the six stages of the `sync` pipeline (see the crate-level docs):
 /// Reconcile → Discover → Consolidate → Distribute → Cleanup → Save. Kept as a
 /// typed enum (not a `&str`) so the GUI exhaustively matches stages (D-10).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 // `feature = "bindings"` is declared by plan 25-01 (same Wave 1, owns
 // Cargo.toml). Until both plans merge into the phase branch this derive is
 // inert and rustc emits a benign `unexpected_cfgs` warning; it resolves the
 // moment 25-01's `[features] bindings = ["dep:specta"]` lands. The
 // derive itself is correct in both states (verify post-merge with
 // `cargo build -p tome --features bindings`).
+//
+// Plan 27-05: Deserialize is required so the GUI's `retry_sync_from(stage)`
+// command can accept a SyncStage argument across the IPC boundary
+// (tauri-specta's CommandArg trait demands Deserialize).
 #[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub enum SyncStage {
     /// Lockfile-authoritative drift detection for managed skills.
