@@ -34,9 +34,14 @@ ignore = [
     { id = "RUSTSEC-2024-0420", reason = "gtk-rs (transitive via tauri/wry, Linux-only target)" },
 
     # --- Singletons ---
-    # `proc-macro-error` — replacement `proc-macro-error2` is already in the
-    # tree but the older crate co-exists until dialoguer/console upgrade.
+    # `proc-macro-error` — and its fork `proc-macro-error2`. The original was
+    # flagged unmaintained (RUSTSEC-2024-0370); the fork that was meant to
+    # replace it has since gone unmaintained too (RUSTSEC-2026-0173). Both
+    # co-exist in the tree transitively until dialoguer/console (orig) and the
+    # tauri-specta macro stack (fork) drop them. No exploitable surface — both
+    # are proc-macro build-time deps.
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error (transitive via dialoguer/console)" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 — fork of proc-macro-error, also now unmaintained (transitive via tauri-specta macro stack)" },
     # `paste` — transitive via ratatui macro expansion.
     { id = "RUSTSEC-2024-0436", reason = "paste (transitive via ratatui macros)" },
 
