@@ -3,17 +3,19 @@ status: testing
 phase: 27-sync-triage-ui
 source: [27-01a-SUMMARY.md, 27-01b-SUMMARY.md, 27-02-SUMMARY.md, 27-02b-SUMMARY.md, 27-03-SUMMARY.md, 27-04-SUMMARY.md, 27-05-SUMMARY.md]
 started: 2026-06-07T04:35:00Z
-updated: 2026-06-07T04:48:00Z
+updated: 2026-06-08T00:00:00Z
 ---
 
 ## Current Test
 
-number: 5
-name: Cancel During Sync
+number: 6
+name: Triage Panel After Sync
 expected: |
-  While a sync is in progress, click Cancel. Pipeline stops at the next stage boundary.
-  Stepper enters "cancelled" terminal state inline (no toast — D-18 supersession).
-  After cancel, library state is consistent: no half-written manifest, no partial lockfile.
+  After a sync that produces a lockfile diff, TriagePanel appears (right side of split pane).
+  Three section headers: NEW / CHANGED / REMOVED with per-group counts.
+  Each row has an inline [✓ keep] chip toggle. Bulk actions for NEW visible.
+  Right column TriageDetail shows selected skill's diff metadata.
+  Bottom "[Apply N decisions]" button disabled until at least one non-keep decision is made.
 awaiting: user response
 
 ## Tests
@@ -59,7 +61,7 @@ expected: |
   Stepper enters a "cancelled" terminal state inline (no toast — D-18 supersession honored).
   After cancel, library state is consistent: no half-written manifest, no partial lockfile.
   Re-running `tome status` from the CLI should show pre-sync state preserved (or fully consistent post-sync if the cancel landed at a clean boundary).
-result: [pending]
+result: pass
 
 ### 6. Triage Panel After Sync
 expected: |
@@ -108,9 +110,9 @@ result: [pending]
 ## Summary
 
 total: 10
-passed: 4
+passed: 5
 issues: 0
-pending: 6
+pending: 5
 skipped: 0
 blocked: 0
 
