@@ -42,7 +42,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+// rand 0.10 moved `random_range` (and friends) from `Rng` onto the `RngExt`
+// extension trait; it must be in scope at the call site.
+use rand::{Rng, RngExt, SeedableRng};
 
 use tome::SkillName; // re-exported at crate root from `discover` (D-26-02).
 use tome::config::DirectoryName;
