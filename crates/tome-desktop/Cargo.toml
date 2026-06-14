@@ -69,7 +69,7 @@ tempfile = "3"
 # so the synthetic fixture is the only consumer in this workspace.
 # Content hashes come from the canonical `tome::hash_directory` re-export
 # (manifest.rs) so we don't need a direct `sha2` dev-dep here.
-rand = "0.9"
+rand = "0.10"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
