@@ -2,6 +2,7 @@
 
 [Introduction](introduction.md)
 
+- [Feature List](features.md)
 - [Commands](commands.md)
 - [Configuration](configuration.md)
 - [Cross-machine sync](cross-machine-sync.md)
