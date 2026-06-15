@@ -1,0 +1,43 @@
+/* SkillContextMenu — light styling so the popover reads like a native
+ * macOS contextual menu. The wrapper is purely a click-target; the popover
+ * and items pick up the existing token palette.
+ */
+
+.wrapper {
+  display: block;
+  width: 100%;
+  /* The wrapper inherits the row's height; no flex / size overrides. */
+}
+
+.popover {
+  background: var(--bg-window);
+  color: var(--label-primary);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+  padding: 4px 0;
+  min-width: 220px;
+  outline: none;
+}
+
+.menu {
+  outline: none;
+  display: flex;
+  flex-direction: column;
+}
+
+.item {
+  padding: 6px 12px;
+  font-size: var(--text-body-size, 13px);
+  font-weight: 400;
+  line-height: 1.3;
+  color: var(--label-primary);
+  cursor: default;
+  outline: none;
+}
+
+.item[data-hovered="true"],
+.item[data-focused="true"] {
+  background: var(--accent);
+  color: var(--accent-on);
+}

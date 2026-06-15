@@ -1,0 +1,37 @@
+/* HealthView — UI-SPEC §Per-view Design §Health. */
+
+/* All-clear state: centred glyph + heading + sub-line. The ContentPane
+ * supplies the outer page chrome; this just centres its own content. */
+.allClear {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  /* Min-height so the all-clear state feels intentional rather than
+   * floating against the page title. Matches the empty-selection placeholder
+   * pattern from SkillsView's DetailColumn. */
+  min-height: 60vh;
+  gap: var(--space-2);
+}
+
+.checkmark {
+  margin-bottom: var(--space-2);
+}
+
+.allClearHeading {
+  font-size: var(--text-subhead-size);
+  font-weight: 600;
+  line-height: var(--text-subhead-line);
+  color: var(--label-primary);
+  margin: 0;
+}
+
+.allClearSub {
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  line-height: var(--text-body-line);
+  color: var(--label-secondary);
+  margin: 0;
+  max-width: 360px;
+}

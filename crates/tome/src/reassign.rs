@@ -98,7 +98,12 @@ pub(crate) struct ReassignPlan {
 }
 
 /// Build a plan describing what the reassign/fork will do.
-pub(crate) fn plan(
+///
+/// `pub` (CORE-01 / D-GUI-08): the GUI uses this single fn for BOTH reassign and
+/// fork (fork passes `is_fork: true`) — there is no separate `fork::plan`. The
+/// mutating-operations UI (Phase 29) calls it directly to render the
+/// `ReassignPlan` preview.
+pub fn plan(
     skill_name: &str,
     to_dir: &str,
     config: &Config,
@@ -116,7 +121,7 @@ pub(crate) fn plan(
     // carries `from_directory: Option<DirectoryName>` so render_plan can
     // distinguish "Unowned → <to>" from "<from> → <to>". The previous stub
     // error pointing at `tome adopt` is removed.
-    let from_directory = entry.source_name.clone();
+    let from_directory = entry.source_name().cloned();
 
     // Validate target directory exists in config
     let to_dir_name =
@@ -344,9 +349,10 @@ pub(crate) fn execute(
 
     // D-C1 closure: re-anchoring an Unowned skill clears previous_source;
     // re-anchoring an Owned skill leaves no breadcrumb because the skill is
-    // owned again. Either way, previous_source becomes None.
-    planned_entry.source_name = Some(plan.to_directory.clone());
-    planned_entry.previous_source = None;
+    // owned again. Either way the entry becomes Owned (no breadcrumb).
+    planned_entry.ownership = crate::manifest::SkillOwnership::Owned {
+        source: plan.to_directory.clone(),
+    };
     manifest.insert(plan.skill_name.clone(), planned_entry);
 
     Ok(())
@@ -821,8 +827,8 @@ mod tests {
             .as_ref()
             .expect("plan() must capture the manifest entry");
         assert_eq!(
-            entry.source_name,
-            Some(DirectoryName::new("old-dir").unwrap()),
+            entry.source_name(),
+            Some(&DirectoryName::new("old-dir").unwrap()),
             "snapshot must mirror the manifest at plan time"
         );
 
@@ -936,8 +942,8 @@ mod tests {
         // Final state must reflect the planned re-anchor — drift is closed.
         let entry = manifest.get("test-skill").unwrap();
         assert_eq!(
-            entry.source_name,
-            Some(DirectoryName::new("target-dir").unwrap()),
+            entry.source_name(),
+            Some(&DirectoryName::new("target-dir").unwrap()),
             "execute must re-anchor to planned target, ignoring live mutations"
         );
     }
@@ -979,12 +985,13 @@ mod tests {
 
         let entry = manifest.get("orphan-skill").unwrap();
         assert_eq!(
-            entry.source_name,
-            Some(crate::config::DirectoryName::new("new-dir").unwrap()),
+            entry.source_name(),
+            Some(&crate::config::DirectoryName::new("new-dir").unwrap()),
             "re-anchor must set source_name"
         );
         assert_eq!(
-            entry.previous_source, None,
+            entry.previous_source(),
+            None,
             "re-anchor must clear previous_source per D-C1 closure"
         );
     }

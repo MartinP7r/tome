@@ -1045,9 +1045,14 @@ fn tome_remove_dir_cleans_git_cache() {
     )
     .unwrap();
     assert_eq!(
-        manifest_before["skills"]["git-skill"]["source_name"].as_str(),
+        manifest_before["skills"]["git-skill"]["ownership"]["kind"].as_str(),
+        Some("owned"),
+        "precondition: manifest must record git-skill as Owned pre-remove, got: {manifest_before}"
+    );
+    assert_eq!(
+        manifest_before["skills"]["git-skill"]["ownership"]["source"].as_str(),
         Some("test-git"),
-        "precondition: manifest must record source_name = test-git pre-remove, got: {manifest_before}"
+        "precondition: manifest must record ownership.source = test-git pre-remove, got: {manifest_before}"
     );
 
     // -- Run: `tome remove dir test-git --force` (non-interactive).
@@ -1090,17 +1095,15 @@ fn tome_remove_dir_cleans_git_cache() {
         &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
     )
     .unwrap();
-    assert!(
-        manifest_after["skills"]["git-skill"]
-            .get("source_name")
-            .is_none()
-            || manifest_after["skills"]["git-skill"]["source_name"].is_null(),
-        "manifest entry for git-skill must transition to Unowned (source_name omitted/null), got: {manifest_after}"
+    assert_eq!(
+        manifest_after["skills"]["git-skill"]["ownership"]["kind"].as_str(),
+        Some("unowned"),
+        "manifest entry for git-skill must transition to Unowned, got: {manifest_after}"
     );
     assert_eq!(
-        manifest_after["skills"]["git-skill"]["previous_source"].as_str(),
+        manifest_after["skills"]["git-skill"]["ownership"]["last_owner"].as_str(),
         Some("test-git"),
-        "manifest entry must record previous_source = test-git per Phase 14 D-C1, got: {manifest_after}"
+        "manifest entry must record last_owner = test-git per Phase 14 D-C1, got: {manifest_after}"
     );
 }
 
@@ -1216,9 +1219,14 @@ fn tome_remove_dir_cleans_claude_plugins() {
     )
     .unwrap();
     assert_eq!(
-        manifest_before["skills"]["managed-foo"]["source_name"].as_str(),
+        manifest_before["skills"]["managed-foo"]["ownership"]["kind"].as_str(),
+        Some("owned"),
+        "precondition: manifest must record managed-foo as Owned pre-remove, got: {manifest_before}"
+    );
+    assert_eq!(
+        manifest_before["skills"]["managed-foo"]["ownership"]["source"].as_str(),
         Some("test-cp"),
-        "precondition: manifest must record source_name = test-cp pre-remove, got: {manifest_before}"
+        "precondition: manifest must record ownership.source = test-cp pre-remove, got: {manifest_before}"
     );
 
     // -- Run: `tome remove dir test-cp --force` (non-interactive).
@@ -1261,16 +1269,14 @@ fn tome_remove_dir_cleans_claude_plugins() {
         &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
     )
     .unwrap();
-    assert!(
-        manifest_after["skills"]["managed-foo"]
-            .get("source_name")
-            .is_none()
-            || manifest_after["skills"]["managed-foo"]["source_name"].is_null(),
+    assert_eq!(
+        manifest_after["skills"]["managed-foo"]["ownership"]["kind"].as_str(),
+        Some("unowned"),
         "manifest must transition managed-foo to Unowned, got: {manifest_after}"
     );
     assert_eq!(
-        manifest_after["skills"]["managed-foo"]["previous_source"].as_str(),
+        manifest_after["skills"]["managed-foo"]["ownership"]["last_owner"].as_str(),
         Some("test-cp"),
-        "manifest must record previous_source = test-cp per Phase 14 D-C1, got: {manifest_after}"
+        "manifest must record last_owner = test-cp per Phase 14 D-C1, got: {manifest_after}"
     );
 }

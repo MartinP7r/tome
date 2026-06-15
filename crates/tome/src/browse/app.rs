@@ -784,30 +784,55 @@ impl App {
         let skill = SkillName::new(&row_name)
             .map_err(|e| anyhow::anyhow!("invalid skill name '{row_name}': {e}"))?;
 
-        // Step 1+2: mutate in-memory.
-        let prefs = self
-            .machine_prefs
-            .as_mut()
-            .expect("machine_prefs must be Some after the Some-arm above");
-        match &scope {
-            ToggleScope::Global => {
-                prefs.toggle_global_disabled(skill, was_disable);
-            }
-            ToggleScope::PerDirBlocklist(dir) => {
-                prefs.toggle_per_dir_blocklist(dir, skill, was_disable);
-            }
-            ToggleScope::PerDirAllowlist(dir) => {
-                prefs.toggle_per_dir_allowlist(dir, skill, was_disable);
-            }
-        }
-
-        // Step 3: atomic save.
+        // The Global scope routes through the shared `tome::actions` helper
+        // — the same code path the GUI's `set_skill_disabled` Tauri command
+        // uses (Phase 26 plan 26-03 / D-06). PerDir scopes stay inline
+        // because their semantics (per-directory blocklist / allowlist) are
+        // TUI-only and not part of the shared GUI surface today.
         let path = self
             .machine_path
             .clone()
             .ok_or_else(|| anyhow::anyhow!("machine path not wired into browse session"))?;
-        let prefs_immut = self.machine_prefs.as_ref().expect("Some after mutation");
-        machine::save(prefs_immut, &path)?;
+
+        match &scope {
+            ToggleScope::Global => {
+                // Shared helper does load-mutate-save in one atomic
+                // temp+rename. We then re-sync the in-memory prefs from
+                // disk so the next render and the `current_toggle_action`
+                // lookup observe the same state the GUI would.
+                crate::actions::set_skill_disabled(&skill, was_disable, &path)?;
+                let reloaded = machine::load(&path)?;
+                *self
+                    .machine_prefs
+                    .as_mut()
+                    .expect("machine_prefs must be Some after the Some-arm above") = reloaded;
+            }
+            ToggleScope::PerDirBlocklist(dir) => {
+                // PerDir arms still mutate in-memory + atomic save inline
+                // (HARD-21 D-BROWSE-1 routing — not shared with the GUI's
+                // global-only D-06 surface).
+                {
+                    let prefs = self
+                        .machine_prefs
+                        .as_mut()
+                        .expect("machine_prefs must be Some after the Some-arm above");
+                    prefs.toggle_per_dir_blocklist(dir, skill, was_disable);
+                }
+                let prefs_immut = self.machine_prefs.as_ref().expect("Some after mutation");
+                machine::save(prefs_immut, &path)?;
+            }
+            ToggleScope::PerDirAllowlist(dir) => {
+                {
+                    let prefs = self
+                        .machine_prefs
+                        .as_mut()
+                        .expect("machine_prefs must be Some after the Some-arm above");
+                    prefs.toggle_per_dir_allowlist(dir, skill, was_disable);
+                }
+                let prefs_immut = self.machine_prefs.as_ref().expect("Some after mutation");
+                machine::save(prefs_immut, &path)?;
+            }
+        }
 
         // Step 4: scope-explicit StatusMessage::Success body. Skill name
         // appears in the body (NOT in the action-menu label per D-BROWSE-2).

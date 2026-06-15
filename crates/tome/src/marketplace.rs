@@ -433,12 +433,19 @@ impl MarketplaceAdapter for GitAdapter {
     }
 
     fn install(&self, _plugin_id: &str) -> Result<()> {
+        // D-05a regression contract: install still delegates verbatim to
+        // git::clone_repo. The adapter is not a long-op-with-UI surface today,
+        // so it passes a discarding NullSink + a never-tripped CancelToken —
+        // the progress/cancel plumbing (D-11/D-12) is threaded for the
+        // lib.rs::sync git-resolution path, not for the marketplace adapter.
         git::clone_repo(
             &self.url,
             &self.cache_dir,
             self.ref_branch(),
             self.ref_tag(),
             self.ref_rev(),
+            &crate::progress::NullSink,
+            &crate::progress::CancelToken::new(),
         )
     }
 
@@ -448,6 +455,8 @@ impl MarketplaceAdapter for GitAdapter {
             self.ref_branch(),
             self.ref_tag(),
             self.ref_rev(),
+            &crate::progress::NullSink,
+            &crate::progress::CancelToken::new(),
         )
     }
 

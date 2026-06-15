@@ -8,6 +8,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
+use crate::progress::{CancelToken, ProgressEvent, ProgressSink};
+
 /// Run a git command in the given directory, returning its raw output.
 fn git(repo_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
     let output = std::process::Command::new("git")
@@ -89,10 +91,30 @@ pub(crate) fn init(repo_dir: &Path, dry_run: bool) -> Result<()> {
 /// Create a snapshot (git commit) of the current tome home state.
 ///
 /// Returns `true` if a commit was created, `false` if there was nothing to commit.
-pub(crate) fn snapshot(repo_dir: &Path, message: Option<&str>, dry_run: bool) -> Result<bool> {
+///
+/// `sink` receives a [`ProgressEvent::BackupSnapshot`] describing the snapshot
+/// step (D-11: the backup long-op family adopts the [`ProgressSink`]
+/// vocabulary now). `cancel` is checked before the destructive git staging
+/// runs so a cancellation requested at the previous stage boundary is honored
+/// (D-12). The user-facing `println!` lines are unchanged so CLI stdout stays
+/// byte-for-byte identical — the sink is an additive observer, not a
+/// replacement for the existing presentation.
+pub(crate) fn snapshot(
+    repo_dir: &Path,
+    message: Option<&str>,
+    dry_run: bool,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<bool> {
     if !has_repo(repo_dir) {
         anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
+    if cancel.is_cancelled() {
+        anyhow::bail!("backup snapshot cancelled before start");
+    }
+    sink.emit(ProgressEvent::BackupSnapshot {
+        message: message.unwrap_or("tome backup snapshot").to_string(),
+    });
     // Stage all changes (gitignore handles managed skill exclusion)
     git_success(repo_dir, &["add", "-A"])?;
     // Check if there's anything to commit
@@ -151,7 +173,13 @@ pub(crate) fn list(repo_dir: &Path, count: usize) -> Result<Vec<BackupEntry>> {
 /// before the destructive checkout — if the pre-restore snapshot cannot be
 /// created (the snapshot is the user's only recovery path if the restore
 /// was accidental).
-pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
+pub(crate) fn restore(
+    repo_dir: &Path,
+    target: &str,
+    dry_run: bool,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
     if !has_repo(repo_dir) {
         anyhow::bail!("no backup repo found — run `tome backup init` first");
     }
@@ -159,11 +187,24 @@ pub(crate) fn restore(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()
         println!("Would restore library to {}", target);
         return Ok(());
     }
+    if cancel.is_cancelled() {
+        anyhow::bail!("backup restore cancelled before start");
+    }
+    sink.emit(ProgressEvent::BackupSnapshot {
+        message: format!("restore to {target}"),
+    });
     // Auto-snapshot current state before restoring — propagating failure
     // here is intentional: the safety snapshot is the user's only recovery
     // path if the restore was accidental. Without it we must not proceed
     // with the destructive `git checkout`.
-    snapshot(repo_dir, Some("pre-restore auto-snapshot"), false).context(
+    snapshot(
+        repo_dir,
+        Some("pre-restore auto-snapshot"),
+        false,
+        sink,
+        cancel,
+    )
+    .context(
         "failed to create pre-restore safety snapshot — aborting restore to protect current state",
     )?;
     // Restore files from target ref
@@ -296,7 +337,22 @@ pub(crate) fn render_list(entries: &[BackupEntry]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::progress::NullSink;
     use tempfile::TempDir;
+
+    /// Test wrapper: call `snapshot` with a discarding `NullSink` + never-tripped
+    /// `CancelToken`. Keeps the existing tests focused on commit behavior rather
+    /// than the additive progress/cancel plumbing (covered by the sync-level
+    /// RecordingSink test in `lib.rs`).
+    fn snap(repo_dir: &Path, message: Option<&str>, dry_run: bool) -> Result<bool> {
+        snapshot(repo_dir, message, dry_run, &NullSink, &CancelToken::new())
+    }
+
+    /// Test wrapper: call `restore` with a discarding `NullSink` + never-tripped
+    /// `CancelToken`.
+    fn rest(repo_dir: &Path, target: &str, dry_run: bool) -> Result<()> {
+        restore(repo_dir, target, dry_run, &NullSink, &CancelToken::new())
+    }
 
     /// Configure a freshly-initialised test git repo so commits are
     /// deterministic on developer machines that have global gpg-signing
@@ -363,7 +419,7 @@ mod tests {
 
         // Add a file and snapshot
         std::fs::write(lib_dir.join("test-skill.md"), "# Test").unwrap();
-        let created = snapshot(&lib_dir, Some("added test skill"), false).unwrap();
+        let created = snap(&lib_dir, Some("added test skill"), false).unwrap();
         assert!(created);
 
         // Verify git log has the entry
@@ -378,7 +434,7 @@ mod tests {
         std::fs::create_dir_all(&lib_dir).unwrap();
         init_test_repo(&lib_dir);
 
-        let created = snapshot(&lib_dir, None, false).unwrap();
+        let created = snap(&lib_dir, None, false).unwrap();
         assert!(!created);
     }
 
@@ -392,7 +448,7 @@ mod tests {
         // Create 3 snapshots
         for i in 1..=3 {
             std::fs::write(lib_dir.join(format!("file{i}.txt")), format!("content {i}")).unwrap();
-            snapshot(&lib_dir, Some(&format!("snapshot {i}")), false).unwrap();
+            snap(&lib_dir, Some(&format!("snapshot {i}")), false).unwrap();
         }
 
         let entries = list(&lib_dir, 10).unwrap();
@@ -416,14 +472,14 @@ mod tests {
 
         // Create a file and snapshot
         std::fs::write(lib_dir.join("skill.md"), "original").unwrap();
-        snapshot(&lib_dir, Some("original state"), false).unwrap();
+        snap(&lib_dir, Some("original state"), false).unwrap();
 
         // Modify the file and snapshot again
         std::fs::write(lib_dir.join("skill.md"), "modified").unwrap();
-        snapshot(&lib_dir, Some("modified state"), false).unwrap();
+        snap(&lib_dir, Some("modified state"), false).unwrap();
 
         // Restore to HEAD~1 (the "original state" commit)
-        restore(&lib_dir, "HEAD~1", false).unwrap();
+        rest(&lib_dir, "HEAD~1", false).unwrap();
 
         // File should be back to original content
         let content = std::fs::read_to_string(lib_dir.join("skill.md")).unwrap();
@@ -444,7 +500,7 @@ mod tests {
 
         // Commit a file (this becomes the restore target)
         std::fs::write(lib_dir.join("skill.md"), "v1-committed").unwrap();
-        snapshot(&lib_dir, Some("v1"), false).unwrap();
+        snap(&lib_dir, Some("v1"), false).unwrap();
 
         // Modify the file in the working tree (so restore has something to revert)
         std::fs::write(lib_dir.join("skill.md"), "v2-modified-uncommitted").unwrap();
@@ -458,7 +514,7 @@ mod tests {
         std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
 
         // Attempt restore — should bail BEFORE checkout.
-        let result = restore(&lib_dir, "HEAD", false);
+        let result = rest(&lib_dir, "HEAD", false);
         assert!(
             result.is_err(),
             "restore should have failed when pre-snapshot failed"
@@ -487,7 +543,7 @@ mod tests {
 
         // Create a file and snapshot
         std::fs::write(lib_dir.join("skill.md"), "original").unwrap();
-        snapshot(&lib_dir, Some("baseline"), false).unwrap();
+        snap(&lib_dir, Some("baseline"), false).unwrap();
 
         // Modify the file (unstaged)
         std::fs::write(lib_dir.join("skill.md"), "changed content here").unwrap();
@@ -507,7 +563,7 @@ mod tests {
         std::fs::write(lib_dir.join("new-file.md"), "content").unwrap();
 
         // Dry run should say it would snapshot but not actually commit
-        let result = snapshot(&lib_dir, Some("dry run test"), true).unwrap();
+        let result = snap(&lib_dir, Some("dry run test"), true).unwrap();
         assert!(result); // There are changes to snapshot
 
         // Count commits — should still be just the initial one
@@ -614,7 +670,7 @@ mod tests {
 
         // Add a file in repo A and push
         std::fs::write(repo_a.join("new-skill.md"), "# Skill").unwrap();
-        snapshot(&repo_a, Some("add skill"), false).unwrap();
+        snap(&repo_a, Some("add skill"), false).unwrap();
         push(&repo_a).unwrap();
 
         // Pull in repo B — should get the new file

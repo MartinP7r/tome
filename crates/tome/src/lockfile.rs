@@ -102,8 +102,8 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
         entries.insert(
             name.clone(),
             LockEntry {
-                source_name: entry.source_name.clone(),
-                previous_source: entry.previous_source.clone(),
+                source_name: entry.source_name().cloned(),
+                previous_source: entry.previous_source().cloned(),
                 content_hash: entry.content_hash.clone(),
                 registry_id,
                 version,

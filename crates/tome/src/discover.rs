@@ -15,6 +15,8 @@ use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, Direc
 /// Warns on names that don't match the strict `[a-z0-9-]+` pattern
 /// (which may become a hard requirement in a future version).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[cfg_attr(feature = "bindings", specta(transparent))]
 #[serde(transparent)]
 pub struct SkillName(String);
 
@@ -107,7 +109,8 @@ impl<'de> serde::Deserialize<'de> for SkillName {
 }
 
 /// Provenance metadata from package manager sources.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct SkillProvenance {
     /// Registry identifier (e.g. "my-plugin@npm")
     pub registry_id: String,
@@ -118,7 +121,14 @@ pub struct SkillProvenance {
 }
 
 /// How a skill was sourced — determines consolidation strategy.
-#[derive(Debug, Clone)]
+///
+/// The IPC boundary serializes this as a discriminated union shaped
+/// `{ "kind": "managed" | "local", ... }` so the GUI can pattern-match
+/// the kind without parsing strings — same shape as `LockfileState`
+/// from plan 26-01.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SkillOrigin {
     /// Managed by a package manager (v0.10+: stored as a real-directory
     /// copy in the library, NOT a symlink). The `managed: true` manifest
@@ -185,7 +195,15 @@ fn _scan_mode_exhaustiveness(m: &ScanMode) {
 }
 
 /// A discovered skill with its metadata.
-#[derive(Debug, Clone)]
+///
+/// Crosses the Tauri IPC boundary as the row type backing the GUI's Skills
+/// view (`list_skills` Tauri command, plan 26-02 Task 2). The `frontmatter`
+/// field is skipped on serialization to keep payload size proportional to the
+/// VIEW-02 row contract — the detail pane fetches frontmatter via its own
+/// command in plan 26-03. `path` is serialized as a string for cross-boundary
+/// compatibility (Rust `PathBuf` → TS `string`).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct DiscoveredSkill {
     /// Skill name (directory name)
     pub name: SkillName,
@@ -196,7 +214,14 @@ pub struct DiscoveredSkill {
     /// How this skill was sourced (managed vs local), with optional provenance metadata.
     pub origin: SkillOrigin,
     /// Parsed frontmatter from SKILL.md (None if parsing failed).
+    ///
+    /// **Not serialized across the Tauri IPC boundary.** `SkillFrontmatter`
+    /// holds `serde_yaml::Value` for unknown fields which can't cross specta
+    /// without a deeper port; the GUI's detail pane (plan 26-03) fetches a
+    /// presentation-shaped frontmatter view via its own command instead.
     #[allow(dead_code)]
+    #[serde(skip)]
+    #[cfg_attr(feature = "bindings", specta(skip))]
     pub frontmatter: Option<crate::skill::SkillFrontmatter>,
 }
 

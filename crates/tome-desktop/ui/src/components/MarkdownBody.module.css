@@ -1,0 +1,140 @@
+/* MarkdownBody — UI-SPEC §Component Contract §MarkdownBody.
+ *
+ * Token bindings (verbatim per UI-SPEC §Typography revision 1):
+ *   h1 → --text-title  (22px / 600 / 1.2)
+ *   h2 → --text-subhead (16px / 600 / 1.3)
+ *   h3 → --text-body   (13px / 600 / 1.3)  ← no raw 14px
+ *   p/li → --text-body (13px / 400 / 1.5)
+ *   code inline → mono --text-small (12px / 400) on --bg-subtle, --radius-xs
+ *   pre fenced → mono --text-small (12px / 400) on --bg-subtle, --radius-md
+ *
+ * Scrolling: this is the scrollable region; DetailHeader stays fixed above.
+ */
+
+.body {
+  /* Take all remaining vertical space inside the detail column flex. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-5) var(--space-6);
+  /* Readable measure cap per UI-SPEC. */
+  max-width: 720px;
+  color: var(--label-primary);
+}
+
+/* Headings */
+
+.body h1 {
+  font-size: var(--text-title-size, 22px);
+  font-weight: 600;
+  line-height: var(--text-title-line, 1.2);
+  margin-top: var(--space-6);
+  margin-bottom: var(--space-4);
+  color: var(--label-primary);
+}
+
+.body h1:first-child {
+  margin-top: 0;
+}
+
+.body h2 {
+  font-size: var(--text-subhead-size, 16px);
+  font-weight: 600;
+  line-height: var(--text-subhead-line, 1.3);
+  margin-top: var(--space-5);
+  margin-bottom: var(--space-3);
+  color: var(--label-primary);
+}
+
+.body h3 {
+  font-size: var(--text-body-size, 13px);
+  font-weight: 600;
+  line-height: var(--text-body-line, 1.5);
+  margin-top: var(--space-4);
+  margin-bottom: var(--space-2);
+  color: var(--label-primary);
+}
+
+/* Paragraphs */
+
+.body p {
+  font-size: var(--text-body-size, 13px);
+  font-weight: 400;
+  line-height: var(--text-body-line, 1.5);
+  margin: 0 0 var(--space-3);
+}
+
+/* Lists */
+
+.body ul,
+.body ol {
+  padding-left: var(--space-4);
+  margin: 0 0 var(--space-3);
+}
+
+.body li {
+  font-size: var(--text-body-size, 13px);
+  font-weight: 400;
+  line-height: var(--text-body-line, 1.5);
+  margin-bottom: 2px;
+}
+
+/* Links — accent colour, hover underline. Open via openUrl (see component). */
+
+.body a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.body a:hover {
+  text-decoration: underline;
+}
+
+.body a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+/* Inline emphasis */
+
+.body strong {
+  font-weight: 600;
+}
+
+.body em {
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Inline code */
+
+.body code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-small-size, 12px);
+  font-weight: 400;
+  line-height: var(--text-small-line, 1.4);
+  background: var(--bg-subtle);
+  border-radius: var(--radius-xs, 3px);
+  padding: 1px 4px;
+}
+
+/* Fenced code block — pre wraps the inline code; reset the inner background. */
+
+.body pre {
+  background: var(--bg-subtle);
+  border-radius: var(--radius-md, 6px);
+  padding: var(--space-3);
+  overflow-x: auto;
+  margin: 0 0 var(--space-3);
+}
+
+.body pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: var(--text-small-size, 12px);
+  line-height: var(--text-small-line, 1.4);
+}

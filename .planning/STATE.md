@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: completed
-stopped_at: Phase 25 context gathered
-last_updated: "2026-05-25T09:55:59.050Z"
-last_activity: 2026-05-23 — Milestone v1.0 ratified, drafts promoted
+status: milestone_complete
+stopped_at: Milestone complete (Phase 26 was final phase)
+last_updated: 2026-05-31T07:39:30.816Z
+last_activity: 2026-05-29 -- Phase 26 execution started
 progress:
-  total_phases: 26
-  completed_phases: 19
-  total_plans: 79
-  completed_plans: 79
-  percent: 73
+  total_phases: 2
+  completed_phases: 1
+  total_plans: 14
+  completed_plans: 93
+  percent: 50
 ---
 
 # Project State
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 25 — Rust core extraction + Tauri integration spike (not started)
+**Current focus:** Milestone complete
 
 ## Current Position
 
-Phase: Not started (defining requirements complete; phase 25 awaits `/gsd:plan-phase 25`)
-Plan: —
-Status: Defining requirements complete; ratified via `/gsd-new-milestone`
-Last activity: 2026-05-23 — Milestone v1.0 ratified, drafts promoted
+Phase: 26
+Plan: Not started
+Status: Milestone complete
+Last activity: 2026-05-31
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -70,6 +70,10 @@ Historical decisions are archived in:
 - `.planning/milestones/v1.0-{REQUIREMENTS,ROADMAP}.md` — v1.0 source drafts (ratified into top-level REQUIREMENTS.md + ROADMAP.md on 2026-05-23)
 - `.planning/milestones/v0.11-REQUIREMENTS.md` — v0.11 archived requirements (REQUIREMENTS.md overwritten with v1.0 content on ratification)
 - [Phase 18..24]: decisions logged historically here; see archived `.planning/STATE.md` history in git for full list
+- [Phase 25]: 25-03: threaded ProgressSink + CancelToken through sync() (typed ProgressEvent per stage, is_cancelled() at every boundary); IndicatifSink re-homes spinners at the CLI edge, NullSink under --quiet/--verbose; promoted remove/reassign/relocate/eject plan() to pub + extracted list::collect — GUI-callable domain surface (D-09/D-11/D-12/D-GUI-08)
+- [Phase 25]: 25-04: stood up crates/tome-desktop (Tauri 2, path dep on tome+bindings, specta trio pinned =2.0.0-rc.25). get_status command returns real StatusReport; TauriEventSink bridges typed ProgressEvent→SyncProgress (typed SyncStage, saturating casts); make_builder() is the single command/event registry shared by main.rs + gen-bindings; committed bindings.ts is an INTENTIONAL Wave-3 partial snapshot (Result<StatusReport,String>, pre-TomeError — 25-05 regenerates). Exported bindings from gen-bindings bin not build.rs (D-07 corrected); Builder::dangerously_cast_bigints_to_number() to export usize counts as TS number (no library type change); CI bindings-freshness gate + macOS desktop-build job on macos-latest; [package.metadata.dist] dist=false excludes tome-desktop from cargo-dist (release CLI-only, release.yml untouched) (CORE-02/03/04, D-06/D-07)
+- [Phase 25]: 25-05: TomeError IPC-boundary classification (CORE-05). RESEARCH .with_context(|| DomainErrorKind) is NOT downcastable through anyhow — replaced with a transparent DomainTagged wrapper (Display delegates to underlying top, source() skips it) so the {e:#} chain is byte-for-byte unchanged while chain().find_map(downcast_ref) recovers the kind. Boundary classifies DomainTagged + bare DomainErrorKind, else Internal; ErrorCode has ALL+const _ guard + exhaustive From<&DomainErrorKind>. Sentinels at Config::validate (Validation/Conflict), bad --config (NotFound), git clone/update (Git). bindings.ts regenerated with TomeError+ErrorCode (supersedes 25-04 Wave-3 snapshot; freshness clean).
+- [Phase 25]: 25-06: v1.0 frontend framework = React (D-GUI-04, irreversible from Phase 26). Built 3-way StatusReport spike (React/Solid/Svelte) scored 1-5 x4 criteria; React+Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization/NF-02 a11y/NF-03 HIG). Bundle gzip: Solid 6.20kB / Svelte 15.85kB / React 62.29kB. Winner collapsed into crates/tome-desktop/ui/ (one canonical bindings.ts, relative ./bindings import); losers deleted. ADR: .planning/research/v1.0-frontend-framework-decision.md
 
 ### v1.0 design context (consume during phase planning)
 
@@ -112,6 +116,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-25T09:55:59.037Z
-Stopped at: Phase 25 context gathered
-Resume file: .planning/phases/25-rust-core-extraction-tauri-integration-spike/25-CONTEXT.md
+Last session: 2026-05-28T13:05:59.273Z
+Stopped at: Phase 26 UI-SPEC approved
+Resume file: .planning/phases/26-read-only-views-alpha-cut/26-UI-SPEC.md
