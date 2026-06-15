@@ -334,7 +334,7 @@ Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog
 
 _(v0.12 dogfooding backlog 999.1-999.5 all promoted and shipped in v0.14-v0.16. Numbering resets — sparse 999.x is fine.)_
 
-### Phase 999.1: GUI hover tooltips for domain terminology (BACKLOG)
+### Phase 999.4: GUI hover tooltips for domain terminology (BACKLOG)
 
 **Goal:** Surface short hover (and click-to-pin) tooltips in the desktop GUI that explain domain-specific phrases the user might not immediately recognise — e.g., "local override" (from `machine.toml` `[directory_overrides.<name>]`), "Owned" vs "Unowned" skills, "managed" vs "local" directories, "lockfile diff", and the six pipeline stage names (Reconcile / Discover / Consolidate / Distribute / Cleanup / Save). Optionally toggleable via a View-menu setting ("Show explanations" / "Hide tooltips") for users who prefer minimal chrome once they internalise the vocabulary.
 
