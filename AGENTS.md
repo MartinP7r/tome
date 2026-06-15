@@ -9,8 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI agents 
 | Phase | Goal | Status |
 |------:|------|--------|
 | 25 | Rust core extraction + Tauri integration spike (CORE-01..05) | Complete 2026-05-27 |
-| 26 | Read-only views — **alpha cut** (VIEW-01..06 + NF-01..03, NF-05) | Complete 2026-05-29 (PR #560 draft) |
-| 27 | Sync + triage UI (SYNC-01..05) | **In progress** — context gathered 2026-06-02 |
+| 26 | Read-only views — **alpha cut** (VIEW-01..06 + NF-01..03, NF-05) | Complete — shipped via PR #560 |
+| 27 | Sync + triage UI (SYNC-01..05) | **In progress** — 7 plans planned, all executed; UAT underway |
 | 28 | Configuration UI — **beta cut** (CFG-01..05 + NF-04) | Pending |
 | 29 | Mutating operations UI (OPS-01..04 + NF-04) | Pending |
 | 30 | Backup UI — **rc cut** (BAK-01..04 + NF-04) | Pending |
