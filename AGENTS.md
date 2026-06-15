@@ -4,15 +4,23 @@ This file provides guidance to Claude Code (claude.ai/code) and other AI agents 
 
 ## Current State
 
-**v0.9.0 (shipped 2026-04-29)** — between milestones; next milestone (Tauri GUI) drafted in `.planning/milestones/`, awaiting `/gsd:new-milestone` to ratify. Per semver the next release is `0.10.0`; the project disclaims API stability (`Backward compat: None`) so it has not yet committed to a `1.0.0` cut.
+**v0.16.0 (shipped 2026-05-20)** — last released CLI cut. `## [Unreleased]` is accumulating in `CHANGELOG.md` (no tag yet). The **v1.0 Desktop (Tauri GUI) milestone** is active (ratified 2026-05-23) — seven phases (25–31) across four cuts (alpha → beta → rc → v1.0):
 
-Cumulative through v0.9:
-- **v0.6 — Unified Directory Model**: `[directories.*]` BTreeMap replacing `[[sources]]` + `[targets.*]`; git-backed skill repos with shallow clone + ref pinning + SHA in lockfile; per-directory skill filtering (`enabled`/`disabled` in `machine.toml`); CLI commands `tome add`, `tome remove`, `tome reassign`, `tome fork`; browse TUI polish (theming, fuzzy highlighting, scrollbar, markdown preview, help overlay).
-- **v0.7 — Wizard Hardening**: WIZ-01–05 formally validated and unit-tested (registry invariants, `find_known_directories_in` coverage, circular-path detection); legacy pre-v0.6 config detection (WUX-03).
-- **v0.8 — Cross-Platform Polish**: partial-failure visibility in `tome browse`; cross-platform clipboard via arboard; xdg-open integration; HOTFIX-01/02/03 (lockfile regen + save chain ordering).
-- **v0.9 — Cross-Machine Path Overrides**: `[directory_overrides.<name>]` schema in `machine.toml` (PORT-01..05); override-induced validation errors named `machine.toml`; `(override)` annotation in `tome status`/`tome doctor`; Phase-8 review tail (`StatusMessage` enum redesign, `RemoveFailure` invariants, `arboard` patch-pin policy, dead-code removal).
+| Phase | Goal | Status |
+|------:|------|--------|
+| 25 | Rust core extraction + Tauri integration spike (CORE-01..05) | Complete 2026-05-27 |
+| 26 | Read-only views — **alpha cut** (VIEW-01..06 + NF-01..03, NF-05) | Complete — shipped via PR #560 |
+| 27 | Sync + triage UI (SYNC-01..05) | **In progress** — 7 plans planned, all executed; UAT underway |
+| 28 | Configuration UI — **beta cut** (CFG-01..05 + NF-04) | Pending |
+| 29 | Mutating operations UI (OPS-01..04 + NF-04) | Pending |
+| 30 | Backup UI — **rc cut** (BAK-01..04 + NF-04) | Pending |
+| 31 | Distribution: sign + notarize + auto-update + DMG + first-run (DIST-01..05) | Pending |
 
-Open carry-overs: 2 Linux-runtime UAT items (clipboard + xdg-open) pending Linux hardware; intermittent `backup::tests::push_and_pull_roundtrip` flake.
+**Release chain through v0.16:** v0.6 Unified Directory Model → v0.7 Wizard Hardening → v0.8 Cross-Platform Polish + Hotfixes → v0.9 Cross-Machine Path Overrides → v0.10 Library-canonical Model + Marketplace Adapter → v0.11 Observability Foundation → v0.12 Pre-v1.0 Review Polish → v0.13 `tome add` UX → v0.14 Type+Role UX + Doctor Claim-Orphan → v0.15 Generic Managed Source Directory → **v0.16 Doctor Diagnostics Expansion** (current). See `CHANGELOG.md` for per-version detail.
+
+**Open carry-overs:** 2 Linux-runtime UAT items (clipboard + xdg-open) pending Linux hardware; intermittent `backup::tests::push_and_pull_roundtrip` flake.
+
+**During v1.0:** `crates/tome-desktop` is `cargo-dist`-excluded (`dist = false`) — interim CLI releases ship from `crates/tome` unchanged. v1.0 will be the first release to publish a desktop bundle.
 
 ## Quick Reference
 
