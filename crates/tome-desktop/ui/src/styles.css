@@ -1,0 +1,222 @@
+/* Global stylesheet.
+ *
+ * The token import MUST come before any rules that consume custom properties.
+ * Every color reference below resolves through tokens.css so that the
+ * `@media (prefers-color-scheme: dark)` block in tokens.css drives the whole
+ * surface automatically.
+ *
+ * Phase 26-XX hotfix: the original styles.css predated tokens.css (it was
+ * authored during Phase 25's CSS-Modules spike) and left `background: #fff`
+ * + `color: #6e6e73` literals on `.card`, `<section>`, `<section> > h2`, and
+ * the bare `th`/`td` rules. In dark mode the KeyValueRow/DirectoryTable
+ * module CSS correctly switched their text to `#f5f5f7` — but the underlying
+ * `<section>` stayed white, so the readable text disappeared into the card
+ * background. Refactored to consume `var(--bg-window)`, `var(--bg-subtle)`,
+ * `var(--label-*)`, and `var(--separator)` so dark mode is automatic.
+ */
+
+@import "./tokens.css";
+
+:root {
+  font-family: var(--font-system);
+  font-size: var(--text-body-size);
+  color: var(--label-primary);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+/* Phase 26 shell takes over the viewport — fill it so the 3-column grid
+ * has somewhere to live. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+.app {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 28px 48px;
+}
+
+h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.subtitle {
+  color: var(--label-secondary);
+  margin: 0 0 20px;
+  font-size: 13px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.card {
+  background: var(--bg-window);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.card .label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+}
+
+.card .value {
+  font-size: 22px;
+  font-weight: 600;
+  margin-top: 4px;
+  color: var(--label-primary);
+}
+
+section {
+  background: var(--bg-window);
+  border: 1px solid var(--separator);
+  border-radius: 10px;
+  margin-bottom: 18px;
+  overflow: hidden;
+}
+
+section > h2 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--separator);
+  background: var(--bg-subtle);
+  color: var(--label-primary);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--separator);
+  color: var(--label-primary);
+}
+
+th {
+  color: var(--label-secondary);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+tr:last-child td {
+  border-bottom: none;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Role / status badge palette. Dual-tone (background + text) so the same
+ * class works on light and dark surfaces; the dark-mode block at the bottom
+ * shifts to a stronger surface + brighter text pairing per UI-SPEC §Color. */
+.role-managed {
+  background: #efeaff;
+  color: #6336c9;
+}
+.role-synced {
+  background: #e3f3e8;
+  color: #1f8f4e;
+}
+.role-source {
+  background: #fff1da;
+  color: #a35d00;
+}
+.role-target {
+  background: #e4eefb;
+  color: #1f5fb8;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--label-secondary);
+}
+
+.ok {
+  color: #1f8f4e;
+}
+.warn {
+  color: #a35d00;
+}
+.err {
+  color: #c8362f;
+}
+
+.error-banner {
+  background: #fdecea;
+  border: 1px solid #f5c6c2;
+  color: #99201a;
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+/* ── Dark-mode shifts for tokens.css-orthogonal surfaces ───────────────────
+ * The token system covers neutral surface + label colors. The semantic
+ * tints below (role badges, .ok/.warn/.err, .error-banner) need their own
+ * dark counterparts because their meaning is tied to a specific hue.
+ */
+@media (prefers-color-scheme: dark) {
+  .role-managed {
+    background: rgba(125, 90, 245, 0.18);
+    color: #b9a3ff;
+  }
+  .role-synced {
+    background: rgba(48, 209, 88, 0.16);
+    color: #6dd590;
+  }
+  .role-source {
+    background: rgba(255, 159, 10, 0.18);
+    color: #ffc777;
+  }
+  .role-target {
+    background: rgba(10, 132, 255, 0.20);
+    color: #7cb8ff;
+  }
+  .ok {
+    color: #6dd590;
+  }
+  .warn {
+    color: #ffc777;
+  }
+  .err {
+    color: #ff7a72;
+  }
+  .error-banner {
+    background: rgba(255, 69, 58, 0.10);
+    border-color: rgba(255, 69, 58, 0.35);
+    color: #ff7a72;
+  }
+}

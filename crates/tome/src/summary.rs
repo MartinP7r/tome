@@ -14,6 +14,7 @@ use crate::manifest::SkillEntry;
 /// One row of the Unowned section in `tome status` and `tome doctor`.
 /// Per D-D3 in the Phase 14 CONTEXT.md.
 #[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct SkillSummary {
     /// Skill name as displayed.
     pub name: String,
@@ -43,10 +44,7 @@ impl SkillSummary {
     pub fn from_entry(name: &SkillName, entry: &SkillEntry) -> Self {
         Self {
             name: name.as_str().to_string(),
-            previous_source: entry
-                .previous_source
-                .as_ref()
-                .map(|d| d.as_str().to_string()),
+            previous_source: entry.previous_source().map(|d| d.as_str().to_string()),
             source_path_display: crate::paths::collapse_home(&entry.source_path),
             synced_at: entry.synced_at.clone(),
             managed: entry.managed,

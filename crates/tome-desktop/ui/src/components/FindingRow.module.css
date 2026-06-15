@@ -1,0 +1,103 @@
+/* FindingRow — UI-SPEC §Components §FindingRow. */
+
+.row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--separator);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  /* 22px line-height alignment so the icon sits next to the title baseline. */
+  padding-top: 2px;
+}
+
+.text {
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--text-body-size);
+  font-weight: 600;
+  line-height: var(--text-body-line);
+  color: var(--label-primary);
+  /* No ellipsis on title — wraps cleanly if a skill name overflows. */
+}
+
+.description {
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  /* Single-line clamp with ellipsis per UI-SPEC. Full text remains
+   * available through the row's aria-label. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+.trailing {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-shrink: 0;
+  /* Align with the title baseline, not the description. */
+  padding-top: 1px;
+}
+
+/* Manual-remediation hint — verbatim copy. Per UI-SPEC: text-small / 400 /
+ * label-secondary, NO button. Max-width keeps the hint from pushing the
+ * trailing column too wide. */
+.hint {
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  max-width: 280px;
+  text-align: right;
+}
+
+/* Failed-fix state (D-11 / SAFE-01). Inline below the title; [Code]
+ * highlight in 600; message + context in 400. --danger text. */
+.failed {
+  margin-top: var(--space-2);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  color: var(--danger);
+}
+
+.errCode {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.disclosure {
+  margin-top: var(--space-1);
+  color: var(--danger);
+}
+
+.disclosure summary {
+  cursor: pointer;
+  font-weight: 400;
+}
+
+.disclosure ul {
+  margin: var(--space-1) 0 0;
+  padding-left: var(--space-4);
+  list-style: disc;
+  font-weight: 400;
+  font-size: var(--text-small-size);
+}
+
+.disclosure li {
+  margin-bottom: 2px;
+}

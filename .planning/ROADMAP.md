@@ -268,8 +268,8 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Milestone Goal:** Make the skill library *visible*. Tauri 2 desktop GUI over the existing CLI library; the Rust core is reshaped to return structured types callable from any front-end. CLI continues to ship unchanged from `crates/tome`; new `crates/tome-desktop` workspace member hosts the app. macOS-only for v1.0 (Linux deferred to v2). Cuts: alpha (Phases 25–26) → beta (27–28) → rc (29–30) → v1.0 (31). Full requirements in [`REQUIREMENTS.md`](REQUIREMENTS.md); full per-phase plan in [`milestones/v1.0-ROADMAP.md`](milestones/v1.0-ROADMAP.md).
 
-- [ ] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.**
-- [ ] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.**
+- [x] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.** (completed 2026-05-27)
+- [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
 - [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
@@ -278,13 +278,55 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 **Open questions (Q1–Q7 from `milestones/v1.0-ROADMAP.md`):**
 
-- Q1: Frontend framework choice — resolve in Phase 25 spike (D-GUI-04)
+- Q1: Frontend framework choice — **RESOLVED in Phase 25 spike (25-06): React** (D-GUI-04, irreversible from Phase 26). See `.planning/research/v1.0-frontend-framework-decision.md`.
 - Q2: Tauri minor-version pinning policy
 - Q3: How `tome lint` failures surface (separate view / integrated into doctor / both)
 - Q4: Tray-icon presence (default: no, launch on demand)
 - Q5: Linux as stretch goal vs strict v2 (default: strict v2)
 - Q6: Sparkle vs `tauri-plugin-updater` (default Tauri; revisit in Phase 31)
 - Q7: Telemetry / crash reporting (out of scope v1.0; flag for v2)
+
+### Phase 25: Rust core extraction + Tauri integration spike
+**Goal**: Reshape `crates/tome` so its domain operations return structured types callable from any front-end, add `crates/tome-desktop` as a sibling Tauri 2 app crate, wire `specta` + `tauri-specta` bindings, add a progress-event channel and a stable `TomeError` boundary, and pick the frontend framework via a 3-way spike. **No production UI ships in this phase** — the spike apps are throwaway except the winner's scaffold.
+**Depends on**: v0.16 shipped (current `main`). Builds on the v0.10 library-canonical types (`SkillEntry`, `RemovePlan`, `StatusReport`) and the v0.11 `tracing`/`LogLevel` substrate. Decisions locked in `25-CONTEXT.md` (D-01..D-17) and `milestones/v1.0-REQUIREMENTS.md` (D-GUI-01..09).
+**Requirements**: CORE-01, CORE-02, CORE-03, CORE-04, CORE-05
+**Success Criteria** (what must be TRUE):
+  1. Each top-level CLI command has a corresponding domain function returning a structured Rust type (`StatusReport`, `ListReport`, `LintReport`, `RemovePlan`, etc.). Existing CLI is rewired to call these and format their output; the full `crates/tome/tests/cli*.rs` integration suite still passes (no CLI regression). The `#542` Owned/Unowned migration lands as part of this: `SkillEntry::source_name: Option<DirectoryName>` becomes `ownership: SkillOwnership { Owned { source }, Unowned { last_owner } }` (CONTEXT.md D-08; named `SkillOwnership` to avoid colliding with the existing `discover.rs::SkillProvenance` struct).
+  2. `crates/tome-desktop` builds a debug `.app` on macOS via `cargo tauri dev`. The app opens a window displaying a real `StatusReport` from `tome::status::gather` against the user's actual `tome_home`. `crates/tome-desktop` depends on `crates/tome` as a path dep with `features = ["bindings"]` (CONTEXT.md D-05, D-06).
+  3. `bindings.ts` is generated by `specta` + `tauri-specta` via a `gen-bindings` bin that shares a `make_builder()` fn with `main.rs` (NOT `build.rs` — it can't see the `#[tauri::command]` fns; CONTEXT.md D-07), committed at `crates/tome-desktop/ui/src/bindings.ts`, and contains TypeScript definitions for every type that crosses the IPC boundary. CI fails if the generated bindings are out of date (`cargo run -p tome-desktop --bin gen-bindings` then `git diff --exit-code -- crates/tome-desktop/ui/src/bindings.ts`). `specta::Type` derives are gated behind the optional `bindings` cargo feature so the CLI binary takes no specta cost (CONTEXT.md D-06, D-07).
+  4. Long-running operations emit progress via an injected `ProgressSink` trait (`crates/tome/src/progress.rs`); the domain stays synchronous (no tokio dep in `crates/tome`). A per-op typed `ProgressEvent` enum carries stage/op detail. CLI uses an `IndicatifSink`; a `NullSink` serves tests + `--quiet`; the spike app subscribes to `sync-progress` Tauri events via a `TauriEventSink` and renders a placeholder progress bar. A `&CancellationToken` arg is threaded alongside `sink` (real cancel behavior lands in Phase 27/SYNC-04) (CONTEXT.md D-09..D-12).
+  5. Errors crossing into the front-end are classified at the IPC boundary into `TomeError { code: ErrorCode, message: String, context: Vec<String> }` — the domain keeps `anyhow::Result` internally (zero-refactor, no CLI regression). `ErrorCode` is a coarse ~6-variant enum (`Validation`, `NotFound`, `Permission`, `Conflict`, `Git`, `Io`, `Internal`); classification uses typed `DomainErrorKind` sentinels via `downcast_ref` (not message string-matching), unmatched → `Internal`. Front-end can pattern-match on `code` without inspecting the message (CONTEXT.md D-13..D-16).
+  6. **Frontend framework decision (D-GUI-04):** the spike builds the same single-page `StatusReport` view in all three candidates (React, Solid, Svelte), scores each 1–5 across four criteria (bindings.ts ergonomics, bundle size + cold-start, dev-loop speed, ecosystem fit for v1.0 reqs), and records the winner + rationale + invalidation conditions in an ADR at `.planning/research/v1.0-frontend-framework-decision.md`. D-GUI-04 in `milestones/v1.0-REQUIREMENTS.md` is updated with the chosen framework; the two losing spikes are deleted (CONTEXT.md D-01..D-04).
+**Plans**: 6 plans (Wave 1: 25-01, 25-02 — foundational, parallel; Wave 2: 25-03 — lib.rs decomposition + sink threading; Wave 3: 25-04 — tome-desktop scaffold + bindings + CI; Wave 4: 25-05 — TomeError boundary; Wave 5: 25-06 — framework spike + ADR)
+- [x] 25-01-PLAN.md — `SkillOwnership` migration (#542, D-08) + gated `specta::Type` on cross-boundary types + `bindings` cargo feature (CORE-01)
+- [x] 25-02-PLAN.md — `progress.rs`: `ProgressSink` trait + typed `ProgressEvent`/`SyncStage` + `CancelToken` (no tokio) + `NullSink`/`RecordingSink` (CORE-04)
+- [x] 25-03-PLAN.md — `lib.rs` presenter decomposition + thread `sink`/`cancel` through `sync()` + `IndicatifSink` (CORE-01, CORE-04)
+- [x] 25-04-PLAN.md — `crates/tome-desktop` Tauri 2 scaffold + `specta`/`tauri-specta` `bindings.ts` via `gen-bindings` bin + `get_status` + `TauriEventSink` + CI freshness gate + cargo-dist opt-out (CORE-02, CORE-03, CORE-04)
+- [x] 25-05-PLAN.md — `TomeError`/`ErrorCode` boundary + `DomainErrorKind` sentinels via anyhow downcast (CORE-05)
+- [x] 25-06-PLAN.md — 3-way frontend framework spike (React/Solid/Svelte) + scoring + ADR + D-GUI-04 update (D-GUI-04)
+
+### Phase 26: Read-only views — alpha cut
+**Goal**: Ship the read-only half of the GUI: status dashboard, virtualised skill list, detail pane with markdown preview, doctor health view, and on-disk file watcher. After this phase, the desktop app is useful for inspection but does not mutate state. First user-visible UI; built on the React scaffold chosen in Phase 25.
+**Depends on**: Phase 25 (Rust core extraction + Tauri integration spike) — structured domain types (`StatusReport`, etc.), `bindings.ts` generation, `ProgressSink`, `TomeError` boundary, and the React `ui/` scaffold all land there.
+**Requirements**: VIEW-01, VIEW-02, VIEW-03, VIEW-04, VIEW-05, VIEW-06, NF-01 (perf budget), NF-02 (a11y), NF-03 (HIG), NF-05 (concurrency)
+**Success Criteria** (what must be TRUE):
+  1. Status dashboard renders all fields from `tome status --json` with role/type badges, last-sync time, and lockfile state. Refreshes within 200 ms of an external `tome sync` from the CLI.
+  2. Skill list view handles a 2000-skill library at sustained 60 fps during search-as-you-type on M1 (8 GB) — verified via a synthetic-skills bench in CI (NF-01).
+  3. Detail pane renders frontmatter (parsed by existing `lint.rs`), source path, content hash, last sync, managed/local badge, and disabled state. Three actions (open source, copy path, disable on this machine) wired to the same handlers as the existing browse TUI.
+  4. Markdown preview renders SKILL.md body with the same Markdown subset as `browse/markdown.rs`. Code blocks, headings, lists, links all render.
+  5. Health pane lists all `tome doctor` findings with one-click fix actions. Fix actions go through the same repair handlers used by interactive `tome doctor`.
+  6. File watcher reloads UI state when manifest, lockfile, or library content changes externally. No stale UI after CLI sync (VIEW-06).
+  7. Every interactive element is keyboard-accessible and has a VoiceOver label (NF-02). Native menu bar shows File / Edit / View / Library / Help (NF-03).
+**Cut**: **v1.0-alpha**. Internal release; CLI still required for sync and edit.
+**Plans**: 8 plans (Wave 1: 26-01 — StatusReport extension unblocks UI plans; Wave 2: 26-02..26-06 — UI feature plans + Rust watcher in parallel, all depend on 26-01's StatusReport shape; Wave 3: 26-07 + 26-08 — a11y/HIG audit + perf bench depend on all UI plans landing first)
+- [x] 26-01-PLAN.md — Status dashboard view + StatusReport lockfile/machine-prefs extension (VIEW-01)
+- [x] 26-02-PLAN.md — Shell (3-col NavigationSplitView + tokens) + virtualised skill list + fuzzy search (VIEW-02, NF-01 setup)
+- [x] 26-03-PLAN.md — Detail pane + per-skill actions (open/copy/disable) via tome::actions module + Tauri opener+clipboard plugins (VIEW-03)
+- [x] 26-04-PLAN.md — Markdown preview component (react-markdown SC#4 subset) + REQUIREMENTS.md VIEW-04 cleanup (VIEW-04)
+- [x] 26-05-PLAN.md — Doctor health pane + per-item PreviewPopover fixes + content-aware FindingId enum (VIEW-05)
+- [x] 26-06-PLAN.md — Rust-side file watcher (notify 8.2 + debouncer-full 0.7) + 4 typed events + per-hook subscriptions (VIEW-06, NF-05)
+- [x] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
+- [x] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
 ## Backlog
 

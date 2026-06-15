@@ -1,0 +1,84 @@
+/* Button — UI-SPEC §Atoms §Button.
+ *
+ * Token bindings:
+ *   primary:    --accent / --accent-on, 13px / 600, 6px 12px padding,
+ *               --radius-md (6px). Hover/pressed → --accent-pressed (if
+ *               defined; falls back to --accent at reduced opacity).
+ *   secondary:  --bg-window / --label-primary, 13px / 400, 1px --separator
+ *               border, same metrics. Used for non-destructive actions.
+ *   small-fix:  secondary metrics + 4px 10px padding, --text-small 12px / 600.
+ */
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  line-height: 1.2;
+  cursor: default;
+  outline: none;
+  border: 0;
+  transition: background 90ms ease, border-color 90ms ease, opacity 90ms ease;
+}
+
+.button[data-focus-visible="true"] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.button[data-disabled="true"],
+.button[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Primary — the lone Phase-26 mutation CTA (D-06). */
+
+.primary {
+  background: var(--accent);
+  color: var(--accent-on);
+  font-size: var(--text-body-size, 13px);
+  font-weight: 600;
+  padding: 6px 12px;
+}
+
+.primary[data-hovered="true"],
+.primary[data-pressed="true"] {
+  background: var(--accent-pressed, var(--accent));
+}
+
+/* Secondary — non-destructive actions (Open source, Copy path, Cancel). */
+
+.secondary {
+  background: var(--bg-window);
+  color: var(--label-primary);
+  font-size: var(--text-body-size, 13px);
+  font-weight: 400;
+  padding: 6px 12px;
+  border: 1px solid var(--separator);
+}
+
+.secondary[data-hovered="true"] {
+  background: var(--bg-subtle);
+}
+
+.secondary[data-pressed="true"] {
+  background: var(--bg-subtle);
+  border-color: var(--label-secondary);
+}
+
+/* Small-fix — reserved for FindingRow (plan 26-05). */
+
+.smallFix {
+  background: var(--bg-window);
+  color: var(--label-primary);
+  font-size: var(--text-small-size, 12px);
+  font-weight: 600;
+  padding: 4px 10px;
+  border: 1px solid var(--separator);
+}
+
+.smallFix[data-hovered="true"] {
+  background: var(--bg-subtle);
+}

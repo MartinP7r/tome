@@ -1,0 +1,97 @@
+/* tokens.css — Phase 26 design tokens (D-15).
+ *
+ * Single source of truth for color, spacing, radius, and typography CSS
+ * custom properties. Driven by `prefers-color-scheme` for light/dark
+ * (D-16, NF-03): no in-app theme switcher.
+ *
+ * Sourced verbatim from UI-SPEC.md §Color (light + provisional dark),
+ * §Spacing Scale, §Typography. Dark values are provisional Apple-system
+ * pairs pending a Figma dark-frame re-extract (UI-SPEC §"Open Items" #1).
+ *
+ * Reduced-transparency fallback (D-16) swaps `--sidebar-material` to its
+ * solid form via `@media (prefers-reduced-transparency: reduce)`.
+ */
+
+:root {
+  /* ── Color (light) ───────────────────────────────────────────── */
+  --label-primary: #1d1d1f;
+  --label-secondary: #6e6e73;
+  --bg-window: #ffffff;
+  --bg-app: #f5f5f7;
+  --bg-subtle: #f2f2f4;
+  --sidebar-material: rgba(246, 246, 248, 0.72);
+  --sidebar-material-solid: #ececef;
+  --separator: rgba(0, 0, 0, 0.08);
+  --separator-strong: rgba(0, 0, 0, 0.12);
+  --accent: #007aff;
+  --accent-pressed: #0a6cdc;
+  --accent-on: #ffffff;
+  --danger: #ff3b30;
+  --success: #28c840;
+
+  /* ── Spacing (4px grid) ──────────────────────────────────────── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* ── Anchors (extract from Figma; not spacing-scale tokens) ──── */
+  --sidebar-width: 210px;
+  --titlebar-height: 44px;
+  --nav-item-height: 26px;
+  --list-row-height: 52px;
+  --list-column-min: 280px;
+  --list-column-max: 380px;
+
+  /* ── Radius ─────────────────────────────────────────────────── */
+  --radius-xs: 3px;
+  --radius-md: 6px;
+  --radius-pill: 9999px;
+
+  /* ── Typography ─────────────────────────────────────────────── */
+  /* System font stack (D-13) — no web font. */
+  --font-system: -apple-system, "SF Pro Text", "SF Pro Display", system-ui,
+    BlinkMacSystemFont, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Sizes — 4 sizes / 2 weights (UI-SPEC §Typography revision 1). */
+  --text-small-size: 12px;
+  --text-small-line: 1.4;
+  --text-body-size: 13px;
+  --text-body-line: 1.5;
+  --text-subhead-size: 16px;
+  --text-subhead-line: 1.3;
+  --text-title-size: 22px;
+  --text-title-line: 1.2;
+}
+
+/* ── Color (dark — PROVISIONAL, UI-SPEC Open Item #1) ─────────── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --label-primary: #f5f5f7;
+    --label-secondary: #98989d;
+    --bg-window: #1e1e1e;
+    --bg-app: #000000;
+    --bg-subtle: #2c2c2e;
+    --sidebar-material: rgba(40, 40, 42, 0.72);
+    --sidebar-material-solid: #28282a;
+    --separator: rgba(255, 255, 255, 0.10);
+    --separator-strong: rgba(255, 255, 255, 0.15);
+    --accent: #0a84ff;
+    --accent-pressed: #0070dc;
+    --accent-on: #ffffff;
+    --danger: #ff453a;
+    --success: #30d158;
+  }
+}
+
+/* ── Reduced-transparency fallback (D-16, NF-03) ───────────────── */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --sidebar-material: var(--sidebar-material-solid);
+  }
+}

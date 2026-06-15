@@ -12,6 +12,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use super::types::{Config, DirectoryRole, DirectoryType};
+use crate::errors::{DomainErrorKind, WithDomainKind};
 use crate::paths::expand_tilde;
 
 impl Config {
@@ -21,7 +22,22 @@ impl Config {
     /// - library_dir is not a file
     /// - Role/type combos are valid (Managed only for ClaudePlugins, Target not for Git)
     /// - Git fields (branch/tag/rev) only on Git type directories
+    ///
+    /// CORE-05 / D-14: input-validation failures (role/type, git-field misuse,
+    /// library_dir-is-a-file) carry the `Validation` sentinel; library_dir vs
+    /// distribution-dir path-overlap collisions (Cases A/B/C) carry `Conflict`.
+    /// Both tags are transparent — the human-readable `{e:#}` chain (and every
+    /// `assert_cmd` `contains()` integration assertion) is unchanged.
     pub fn validate(&self) -> Result<()> {
+        self.validate_roles_and_fields()
+            .with_domain_kind(DomainErrorKind::Validation)?;
+        self.validate_no_path_overlap()
+            .with_domain_kind(DomainErrorKind::Conflict)?;
+        Ok(())
+    }
+
+    /// Role/type-combo + git-field + library_dir-is-a-file checks (`Validation`).
+    fn validate_roles_and_fields(&self) -> Result<()> {
         // library_dir exists but is a file, not a directory
         if self.library_dir.exists() && !self.library_dir.is_dir() {
             anyhow::bail!(
@@ -103,6 +119,12 @@ impl Config {
             }
         }
 
+        Ok(())
+    }
+
+    /// library_dir vs distribution-dir path-overlap detection, Cases A/B/C
+    /// (`Conflict`).
+    fn validate_no_path_overlap(&self) -> Result<()> {
         // --- Path overlap between library_dir and distribution directories ---
         // Lexical only: tilde-expand both sides, normalize trailing '/', compare
         // without hitting the filesystem. Scope is library_dir vs each

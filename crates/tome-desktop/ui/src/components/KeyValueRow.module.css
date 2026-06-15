@@ -1,0 +1,78 @@
+/* KeyValueRow — Status view row atom (UI-SPEC §Molecules).
+ *
+ * Layout: 160px label column / fluid value column / auto trailing slot.
+ * Tokens (--accent etc.) are still in styles.css's :root; plan 26-02 swaps
+ * in tokens.css. Until then the literal hex values from UI-SPEC §Color light
+ * tokens are inlined as fallbacks alongside the var() references so the row
+ * renders correctly today AND survives the token swap.
+ */
+
+.row {
+  /* Flexbox (not grid) so the trailing slot sits immediately after the value
+   * with a fixed gap, instead of being pushed to the row's right edge by a
+   * 1fr value column. Phase 26 UAT walk found the original `160px 1fr auto`
+   * layout left the LIBRARY skill-count chip and LOCKFILE status dot stranded
+   * at the far right of the pane, away from the data they annotate. */
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.label {
+  flex: 0 0 160px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #6e6e73;
+  line-height: 1.4;
+}
+
+/* Value takes its natural width but can shrink to make room for very long
+ * paths. `min-width: 0` enables that shrinkage; `overflow-wrap: anywhere`
+ * lets long un-broken strings wrap inside the column. */
+.value {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: #1d1d1f;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.valueMono {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 400;
+  color: #1d1d1f;
+  overflow-wrap: anywhere;
+}
+
+.trailing {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .row {
+    border-bottom-color: rgba(255, 255, 255, 0.1);
+  }
+  .label {
+    color: #98989d;
+  }
+  .value,
+  .valueMono {
+    color: #f5f5f7;
+  }
+}

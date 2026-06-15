@@ -23,7 +23,10 @@ pub(crate) struct TargetEjectEntry {
 }
 
 /// Build an eject plan by scanning distribution directories for symlinks into the library.
-pub(crate) fn plan(config: &Config, paths: &TomePaths) -> Result<EjectPlan> {
+///
+/// `pub` (CORE-01 / D-GUI-08): the GUI's eject preview calls this directly to
+/// render the plan in a confirm dialog, mirroring `remove::plan`.
+pub fn plan(config: &Config, paths: &TomePaths) -> Result<EjectPlan> {
     let mut targets = Vec::new();
     let mut total = 0;
 

@@ -379,7 +379,7 @@ fn detect_edited(
         if !entry.managed {
             continue;
         }
-        let Some(source_name) = entry.source_name.as_ref() else {
+        let Some(source_name) = entry.source_name() else {
             continue;
         };
         let Some(lock_entry) = lockfile.skills().get(name.as_str()) else {

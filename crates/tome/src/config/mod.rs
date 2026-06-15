@@ -23,6 +23,8 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::errors::{DomainErrorKind, WithDomainKind};
+
 mod overrides;
 mod types;
 mod validate;
@@ -72,7 +74,16 @@ impl Config {
             Some(p) => {
                 if !p.exists() {
                     let parent_exists = p.parent().is_some_and(|d| d.exists());
-                    anyhow::ensure!(parent_exists, "config file not found: {}", p.display());
+                    if !parent_exists {
+                        // CORE-05 / D-14: a bad explicit `--config` path (parent
+                        // dir missing — likely a typo) carries the `NotFound`
+                        // sentinel for the GUI boundary. Transparent tag — the
+                        // CLI's `config file not found: <path>` message is
+                        // unchanged. A missing file in an existing dir is still
+                        // tolerated (first-run) and produces no error here.
+                        return Err(anyhow::anyhow!("config file not found: {}", p.display()))
+                            .with_domain_kind(DomainErrorKind::NotFound);
+                    }
                 }
                 p.to_path_buf()
             }

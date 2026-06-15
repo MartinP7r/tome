@@ -1,0 +1,23 @@
+{
+  "skills": [
+    {
+      "name": "perf-stub-0",
+      "path": "/tmp/tome-perf-fixture/library/perf-stub-0",
+      "source_name": "synthetic",
+      "origin": { "kind": "local" }
+    },
+    {
+      "name": "perf-stub-1",
+      "path": "/tmp/tome-perf-fixture/library/perf-stub-1",
+      "source_name": "synthetic",
+      "origin": { "kind": "local" }
+    },
+    {
+      "name": "perf-stub-2",
+      "path": "/tmp/tome-perf-fixture/library/perf-stub-2",
+      "source_name": "synthetic",
+      "origin": { "kind": "local" }
+    }
+  ],
+  "warnings": []
+}
