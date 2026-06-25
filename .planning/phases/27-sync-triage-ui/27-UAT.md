@@ -8,12 +8,15 @@ updated: 2026-06-08T00:00:00Z
 
 ## Current Test
 
-number: 8
-name: Skills View Sort=Recent + Group=Source/Role
+number: 6
+name: Triage Panel After Sync (re-test after SYNC-02 fix)
 expected: |
-  Navigate to Skills (⌘2). Sort=Recent reorders by synced_at. Group=Source/Role renders
-  section headers between groups with per-group counts. (Tests 6/7 are issue/blocked — a
-  SYNC-02 diff defect; jumped to test 8 which doesn't depend on the triage diff.)
+  SYNC-02 gap fix shipped (commit eb0f423): generate_prospective() now re-hashes
+  source dirs on disk instead of copying manifest hashes.
+  Re-run: (1) start the app with `cargo tauri dev` from crates/tome-desktop,
+  (2) edit any SKILL.md in a source directory (e.g. ~/.claude/skills/asc-app-create-ui/SKILL.md),
+  (3) open Sync (⌘3). The TriagePanel should show the edited skill as CHANGED.
+  Also verify a newly-added skill dir appears as NEW, and a removed skill dir appears as REMOVED.
 awaiting: user response
 
 ## Tests
@@ -162,3 +165,8 @@ blocked: 1
     - "Compute prospective hashes via a fresh re-hash of discovered skills (dry-run consolidate)"
     - "Add a discover→preview→triage→apply gate so changes show BEFORE they are applied"
   debug_session: ""
+  fix: |
+    Added lockfile::generate_prospective(skills) in crates/tome/src/lockfile.rs —
+    re-hashes each skill's source dir on disk. Wired get_lockfile_diff in
+    crates/tome-desktop/src/commands.rs to call it instead of generate(&manifest, &skills).
+    Commit: eb0f423. All tests green.

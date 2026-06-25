@@ -32,7 +32,7 @@
 // 27-02; 27-04 only swaps the in-progress placeholder for the real
 // StageStepper and adds the terminal-state summary block.
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useStatus } from "../hooks/useStatus";
 import { SYNC_STAGES, useSync } from "../hooks/useSync";
 import { formatRelative } from "../lib/relativeTime";
@@ -91,8 +91,16 @@ export function SyncView() {
     onBulkAction,
     selectTriageSkill,
     applyComplete,
+    refetchDiff,
   } = useSync();
   const { status } = useStatus();
+
+  // Re-hash source dirs on every Sync view mount so the triage panel
+  // reflects edits made since the last lockfileChanged event.
+  useEffect(() => {
+    void refetchDiff();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Build the StageState[] from useSync's stages Map in pipeline order.
   // Memoised so the StageStepper's prop identity is stable across
