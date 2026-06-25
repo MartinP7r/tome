@@ -266,7 +266,11 @@ pub fn get_lockfile_diff(_app: tauri::AppHandle) -> Result<LockfileDiff, TomeErr
         let (resolved_paths, _warnings) = offline_resolved_paths(&config, &paths);
         let mut discover_warnings = Vec::new();
         let skills = tome::discover_all(&config, &resolved_paths, &mut discover_warnings)?;
-        let new_lockfile = tome::lockfile::generate(&manifest, &skills);
+        // Re-hash each skill's source directory on disk so the prospective
+        // lockfile reflects current state, not the stored manifest hashes.
+        // `lockfile::generate` copies manifest hashes (correct post-sync) but
+        // would make the diff always empty here (manifest == lockfile).
+        let new_lockfile = tome::lockfile::generate_prospective(&skills)?;
 
         let diff = tome::update::diff(&old_lockfile, &new_lockfile);
         Ok(lockfile_diff_projection(&diff, &manifest))
