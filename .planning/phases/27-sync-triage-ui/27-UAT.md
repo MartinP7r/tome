@@ -8,14 +8,12 @@ updated: 2026-06-08T00:00:00Z
 
 ## Current Test
 
-number: 6
-name: Triage Panel After Sync
+number: 8
+name: Skills View Sort=Recent + Group=Source/Role
 expected: |
-  After a sync that produces a lockfile diff, TriagePanel appears (right side of split pane).
-  Three section headers: NEW / CHANGED / REMOVED with per-group counts.
-  Each row has an inline [✓ keep] chip toggle. Bulk actions for NEW visible.
-  Right column TriageDetail shows selected skill's diff metadata.
-  Bottom "[Apply N decisions]" button disabled until at least one non-keep decision is made.
+  Navigate to Skills (⌘2). Sort=Recent reorders by synced_at. Group=Source/Role renders
+  section headers between groups with per-group counts. (Tests 6/7 are issue/blocked — a
+  SYNC-02 diff defect; jumped to test 8 which doesn't depend on the triage diff.)
 awaiting: user response
 
 ## Tests
@@ -70,7 +68,34 @@ expected: |
   Each row has an inline [✓ keep] chip toggle. Bulk actions for NEW (e.g. "disable all new from <source>") are visible.
   Right column TriageDetail shows the selected skill's diff metadata.
   Bottom shows "[Apply N decisions]" button (disabled until at least one non-keep decision is made).
-result: [pending]
+result: issue
+reported: "I changed some text in ~/.claude/skills/asc-app-create-ui/SKILL.md but it's not caught when I run sync"
+severity: major
+root_cause: |
+  get_lockfile_diff (commands.rs) builds the prospective lockfile via
+  tome::lockfile::generate(&manifest, &skills), which copies content_hash FROM the
+  stored manifest and uses the freshly-discovered `skills` only for provenance — never
+  re-hashing the on-disk skill dirs. Because generate() iterates manifest.iter(), the
+  "proposed" lockfile is structurally a copy of the manifest. The diff is therefore
+  manifest-vs-lockfile, and those two always agree (written together by the last sync),
+  so the panel is ~always empty and cannot surface NEW (not yet in manifest), CHANGED
+  (manifest hash stale), or REMOVED (still in manifest) skills from a source edit.
+  Compounding: start_sync runs the full tome::sync pipeline (consolidate re-hashes +
+  save) in one shot — there is no discover→pause→triage→apply gate, so a real edit is
+  applied immediately, leaving nothing to triage. Verified: manifest hash == lockfile
+  hash == 6649…dcdf5f for asc-app-create-ui, both pre-edit. Environment confirmed
+  healthy (coding-agent-files/.tome/*, 189 skills consistent; the .local/share 35-skill
+  library is dead legacy, not used by the app).
+artifacts:
+  - path: "crates/tome/src/lockfile.rs"
+    issue: "generate() copies content_hash from manifest instead of re-hashing discovered skill dirs"
+  - path: "crates/tome-desktop/src/commands.rs"
+    issue: "get_lockfile_diff builds prospective lockfile from manifest, not a fresh dry-run consolidate"
+  - path: "crates/tome-desktop/ui/src/hooks/useSync.tsx"
+    issue: "start_sync runs full pipeline with no triage gate before apply"
+missing:
+  - "Triage diff must compute prospective hashes from a fresh re-hash of discovered skills (dry-run consolidate), not the stored manifest"
+  - "Sync flow needs a discover→preview→triage→apply gate so pending changes are shown BEFORE they are applied"
 
 ### 7. Apply Triage with machine.toml Diff Preview
 expected: |
@@ -80,7 +105,9 @@ expected: |
     - Added lines: green background
     - Unchanged lines: neutral, with line numbers
   Cancel discards changes (no write to disk). Apply commits — machine.toml on disk updates atomically.
-result: [pending]
+result: blocked
+blocked_by: prior-finding
+reason: "Depends on a populated triage panel (test 6). Can't exercise Apply with no pending decisions until the test-6 diff defect is fixed. The machine.toml write boundary itself (preview/apply commands, PreviewPopover slot) is independently unit-tested green in 27-03; this is the end-to-end path only."
 
 ### 8. Skills View Sort=Recent + Group=Source/Role
 expected: |
@@ -111,11 +138,27 @@ result: [pending]
 
 total: 10
 passed: 5
-issues: 0
-pending: 5
+issues: 1
+pending: 3
 skipped: 0
-blocked: 0
+blocked: 1
 
 ## Gaps
 
-<!-- Appended as issues are reported -->
+- truth: "Triage panel lists NEW/CHANGED/REMOVED skills that a sync would apply, so the user can triage before applying (SYNC-02, ROADMAP SC#2)"
+  status: failed
+  reason: "User edited a SKILL.md in a source dir; the change is not caught — the triage panel stays empty."
+  severity: major
+  test: 6
+  root_cause: "get_lockfile_diff builds the prospective lockfile via lockfile::generate(&manifest,&skills), which reuses the manifest's stored content_hash instead of re-hashing discovered skill dirs. Diff is manifest-vs-lockfile (always agree → empty). No discover→triage→apply gate; start_sync applies the full pipeline in one shot."
+  artifacts:
+    - path: "crates/tome/src/lockfile.rs"
+      issue: "generate() copies content_hash from manifest, not a fresh re-hash"
+    - path: "crates/tome-desktop/src/commands.rs"
+      issue: "get_lockfile_diff projects from manifest, not a dry-run consolidate"
+    - path: "crates/tome-desktop/ui/src/hooks/useSync.tsx"
+      issue: "start_sync runs full pipeline with no pre-apply triage gate"
+  missing:
+    - "Compute prospective hashes via a fresh re-hash of discovered skills (dry-run consolidate)"
+    - "Add a discover→preview→triage→apply gate so changes show BEFORE they are applied"
+  debug_session: ""
