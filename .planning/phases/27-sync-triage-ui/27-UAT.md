@@ -1,23 +1,14 @@
 ---
-status: testing
+status: partial
 phase: 27-sync-triage-ui
 source: [27-01a-SUMMARY.md, 27-01b-SUMMARY.md, 27-02-SUMMARY.md, 27-02b-SUMMARY.md, 27-03-SUMMARY.md, 27-04-SUMMARY.md, 27-05-SUMMARY.md]
 started: 2026-06-07T04:35:00Z
-updated: 2026-06-08T00:00:00Z
+updated: 2026-06-27T00:00:00Z
 ---
 
 ## Current Test
 
-number: 6
-name: Triage Panel After Sync (re-test after SYNC-02 fix)
-expected: |
-  SYNC-02 gap fix shipped (commit eb0f423): generate_prospective() now re-hashes
-  source dirs on disk instead of copying manifest hashes.
-  Re-run: (1) start the app with `cargo tauri dev` from crates/tome-desktop,
-  (2) edit any SKILL.md in a source directory (e.g. ~/.claude/skills/asc-app-create-ui/SKILL.md),
-  (3) open Sync (⌘3). The TriagePanel should show the edited skill as CHANGED.
-  Also verify a newly-added skill dir appears as NEW, and a removed skill dir appears as REMOVED.
-awaiting: user response
+[testing paused — 1 item outstanding (test 7 blocked on prior finding)]
 
 ## Tests
 
@@ -117,7 +108,8 @@ expected: |
   Navigate to Skills (⌘2). Change Sort dropdown to "Recent". Skill list reorders by `synced_at` (most-recent first).
   Change Group dropdown to "Source" (or "Role"). Skill list now renders section headers between groups, each with the source/role name + per-group skill count.
   VoiceOver (or accessibility tree) sees section headers as proper landmarks.
-result: [pending]
+result: skipped
+reason: user requested skip
 
 ### 9. Sync Terminal States — Success + Failure
 expected: |
@@ -128,22 +120,24 @@ expected: |
   Partial-failure path (success-with-warnings): per the SUMMARY, the wire/UI is structurally ready but `partial_failures` is empty for now
   (carry-forward documented in 27-05-SUMMARY) — so this branch may not be triggerable in this phase. Confirm the success and failure
   paths render; partial-failure visual state is acceptable as "documented gap until sync() inline-surfaces SAFE-01".
-result: [pending]
+result: skipped
+reason: user requested skip
 
 ### 10. Doctor PreviewPopover Refactor Regression
 expected: |
   Navigate to Health (⌘4). Click any Finding row's "Fix" action.
   PreviewPopover opens with the existing single-sentence dryRun description and Apply/Cancel buttons (unchanged behavior).
   This confirms Pitfall 3's atomic slot refactor in 27-03 didn't break the Doctor caller — same behavior, different internals.
-result: [pending]
+result: skipped
+reason: user requested skip
 
 ## Summary
 
 total: 10
 passed: 5
 issues: 1
-pending: 3
-skipped: 0
+pending: 0
+skipped: 3
 blocked: 1
 
 ## Gaps
