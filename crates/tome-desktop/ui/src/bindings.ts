@@ -94,6 +94,132 @@ export const commands = {
 	 *  refetches on those.
 	 */
 	doctorRepairOne: (findingId: FindingId) => typedError<null, TomeError>(__TAURI_INVOKE("doctor_repair_one", { findingId })),
+	/**
+	 *  Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01,
+	 *  extended in plan 27-05 / SYNC-05 to return a `SyncOutcomeWire`).
+	 * 
+	 *  `async` by design — the synchronous `tome::sync_with_outcome` body runs
+	 *  inside [`tauri::async_runtime::spawn_blocking`] so the IPC reactor stays
+	 *  responsive (RESEARCH §"Pitfall 5"; T-27-01b-06 mitigation). Progress is
+	 *  streamed via the [`TauriEventSink`] over `SyncProgress` events; the
+	 *  React side subscribes through `useSync`.
+	 * 
+	 *  **Double-fire guard (T-27-01b-07).** If a sync is already in flight
+	 *  (the managed [`SyncState::cancel`] slot is `Some(_)`), this returns
+	 *  `ErrorCode::Conflict` immediately without overwriting the live token.
+	 * 
+	 *  **Return shape (Plan 27-05 / SYNC-05).** Returns a [`SyncOutcomeWire`]
+	 *  on success carrying `{ result, retry_from, partial_failures }` so the
+	 *  React side can render every SYNC-05 terminal state from one shape:
+	 *  clean success, partial success ("K issues"), failed-with-retry,
+	 *  failed-no-retry. The outer `Result<_, TomeError>` Err is reserved for
+	 *  setup / JoinError failures (Pitfall 5) that happen BEFORE the sync
+	 *  pipeline produces a structured outcome.
+	 */
+	startSync: () => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("start_sync")),
+	/**
+	 *  Request cancellation of an in-flight sync (Phase 27 plan 27-01b / SYNC-01).
+	 * 
+	 *  Synchronous + idempotent. Flips the shared [`CancelToken`] (an
+	 *  `Arc<AtomicBool>`) so `tome::sync` exits at the next stage boundary.
+	 *  Calling this when no sync is running, or calling it twice in a row, is
+	 *  a no-op (the second cancel observes an already-flipped bool).
+	 * 
+	 *  Returns immediately — actual cancellation occurs at the next stage
+	 *  boundary check inside `tome::sync`. The React side does NOT need to
+	 *  wait for confirmation; the `start_sync` command's `Result` carries
+	 *  the final state.
+	 */
+	cancelSync: () => typedError<null, TomeError>(__TAURI_INVOKE("cancel_sync")),
+	/**
+	 *  Resume the sync pipeline from a named stage (Phase 27 plan 27-05 /
+	 *  SYNC-05).
+	 * 
+	 *  Invoked by the React side's `[Retry from <stage>]` button in
+	 *  `StageStepper`'s terminal-failed branch. The stage argument is the
+	 *  `retry_from` value returned by a prior `start_sync` outcome — server-
+	 *  side, today the inner pipeline still runs the full sequence (later
+	 *  stages depend on earlier stages' data). `start_stage` is carried
+	 *  through as an advisory tag so future plans can specialize.
+	 * 
+	 *  Shares the double-fire guard, setup chain, and JoinError handling
+	 *  with [`start_sync`]; the only delta is the `start_stage` option.
+	 */
+	retrySyncFrom: (stage: SyncStage) => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("retry_sync_from", { stage })),
+	/**
+	 *  Retry a list of per-skill partial failures from a prior sync (Phase 27
+	 *  plan 27-05 / SYNC-05).
+	 * 
+	 *  Invoked by the React side's `[Retry failed items]` button in
+	 *  `StageStepper`'s terminal-partial branch. Each `PartialFailureWire`
+	 *  describes a single sub-operation that failed (distribution symlink,
+	 *  cleanup-symlink remove, plugin install). The server-side helper
+	 *  [`tome::retry_partial_failures`] dispatches one operation per failure
+	 *  and aggregates residual failures into the returned `partial_failures`
+	 *  Vec — so a partial-retry that hits half the originals leaves only
+	 *  those half in the outcome.
+	 * 
+	 *  Shares the double-fire guard, setup chain, and JoinError handling
+	 *  with [`start_sync`].
+	 */
+	retryFailedItems: (failures: PartialFailureWire[]) => typedError<SyncOutcomeWire, TomeError>(__TAURI_INVOKE("retry_failed_items", { failures })),
+	/**
+	 *  Return the pending lockfile diff for the GUI's SYNC-02 triage panel
+	 *  (Phase 27 plan 27-02 / SYNC-02).
+	 * 
+	 *  Read-only: loads the on-disk `tome.lock` (current shipped state) and
+	 *  projects the diff against a prospective lockfile built from the current
+	 *  `Manifest` + currently-discovered skills. The diff is the same shape
+	 *  `tome::update::diff` produces — the GUI consumes a triage-friendly
+	 *  projection ([`LockfileDiff`]) keyed by change kind.
+	 * 
+	 *  The prospective lockfile is built from the canonical `Manifest`
+	 *  (`manifest::load`) and the skills discovered against the live config.
+	 *  Git-source discovery uses the offline lockfile cache via
+	 *  `lockfile::resolved_paths_from_lockfile_cache` so no network calls cross
+	 *  this command (matches the read-only contract of the SYNC-02 panel).
+	 * 
+	 *  When no sync has ever run (`tome.lock` is missing), the command returns
+	 *  every discovered skill as Added — the user sees a populated triage panel
+	 *  before the first sync.
+	 */
+	getLockfileDiff: () => typedError<LockfileDiff, TomeError>(__TAURI_INVOKE("get_lockfile_diff")),
+	/**
+	 *  Compute the machine.toml line-diff for a list of pending triage
+	 *  decisions (Phase 27 plan 27-03 / SYNC-03).
+	 * 
+	 *  Read-only: never writes to disk. Reads the current `~/.config/tome/machine.toml`,
+	 *  applies the decisions to a cloned [`tome::MachinePrefs`], then runs
+	 *  [`tome::machine::preview_save`] to produce a structured Myers line-diff
+	 *  the React `MachineTomlDiff` component renders inside `PreviewPopover`.
+	 * 
+	 *  The companion [`apply_machine_toml`] command commits the same proposed
+	 *  prefs via atomic temp+rename when the user explicitly clicks `[Apply]`
+	 *  inside the popover. The two commands re-read the current machine.toml at
+	 *  each call — no caching between Preview and Apply. If the file changes
+	 *  externally in the gap, Apply overwrites (T-27-03-07 disposition: accept;
+	 *  single-user app).
+	 * 
+	 *  Path resolution happens server-side via [`tome::default_machine_path`];
+	 *  the React side never passes a path (T-27-03-01 mitigation).
+	 */
+	previewMachineToml: (decisions: TriageDecision[]) => typedError<MachineTomlPreview, TomeError>(__TAURI_INVOKE("preview_machine_toml", { decisions })),
+	/**
+	 *  Commit a list of pending triage decisions to `machine.toml` (Phase 27
+	 *  plan 27-03 / SYNC-03).
+	 * 
+	 *  Writes via the canonical [`tome::machine::save`] (atomic temp+rename),
+	 *  which fires the Phase-26 watcher's `MachinePrefsChanged` event for free —
+	 *  the React `useSkills` / `useSkillDetail` hooks observe the change and
+	 *  refetch automatically (no manual refresh signal needed).
+	 * 
+	 *  Path resolution is server-side via [`tome::default_machine_path`];
+	 *  the React side never passes a path. The double-confirmation contract
+	 *  (T-27-03-06 / SC#3 "no silent writes") is enforced at the UI layer —
+	 *  this command MUST be reached only through the explicit `[Apply]` button
+	 *  inside the `PreviewPopover`.
+	 */
+	applyMachineToml: (decisions: TriageDecision[]) => typedError<null, TomeError>(__TAURI_INVOKE("apply_machine_toml", { decisions })),
 };
 
 /** Events */
@@ -124,6 +250,31 @@ export type CountOrError_Serialize = {
 	count: number | null,
 	error?: string | null,
 };
+
+/**
+ *  Single line in a `MachineTomlPreview`. Surfaces the side it lives on as a
+ *  1-indexed line number (against the OLD side for `Removed`, against the NEW
+ *  side for `Added` + `Unchanged`) plus the literal content of the line
+ *  (trailing `\n` stripped — the diff renderer reintroduces the newline visually).
+ * 
+ *  Produced by [`preview_save`] and consumed by the Desktop GUI's
+ *  `MachineTomlDiff` component via the `preview_machine_toml` Tauri command.
+ */
+export type DiffLine = {
+	/**  1-indexed line number on the side this line lives on. */
+	line_number: number,
+	/**  Whether this line was removed, added, or unchanged in the diff. */
+	kind: DiffLineKind,
+	/**  Literal text of the line, without the trailing newline character. */
+	content: string,
+};
+
+/**
+ *  Kind of change for a [`DiffLine`]. Serializes as the lowercase tag names
+ *  (`"unchanged"`, `"removed"`, `"added"`) for direct consumption by the React
+ *  `MachineTomlDiff` component (see `27-UI-SPEC.md` §MachineTomlDiff).
+ */
+export type DiffLineKind = "unchanged" | "removed" | "added";
 
 /**
  *  A validated directory name.
@@ -262,6 +413,20 @@ export type DiscoveredSkill = {
 	source_name: DirectoryName,
 	/**  How this skill was sourced (managed vs local), with optional provenance metadata. */
 	origin: SkillOrigin,
+	/**
+	 *  RFC-3339 timestamp of the last manifest sync for this skill (D-16).
+	 * 
+	 *  Populated by `lib.rs::sync` (post-discover, pre-ListReport) from the
+	 *  library manifest's `SkillEntry::synced_at` when an entry exists; `None`
+	 *  for skills not yet in the manifest. `discover_all` itself leaves this
+	 *  `None` — the manifest is loaded by `sync()` and lives outside the
+	 *  discover layer (HARD-05-style layering: discovery scans the filesystem,
+	 *  the orchestrator joins in manifest metadata).
+	 * 
+	 *  Closes the Phase-26 VIEW-02 carryover plumbing for Recent-sort on the
+	 *  Skills view (D-16). The sort semantic itself lives in plan 27-02b.
+	 */
+	synced_at?: string | null,
 };
 
 /**
@@ -527,6 +692,20 @@ export type ListReport = {
 export type LockfileChanged = null;
 
 /**
+ *  Three pre-sorted buckets, alphabetical by skill name within each.
+ * 
+ *  The React side renders three vertical sections (NEW / CHANGED / REMOVED —
+ *  UI-SPEC §TriagePanel) by mapping each Vec; no re-sorting needed on the
+ *  JS side. The buckets are independent — a skill never appears in more than
+ *  one Vec.
+ */
+export type LockfileDiff = {
+	added: TriageEntry[],
+	changed: TriageEntry[],
+	removed: TriageEntry[],
+};
+
+/**
  *  State of `tome.lock` relative to the on-disk manifest (VIEW-01).
  * 
  *  Classification reuses the same content-hash comparison `reconcile.rs`
@@ -580,6 +759,24 @@ export type MachinePrefsSummary = {
 };
 
 /**
+ *  Structured Myers line-diff between the on-disk `machine.toml` and the
+ *  canonical `toml::to_string_pretty(proposed)` serialization.
+ * 
+ *  Returned by [`preview_save`]; consumed by the Desktop GUI's
+ *  `preview_machine_toml` Tauri command. The companion `apply_machine_toml`
+ *  command commits the proposed prefs via the existing atomic [`save`] —
+ *  `preview_save` itself is a pure (no-write) helper.
+ */
+export type MachineTomlPreview = {
+	/**  Every line of the diff in display order: Equal/Removed/Added. */
+	lines: DiffLine[],
+	/**  Number of [`DiffLineKind::Added`] entries in `lines`. */
+	added_count: number,
+	/**  Number of [`DiffLineKind::Removed`] entries in `lines`. */
+	removed_count: number,
+};
+
+/**
  *  The on-disk manifest (`.tome-manifest.json`) was rewritten.
  * 
  *  React hooks that derive from manifest state (skill list, status, doctor)
@@ -591,22 +788,88 @@ export type ManifestChanged = null;
  *  Typed event fired when a custom (non-Predefined) menu item is
  *  activated. The React side (`useMenuActions`) listens via the
  *  generated `events.menuAction` binding and routes to the router
- *  (`JumpStatus` / `JumpSkills` / `JumpHealth`) or focuses the
- *  SearchField (`FocusSearch`).
+ *  (`JumpStatus` / `JumpSkills` / `JumpSync` / `JumpHealth`) or focuses
+ *  the SearchField (`FocusSearch`).
  * 
- *  Phase 27+ Library actions (e.g. `SyncNow`, `AddDirectory`) are NOT
- *  added here — they belong to the milestone that ships them, alongside
- *  the matching Rust command + UI surface.
+ *  `JumpSync` was added in Phase 27 plan 27-01b alongside the Sync
+ *  view substrate. The Library → Sync menu item dispatches `JumpSync`
+ *  too (no separate `SyncNow` variant) — the React side handles the
+ *  "Sync was activated, kick off a run" intent through a parallel
+ *  global ⌘R keybinding in `useMenuActions`. Adding two events for
+ *  what the user perceives as a single action would let the menu and
+ *  keybinding drift; one event keeps the routing single-source.
  */
 export type MenuAction = 
 /**  View → Status (⌘1). */
 { kind: "JumpStatus" } | 
 /**  View → Skills (⌘2). */
 { kind: "JumpSkills" } | 
-/**  View → Health (⌘3). */
+/**
+ *  View → Sync (⌘3) — Phase 27 plan 27-01b. Also dispatched by
+ *  Library → Sync (⌘R).
+ */
+{ kind: "JumpSync" } | 
+/**
+ *  View → Health (⌘4) — re-anchored from ⌘3 in Phase 27 plan 27-01b
+ *  (Pitfall 7).
+ */
 { kind: "JumpHealth" } | 
 /**  View → Focus Search (⌘F). Scoped to the Skills view client-side. */
 { kind: "FocusSearch" };
+
+/**
+ *  Which sub-operation produced a per-skill partial failure inside an
+ *  otherwise-successful stage.
+ * 
+ *  Mirrors the three places the sync pipeline aggregates per-skill /
+ *  per-operation failures today:
+ * 
+ *  - [`PartialFailureOp::Distribution`] — a single skill failed to be linked
+ *    into a distribution directory (D-09 / SAFE-01). The skill name is the
+ *    symlink filename; the directory is captured in the error context.
+ *  - [`PartialFailureOp::Cleanup`] — a stale distribution symlink could not
+ *    be removed (cleanup_disabled_from_target's per-symlink failure). The
+ *    skill name is the symlink filename.
+ *  - [`PartialFailureOp::Install`] — a managed-source install/update failed
+ *    inside the Reconcile stage (RESEARCH OQ-6). The skill name is the
+ *    plugin identifier.
+ *  - [`PartialFailureOp::Other`] — defensive fallback for partial failures
+ *    that don't map cleanly onto the above (e.g., a future SyncReport field).
+ */
+export type PartialFailureOp = 
+/**  Distribute stage per-skill symlink failure. */
+"Distribution" | 
+/**  Cleanup stage per-symlink remove failure. */
+"Cleanup" | 
+/**  Reconcile stage per-plugin install/update failure. */
+"Install" | 
+/**  Reserved fallback. */
+"Other";
+
+/**
+ *  IPC wire-shape mirror of [`tome::PartialFailure`] (Phase 27 plan 27-05).
+ * 
+ *  Same fields; the `message`/`context` already carry the projected error
+ *  payload from the domain side, so this is a structural mirror — no
+ *  reclassification at the boundary. The `code` field is fixed to
+ *  [`crate::error::ErrorCode::Internal`] because per-skill cleanup /
+ *  install failures don't currently carry domain sentinels through the
+ *  SAFE-01 aggregation pipeline; a future plan that threads sentinels
+ *  onto per-skill error sites will narrow this.
+ */
+export type PartialFailureWire = {
+	/**  Which pipeline stage produced this failure. */
+	stage: SyncStage,
+	/**  Which sub-operation failed. */
+	operation: PartialFailureOp,
+	/**
+	 *  Skill name (raw — may not pass `SkillName` validation for a
+	 *  rogue filename on disk). `None` for failures not keyed by a skill.
+	 */
+	skill: string | null,
+	/**  Structured error payload (matches `FindingRow`'s shape). */
+	error: TomeError,
+};
 
 /**
  *  Categorises the auto-repair available for a [`DiagnosticIssue`]
@@ -898,6 +1161,42 @@ export type StatusReport_Serialize = {
 };
 
 /**
+ *  The IPC wire-shape of a sync outcome (Phase 27 plan 27-05 / SYNC-05).
+ * 
+ *  `result: Option<TomeError>` — `None` on a clean or partial-success run;
+ *  `Some(_)` on a stage-level fatal failure. The React side reads this as
+ *  the discriminator for the SyncView terminal-state branches:
+ * 
+ *  - `result === null && partial_failures.length === 0` → "Sync complete"
+ *  - `result === null && partial_failures.length > 0`  → "Sync complete
+ *    with K issues"
+ *  - `result !== null && retry_from !== null`          → "Sync failed —
+ *    Retry from <stage>"
+ *  - `result !== null && retry_from === null`          → "Sync failed —
+ *    Dismiss only" (Save errors)
+ */
+export type SyncOutcomeWire = {
+	/**
+	 *  Fatal stage-level error; `None` on Ok runs (even with K partial
+	 *  failures). The Tauri tagged-Result projection would normally split
+	 *  the success/error states; we collapse them into one field so the
+	 *  React side reads ONE shape regardless of which terminal branch
+	 *  renders.
+	 */
+	result: TomeError | null,
+	/**
+	 *  Safe stage to resume from when `result` is Some. `None` when retry
+	 *  is not safe (Save errors, unknown stage) or when `result` is None.
+	 */
+	retry_from: SyncStage | null,
+	/**
+	 *  Per-skill failures observed during an otherwise-successful run.
+	 *  Empty when `result` is Some (the full failure is in `result`).
+	 */
+	partial_failures: PartialFailureWire[],
+};
+
+/**
  *  Front-end progress event streamed to the webview.
  * 
  *  Carries the **typed** [`SyncStage`] enum directly (not a stringified label)
@@ -912,6 +1211,21 @@ export type SyncProgress = {
 	current: number,
 	/**  Total units in this stage (0 when unknown / not applicable). */
 	total: number,
+	/**
+	 *  Optional human-readable subtitle for the unit currently in flight
+	 *  (D-08). Comes from one of three places:
+	 * 
+	 *  - `ProgressEvent::SyncStageProgress.item` — pass-through from the
+	 *    domain (per-stage assignment owned by the emission site).
+	 *  - `ProgressEvent::GitCloneProgress` — D-09 sink-side fold-in:
+	 *    `Some(format!("git: {dir} ({})", format_bytes(received)))`. The
+	 *    domain emits raw bytes; the sink owns the human-readable format.
+	 *  - `ProgressEvent::BackupSnapshot` — D-09 sink-side fold-in: the
+	 *    `message` field becomes the subtitle verbatim.
+	 * 
+	 *  `None` for `SyncStageStarted` / `SyncStageFinished` events.
+	 */
+	item: string | null,
 };
 
 /**
@@ -951,6 +1265,123 @@ export type TomeError = {
 	/**  Flattened anyhow `.context()` chain (outermost first). */
 	context: string[],
 };
+
+/**
+ *  A single triage decision sent from the GUI's Sync route to the Rust
+ *  `preview_machine_toml` / `apply_machine_toml` commands.
+ * 
+ *  One entry per skill the user has triaged (the `Map<SkillName, …>` in
+ *  `useSync().decisions` is flattened to `Vec<TriageDecision>` at IPC time).
+ *  A skill missing from the Vec is implicitly Keep — the React side only
+ *  surfaces decisions the user explicitly changed away from the default.
+ * 
+ *  `SkillName`'s `Deserialize` impl validates the name at the IPC boundary
+ *  (T-27-03-02 mitigation — path-separator / empty-name rejection happens
+ *  before the value reaches the mutator).
+ */
+export type TriageDecision = {
+	skill: SkillName,
+	decision: TriageDecisionKind,
+};
+
+/**
+ *  Decision kind for [`TriageDecision`]. Stable lowercase string union on
+ *  the TS side (`"keep"` / `"disable"`) so the React decision-map keeps a
+ *  narrow shape.
+ * 
+ *  - `Keep` — explicit "leave this skill enabled" choice. A no-op at write
+ *    time; the user's intent is recorded in React state so the per-row UI
+ *    reflects it, but `apply_machine_toml` does not touch the on-disk file
+ *    for Keep entries.
+ *  - `Disable` — adds the skill to the global `disabled` set in
+ *    `machine.toml` (the same set toggled by `set_skill_disabled` in the
+ *    Skills view). Idempotent on the disabled set.
+ */
+export type TriageDecisionKind = "keep" | "disable";
+
+/**
+ *  A single skill's per-row payload in the triage panel.
+ * 
+ *  One entry per row in the GUI. Shape covers all three change kinds:
+ * 
+ *  - **Added** (`change_kind: "added"`): `content_hash_new = Some`,
+ *    `content_hash_old = None`, `synced_at = None` (the manifest does not
+ *    yet have an entry for this skill).
+ *  - **Changed** (`change_kind: "changed"`): both hashes populated; `synced_at`
+ *    from the manifest entry for the current (old-state) skill.
+ *  - **Removed** (`change_kind: "removed"`): `content_hash_old = Some`,
+ *    `content_hash_new = None`. `previous_source` carries the owning
+ *    directory at the moment the skill was last seen.
+ * 
+ *  All fields are serializable via `specta::Type` so the React side gets a
+ *  fully-typed payload; no string parsing on the JS side.
+ */
+export type TriageEntry = {
+	/**  Skill name (matches the manifest key + the lockfile key). */
+	name: SkillName,
+	/**
+	 *  Which change kind this row belongs to. The Rust side already sorts
+	 *  entries into the three Vecs of [`LockfileDiff`], but echoing the kind
+	 *  on every entry keeps the boundary self-describing for diagnostics and
+	 *  for the React-side aria-label templates (UI-SPEC §VoiceOver labels).
+	 */
+	change_kind: TriageEntryChangeKind,
+	/**
+	 *  The directory currently owning this skill (Added → new owner;
+	 *  Changed → the new owner; Removed → the owner at the moment of removal
+	 *  per the old lockfile entry). `None` for the Unowned state (an Added
+	 *  skill never appears Unowned, but a Removed-while-Unowned skill can).
+	 */
+	source_name: DirectoryName | null,
+	/**
+	 *  For Removed entries that transitioned through Unowned: the last
+	 *  directory that owned the skill (D-C1 breadcrumb).
+	 */
+	previous_source: DirectoryName | null,
+	/**
+	 *  Origin classification (managed vs. local). For Added/Changed: derived
+	 *  from the new entry's `registry_id` (managed) vs. absence (local). For
+	 *  Removed: derived from the old entry's `registry_id`. The
+	 *  `provenance` payload (when `kind = managed`) carries `version` and
+	 *  `git_commit_sha` from the lockfile — the React-side `TriageDetail`
+	 *  reads `git_commit_sha` to decide whether to show the "View source"
+	 *  radio (D-14: git-sourced only).
+	 */
+	origin: SkillOrigin,
+	/**  Old SHA-256 hex (present for Changed + Removed; absent for Added). */
+	content_hash_old: string | null,
+	/**  New SHA-256 hex (present for Added + Changed; absent for Removed). */
+	content_hash_new: string | null,
+	/**
+	 *  Registry identifier (e.g. "axiom@npm"). Mirrors the lockfile's
+	 *  `registry_id` field; `None` for local skills. For Changed entries
+	 *  where the registry identifier itself changed (rare, but possible
+	 *  across a marketplace rename), the value is the **new** registry id;
+	 *  the React-side disclosure shows the old via the diff metadata.
+	 */
+	registry_id: string | null,
+	/**  Old version string (for Changed + Removed). */
+	version_old: string | null,
+	/**  New version string (for Added + Changed). */
+	version_new: string | null,
+	/**  Old git commit SHA (for Changed + Removed). */
+	git_commit_sha_old: string | null,
+	/**  New git commit SHA (for Added + Changed). */
+	git_commit_sha_new: string | null,
+	/**
+	 *  ISO-8601 timestamp from the manifest's `SkillEntry::synced_at` for
+	 *  this skill at the moment the diff was computed. `None` for an Added
+	 *  skill (no manifest entry yet) or for a skill the manifest stamped
+	 *  with no value (legacy).
+	 */
+	synced_at: string | null,
+};
+
+/**
+ *  Discriminator carried on each `TriageEntry`. Stable string union on the
+ *  TS side so React's pattern-match stays exhaustive.
+ */
+export type TriageEntryChangeKind = "added" | "changed" | "removed";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

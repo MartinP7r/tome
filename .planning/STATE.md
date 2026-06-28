@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: milestone_complete
-stopped_at: Milestone complete (Phase 26 was final phase)
-last_updated: 2026-05-31T07:39:30.816Z
-last_activity: 2026-05-29 -- Phase 26 execution started
+status: executing
+stopped_at: Phase 27 planned (7 plans, 5 waves) — verification passed
+last_updated: "2026-06-06T11:57:10.215Z"
+last_activity: 2026-06-06 -- Phase 27 execution started
 progress:
-  total_phases: 2
-  completed_phases: 1
-  total_plans: 14
-  completed_plans: 93
+  total_phases: 4
+  completed_phases: 2
+  total_plans: 21
+  completed_plans: 14
   percent: 50
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Milestone complete
+**Current focus:** Phase 27 — sync-triage-ui
 
 ## Current Position
 
-Phase: 26
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-05-31
+Phase: 27 (sync-triage-ui) — EXECUTING
+Plan: 1 of 7
+Status: Executing Phase 27
+Last activity: 2026-06-06 -- Phase 27 execution started
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -116,6 +116,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-05-28T13:05:59.273Z
-Stopped at: Phase 26 UI-SPEC approved
-Resume file: .planning/phases/26-read-only-views-alpha-cut/26-UI-SPEC.md
+Last session: 2026-06-05T12:16:58.288Z
+Stopped at: Phase 27 planned (7 plans, 5 waves) — verification passed
+Resume file: .planning/phases/27-sync-triage-ui/27-01a-PLAN.md

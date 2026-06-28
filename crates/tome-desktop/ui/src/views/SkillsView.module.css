@@ -36,6 +36,31 @@
   padding: var(--space-2) 0;
 }
 
+/* Group sections — Phase 27 plan 27-02b closes the VIEW-02 carryover.
+ * Each group gets a SectionHeader (level=2) above its virtualised
+ * ListBox; the separator rhythm matches the Phase 26 spacing tokens
+ * already used by SectionHeader's own .header margins so the visual
+ * cadence reads consistently across the Skills view and the Sync
+ * triage panel (which also stacks level-2 headers). */
+.groupSection {
+  display: flex;
+  flex-direction: column;
+  /* Bottom rhythm between groups so the next SectionHeader's --space-6
+   * top margin sums to a comfortable separator without doubling. */
+  padding-bottom: var(--space-3);
+}
+
+.groupSection:last-child {
+  padding-bottom: 0;
+}
+
+/* The SectionHeader sits OUTSIDE the virtualiser between virtualised
+ * chunks. Pad it inline so the heading aligns with the search slot +
+ * toolbar gutter above. */
+.groupHeader {
+  padding: 0 var(--space-4);
+}
+
 .detailColumn {
   /* Non-scrolling outer flex: DetailHeader stays pinned at top; MarkdownBody
    * takes the remaining height and scrolls internally (UI-SPEC §Skills

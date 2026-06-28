@@ -58,7 +58,13 @@ const STATUS_REPORT = {
   health: { count: 2, error: null },
 };
 
-/** A11y fixture — 3 representative skills (1 managed, 2 local). */
+/** A11y fixture — 3 representative skills (1 managed, 2 local).
+ *
+ *  Phase 27 plan 27-02b adds `synced_at` (D-16) to each row so the
+ *  new "skills view group-by Source passes axe WCAG-AA" subtest
+ *  exercises the same field the Sort=Recent comparator keys on.
+ *  Mixed null + populated values mirror the real-world shape (a skill
+ *  freshly discovered but not yet synced has `synced_at = null`). */
 const A11Y_LIST_REPORT = {
   skills: [
     {
@@ -67,22 +73,27 @@ const A11Y_LIST_REPORT = {
       source_name: "claude-plugins",
       origin: {
         kind: "managed",
-        registry_id: "axiom",
-        version: "1.2.3",
-        git_commit_sha: null,
+        provenance: {
+          registry_id: "axiom",
+          version: "1.2.3",
+          git_commit_sha: null,
+        },
       },
+      synced_at: "2026-05-29T08:00:00Z",
     },
     {
       name: "rust-helper",
       path: "/Users/test/skills/rust-helper",
       source_name: "personal",
       origin: { kind: "local" },
+      synced_at: "2026-05-28T08:00:00Z",
     },
     {
       name: "deprecated-skill",
       path: "/Users/test/skills/deprecated-skill",
       source_name: "personal",
       origin: { kind: "local" },
+      synced_at: null,
     },
   ],
   warnings: [],
@@ -123,6 +134,86 @@ const SKILL_DETAIL_BY_NAME: Record<string, any> = {
     },
     body: "# Axiom Build\n\nHelp with iOS build issues.",
   },
+};
+
+/** Triage fixture — exercises GridList + nested SectionHeader + the
+ *  TriageRow chip-toggle + the RadioGroup canonical picker. Two added
+ *  entries (one managed-git, one local) + one changed + one removed
+ *  covers every branch the triage UI renders. */
+const TRIAGE_DIFF = {
+  added: [
+    {
+      name: "axiom-build",
+      change_kind: "added" as const,
+      source_name: "plugins",
+      previous_source: null,
+      origin: {
+        kind: "managed" as const,
+        provenance: {
+          registry_id: "axiom@npm",
+          version: "1.2.0",
+          git_commit_sha: "abc1234",
+        },
+      },
+      content_hash_old: null,
+      content_hash_new: "b".repeat(64),
+      registry_id: "axiom@npm",
+      version_old: null,
+      version_new: "1.2.0",
+      git_commit_sha_old: null,
+      git_commit_sha_new: "abc1234",
+      synced_at: null,
+    },
+    {
+      name: "axiom-swiftui",
+      change_kind: "added" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: null,
+      content_hash_new: "c".repeat(64),
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: null,
+    },
+  ],
+  changed: [
+    {
+      name: "rust-helper",
+      change_kind: "changed" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: "a".repeat(64),
+      content_hash_new: "d".repeat(64),
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: "2026-05-29T08:00:00Z",
+    },
+  ],
+  removed: [
+    {
+      name: "deprecated-skill",
+      change_kind: "removed" as const,
+      source_name: "personal",
+      previous_source: null,
+      origin: { kind: "local" as const },
+      content_hash_old: "e".repeat(64),
+      content_hash_new: null,
+      registry_id: null,
+      version_old: null,
+      version_new: null,
+      git_commit_sha_old: null,
+      git_commit_sha_new: null,
+      synced_at: "2026-05-28T08:00:00Z",
+    },
+  ],
 };
 
 const DOCTOR_REPORT = {
@@ -178,6 +269,140 @@ export async function invoke(cmd: string, _args?: any): Promise<any> {
     case "get_doctor_report":
       return DOCTOR_REPORT;
     case "doctor_repair_one":
+      return null;
+    // Phase 27 plan 27-01b — long-running sync pipeline commands.
+    // The axe-core gate only scans the initial render tree; it never
+    // exercises an actual sync. start_sync returns immediately with a
+    // success unit so the SyncView's terminal-state placeholder renders
+    // if the gate happens to click [Run sync]. cancel_sync is idempotent
+    // on the Rust side and returns unit too.
+    //
+    // Phase 27 plan 27-04 — the `?sync_cancelled=1` query param flag
+    // makes start_sync return the cancel-shaped error
+    // (ErrorCode::Internal + "sync cancelled" message) so the axe scan
+    // can drive the cancelled terminal-state branch without needing a
+    // real CancelToken poll. The React side's cancelRequestedRef must
+    // ALREADY be set by the time start_sync resolves — the test clicks
+    // [Run sync] then [Cancel sync] before the mock returns.
+    case "start_sync":
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_cancelled=1")
+      ) {
+        // Generous delay so the playwright axe test has time to do BOTH
+        // an in-progress axe scan AND click [Cancel sync] between
+        // [Run sync] and this Promise resolving. The axe scan itself
+        // can take several hundred ms; 3s margin covers it.
+        return new Promise((_resolve, reject) =>
+          setTimeout(() => {
+            // Reject with the cancel-shaped TomeError. The typedError
+            // wrapper in bindings.ts wraps non-Error rejections into
+            // `{ status: "error", error: e }` — we deliberately throw a
+            // plain object (NOT an Error instance) so the wrapper
+            // doesn't re-throw.
+            reject({
+              code: "Internal",
+              message: "sync cancelled",
+              context: [],
+            });
+          }, 3000),
+        );
+      }
+      // Phase 27 plan 27-05 — drive the terminal-failed-with-retry
+      // axe scan. Resolves with a SyncOutcomeWire whose `result` is
+      // non-null and `retry_from = "Discover"` so the React tree
+      // renders the "Sync failed" summary + [Retry from Discover] +
+      // [Dismiss] action triplet.
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_failed=1")
+      ) {
+        return {
+          result: {
+            code: "Permission",
+            message: "consolidate failed",
+            context: ["permission denied at /tmp/foo"],
+          },
+          retry_from: "Discover",
+          partial_failures: [],
+        };
+      }
+      // Phase 27 plan 27-05 — drive the terminal-partial-failure axe
+      // scan. Resolves with a SyncOutcomeWire whose `result` is null
+      // (the pipeline technically succeeded) but `partial_failures`
+      // is non-empty so the React tree renders the "Sync complete
+      // with K issues" summary + [Retry failed items] + [Dismiss].
+      // The Distribute stage is targeted because it's the most common
+      // SAFE-01 aggregation site.
+      if (
+        typeof window !== "undefined" &&
+        window.location?.search?.includes("sync_partial=1")
+      ) {
+        return {
+          result: null,
+          retry_from: null,
+          partial_failures: [
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "axiom-build",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied at /tmp/foo/axiom-build"],
+              },
+            },
+            {
+              stage: "Distribute",
+              operation: "Distribution",
+              skill: "rust-helper",
+              error: {
+                code: "Internal",
+                message: "permission denied",
+                context: ["permission denied at /tmp/foo/rust-helper"],
+              },
+            },
+          ],
+        };
+      }
+      // Default success: clean SyncOutcomeWire shape (Plan 27-05).
+      return { result: null, retry_from: null, partial_failures: [] };
+    case "cancel_sync":
+      return null;
+    // Phase 27 plan 27-05 — retry commands. Both resolve with a clean
+    // SyncOutcomeWire so the axe scan can drive the "post-retry success"
+    // path if a future scan exercises the retry click.
+    case "retry_sync_from":
+    case "retry_failed_items":
+      return { result: null, retry_from: null, partial_failures: [] };
+    // Phase 27 plan 27-02 — SYNC-02 triage panel projection. The a11y gate
+    // has two scans: the default empty-diff path (nothing renders besides
+    // the idle hero) and a "triage" path that surfaces a representative
+    // sample diff so axe can scan the GridList / sectioned headings /
+    // RadioGroup composition. The triage path is selected by setting the
+    // `?triage=1` query param on the loaded page.
+    case "get_lockfile_diff":
+      if (typeof window !== "undefined" && window.location?.search?.includes("triage=1")) {
+        return TRIAGE_DIFF;
+      }
+      return { added: [], changed: [], removed: [] };
+    // Phase 27 plan 27-03 — SYNC-03 Apply flow mocks. The a11y gate opens
+    // the PreviewPopover by clicking [Apply N decisions], so the mock
+    // returns a representative MachineTomlPreview the
+    // MachineTomlDiff component renders inside the popover. Apply is a
+    // no-op success that returns null — the popover closes and the
+    // Sidebar badge clears.
+    case "preview_machine_toml":
+      return {
+        lines: [
+          { kind: "unchanged", line_number: 1, content: "[machine_prefs]" },
+          { kind: "removed", line_number: 2, content: "disabled = []" },
+          { kind: "added", line_number: 2, content: "disabled = [\"alpha\"]" },
+        ],
+        added_count: 1,
+        removed_count: 1,
+      };
+    case "apply_machine_toml":
       return null;
     default:
       throw new Error(`a11y mock: unknown command '${cmd}'`);

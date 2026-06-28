@@ -1,0 +1,106 @@
+/* TriageDetail — UI-SPEC §TriageDetail (Phase 27 plan 27-02). */
+
+.detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+}
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--space-5);
+  color: var(--label-secondary);
+  font-size: var(--text-body-size);
+}
+
+.titleRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--text-title-size);
+  font-weight: 600;
+  line-height: var(--text-title-line);
+  color: var(--label-primary);
+  margin: 0;
+}
+
+/* Metadata grid — same shape as Phase 26 DetailHeader.metaGrid. */
+.metaGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.metaCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metaLabel {
+  font-size: var(--text-small-size);
+  font-weight: 600;
+  line-height: var(--text-small-line);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--label-secondary);
+  margin: 0;
+}
+
+.metaValue {
+  font-size: var(--text-body-size);
+  font-weight: 400;
+  line-height: var(--text-body-line);
+  color: var(--label-primary);
+  margin: 0;
+}
+
+.metaValueMono {
+  font-size: var(--text-small-size);
+  font-weight: 400;
+  line-height: var(--text-small-line);
+  color: var(--label-primary);
+  margin: 0;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.removedHelper {
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  color: var(--label-secondary);
+  margin: 0;
+}
+
+.diffMetadata {
+  font-size: var(--text-small-size);
+  color: var(--label-secondary);
+}
+
+.diffMetadata summary {
+  cursor: pointer;
+  padding-bottom: var(--space-2);
+}
+
+.diffMetadata summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}

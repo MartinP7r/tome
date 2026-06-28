@@ -9,10 +9,14 @@
 //
 // State shape stays flat — adding a new view (e.g. Sync, Config in Phase 27)
 // is a literal-union extension.
+//
+// Phase 27 plan 27-01b extends the union with `"sync"` between `"skills"` and
+// `"health"` to match the sidebar render order (Status → Skills → Sync →
+// Health) and the menu-bar accelerators (⌘1..⌘4 in the same order).
 
 import { useSyncExternalStore } from "react";
 
-export type View = "status" | "skills" | "health";
+export type View = "status" | "skills" | "sync" | "health";
 
 type Listener = () => void;
 

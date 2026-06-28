@@ -251,7 +251,8 @@ pub fn reconcile_lockfile(
             prefs,
             machine_path,
             &opts,
-            drift_to_apply.len() + missing_to_apply.len(),
+            &drift_to_apply,
+            &missing_to_apply,
         )?
     } else {
         ConsentDecision::SkipNoWork
@@ -433,7 +434,8 @@ fn resolve_consent(
     prefs: &mut MachinePrefs,
     machine_path: &Path,
     opts: &ReconcileOpts,
-    affected_count: usize,
+    drift: &[Classified],
+    missing: &[Classified],
 ) -> Result<ConsentDecision> {
     // --no-install: caller-side override, doesn't touch persisted state.
     if opts.no_install {
@@ -449,7 +451,7 @@ fn resolve_consent(
                 return Ok(ConsentDecision::SkipNoInteractive);
             }
             // Show prompt (D-08).
-            let choice = prompt_consent(affected_count)?;
+            let choice = prompt_consent(drift, missing)?;
             apply_consent_decision(prefs, choice, machine_path)?;
             match choice {
                 AutoInstall::Always => Ok(ConsentDecision::Apply),
@@ -480,18 +482,25 @@ pub(crate) fn apply_consent_decision(
 /// The literal `[Y/n/never]` line in CONTEXT.md D-08 is realised as an
 /// arrow-key list; the option labels below describe the same three
 /// outcomes and default to `Always` (the affirmative action).
-fn prompt_consent(affected_count: usize) -> Result<AutoInstall> {
-    let prompt = format!(
-        "Tome detected {affected_count} missing or out-of-date managed plugins. \
-         Install/update them now?"
+fn prompt_consent(drift: &[Classified], missing: &[Classified]) -> Result<AutoInstall> {
+    let affected_count = drift.len() + missing.len();
+    eprintln!(
+        "Tome detected {affected_count} missing or out-of-date managed plugin{}:",
+        if affected_count == 1 { "" } else { "s" }
     );
+    for c in missing {
+        eprintln!("  missing:      {}", c.name);
+    }
+    for c in drift {
+        eprintln!("  out-of-date:  {}", c.name);
+    }
     let items = [
         "Yes (always — install on every sync)",
         "Yes (ask me again next time)",
         "No (never ask again on this machine)",
     ];
     let idx = dialoguer::Select::new()
-        .with_prompt(prompt)
+        .with_prompt("Install/update them now?")
         .items(items)
         .default(0)
         .interact()

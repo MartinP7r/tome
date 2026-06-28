@@ -1,6 +1,7 @@
-// axe-core/playwright WCAG-AA gate (Phase 26 plan 26-07 Task 3 / NF-02).
+// axe-core/playwright WCAG-AA gate (Phase 26 plan 26-07 Task 3 / NF-02 +
+// Phase 27 plan 27-01b Task 4 — Sync route added).
 //
-// Scans the four Phase-26 surfaces — Status, Skills, Health, PreviewPopover
+// Scans the five GUI surfaces — Status, Skills, Sync, Health, PreviewPopover
 // — against `wcag2a` + `wcag2aa` and fails the build on any violation.
 //
 // Architecture (Path A from the plan):
@@ -92,6 +93,102 @@ test("skills view passes axe WCAG-AA", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
+test("skills view group-by Source passes axe WCAG-AA (Phase 27 plan 27-02b)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-02b — VIEW-02 carryover closure. Toggle the Group
+  // menu to "Source" and confirm the rendered SectionHeader-between-
+  // groups composition has no nested-interactive or heading-order
+  // violations. The Skills view keeps its existing ListBox primitive
+  // (rows have no inline buttons; the GridList vs ListBox decision in
+  // TriagePanel does NOT carry over here).
+  await page
+    .getByRole("option", { name: /^Skills, Skills section/ })
+    .click();
+  await page
+    .getByRole("searchbox", { name: "Search skills" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // Click the Group menu trigger ("Group: None" is the closed-state
+  // label rendered by PopupMenu) and select "Source".
+  await page.getByRole("button", { name: "Group skills" }).click();
+  await page.getByRole("menuitemradio", { name: "Source" }).click();
+  // Wait for the SectionHeader(s) the grouped render emits. The a11y
+  // mock fixture has skills under `claude-plugins` and `personal`, so
+  // both labels render as level-2 <h2>s (uppercase per UI-SPEC).
+  await page
+    .getByRole("heading", { level: 2, name: /^PERSONAL/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view passes axe WCAG-AA", async ({ page }) => {
+  // Phase 27 plan 27-01b — Sync route a11y. Click the Sidebar's Sync
+  // NavItem (a React Aria ListBoxItem → role="option") and wait for the
+  // idle hero's <h1> to render before scanning.
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  // The idle hero headline is either "You haven't synced yet." (no last
+  // sync recorded in StatusReport) or "Last synced …" (the a11y mock
+  // ships a `last_sync` value, so this is the rendered string). Wait
+  // for the <h1> shape rather than the literal string so the test stays
+  // robust if the mock's last_sync drifts later.
+  await page
+    .getByRole("heading", { level: 1 })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // [Run sync] is the primary CTA — wait for it so axe scans the full
+  // idle composition (button + glyph + heading + recent-changes
+  // disclosure).
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view triage panel passes axe WCAG-AA (Phase 27 plan 27-02)", async ({ page }) => {
+  // Phase 27 plan 27-02 — SYNC-02 triage panel a11y scan. The mock
+  // returns a populated LockfileDiff when `?triage=1` is set on the
+  // URL, so loading the page with that param mounts the triage panel
+  // (GridList + nested SectionHeader + TriageRow chip + RadioGroup) so
+  // axe can scan every interactive surface.
+  await page.goto("/?triage=1");
+  // Wait for the shell to land on Status (default route), then navigate
+  // to Sync.
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  // Wait for the populated triage panel — the NEW outer SectionHeader
+  // is the entry-point landmark (h2 with "NEW (2)").
+  await page
+    .getByRole("heading", { level: 2, name: /^NEW/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // The Apply N decisions button is the canonical action affordance.
+  await page
+    .getByRole("button", { name: /Apply \d+ triage decisions/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
 test("health view passes axe WCAG-AA", async ({ page }) => {
   await page
     .getByRole("option", { name: /^Health, Health section/ })
@@ -106,6 +203,55 @@ test("health view passes axe WCAG-AA", async ({ page }) => {
     .waitFor({ state: "visible", timeout: 10_000 });
 
   const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync apply popover (machine.toml diff) passes axe WCAG-AA (Phase 27 plan 27-03)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-03 — SYNC-03 Apply flow. Open the triage panel via
+  // ?triage=1, change one decision so the [Apply N decisions] button
+  // enables, click it to open the PreviewPopover. The popover renders the
+  // MachineTomlDiff slot (a table with the additions/removals header).
+  // Scope the axe scan to the dialog so it measures the popover
+  // composition (table + glyph gutters + helper + buttons).
+  await page.goto("/?triage=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("heading", { level: 2, name: /^NEW/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // Toggle the first row's [✓ keep] chip to "disable" so the Apply button
+  // enables. The chip is the inline toggle in TriageRow (D-12).
+  await page.getByRole("button", { name: /keep/i }).first().click();
+  // Wait for the Apply button label to update to a non-zero count.
+  await page
+    .getByRole("button", { name: /Apply [1-9]\d* triage decisions/ })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: /Apply [1-9]\d* triage decisions/ })
+    .click();
+  // PreviewPopover renders as a Dialog. Wait for the machine.toml diff
+  // table to render — its aria-label includes "machine.toml" so we anchor
+  // on that.
+  await page
+    .getByRole("dialog")
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("table", { name: /machine\.toml/i })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Scope axe to the dialog so the scan measures the popover specifically.
+  const results = await new AxeBuilder({ page })
+    .include('[role="dialog"]')
     .withTags(WCAG_TAGS)
     .disableRules(DISABLED_RULES)
     .analyze();
@@ -133,6 +279,143 @@ test("preview popover (Health Fix) passes axe WCAG-AA", async ({ page }) => {
   // Scope axe to the dialog so we measure the popover specifically.
   const results = await new AxeBuilder({ page })
     .include('[role="dialog"]')
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view in-progress + cancelled terminal state passes axe WCAG-AA (Phase 27 plan 27-04)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-04 — SYNC-04 cancellation invariant + terminal-state
+  // rendering. Drive the cancelled-terminal branch by:
+  //   1. Load with ?sync_cancelled=1 (the mock returns a cancel-shaped
+  //      error 200ms after start_sync is invoked).
+  //   2. Navigate to Sync; click [Run sync] → kicks off start_sync.
+  //   3. Click [Cancel sync] inside the window before the mock resolves
+  //      → sets the cancelRequestedRef.
+  //   4. Wait for the "Sync cancelled" summary heading to appear.
+  //   5. Scan the whole route for axe violations — the stepper has 6
+  //      cancelled rows + the summary block + [Run sync] + [Dismiss].
+  await page.goto("/?sync_cancelled=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Scan A — in-progress state. Click [Run sync], wait for the stepper
+  // to mount (list role appears), then scan.
+  await page.getByRole("button", { name: "Run sync" }).click();
+  await page
+    .getByRole("list", { name: "Sync pipeline progress" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: "Cancel sync at next stage boundary" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  let results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+
+  // Scan B — cancelled terminal state. Click [Cancel sync] (which sets
+  // the cancelRequestedRef), then wait for the mock to resolve with
+  // the cancel-shaped error → the summary heading appears.
+  await page
+    .getByRole("button", { name: "Cancel sync at next stage boundary" })
+    .click();
+  await page
+    .getByRole("heading", { level: 1, name: "Sync cancelled" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view terminal-failed-with-retry passes axe WCAG-AA (Phase 27 plan 27-05)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-05 — SYNC-05 terminal-failed-with-retry rendering.
+  // The mock returns a SyncOutcomeWire with result.code=Permission +
+  // retry_from=Discover when `?sync_failed=1` is set. The React tree
+  // renders the "Sync failed" summary + [Retry from Discover] + [Dismiss].
+  await page.goto("/?sync_failed=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  // Kick off the run. The mock resolves immediately with the failed
+  // SyncOutcomeWire shape; the React side classifies as terminalKind =
+  // "failed" and renders the summary + retry-from-Discover button.
+  await page.getByRole("button", { name: "Run sync" }).click();
+  await page
+    .getByRole("heading", { level: 1, name: "Sync failed" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  // [Retry from Discover] surfaces in the summary block (and the
+  // stepper's trailing action row redundantly per UI-SPEC).
+  await page
+    .getByRole("button", { name: "Retry from Discover" })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_TAGS)
+    .disableRules(DISABLED_RULES)
+    .analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("sync view terminal-partial-failure passes axe WCAG-AA (Phase 27 plan 27-05)", async ({
+  page,
+}) => {
+  // Phase 27 plan 27-05 — SYNC-05 terminal-partial-failure (D-20)
+  // rendering. The mock returns a SyncOutcomeWire with result=null +
+  // partial_failures=[2 Distribute failures] when `?sync_partial=1` is
+  // set. The React tree renders "Sync complete with 2 issues" + the
+  // [Retry failed items] + [Dismiss] action triplet, AND the stepper's
+  // Distribute row carries the amber [⚠ 2 issues] badge + the inline
+  // FindingRow list.
+  await page.goto("/?sync_partial=1");
+  await page
+    .getByRole("heading", { level: 1, name: "Status" })
+    .first()
+    .waitFor({ state: "visible", timeout: 15_000 });
+  await page
+    .getByRole("option", { name: /^Sync, Sync section/ })
+    .click();
+  await page
+    .getByRole("button", { name: "Run sync" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Run sync" }).click();
+  // Heading + retry action surface from the summary block.
+  await page
+    .getByRole("heading", { level: 1, name: "Sync complete with 2 issues" })
+    .waitFor({ state: "visible", timeout: 10_000 });
+  await page
+    .getByRole("button", { name: "Retry failed items" })
+    .first()
+    .waitFor({ state: "visible", timeout: 10_000 });
+
+  const results = await new AxeBuilder({ page })
     .withTags(WCAG_TAGS)
     .disableRules(DISABLED_RULES)
     .analyze();

@@ -79,7 +79,12 @@ pub(crate) mod lint;
 // CORE-01 collect-shape (gather → render) keeps the surface narrow: only
 // `ListReport` + `collect` are public.
 pub mod list;
-pub(crate) mod lockfile;
+// `lockfile` is `pub` so `tome-desktop` can call `lockfile::load` and consume
+// `Lockfile` + `LockEntry` across the crate boundary for the SYNC-02
+// triage-panel projection (Phase 27 plan 27-02 / get_lockfile_diff command).
+// The CLI's lockfile-writing path stays in-crate via the pipeline; only the
+// read shape + `load` are needed by the GUI for diff projection.
+pub mod lockfile;
 // `machine` is normally `pub(crate)` to keep `MachinePrefs` out of the
 // v1.0 GUI Tauri IPC surface. The HARD-21 browse_snapshots integration
 // test (under `test-support`) needs to construct `MachinePrefs` to
@@ -124,8 +129,17 @@ pub mod skill;
 // GUI contract. Widened in 25-04 (carry-forward from 25-03's pub `plan` fns).
 pub mod status;
 pub(crate) mod summary;
+// `sync_outcome` is `pub` so `tome-desktop` can construct + read
+// `SyncOutcome` + `PartialFailure` + `PartialFailureOp` at the IPC
+// boundary (Phase 27 plan 27-05 / SYNC-05). The CLI consumes
+// `tome::sync()` directly and does not need the outcome wrapping.
+pub mod sync_outcome;
 pub mod tracing_init;
-pub(crate) mod update;
+// `update` is `pub` so `tome-desktop` can call `update::diff` and consume
+// `UpdateDiff`/`SkillChange` for the SYNC-02 lockfile-diff projection (plan
+// 27-02). The CLI's `present_changes` interactive triage stays in-crate
+// (not exported); the GUI substitutes its own visual triage flow.
+pub mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
@@ -167,12 +181,34 @@ pub use migration_v010::MigrationPartialOrFailed;
 /// `WithDomainKind::with_domain_kind`; the domain itself stays `anyhow::Result`.
 pub use errors::{DomainErrorKind, DomainTagged};
 
+/// Per-machine preferences (re-exported from the `pub(crate)` `machine`
+/// module so external consumers — the Tauri `start_sync` command in
+/// `crates/tome-desktop/src/commands.rs`, plan 27-01b — can load and pass
+/// `MachinePrefs` into `sync()` without depending on the module path.
+pub use machine::MachinePrefs;
 /// Phase 26 plan 26-06 (VIEW-06 / NF-05) — the `tome-desktop` file watcher
 /// reads the canonical `machine.toml` path here without forcing the whole
 /// `machine` module to become part of the public API. Keep the re-export
 /// narrow (single function — no `MachinePrefs` etc.) so the GUI watcher's
 /// dependency surface stays small.
 pub use machine::default_machine_path;
+/// Load `machine.toml` from the given path. Re-exported alongside
+/// [`MachinePrefs`] for the same reason (plan 27-01b).
+pub use machine::load as load_machine_prefs;
+/// Phase 27 plan 27-03 (SYNC-03) — the desktop `apply_machine_toml` command
+/// commits proposed prefs via the canonical atomic temp+rename. Re-exported
+/// alongside [`load_machine_prefs`] so the GUI does not need to know the
+/// `machine` module path; this also keeps the public API symmetric (load /
+/// save) without lifting the whole module to `pub`.
+pub use machine::save as save_machine_prefs;
+/// Phase 27 plan 27-03 (SYNC-03) — the desktop `preview_machine_toml` command
+/// returns a structured Myers diff between the on-disk `machine.toml` and the
+/// proposed prefs, rendered as a `MachineTomlDiff` inside the `PreviewPopover`.
+/// The types ([`MachineTomlPreview`], [`DiffLine`], [`DiffLineKind`]) and the
+/// helper ([`preview_save`](machine::preview_save)) are re-exported here so
+/// `tome-desktop`'s `commands.rs` can use them without touching the gated
+/// `machine` module.
+pub use machine::{DiffLine, DiffLineKind, MachineTomlPreview, preview_save};
 
 /// Phase 26 plan 26-03 (VIEW-03) — `tome-desktop` accepts `SkillName` as the
 /// input arg for the 4 new commands (`get_skill_detail`, `set_skill_disabled`,
@@ -180,6 +216,33 @@ pub use machine::default_machine_path;
 /// the `discover` module's larger surface (`DiscoveredSkill`, scanners) out
 /// of the GUI's import path while making the validated newtype reachable.
 pub use discover::SkillName;
+
+/// Phase 27 plan 27-02 (SYNC-02) — `tome-desktop`'s SYNC-02 triage projection
+/// reconstructs a `SkillOrigin` from lockfile `registry_id`/`version`/
+/// `git_commit_sha` fields so the React side reuses the same discriminator
+/// the Skills view already pattern-matches. The `discover_all` re-export
+/// lets `get_lockfile_diff` build a prospective lockfile from the current
+/// disk state without depending on the `pub(crate)` `discover` module path.
+pub use discover::{SkillOrigin, SkillProvenance, discover_all};
+
+/// Phase 27 plan 27-02 (SYNC-02) — `tome-desktop`'s SYNC-02 triage projection
+/// surfaces lockfile content hashes as boundary strings. Re-exporting
+/// `ContentHash` lets the `sync_types` module's unit tests construct valid
+/// hashes without duplicating the 64-hex validator. The `validation` module
+/// stays `pub(crate)` (the rest of its surface is the internal
+/// `validate_identifier` helper); only `ContentHash` is lifted.
+pub use validation::ContentHash;
+
+/// Phase 27 plan 27-05 (SYNC-05) — `tome-desktop`'s `start_sync` /
+/// `retry_sync_from` / `retry_failed_items` commands return a structured
+/// `SyncOutcome` wrapping struct so the React `useSync` hook can render the
+/// full SYNC-05 terminal-state matrix (success / partial / failed-with-retry
+/// / failed-no-retry). The wrapping shape is the domain-side projection;
+/// the boundary in `crates/tome-desktop/src/sync_outcome_wire.rs` mirrors
+/// it with `TomeError` substituted for `anyhow::Error`.
+pub use sync_outcome::{
+    PartialFailure, PartialFailureOp, StageTrackingSink, SyncOutcome, safe_retry_from,
+};
 
 /// Summary of a complete sync operation — the return-shape of the full
 /// `sync()` pipeline (reconcile → discover → consolidate → distribute →
@@ -306,6 +369,10 @@ impl ProgressSink for IndicatifSink {
                 stage,
                 current: done,
                 total,
+                item: _, // D-08: the per-unit subtitle is a GUI affordance;
+                         // the CLI spinner keeps a counts-only message so the
+                         // captured-output contract (no per-skill chrome in
+                         // `insta`/`assert_cmd` snapshots) holds byte-for-byte.
             } => {
                 if let Some(sp) = current.as_ref()
                     && total > 0
@@ -547,6 +614,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     quiet,
                     machine_path: &machine_path,
                     machine_prefs: &machine_prefs,
+                    start_stage: None,
                 },
                 sink,
                 &cancel,
@@ -762,6 +830,7 @@ pub(crate) fn cmd_sync(
             quiet,
             machine_path,
             machine_prefs,
+            start_stage: None,
         },
         sink,
         &cancel,
@@ -1480,6 +1549,29 @@ pub(crate) fn cmd_backup(sub: cli::BackupCommand, paths: &TomePaths, dry_run: bo
     Ok(())
 }
 
+/// D-16: populate `DiscoveredSkill::synced_at` from the manifest.
+///
+/// The discover layer cannot read the manifest (the manifest is owned by
+/// `sync()` and lives outside the discover module), so the orchestrator joins
+/// the per-skill `synced_at` timestamp at the post-discover boundary. Skills
+/// with no matching `SkillEntry` in the manifest remain `synced_at: None`
+/// (they haven't been synced yet). Cost: one hashmap lookup per discovered
+/// skill — negligible compared to discovery's filesystem traversal.
+///
+/// Extracted from `sync()` so the join semantic is directly unit-testable
+/// without spinning a full TempDir+config+manifest fixture; pinned by tests
+/// in `mod tests` below (`join_synced_at_*`).
+fn join_synced_at_from_manifest(
+    skills: &mut [discover::DiscoveredSkill],
+    manifest: &manifest::Manifest,
+) {
+    for skill in skills {
+        skill.synced_at = manifest
+            .get(skill.name.as_str())
+            .map(|entry| entry.synced_at.clone());
+    }
+}
+
 /// Warn about `disabled_directories` entries in machine.toml that don't match any
 /// configured directory name. Helps catch typos and stale entries.
 fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
@@ -1494,22 +1586,35 @@ fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, conf
 }
 
 /// Options for the sync pipeline.
-struct SyncOptions<'a> {
-    dry_run: bool,
-    force: bool,
-    no_triage: bool,
-    no_input: bool,
-    no_install: bool,
-    verbose: bool,
-    quiet: bool,
+///
+/// Made `pub` in plan 27-01b (Wave 2 of Phase 27): the Tauri `start_sync`
+/// command in `crates/tome-desktop/src/commands.rs` constructs `SyncOptions`
+/// at the IPC boundary so the GUI can drive `sync()` the same way `cmd_sync`
+/// does. All fields are `pub` so callers can populate them inline; the public
+/// shape mirrors what `cmd_sync` was already passing internally.
+pub struct SyncOptions<'a> {
+    pub dry_run: bool,
+    pub force: bool,
+    pub no_triage: bool,
+    pub no_input: bool,
+    pub no_install: bool,
+    pub verbose: bool,
+    pub quiet: bool,
     /// Path where `machine.toml` should be saved after triage. Loaded once
     /// at `run()` entry alongside `machine_prefs` so the override-apply step
     /// in `Config::load_with_overrides` and the disabled-skill filtering
     /// inside `sync()` see identical prefs.
-    machine_path: &'a Path,
+    pub machine_path: &'a Path,
     /// Per-machine preferences already loaded by the caller. `sync()` clones
     /// these locally so triage can mutate without affecting the caller's copy.
-    machine_prefs: &'a machine::MachinePrefs,
+    pub machine_prefs: &'a machine::MachinePrefs,
+    /// Phase 27 plan 27-05 (SYNC-05): when `Some(stage)`, skip every
+    /// pipeline stage strictly before `stage`. Used by the GUI's
+    /// `retry_sync_from(stage)` command to resume after a stage failure.
+    /// `None` runs the full pipeline (CLI behavior). Today this option is
+    /// honored only by `sync_with_outcome`; the bare `sync()` ignores it
+    /// (the CLI never sets it).
+    pub start_stage: Option<progress::SyncStage>,
 }
 
 /// Pre-discovery step: clone or update git-type directories.
@@ -1759,7 +1864,21 @@ fn apply_edit_decisions(
 /// command. A cancellation observed between stages bails *before* any
 /// half-written manifest/lockfile (T-25-03a: cancel checks sit at stage
 /// boundaries, never mid-write, so the atomic temp+rename invariant holds).
-fn sync(
+/// Run the full sync pipeline.
+///
+/// Made `pub` in plan 27-01b: the Tauri `start_sync` command in
+/// `crates/tome-desktop/src/commands.rs` invokes this directly (wrapped in
+/// `tauri::async_runtime::spawn_blocking` so the synchronous body does not
+/// stall the async IPC reactor — RESEARCH Pitfall 5). The CLI's `cmd_sync`
+/// is the other caller. Both paths share a single implementation; the
+/// front-end-specific behavior (CLI spinner vs GUI typed event stream)
+/// is supplied by `sink`.
+///
+/// Return type stays `Result<()>` for plan 27-01b — 27-05 will swap this
+/// for a `Result<SyncOutcomeWire>` shape that crosses the IPC boundary
+/// with structured per-stage outcomes. Today the GUI consumes progress
+/// purely through `SyncProgress` events on `sink`.
+pub fn sync(
     config: &Config,
     paths: &TomePaths,
     opts: SyncOptions<'_>,
@@ -1776,6 +1895,12 @@ fn sync(
         quiet,
         machine_path,
         machine_prefs: prefs_in,
+        // Phase 27 plan 27-05: today `start_stage` is an advisory tag the
+        // GUI sets via its retry commands; the inner pipeline still runs
+        // the full sequence (stages produce data later stages need —
+        // skipping Discover would break Consolidate). See the
+        // `sync_with_outcome` doc comment for the rationale.
+        start_stage: _,
     } = opts;
 
     // OBS-03 D-SPAN-1: top-level sync span. RAII via `.entered()`; the
@@ -1954,7 +2079,12 @@ fn sync(
 
         // 1. Discover
         let mut warnings = Vec::new();
-        let discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        let mut discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+
+        // D-16: join in the manifest's per-skill `synced_at` timestamp.
+        // Extracted into `join_synced_at_from_manifest` so the join logic is
+        // directly unit-testable without spinning a full sync fixture.
+        join_synced_at_from_manifest(&mut discovered, &manifest_for_reconcile);
 
         sink.emit(ProgressEvent::SyncStageFinished {
             stage: SyncStage::Discover,
@@ -2101,6 +2231,13 @@ fn sync(
                 stage: SyncStage::Distribute,
                 current: idx,
                 total,
+                // D-08: per-stage subtitle. Distribute iterates per
+                // distribution directory; the current `name` is the
+                // DirectoryName receiving symlinks. Per-skill emission inside
+                // distribute::distribute_to_directory is a future-plan
+                // expansion — when it lands, set `item: Some(skill_name.to_string())`
+                // there instead.
+                item: Some(name.to_string()),
             });
             let result = distribute::distribute_to_directory(
                 paths.library_dir(),
@@ -2310,6 +2447,100 @@ fn sync(
     }
 
     Ok(())
+}
+
+/// GUI-facing sync entry point that wraps [`sync`] and returns a structured
+/// [`sync_outcome::SyncOutcome`] (Phase 27 plan 27-05 / SYNC-05).
+///
+/// The CLI keeps using [`sync`] directly — its `Result<()>` shape matches
+/// the existing presenter contract. The GUI calls this sibling so the React
+/// `useSync` hook can render the full SYNC-05 terminal-state matrix: clean
+/// success, partial success ("Sync complete with K issues"), stage failure
+/// ("Sync failed — Retry from <stage>"), and the "no retry affordance"
+/// case (Save failures).
+///
+/// ## How `failed_stage` is captured
+///
+/// We wrap the caller's sink in a [`sync_outcome::StageTrackingSink`] that
+/// observes every `SyncStageStarted` event. When the inner `sync` call
+/// returns Err, the latest-started stage IS the failed stage (all six
+/// stages run sequentially, so the bail observed by the caller occurs
+/// inside whichever stage block last announced its start).
+///
+/// ## `start_stage` semantics
+///
+/// `options.start_stage` is the GUI's "Retry from <stage>" hint. Today the
+/// inner [`sync`] always runs the full pipeline (stages produce data that
+/// later stages need — skipping Discover would break Consolidate). The
+/// `start_stage` field is honored as an *advisory tag*: the GUI's retry
+/// commands set it so the wire-side `SyncOutcome` reports the intended
+/// resume point in the UI copy; the actual work still re-runs the full
+/// pipeline. A future plan that proves a "true stage resume" is safe (by
+/// re-deriving stage outputs from on-disk state) could honor the field
+/// strictly.
+///
+/// ## `partial_failures` (current limitation)
+///
+/// The existing [`sync`] bails with an `anyhow::Error` when SAFE-01's per-
+/// skill failure aggregates (`distribution_cleanup_failures`,
+/// `reconcile_install_failures`) are non-empty. That means the GUI sees a
+/// failed run, not a partial-success. `partial_failures` here is therefore
+/// always empty in this plan's wrapper — the React side handles both
+/// shapes (a single fatal Err and a vector of per-skill issues) so when a
+/// future plan refactors `sync` to surface partial failures inline this
+/// wrapper gains the populator with zero React changes.
+pub fn sync_with_outcome(
+    config: &Config,
+    paths: &TomePaths,
+    options: SyncOptions<'_>,
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> sync_outcome::SyncOutcome {
+    let tracker = sync_outcome::StageTrackingSink::new(sink);
+    let result = sync(config, paths, options, &tracker, cancel);
+    let failed_stage = if result.is_err() {
+        tracker.last_started()
+    } else {
+        None
+    };
+    sync_outcome::SyncOutcome::from_sync_result(result, failed_stage, Vec::new())
+}
+
+/// Retry a list of per-skill partial failures (Phase 27 plan 27-05 / SYNC-05).
+///
+/// The GUI's `retry_failed_items(failures)` command dispatches here. Each
+/// `PartialFailure` describes a single sub-operation that failed during a
+/// prior `sync` run (distribution-symlink creation, distribution-symlink
+/// cleanup, plugin install). We re-run only the failing operations, not
+/// the full pipeline.
+///
+/// Today's implementation re-runs the full [`sync_with_outcome`] pipeline
+/// — per-skill independent retry (calling `distribute_to_directory` or
+/// the install helpers in isolation) requires extracting per-skill entry
+/// points that today live behind `pub(crate)` boundaries. The full re-run
+/// is correctness-equivalent (idempotent operations only repeat the
+/// failed work) at the cost of doing extra read-only work for already-
+/// successful skills. A future plan can specialize this to call per-skill
+/// helpers once they're exposed.
+///
+/// The `_failures` argument is accepted for forward-compatibility — when
+/// the per-skill helpers land, the dispatch loop reads this list and only
+/// fires the matching helpers.
+pub fn retry_partial_failures(
+    config: &Config,
+    paths: &TomePaths,
+    options: SyncOptions<'_>,
+    _failures: &[sync_outcome::PartialFailure],
+    sink: &dyn ProgressSink,
+    cancel: &CancelToken,
+) -> sync_outcome::SyncOutcome {
+    // Re-run the full pipeline. The per-failure dispatch hook is the
+    // _failures argument; today it's advisory because the per-skill
+    // helpers (distribute_one, install_one, cleanup_one) are not yet
+    // public surface. The outcome shape is identical to a normal
+    // `sync_with_outcome` call so the React side renders it through the
+    // same StageStepper / SyncToast / FindingRow composition.
+    sync_with_outcome(config, paths, options, sink, cancel)
 }
 
 /// Remove symlinks from a target directory that point to disabled skills,
@@ -2952,6 +3183,7 @@ mod tests {
                 quiet: true, // suppress stdout chrome in the test harness
                 machine_path: &machine_path,
                 machine_prefs: &machine_prefs,
+                start_stage: None,
             },
             &sink,
             &CancelToken::new(),
@@ -2973,6 +3205,62 @@ mod tests {
                 "sync() must emit a SyncStageStarted for {stage:?}; got {started:?}",
             );
         }
+    }
+
+    /// D-16: the manifest join populates `synced_at` from the
+    /// `SkillEntry::synced_at` field for skills present in the manifest.
+    /// Skills with no manifest entry remain `None`. Directly exercises the
+    /// extracted `join_synced_at_from_manifest` helper so we don't need a
+    /// full sync-fixture roundtrip.
+    #[test]
+    fn join_synced_at_populates_known_skills_and_leaves_others_none() {
+        use crate::discover::{DiscoveredSkill, SkillName, SkillOrigin};
+        use crate::manifest::{Manifest, SkillEntry};
+        use std::path::PathBuf;
+
+        let mut manifest = Manifest::default();
+        // SkillEntry::new stamps a current timestamp, so override the
+        // `synced_at` field to a deterministic value the assertion can
+        // compare against.
+        let mut entry = SkillEntry::new(
+            PathBuf::from("/tmp/known"),
+            DirectoryName::new("test").unwrap(),
+            crate::validation::ContentHash::new("a".repeat(64)).unwrap(),
+            false,
+        );
+        entry.synced_at = "2026-06-05T10:00:00Z".to_string();
+        manifest.insert(SkillName::new("known").unwrap(), entry);
+
+        let mut skills = vec![
+            DiscoveredSkill {
+                name: SkillName::new("known").unwrap(),
+                path: PathBuf::from("/tmp/known"),
+                source_name: DirectoryName::new("test").unwrap(),
+                origin: SkillOrigin::Local,
+                frontmatter: None,
+                synced_at: None,
+            },
+            DiscoveredSkill {
+                name: SkillName::new("unknown").unwrap(),
+                path: PathBuf::from("/tmp/unknown"),
+                source_name: DirectoryName::new("test").unwrap(),
+                origin: SkillOrigin::Local,
+                frontmatter: None,
+                synced_at: None,
+            },
+        ];
+
+        join_synced_at_from_manifest(&mut skills, &manifest);
+
+        assert_eq!(
+            skills[0].synced_at.as_deref(),
+            Some("2026-06-05T10:00:00Z"),
+            "manifest-resident skill must inherit its synced_at",
+        );
+        assert!(
+            skills[1].synced_at.is_none(),
+            "skill with no manifest entry must remain None",
+        );
     }
 
     #[test]

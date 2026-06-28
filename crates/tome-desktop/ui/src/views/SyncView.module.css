@@ -1,0 +1,99 @@
+/* SyncView — Phase 27 plan 27-02 styling.
+ * The split layout renders the triage panel + detail side-by-side under
+ * the idle / in-progress hero so the user can review pending changes
+ * before / during a sync run. */
+
+.idle {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-4);
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  text-align: center;
+  padding: var(--space-6) 0;
+}
+
+.inProgress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-4);
+}
+
+.stepperPlaceholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+}
+
+/* Plan 27-04 — terminal-cancelled summary block rendered above the
+ * StageStepper. UI-SPEC §Terminal cancelled: amber subhead + sub-line +
+ * action row of [Run sync] (primary) + [Dismiss] (secondary). */
+.cancelledSummary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+  padding: var(--space-4, 16px);
+  background: var(--bg-window);
+  border-radius: 8px;
+  border: 1px solid var(--separator);
+}
+
+.cancelledHeading {
+  /* --text-subhead 16px / 600 amber per UI-SPEC §Color */
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--badge-override-fg, #a35d00);
+  line-height: 1.3;
+}
+
+.cancelledSubline {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--label-secondary);
+  line-height: 1.4;
+}
+
+.cancelledActions {
+  display: flex;
+  gap: var(--space-2, 8px);
+  margin-top: var(--space-2, 8px);
+}
+
+/* Split body — the post-Reconcile triage flow uses a flex split inside
+ * SyncView (the ContentPane is single-column today; 27-04 will graduate
+ * the broader shell). 60/40 split is a sensible default for triage list
+ * vs detail. */
+.splitBody {
+  display: flex;
+  flex-direction: row;
+  gap: var(--space-4);
+  align-items: stretch;
+  min-height: 320px;
+  border-top: 1px solid var(--separator);
+  padding-top: var(--space-4);
+}
+
+.triageColumn {
+  flex: 0 0 60%;
+  min-width: 0;
+  overflow: auto;
+}
+
+.detailColumn {
+  flex: 1 1 40%;
+  min-width: 0;
+  background: var(--bg-window);
+  border-left: 1px solid var(--separator);
+  overflow: auto;
+}

@@ -494,6 +494,7 @@ mod tests {
             source_name: DirectoryName::new("test").unwrap(),
             origin,
             frontmatter: None,
+            synced_at: None,
         }
     }
 
@@ -725,6 +726,7 @@ mod tests {
             source_name: DirectoryName::new("test2").unwrap(),
             origin: crate::discover::SkillOrigin::Local,
             frontmatter: None,
+            synced_at: None,
         };
 
         let (result, _manifest) = consolidate(
@@ -807,6 +809,7 @@ mod tests {
             source_name: DirectoryName::new("test").unwrap(),
             origin: crate::discover::SkillOrigin::Local,
             frontmatter: None,
+            synced_at: None,
         };
 
         let (result, _) = consolidate(
@@ -1464,6 +1467,7 @@ mod tests {
             source_name: DirectoryName::new("plugins").unwrap(),
             origin: crate::discover::SkillOrigin::Managed { provenance: None },
             frontmatter: None,
+            synced_at: None,
         };
 
         // Call consolidate_managed directly

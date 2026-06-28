@@ -39,7 +39,7 @@ The Rust crate must be reshaped to support both the existing CLI and the new GUI
 Replacement for `tome status` + `tome list` + `tome browse`. First user-visible value; ships in the alpha cut.
 
 - [x] **VIEW-01**: Status dashboard window shows: resolved `tome_home`, library directory, configured directories (with role/type badges), skill count, last sync time, lockfile state, and machine pref summary — equivalent to `tome status --json` rendered as a UI.
-- [~] **VIEW-02** _(partial — Phase 26 alpha cut)_: Skill list view with virtualised rendering (handles ≥2000 skills at 60 fps), fuzzy search (matches `nucleo`-style ranking from the CLI), sort modes (name / source / recent), and group-by (none / source / role). _Phase 26 ships virtualised render + fuse.js fuzzy search + name + source sort. **Deferred to Phase 27**: "recent" sort (needs `synced_at` field on `DiscoveredSkill`) and group-by visual section headers — see `.planning/phases/26-read-only-views-alpha-cut/deferred-items.md`._
+- [x] **VIEW-02** _(complete — Phase 27 plan 27-02b closes the Phase 26 carryovers)_: Skill list view with virtualised rendering (handles ≥2000 skills at 60 fps), fuzzy search (matches `nucleo`-style ranking from the CLI), sort modes (name / source / recent), and group-by (none / source / role). _(closed in Phase 27 via 27-01a synced_at plumbing + 27-02 SectionHeader level extension + 27-02b SkillsView wiring)_
 - [x] **VIEW-03**: Skill detail pane shows frontmatter (parsed via existing `lint.rs` logic), source directory path, content hash, last sync timestamp, managed/local status, and disabled state — clicking actions (open source dir / copy path / disable on this machine) match the existing browse TUI.
 - [x] **VIEW-04**: Markdown preview pane renders SKILL.md body (post-frontmatter) with the SC#4 markdown subset: headings (H1–H3), paragraphs, inline emphasis (bold/italic/inline code), lists (ordered + unordered), links (open in system browser), and fenced code blocks. **Supersedes** the original `browse/markdown.rs` reference — that hand-rolled ratatui-only renderer covers only headers + horizontal rules + inline bold/italic/code and cannot be reused for a webview (D-08 / Phase 26 UI-SPEC Open Item 4).
 - [x] **VIEW-05**: Health pane surfaces `tome doctor` findings (orphan dirs, broken symlinks, missing manifest entries, missing source paths) with one-click "fix" actions that call into the same repair handlers used by the CLI's interactive `tome doctor`.
@@ -49,11 +49,11 @@ Replacement for `tome status` + `tome list` + `tome browse`. First user-visible 
 
 Replacement for `tome sync` and its interactive triage flow. Highest-UX-risk surface; warrants its own phase.
 
-- [ ] **SYNC-01**: A "Sync" action runs the same pipeline as `tome sync` (discover → consolidate → distribute → cleanup → save) and renders progress per stage; the user sees what stage is running and which directory is currently being processed.
-- [ ] **SYNC-02**: When the lockfile diff produces new/changed/removed skills, a triage panel lists them with diff metadata (source, hash, timestamp) and per-skill actions: keep (default), disable on this machine, or for git-sourced skills view-source. Bulk actions (disable all new from `<directory>`) supported.
-- [ ] **SYNC-03**: Triage decisions are previewable: the user sees the resulting `machine.toml` diff before applying. No silent writes.
-- [ ] **SYNC-04**: Sync runs are cancellable. The user can abort discovery or consolidation in progress; the cancel leaves the library in a consistent state (no half-written manifest, no partial lockfile).
-- [ ] **SYNC-05**: Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` semantics shipped in SAFE-01) with a retry action that resumes from the failed stage where possible.
+- [x] **SYNC-01** *(complete in Phase 27 plan 27-01a + 27-01b)*: A "Sync" action runs the same pipeline as `tome sync` (discover → consolidate → distribute → cleanup → save) and renders progress per stage; the user sees what stage is running and which directory is currently being processed.
+- [x] **SYNC-02** *(complete in Phase 27 plans 27-02 + 27-02b)*: When the lockfile diff produces new/changed/removed skills, a triage panel lists them with diff metadata (source, hash, timestamp) and per-skill actions: keep (default), disable on this machine, or for git-sourced skills view-source. Bulk actions (disable all new from `<directory>`) supported.
+- [x] **SYNC-03** *(complete in Phase 27 plan 27-03)*: Triage decisions are previewable: the user sees the resulting `machine.toml` diff before applying. No silent writes.
+- [x] **SYNC-04** *(complete in Phase 27 plan 27-04)*: Sync runs are cancellable. The user can abort discovery or consolidation in progress; the cancel leaves the library in a consistent state (no half-written manifest, no partial lockfile).
+- [x] **SYNC-05** *(complete in Phase 27 plan 27-05)*: Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` semantics shipped in SAFE-01) with a retry action that resumes from the failed stage where possible.
 
 ### Configuration UI (CFG)
 
@@ -162,7 +162,7 @@ Deferred to post-v1.0.
 |-------------|-------|--------------|--------|
 | CORE-01..05 | Phase 25 | TBD | Pending |
 | VIEW-01..06 | Phase 26 | TBD | Pending |
-| SYNC-01..05 | Phase 27 | TBD | Pending |
+| SYNC-01..05 | Phase 27 | TBD | Complete |
 | CFG-01..05 | Phase 28 | TBD | Pending |
 | OPS-01..04 | Phase 29 | TBD | Pending |
 | BAK-01..04 | Phase 30 | TBD | Pending |

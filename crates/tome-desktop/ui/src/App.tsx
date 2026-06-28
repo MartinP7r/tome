@@ -1,20 +1,16 @@
-// App shell — Phase 26 alpha cut.
+// App shell — Phase 26 alpha cut + Phase 27 plan 27-01b Sync surface.
 //
 // The 3-column NavigationSplitView shell (D-01): Window wraps a Titlebar +
-// Sidebar + the active view. Lands on Status (D-02). ⌘1 / ⌘2 / ⌘3 jump
-// between Status / Skills / Health and ⌘F focuses the SearchField —
-// all four now dispatched by the **native macOS menu bar**
+// Sidebar + the active view. Lands on Status (D-02). ⌘1 / ⌘2 / ⌘3 / ⌘4 jump
+// between Status / Skills / Sync / Health and ⌘F focuses the SearchField —
+// all five now dispatched by the **native macOS menu bar**
 // (plan 26-07, `crates/tome-desktop/src/menu.rs`) → typed `MenuAction`
-// Tauri event → `useMenuActions` hook. The previous document-level
-// keydown listener was removed in plan 26-07 to avoid a double-binding
-// conflict with the menu's registered accelerators (Pitfall 9). The
-// Skills view's right side hosts a list column + detail column instead
-// of a single ContentPane, so we branch on `view === 'skills'` before
-// rendering.
+// Tauri event → `useMenuActions` hook. Plan 27-01b re-anchored ⌘3 from
+// Health to Sync and moved Health to ⌘4 (Pitfall 7).
 //
-// Plan 26-05 wires the Sidebar Health badge to `useDoctorReport`'s live
-// `findings.length` and replaces the HealthPlaceholder with the real
-// HealthView.
+// Plan 27-01b also lifts `useSync` to the App root so the Sidebar's
+// spinner + dual-meaning badge slot can subscribe to the in-flight sync
+// state without each consumer re-binding the SyncProgress listener.
 
 import { ContentPane } from "./shell/ContentPane";
 import { Sidebar } from "./shell/Sidebar";
@@ -22,10 +18,12 @@ import { Titlebar, type SectionLabel } from "./shell/Titlebar";
 import { Window } from "./shell/Window";
 import { useDoctorReport } from "./hooks/useDoctorReport";
 import { useMenuActions } from "./hooks/useMenuActions";
+import { useSync } from "./hooks/useSync";
 import { useRouter, setView, type View } from "./stores/router";
 import { HealthView } from "./views/HealthView";
 import { SkillsView } from "./views/SkillsView";
 import { StatusView } from "./views/StatusView";
+import { SyncView } from "./views/SyncView";
 
 function sectionLabel(view: View): SectionLabel {
   switch (view) {
@@ -33,6 +31,8 @@ function sectionLabel(view: View): SectionLabel {
       return "Status";
     case "skills":
       return "Skills";
+    case "sync":
+      return "Sync";
     case "health":
       return "Health";
   }
@@ -50,17 +50,40 @@ export default function App() {
   const { report: doctorReport } = useDoctorReport();
   const badgeCount = doctorReport?.findings.length ?? 0;
 
+  // Plan 27-02 — Sidebar Sync NavItem spinner + dual-meaning badge slot.
+  // Pre-sync badge: `pendingDiffCount` = added + changed + removed (D-05).
+  // Post-sync failure badge: `unresolvedFailureCount` (plan 27-05 / D-20).
+  // Pre-sync takes priority: when both counts are positive the user is
+  // still actively triaging, so the pending badge wins. The user must
+  // clear pending decisions (Apply) before the failure badge surfaces.
+  const sync = useSync();
+  const syncBadge = sync.pendingDiffCount > 0
+    ? { kind: "pending" as const, count: sync.pendingDiffCount }
+    : sync.unresolvedFailureCount > 0
+      ? { kind: "failures" as const, count: sync.unresolvedFailureCount }
+      : { kind: "none" as const };
+
   const isSkills = view === "skills";
 
   return (
     <Window mode={isSkills ? "split" : "single"}>
       <Titlebar section={sectionLabel(view)} />
-      <Sidebar selected={view} onChange={setView} badgeCount={badgeCount} />
+      <Sidebar
+        selected={view}
+        onChange={setView}
+        badgeCount={badgeCount}
+        syncInProgress={sync.isRunning}
+        syncBadge={syncBadge}
+      />
       {isSkills ? (
         <SkillsView />
       ) : view === "status" ? (
         <ContentPane title="Status">
           <StatusView />
+        </ContentPane>
+      ) : view === "sync" ? (
+        <ContentPane title="Sync">
+          <SyncView />
         </ContentPane>
       ) : (
         <ContentPane title="Health">

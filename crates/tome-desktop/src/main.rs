@@ -26,6 +26,11 @@ fn main() {
         // specific permissions they need (no fs widening).
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        // Phase 27 plan 27-01b — register the managed `SyncState` so both
+        // `start_sync` and `cancel_sync` (Tauri commands in
+        // `commands.rs`) share the in-flight `CancelToken` slot
+        // (T-27-01b-07 double-fire mitigation).
+        .manage(tome_desktop::sync_state::SyncState::default())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             // Wire the typed events so `SyncProgress::emit(&app)` reaches the

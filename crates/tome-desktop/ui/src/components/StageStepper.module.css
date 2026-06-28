@@ -1,0 +1,59 @@
+/* StageStepper — Phase 27 plan 27-04 / UI-SPEC §StageStepper.
+ *
+ * Vertical 6-stage list with 24px outer padding, 12px row gap, and a 2px
+ * vertical connector line in --separator behind the icon column.
+ */
+
+.outer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4, 16px);
+}
+
+.summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2, 8px);
+}
+
+.actionRow {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-2, 8px);
+  min-height: 32px;
+}
+
+.stepper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3, 12px);
+  padding: var(--space-6, 24px);
+  background: var(--bg-elevated, transparent);
+}
+
+/* 2px vertical connector line between the StageRow icon centres.
+ * `padding: var(--space-6)` on .stepper + 24px-wide row icon = the
+ * line lives at left: calc(24px + 12px) ≈ 36px so it crosses the icon
+ * centres. Reaches from the centre of the first icon to the centre of
+ * the last. */
+.stepper::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--space-6, 24px) + 11px);
+  top: calc(var(--space-6, 24px) + 20px);
+  bottom: calc(var(--space-6, 24px) + 20px);
+  width: 2px;
+  background: var(--separator, rgb(60 60 67 / 36%));
+  z-index: 0;
+  pointer-events: none;
+}
+
+.stepper > * {
+  position: relative;
+  z-index: 1;
+  /* Hide the connector behind active row icons by giving the row a
+   * background. Keeps the spinner readable. */
+  background: var(--bg-elevated, transparent);
+}

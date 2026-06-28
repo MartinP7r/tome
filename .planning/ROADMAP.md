@@ -270,7 +270,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 
 - [x] **Phase 25: Rust core extraction + Tauri integration spike** (CORE-01..05) — Decompose `lib.rs::run` into CLI presenter + structured-type domain calls; add `crates/tome-desktop` Tauri 2 scaffold; wire `specta` + `tauri-specta` for `bindings.ts` generation; Tauri event channel for progress; `TomeError` enum with stable codes. Frontend framework decided via spike (D-GUI-04). **No production UI in this phase.** (completed 2026-05-27)
 - [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
-- [ ] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase.
+- [x] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase. (completed 2026-06-07)
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
 - [ ] **Phase 30: Backup UI — rc cut** (BAK-01..04 + NF-04) — Backup history view, snapshot action, diff view, restore flow with automatic post-restore sync. **v1.0-rc cut.**
@@ -328,11 +328,122 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 26-07-PLAN.md — Native macOS menu bar + keyboard-shortcut audit (Pitfall 9) + axe-core/playwright a11y CI gate (NF-02, NF-03)
 - [x] 26-08-PLAN.md — Synthetic 2000-skill fixture + Playwright FPS bench + macOS-only perf CI workflow (NF-01)
 
+### Phase 27: Sync + triage UI
+**Goal**: Replace `tome sync`'s CLI flow (and `update.rs`'s interactive triage prompt) with a visual flow showing per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` writes, cancellation, and failure-summary + retry. Highest-UX-risk phase of the v1.0 milestone — first cross-stage *mutating* pipeline rendered in the GUI.
+**Depends on**: Phase 26 (file watcher for post-sync reloads, Health-pane patterns for failure surfacing, alpha shell + 3-column layout for the new sidebar section, virtualised list primitives for the triage panel). Built on the Phase 25 substrate: `ProgressSink` / `ProgressEvent` / `SyncStage` / `CancellationToken` (`crates/tome/src/progress.rs`), `TauriEventSink` (`crates/tome-desktop/src/`), `TomeError` boundary, committed `bindings.ts` + CI freshness gate.
+**Requirements**: SYNC-01, SYNC-02, SYNC-03, SYNC-04, SYNC-05
+**Phase 26 carryovers folded in** (see `.planning/phases/26-read-only-views-alpha-cut/deferred-items.md`): VIEW-02 group-by (Source/Role) section headers + VIEW-02 "Recent" sort via a new `synced_at` field on the manifest's per-skill provenance. Closing these alongside SYNC-02's "sectioned pending changes" surface keeps the section-header abstraction one implementation, not two; the `synced_at` field also feeds SYNC-02's per-skill diff metadata.
+**Success Criteria** (what must be TRUE):
+  1. "Sync" action runs the full pipeline (discover → consolidate → distribute → cleanup → save) with per-stage progress and a current-directory indicator. The CLI's interactive triage is *not* invoked — the GUI's triage panel replaces it (SYNC-01).
+  2. Lockfile diff produces a triage panel listing new / changed / removed skills with diff metadata (source, hash, timestamp). Per-skill default action is "keep"; alternates are "disable on this machine" and (for git-sourced skills) "view source". Bulk actions (e.g. "disable all new from `<directory>`") work (SYNC-02).
+  3. Triage decisions render as a `machine.toml` diff before save. User clicks "apply" to write; "cancel" abandons without side-effects. No silent writes (SYNC-03).
+  4. Cancel action during sync stops the pipeline at the current stage boundary and leaves library state consistent (no half-written manifest, no partial lockfile). Verified via integration test (SYNC-04).
+  5. Failed sync surfaces a per-stage failure summary (matching CLI's `⚠ K operations failed` SAFE-01 semantics) with a retry action that resumes from the failed stage where possible — re-running discover + consolidate is acceptable; rerunning distribute on a partial manifest is not (SYNC-05).
+  6. VIEW-02 carryover closure: picking `Group = Source` or `Group = Role` renders `SectionHeader` rows between skill spans (VoiceOver heading landmarks, per-group totals); picking `Sort = Recent` produces a stable ordering keyed on the per-skill `synced_at` timestamp (most-recent first, alphabetical-name tiebreaker). REQUIREMENTS.md VIEW-02 flips from `partial` → `complete`.
+**Cut**: none (v1.0-beta cut lands at the end of Phase 28).
+**Plans**: 7 plans (Wave 1: 27-01a — Rust domain types (`item: Option<String>` + `synced_at` + sink fold-in); Wave 2: 27-01b — Tauri boundary commands + React skeleton + `bindings.ts` regen + axe scan; Wave 3: 27-02 (triage panel + `SectionHeader` extension), 27-02b (SkillsView VIEW-02 closure), 27-03 (`machine.toml` diff preview + similar crate) — three plans in parallel; Wave 4: 27-04 — cancellation invariant integration test + StageStepper + SyncToast; Wave 5: 27-05 — `SyncOutcome` wrapping struct + partial-failure rendering + retry handlers)
+- [x] 27-01a-PLAN.md — Rust domain types: `item: Option<String>` on `ProgressEvent::SyncStageProgress` (D-08), `synced_at: Option<String>` on `DiscoveredSkill` (D-16), sink-side D-09 fold-in, Pitfall 4 ordering test (SYNC-01)
+- [x] 27-01b-PLAN.md — Tauri boundary `start_sync` (spawn_blocking) + `cancel_sync` + `MenuAction::JumpSync` (⌘3 re-anchor); React `SyncView` skeleton + `useSync` hook (Pitfall 6 discipline); Sidebar 4th NavItem; `bindings.ts` regen; axe scan (SYNC-01)
+- [x] 27-02-PLAN.md — Triage panel with lockfile diff + per-skill actions + bulk actions on NEW only + GridList primitive + reusable `SectionHeader` extension (SYNC-02)
+- [x] 27-02b-PLAN.md — SkillsView VIEW-02 closure: Sort=Recent via `synced_at`, group-by Source/Role with SectionHeader, REQUIREMENTS.md flip (VIEW-02 carryover)
+- [x] 27-03-PLAN.md — `machine.toml` diff preview + `similar` crate + `PreviewPopover` slot refactor + `MachineTomlDiff` component (SYNC-03)
+- [x] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
+- [x] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
+
 ## Backlog
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
 
 _(v0.12 dogfooding backlog 999.1-999.5 all promoted and shipped in v0.14-v0.16. Numbering resets — sparse 999.x is fine.)_
+
+
+### Phase 999.1: Per-project local config (`.tome.toml`) (BACKLOG)
+
+**Goal:** [Captured for future planning] Let projects ship their own committed `tome` config so a `git clone` of a project pulls down a known-good skill manifest without manual `tome init` ceremony. Analogous to `Cargo.toml` for `cargo`, `package.json` for `npm`, or `.nvmrc` for `nvm` — the project declares what it needs, the tool picks it up.
+
+**Why it matters:**
+- **Team consistency** — everyone working on the same repo gets the same baseline skill set, with pinned versions.
+- **Onboarding** — new contributor runs `tome <some-command>` in the repo, gets the project's expected AI coding skills installed locally without reading docs.
+- **Per-project scope** — a Rust project pulls in Rust-focused skills; a TypeScript project pulls in TS-focused skills, without polluting either's neighbor.
+- **Reproducibility** — the committed config + lockfile snapshot mean "what skills was this repo built with on date X" is answerable.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.1`):
+1. **Filename:** `.tome.toml`? `.tomerc`? `tome.toml` (no dot, Cargo-style)? User flagged both `.tomerc` and `.tome.toml` as candidates.
+2. **Registration command + discovery mechanism:** How does a project get its committed tracking file written? Candidate UX (user, 2026-06-24): run a command *inside* the project dir — `cd ~/dev/jibiki/jibiki && tome track` (or reuse `tome add`) — which writes the project-local file in place, then commits with the repo. Candidate verbs: `tome track`, `tome add`, `tome use <path>`. And how is it found on later invocations: walk-up-from-cwd (git-style automatic), explicit command, or hybrid (automatic in the project dir + explicit command for non-cwd projects)? Both the registration verb and the discovery contract are undecided.
+3. **Scope of the local config:** Just additional skill sources? Or also overrides for global directory roles, disabled-skill lists, or wholesale tome-home redirection?
+4. **Merge semantics vs `~/.tome/tome.toml`:** Project augments global (additive), project overrides global (replacement), or layered (project precedence with explicit opt-out for "ignore global entirely")?
+5. **Interaction with the existing per-machine `~/.config/tome/machine.toml`:** Where do per-machine *overrides* sit when a project-local config also exists? Three-layer model (global → project → machine) needs careful precedence rules.
+6. **Lockfile handling:** Does the project config get its own `tome.lock` committed alongside? Or does it inherit the global lockfile?
+7. **Multi-project on one machine:** Can two projects with conflicting local configs coexist? Single-active-project model vs. simultaneous-projects model.
+
+**Related context:**
+- v0.6 unified directory model already supports per-directory `enabled`/`disabled` skill lists in `machine.toml` — that pattern can extend, but is currently per-machine, not per-project.
+- v0.9 cross-machine path overrides (`[directory_overrides.<name>]`) addresses a different axis (path portability across machines for the *same* user); per-project config addresses portability across *users* of the same repo.
+- The v1.0 Tauri GUI milestone is the natural moment to surface "currently active project" in the UI if discovery is automatic.
+
+**Requirements:** TBD (to be derived during `/gsd:discuss-phase 999.1`)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
+
+### Phase 999.2: Sync idle hero — surface past-run history (BACKLOG)
+
+**Goal:** [Captured for future planning] The Phase-27 Sync idle hero passes its UI contract (last-synced line + "Run sync" CTA + recent-changes disclosure) but feels content-light on a no-history machine. User feedback during 27-UAT (2026-06-07): "the sync screen is a bit empty with no information about past runs." Strengthen the idle state so it conveys signal even before the first sync, and richer signal after.
+
+**Source:** Phase 27 UAT test 3 passed-with-observation.
+
+**Why it matters:**
+- The current recent-changes disclosure relies on a prior run to have content. First-time or freshly-reset machines see an empty disclosure and nothing else of substance.
+- "Past runs" is a natural mental model — users want to see when they synced, what changed, and whether errors were recovered — without leaving the Sync view.
+- The data infrastructure already exists or is one small step away: `synced_at` per-skill (27-01a), `SyncOutcome.partial_failures` (27-05, structurally ready), and `tome.lock` history.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.2`):
+1. **What counts as "past run history"** — last N runs with outcome + timestamp + diff summary? Or just last 1 with a "View all" disclosure?
+2. **Where does the data live?** A new `~/.tome/sync-history.json` log, or derive from `tome.lock` snapshots + manifest timestamps already on disk?
+3. **Persistence policy** — keep all runs, last N, or last 30 days? Rotate vs. never delete?
+4. **First-time UX** — what does the hero say with zero history? Surface info about what sync WILL do (e.g. count of configured directories + estimated skill touch)?
+5. **Inline diff preview from history** — clicking a past run shows its diff? Or just outcome summary?
+6. **Failure recovery affordance** — surface past failed runs prominently with a one-click "retry from where it left off"?
+
+**Related context:**
+- Phase 27 27-01a's `DiscoveredSkill.synced_at: Option<String>` is the per-skill provenance field — already feeds SkillsView's Sort=Recent.
+- Phase 27 27-05's `SyncOutcome` carries `retry_from` + `partial_failures` — the data model for failed-run replay already exists at the IPC boundary.
+- Carry-forward from 27-05-SUMMARY ("`partial_failures` empty until `sync()` inline-surfaces SAFE-01") would benefit from resolution BEFORE this phase ships — past-run failure history is meaningless if the underlying types never populate.
+
+**Requirements:** TBD (to be derived during `/gsd:discuss-phase 999.2`)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
+
+### Phase 999.3: StageStepper dwell time + post-hoc inspection (BACKLOG)
+
+**Goal:** [Captured for future planning] The Phase-27 StageStepper renders per-stage progress correctly per its UI contract, but on small libraries each stage completes in milliseconds and the user only catches the terminal state. The "what is sync doing" feedback the stepper was supposed to provide isn't actually received. Make per-stage progress legible — either by minimum dwell time during the run, or by post-hoc inspection after the run completes.
+
+**Source:** Phase 27 UAT test 4 passed-with-observation (2026-06-07). User feedback: "yes, this shows, though it's disappearing much too fast to have enough meaningful impact."
+
+**Why it matters:**
+- The stepper is the primary user-facing artifact of "sync is doing something" — when it fails to convey signal, users feel uncertain whether the operation actually happened.
+- The current per-stage `item` field (D-08, shipped in 27-01a) is exactly the per-skill detail that *should* be the most valuable part of the visual feedback, but it flashes through in a single frame on a small library.
+- This is a problem of information density vs. operation speed. The faster the underlying sync gets, the more it needs deliberate UX choices to remain comprehensible.
+
+**Open design questions** (for future `/gsd:discuss-phase 999.3`):
+1. **Minimum dwell time per stage** — enforce e.g. 200ms-400ms minimum visible duration per stage even when underlying work finishes faster? Animation pacing tradeoff: feels deliberate vs. feels slow on power users' machines.
+2. **Post-hoc inspection** — keep the StageStepper visible after the run with stage-by-stage timings + per-skill items processed? Or a dedicated "View run details" disclosure on the SyncSummary?
+3. **Item streaming pacing** — when the active stage processes 50 skills in 200ms, do we show every skill name flashing, or just the final count + a "view all" affordance?
+4. **Skip the stepper for "trivial" runs** — if the whole sync takes <500ms with no changes, do we skip the in-progress UI entirely and just show "No changes" terminal state?
+5. **Per-stage error visibility** — when a stage failed but recovery succeeded, is that captured anywhere the user can see post-run?
+
+**Related context:**
+- The `synced_at` per-skill field (27-01a) + `partial_failures` Vec on `SyncOutcome` (27-05) already provide the data model for post-hoc inspection. The UI is the gap.
+- Cross-pollinates with backlog 999.2 (Sync idle hero past-run history) — both are about making sync's behavior more legible. They might merge or share a "Run details" view.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with `/gsd:review-backlog` when ready)
 
 ### Phase 999.4: GUI hover tooltips for domain terminology (BACKLOG)
 

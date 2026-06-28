@@ -14,6 +14,9 @@ pub mod commands;
 pub mod error;
 pub mod menu;
 pub mod sink;
+pub mod sync_outcome_wire;
+pub mod sync_state;
+pub mod sync_types;
 pub mod watcher;
 
 use tauri_specta::{Builder, collect_commands, collect_events};
@@ -38,6 +41,25 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             // Phase 26 plan 26-05 (VIEW-05 / D-09/D-10/D-11/D-12).
             commands::get_doctor_report,
             commands::doctor_repair_one,
+            // Phase 27 plan 27-01b (SYNC-01) — long-running sync pipeline
+            // with double-fire mitigation via the managed `SyncState`.
+            // Plan 27-05 (SYNC-05) extends start_sync's return shape to
+            // SyncOutcomeWire and adds retry_sync_from + retry_failed_items
+            // for the terminal-state retry affordances.
+            commands::start_sync,
+            commands::cancel_sync,
+            commands::retry_sync_from,
+            commands::retry_failed_items,
+            // Phase 27 plan 27-02 (SYNC-02) — read-only lockfile-diff
+            // projection for the triage panel.
+            commands::get_lockfile_diff,
+            // Phase 27 plan 27-03 (SYNC-03) — previewable machine.toml
+            // writes. `preview_machine_toml` is read-only (returns a
+            // structured Myers diff); `apply_machine_toml` commits via
+            // atomic temp+rename. SC#3 "no silent writes" — both must be
+            // wired into the React PreviewPopover flow, never auto-fired.
+            commands::preview_machine_toml,
+            commands::apply_machine_toml,
         ])
         .events(collect_events![
             sink::SyncProgress,

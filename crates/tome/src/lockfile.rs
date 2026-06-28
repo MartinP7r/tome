@@ -76,10 +76,70 @@ pub struct LockEntry {
     pub git_commit_sha: Option<String>,
 }
 
+/// Generate a **prospective** lockfile by re-hashing every discovered skill
+/// on disk.
+///
+/// Unlike [`generate`], which copies `content_hash` from the manifest (correct
+/// after a completed sync when the manifest hashes are current), this function
+/// re-hashes each skill's source directory fresh — so the result reflects the
+/// *current* on-disk state, not the last-synced state.
+///
+/// Used by `get_lockfile_diff` in the Tauri GUI to compute a true before/after
+/// diff against the on-disk lockfile without requiring a full sync first.
+/// Hashing errors for individual skills are propagated immediately (no silent
+/// skipping), so a partially-hashed prospective lockfile is never returned.
+pub fn generate_prospective(skills: &[DiscoveredSkill]) -> anyhow::Result<Lockfile> {
+    let mut entries = BTreeMap::new();
+
+    for skill in skills {
+        let content_hash = crate::manifest::hash_directory(&skill.path).with_context(|| {
+            format!(
+                "failed to hash skill '{}' at {}",
+                skill.name,
+                skill.path.display()
+            )
+        })?;
+
+        let (registry_id, version, git_commit_sha) = skill
+            .origin
+            .provenance()
+            .map(|p| {
+                (
+                    Some(p.registry_id.clone()),
+                    p.version.clone(),
+                    p.git_commit_sha.clone(),
+                )
+            })
+            .unwrap_or((None, None, None));
+
+        entries.insert(
+            skill.name.clone(),
+            LockEntry {
+                source_name: Some(skill.source_name.clone()),
+                previous_source: None,
+                content_hash,
+                registry_id,
+                version,
+                git_commit_sha,
+            },
+        );
+    }
+
+    Ok(Lockfile {
+        version: 1,
+        skills: entries,
+    })
+}
+
 /// Generate a lockfile from the manifest and discovered skills.
 ///
 /// For each manifest entry, looks up the matching `DiscoveredSkill` to extract
 /// provenance metadata (registry_id, version) when available.
+///
+/// NOTE: this function copies `content_hash` from the manifest, making it
+/// suitable for *regenerating* a lockfile after a completed sync (where the
+/// manifest already reflects current on-disk state). For computing a
+/// pre-sync diff, use [`generate_prospective`] instead.
 pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
     let skill_map: BTreeMap<&str, &DiscoveredSkill> =
         skills.iter().map(|s| (s.name.as_str(), s)).collect();
@@ -306,6 +366,7 @@ mod tests {
             source_name: DirectoryName::new(source).unwrap(),
             origin,
             frontmatter: None,
+            synced_at: None,
         }
     }
 

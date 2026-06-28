@@ -27,7 +27,11 @@
 /// Grows additively. The GUI branches on this discriminant; new variants are a
 /// non-breaking superset. Mirrors `tome::DomainErrorKind` plus an `Internal`
 /// fallback (the domain enum deliberately omits `Internal` — see its docs).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+// Plan 27-05: Deserialize is required so PartialFailureWire (which embeds
+// a TomeError) can flow as an argument to `retry_failed_items` — the GUI
+// round-trips the per-skill failures from a prior `start_sync` back to the
+// Rust side without loss.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, specta::Type)]
 pub enum ErrorCode {
     /// Input/config validation failure.
     Validation,
@@ -101,7 +105,7 @@ impl From<&tome::DomainErrorKind> for ErrorCode {
 /// - `message`: the top-level error string (`err.to_string()`).
 /// - `context`: the flattened anyhow cause chain, outermost first — the same
 ///   information the CLI prints via `{e:#}`, available for a details view.
-#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, specta::Type)]
 pub struct TomeError {
     /// Stable, coarse classification.
     pub code: ErrorCode,

@@ -26,6 +26,7 @@ import { DetailHeader } from "../components/DetailHeader";
 import { MarkdownBody } from "../components/MarkdownBody";
 import { PopupMenu, type PopupMenuItem } from "../components/PopupMenu";
 import { SearchField, type SearchFieldHandle } from "../components/SearchField";
+import { SectionHeader } from "../components/SectionHeader";
 import {
   SkillContextMenu,
   type SkillContextAction,
@@ -37,25 +38,16 @@ import { useSkillDetail } from "../hooks/useSkillDetail";
 import { useSkills } from "../hooks/useSkills";
 import styles from "./SkillsView.module.css";
 
-/** Pitfall 9 / T-26-07-01 guard — when the user has a text input focused
- *  (the SearchField is the only such surface in Skills view today), the
- *  Predefined Edit > Copy menu item already routes ⌘C to the OS copy
- *  handler. The skill-scoped ⌘C handler below abstains in that case so
- *  the two never collide. Re-detects via `aria-label="Search skills"` on
- *  the parent `[role="searchbox"]` for the react-aria-components shape
- *  (the actual `<input>` is nested inside the labelled group). */
-function isTextInputFocused(): boolean {
-  const el = document.activeElement;
-  if (!(el instanceof HTMLElement)) return false;
-  const tag = el.tagName;
-  if (tag === "INPUT" || tag === "TEXTAREA") return true;
-  if (el.isContentEditable) return true;
-  const role = el.getAttribute("role");
-  return role === "searchbox" || role === "textbox";
-}
+// Phase 27 plan 27-01b extracted the text-input-focused guard into
+// `lib/textInputFocus.ts` so useMenuActions (which binds global ⌘R / ⌘.
+// in 27-01b) can share the same abstain-when-typing logic. The Pitfall 9
+// / T-26-07-01 rationale stays the same: a focused SearchField (or any
+// text input) routes ⌘C to the OS Edit menu, and skill-scoped handlers
+// must not collide.
+import { isTextInputFocused } from "../lib/textInputFocus";
 
-type SortMode = "name" | "source" | "recent";
-type GroupMode = "none" | "source" | "role";
+export type SortMode = "name" | "source" | "recent";
+export type GroupMode = "none" | "source" | "role";
 
 const SORT_ITEMS: PopupMenuItem[] = [
   { id: "name", label: "Name" },
@@ -72,6 +64,29 @@ const GROUP_ITEMS: PopupMenuItem[] = [
 // constructs the instance internally. Passing the class — not an instance —
 // is the documented usage pattern (react-aria.adobe.com/Virtualizer).
 const LAYOUT_OPTIONS = { rowSize: 52, gap: 0, padding: 0 } as const;
+
+/** Shared ListBoxItem renderer — used by both the Group=None flat list
+ *  and each Group=Source / Group=Role group's per-group ListBox. */
+function renderSkillRow(
+  skill: DiscoveredSkill,
+  setSelected: (name: string) => void,
+) {
+  return (
+    <ListBoxItem
+      id={skill.name}
+      textValue={skill.name}
+      aria-label={`${skill.name}, source ${skill.source_name}, ${skill.origin.kind === "managed" ? "managed" : "local"}`}
+    >
+      {({ isSelected }) => (
+        <SkillContextMenuRow
+          skill={skill}
+          selected={isSelected}
+          onSelect={() => setSelected(skill.name)}
+        />
+      )}
+    </ListBoxItem>
+  );
+}
 
 export function SkillsView() {
   const { skills, warnings, err } = useSkills();
@@ -108,12 +123,17 @@ export function SkillsView() {
   // Sort (display-only — D-GUI-08 §S-10 allowed exception).
   const sorted = useMemo(() => sortSkills(filtered, sort), [filtered, sort]);
 
-  // Group is a no-op render in this plan. Section-header rendering for
-  // grouped mode is a follow-up — the toolbar is wired so the API contract
-  // is in place; rendering grouped sections is small but adds Layout
-  // complexity we'd rather verify against the 26-08 perf bench first.
-  // (TODO 26-03+: implement grouped rendering once perf bench is green.)
-  void group;
+  // Group buckets — Phase 27 plan 27-02b closes the Phase 26 VIEW-02
+  // carryover. SectionHeader (level=2) renders OUTSIDE the virtualiser
+  // between virtualised chunks; each group gets its own ListBox so
+  // selection still threads through to the detail column. The typical
+  // user has <10 groups (1–3 directories × 2 origin kinds) so the small
+  // outer iteration is cheap and avoids heterogeneous-Virtualizer
+  // complexity — see Phase 26 deferred-items.md note "(a) heterogeneous
+  // Virtualizer item shape … OR (b) TanStack Virtual fallback" — we
+  // took neither; instead we virtualise per-group, which keeps the 60
+  // fps bench (NF-01) and yields a free heading rotor.
+  const groups = useMemo(() => groupSkills(sorted, group), [sorted, group]);
 
   // ⌘F → focus the SearchField is now dispatched by the native macOS
   // menu (plan 26-07's View → Focus Search item) through the typed
@@ -190,35 +210,62 @@ export function SkillsView() {
           </div>
         )}
         <div className={styles.list}>
-          <Virtualizer layout={ListLayout} layoutOptions={LAYOUT_OPTIONS}>
-            <ListBox
-              aria-label="Skills"
-              items={sorted}
-              selectionMode="single"
-              selectedKeys={selected ? new Set([selected]) : new Set()}
-              onSelectionChange={(keys) => {
-                if (keys === "all") return;
-                const first = [...keys][0];
-                setSelected(typeof first === "string" ? first : null);
-              }}
-            >
-              {(skill) => (
-                <ListBoxItem
-                  id={skill.name}
-                  textValue={skill.name}
-                  aria-label={`${skill.name}, source ${skill.source_name}, ${skill.origin.kind === "managed" ? "managed" : "local"}`}
+          {group === "none" ? (
+            // Group=None — Phase 26 back-compat path. One Virtualizer +
+            // ListBox covering the whole filtered+sorted list. No
+            // SectionHeader rendered (the toolbar selection is
+            // semantically "flat").
+            <Virtualizer layout={ListLayout} layoutOptions={LAYOUT_OPTIONS}>
+              <ListBox
+                aria-label="Skills"
+                items={sorted}
+                selectionMode="single"
+                selectedKeys={selected ? new Set([selected]) : new Set()}
+                onSelectionChange={(keys) => {
+                  if (keys === "all") return;
+                  const first = [...keys][0];
+                  setSelected(typeof first === "string" ? first : null);
+                }}
+              >
+                {(skill) => renderSkillRow(skill, setSelected)}
+              </ListBox>
+            </Virtualizer>
+          ) : (
+            // Group=Source / Group=Role — emit a SectionHeader (level=2)
+            // before each group's virtualised ListBox. Selection state
+            // is shared across groups (single `selected` key in the
+            // parent state) so jumping rows across groups still drives
+            // the detail column correctly.
+            groups.map((g) => (
+              <div key={g.groupKey} className={styles.groupSection}>
+                <div className={styles.groupHeader}>
+                  <SectionHeader
+                    label={g.groupLabel}
+                    count={g.entries.length}
+                    level={2}
+                  />
+                </div>
+                <Virtualizer
+                  layout={ListLayout}
+                  layoutOptions={LAYOUT_OPTIONS}
                 >
-                  {({ isSelected }) => (
-                    <SkillContextMenuRow
-                      skill={skill}
-                      selected={isSelected}
-                      onSelect={() => setSelected(skill.name)}
-                    />
-                  )}
-                </ListBoxItem>
-              )}
-            </ListBox>
-          </Virtualizer>
+                  <ListBox
+                    aria-label={`Skills — ${g.groupLabel}`}
+                    items={g.entries}
+                    selectionMode="single"
+                    selectedKeys={selected ? new Set([selected]) : new Set()}
+                    onSelectionChange={(keys) => {
+                      if (keys === "all") return;
+                      const first = [...keys][0];
+                      setSelected(typeof first === "string" ? first : null);
+                    }}
+                  >
+                    {(skill) => renderSkillRow(skill, setSelected)}
+                  </ListBox>
+                </Virtualizer>
+              </div>
+            ))
+          )}
         </div>
       </div>
       <div className={styles.detailColumn}>
@@ -391,7 +438,25 @@ function SkillContextMenuRow({
   );
 }
 
-function sortSkills(skills: DiscoveredSkill[], mode: SortMode): DiscoveredSkill[] {
+/**
+ * Sort `skills` by `mode` — pure helper, returns a new array (does not
+ * mutate the input). Exported so unit tests can pin the comparator
+ * contract directly (mirrors the 27-01a `join_synced_at_from_manifest`
+ * + 27-02 `lockfile_diff_projection` extraction pattern: pure fn
+ * factored out, tests exercise it without spinning the full view).
+ *
+ * Sort=Recent (Phase 27 plan 27-02b closes the Phase 26 VIEW-02
+ * carryover): keys on `DiscoveredSkill.synced_at` descending
+ * (most-recent first) since the manifest stores RFC-3339 strings —
+ * ISO-8601 lexicographic comparison is the same as chronological for
+ * fixed-width zoned timestamps. Null synced_at sorts last. Identical
+ * timestamps tiebreak alphabetically by name so the order is stable
+ * across renders.
+ */
+export function sortSkills(
+  skills: DiscoveredSkill[],
+  mode: SortMode,
+): DiscoveredSkill[] {
   const out = [...skills];
   switch (mode) {
     case "name":
@@ -403,13 +468,111 @@ function sortSkills(skills: DiscoveredSkill[], mode: SortMode): DiscoveredSkill[
         return s !== 0 ? s : a.name.localeCompare(b.name);
       });
       return out;
-    case "recent":
-      // `DiscoveredSkill` does not carry a synced_at timestamp today (the
-      // manifest does; this is a discovery-time projection). For alpha we
-      // fall back to name order with this code comment as the flag — the
-      // real "recent" sort wires through the manifest in a follow-up plan
-      // once the GUI fetches manifest-shaped data alongside the list.
-      out.sort((a, b) => a.name.localeCompare(b.name));
+    case "recent": {
+      // Plan 27-02b: keys on synced_at (D-16, 27-01a-plumbed). Null last,
+      // alphabetical name tiebreaker. The bindings.ts type declares
+      // `synced_at?: string | null` — both `undefined` (field omitted)
+      // and `null` are treated as "no timestamp" and sort last.
+      out.sort((a, b) => {
+        const aSynced = a.synced_at ?? null;
+        const bSynced = b.synced_at ?? null;
+        if (aSynced === bSynced) return a.name.localeCompare(b.name);
+        if (aSynced === null) return 1; // nulls last
+        if (bSynced === null) return -1;
+        return bSynced.localeCompare(aSynced); // ISO-8601 descending
+      });
       return out;
+    }
   }
+}
+
+/** A single render group produced by `groupSkills`. */
+export interface SkillGroup {
+  /** Stable identity for React keys + tests. Empty string for the
+   *  "no grouping" case (groupMode = "none"). */
+  groupKey: string;
+  /** Display label for the SectionHeader (uppercase, e.g. "MANAGED"
+   *  or "PERSONAL"). Empty string when groupMode = "none". */
+  groupLabel: string;
+  /** Entries that belong to this group. Preserves the input ordering
+   *  (i.e. the sort applied upstream) within each group. */
+  entries: DiscoveredSkill[];
+}
+
+const UNOWNED_KEY = "unowned";
+const UNOWNED_LABEL = "UNOWNED";
+
+/**
+ * Bucket `skills` into render groups based on `mode` — pure helper.
+ *
+ * - "none" → a single group with no label (caller suppresses the
+ *   SectionHeader render). Preserves the Phase 26 flat-list contract.
+ * - "source" → groups by `source_name`. Empty or missing source_name
+ *   maps to the "unowned" group (label "UNOWNED"). Groups are sorted
+ *   alphabetically with UNOWNED forced last.
+ * - "role" → groups by `origin.kind` ("managed" / "local"). The order
+ *   is fixed: MANAGED → LOCAL → UNOWNED. (UNOWNED appears only if a
+ *   skill has no origin shape, which `discover_all` doesn't produce
+ *   today; the slot is included for parity with the source-mode
+ *   bucket so the section-header rotor reads consistently across
+ *   group modes.)
+ *
+ * Empty groups are omitted from the result so the render layer
+ * doesn't emit headers with `(0)` counts.
+ */
+export function groupSkills(
+  skills: DiscoveredSkill[],
+  mode: GroupMode,
+): SkillGroup[] {
+  if (mode === "none") {
+    return [{ groupKey: "", groupLabel: "", entries: [...skills] }];
+  }
+
+  if (mode === "source") {
+    const buckets = new Map<string, DiscoveredSkill[]>();
+    for (const s of skills) {
+      const key = s.source_name && s.source_name.length > 0
+        ? s.source_name
+        : UNOWNED_KEY;
+      const list = buckets.get(key) ?? [];
+      list.push(s);
+      buckets.set(key, list);
+    }
+    const keys = [...buckets.keys()].sort((a, b) => {
+      // UNOWNED forced last regardless of alphabetical order.
+      if (a === UNOWNED_KEY && b !== UNOWNED_KEY) return 1;
+      if (b === UNOWNED_KEY && a !== UNOWNED_KEY) return -1;
+      return a.localeCompare(b);
+    });
+    return keys.map((key) => ({
+      groupKey: key,
+      groupLabel: key === UNOWNED_KEY ? UNOWNED_LABEL : key.toUpperCase(),
+      entries: buckets.get(key) ?? [],
+    }));
+  }
+
+  // mode === "role"
+  const managed: DiscoveredSkill[] = [];
+  const local: DiscoveredSkill[] = [];
+  const unowned: DiscoveredSkill[] = [];
+  for (const s of skills) {
+    if (s.origin.kind === "managed") managed.push(s);
+    else if (s.origin.kind === "local") local.push(s);
+    else unowned.push(s);
+  }
+  const out: SkillGroup[] = [];
+  if (managed.length > 0) {
+    out.push({ groupKey: "managed", groupLabel: "MANAGED", entries: managed });
+  }
+  if (local.length > 0) {
+    out.push({ groupKey: "local", groupLabel: "LOCAL", entries: local });
+  }
+  if (unowned.length > 0) {
+    out.push({
+      groupKey: UNOWNED_KEY,
+      groupLabel: UNOWNED_LABEL,
+      entries: unowned,
+    });
+  }
+  return out;
 }
