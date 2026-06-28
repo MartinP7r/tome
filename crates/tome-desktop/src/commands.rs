@@ -306,10 +306,7 @@ fn offline_resolved_paths(_config: &Config, _paths: &TomePaths) -> (ResolvedGitP
 /// enabled" intent is recorded in React state only). `Disable` decisions
 /// add the skill to the global `disabled` set via the existing public
 /// `MachinePrefs::disable` mutator.
-fn apply_decisions_to_prefs(
-    prefs: &mut tome::MachinePrefs,
-    decisions: &[TriageDecision],
-) {
+fn apply_decisions_to_prefs(prefs: &mut tome::MachinePrefs, decisions: &[TriageDecision]) {
     for d in decisions {
         match d.decision {
             TriageDecisionKind::Disable => prefs.disable(d.skill.clone()),
@@ -740,8 +737,7 @@ mod machine_toml_apply_tests {
             preview
                 .lines
                 .iter()
-                .any(|l| matches!(l.kind, tome::DiffLineKind::Added)
-                    && l.content.contains("foo")),
+                .any(|l| matches!(l.kind, tome::DiffLineKind::Added) && l.content.contains("foo")),
             "expected an Added line containing 'foo', got {preview:?}"
         );
         let _ = tome::DiffLineKind::Unchanged; // smoke-test re-export resolves

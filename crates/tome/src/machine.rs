@@ -1075,8 +1075,14 @@ bogus = "y"
         std::fs::write(&path, &canonical).unwrap();
 
         let preview = preview_save(&proposed, &path).unwrap();
-        assert_eq!(preview.added_count, 0, "expected no additions, got: {preview:?}");
-        assert_eq!(preview.removed_count, 0, "expected no removals, got: {preview:?}");
+        assert_eq!(
+            preview.added_count, 0,
+            "expected no additions, got: {preview:?}"
+        );
+        assert_eq!(
+            preview.removed_count, 0,
+            "expected no removals, got: {preview:?}"
+        );
         assert!(
             preview
                 .lines
