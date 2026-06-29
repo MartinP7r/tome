@@ -5,8 +5,13 @@
 //! on startup (path relative to the crate dir) so a `cargo tauri dev` loop
 //! keeps bindings fresh; CI uses the dedicated `gen-bindings` bin instead
 //! (workspace-root-relative path) — RESEARCH Pitfall 1 / Q-A.
+//!
+//! The entire Tauri runtime is gated `#[cfg(target_os = "macos")]` (D-GUI-06).
+//! On non-macOS the binary compiles as a stub that exits with an error message
+//! so the workspace builds cleanly for the Linux release runner without GTK3.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "macos")]
 fn main() {
     let builder = tome_desktop::make_builder();
 
@@ -59,4 +64,10 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tome-desktop");
+}
+
+#[cfg(not(target_os = "macos"))]
+fn main() {
+    eprintln!("tome-desktop: macOS only — this binary is a no-op on other platforms");
+    std::process::exit(1);
 }

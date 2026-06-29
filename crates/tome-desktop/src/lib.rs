@@ -9,16 +9,29 @@
 //! the `gen-bindings` bin (which exports `bindings.ts` from it). Keeping one
 //! Builder constructor means `bindings.ts` can never drift from what the app
 //! actually exposes.
+//!
+//! All Tauri-dependent modules are gated `#[cfg(target_os = "macos")]`
+//! (D-GUI-06). On Linux the crate compiles as an empty stub so cargo-dist can
+//! include it in the workspace build without requiring GTK3 system libraries.
 
+#[cfg(target_os = "macos")]
 pub mod commands;
+#[cfg(target_os = "macos")]
 pub mod error;
+#[cfg(target_os = "macos")]
 pub mod menu;
+#[cfg(target_os = "macos")]
 pub mod sink;
+#[cfg(target_os = "macos")]
 pub mod sync_outcome_wire;
+#[cfg(target_os = "macos")]
 pub mod sync_state;
+#[cfg(target_os = "macos")]
 pub mod sync_types;
+#[cfg(target_os = "macos")]
 pub mod watcher;
 
+#[cfg(target_os = "macos")]
 use tauri_specta::{Builder, collect_commands, collect_events};
 
 /// Construct the shared `tauri_specta::Builder` registering every command and
@@ -28,6 +41,7 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 /// calls it to mount the handlers + events on the live app; `gen-bindings`
 /// calls it to export `ui/src/bindings.ts`. Adding a command/event here makes
 /// it appear in `bindings.ts` on the next `gen-bindings` run.
+#[cfg(target_os = "macos")]
 pub fn make_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![

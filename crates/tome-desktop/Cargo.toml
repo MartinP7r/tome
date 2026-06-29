@@ -36,6 +36,15 @@ anyhow = { workspace = true }
 # the cross-boundary types derive `specta::Type`. Default CLI builds keep the
 # feature OFF (zero specta cost).
 tome = { path = "../tome", features = ["bindings"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# All Tauri runtime deps are macOS-only (D-GUI-06). On Linux, none of these
+# are resolved so the webkit2gtk → gdk-3.0 → GTK3 transitive chain never
+# enters the dependency graph. The CI check job excluded tome-desktop via
+# `--exclude tome-desktop`, but cargo-dist compiles the full workspace on the
+# Linux release runner — this gate keeps that build clean.
+[target.'cfg(target_os = "macos")'.dependencies]
 tauri = { version = "2.11", features = [] }
 # specta trio — pinned EXACTLY with `=` (they move in lockstep; tauri-specta
 # 2.0.0-rc.25 depends on specta =2.0.0-rc.25). Verified specta-rs ownership +
@@ -43,15 +52,12 @@ tauri = { version = "2.11", features = [] }
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "0.0.12"
-serde = { workspace = true }
-serde_json = { workspace = true }
 # File-watcher stack for VIEW-06 / NF-05 (Phase 26 plan 26-06). Caret-pinned to
 # the latest stable lines (8.2.x / 0.7.x) — 9.0.0-rc.x and 0.8.0-rc.x exist on
 # crates.io but the caret range excludes them; cargo resolves stable only.
 # Package-legitimacy gate: notify-rs canonical (CC0-1.0 / MIT OR Apache-2.0).
 notify = "8.2"
 notify-debouncer-full = "0.7"
-
 # Tauri plugin stack for Phase 26 plan 26-03 (VIEW-03 / D-07). Caret-pinned to
 # the 2.x line — both plugins live in tauri-apps/plugins-workspace and move in
 # lockstep with the core Tauri 2.x ABI. Package-legitimacy gate cleared at
@@ -71,7 +77,7 @@ tempfile = "3"
 # (manifest.rs) so we don't need a direct `sha2` dev-dep here.
 rand = "0.10"
 
-[build-dependencies]
+[target.'cfg(target_os = "macos")'.build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 # Explicit test target — Cargo's auto-discovery doesn't traverse
