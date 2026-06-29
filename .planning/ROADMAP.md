@@ -471,6 +471,22 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
 
+### Phase 999.6: Warn about / auto-exclude repos/ from git (BACKLOG)
+
+**Goal:** [Captured for future planning] Tome clones git-sourced directories into `<tome_home>/repos/<sha256>/`. When `tome_home` is inside a git repo (e.g. `~/dev/coding-agent-files/.tome/`), those clones land as embedded git repositories, triggering git's "adding embedded git repository" warning on every `git add`. Tome should either warn the user during `tome add <url>` when it detects this situation, or offer to write a `.gitignore` entry for `repos/` in the containing repo automatically.
+
+**Context:**
+- Observed: `~/dev/coding-agent-files/repos/b88590c4…` (last30days-skill clone) triggered the warning when running `git add` in `coding-agent-files/`.
+- Workaround: add `repos/` to `.gitignore` in the containing repo manually.
+- The `repos/` directory is tome's internal cache — it should never be committed to a user's dotfiles repo.
+- Detection heuristic: during `tome add`, check if `<tome_home>` is inside a git worktree (`git -C tome_home rev-parse --is-inside-work-tree`). If yes, surface a one-time notice and offer to append `repos/` to the containing repo's `.gitignore`.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ## Progress
 
 **Execution Order:**
