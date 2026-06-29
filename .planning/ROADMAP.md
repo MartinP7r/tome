@@ -455,6 +455,22 @@ Plans:
 Plans:
 - [ ] TBD (promote with /gsd:review-backlog when ready)
 
+### Phase 999.5: Selective skill install from a plugin (BACKLOG)
+
+**Goal:** [Captured for future planning] Allow installing only specific skills from a plugin/source rather than the full set. Today tome installs all skills from a managed directory; if a user only wants 2 of 50 skills from a marketplace plugin, the only workarounds are: (a) rename/remove unwanted skills manually after install, or (b) copy and customize as a local fork. Neither is ergonomic. Ideally tome (or the Claude marketplace) would let you check-off which skills to include at add-time or post-install.
+
+**Context:**
+- Unknown whether Claude marketplace supports per-skill selection at install time — worth investigating before designing the tome side.
+- If marketplace adds this, tome's managed-skill model (symlink from library → plugin dir) may need to track per-skill enable/disable at the plugin level, separate from the machine-prefs `disabled` list.
+- The existing per-directory `enabled`/`disabled` lists in `machine.toml` (v0.6) address a similar need for local directories but don't apply to managed (marketplace) plugins.
+- Copy-and-customize (`tome fork`) already works for permanent customization; this feature targets transient "I just don't want this one skill from the package" use cases.
+
+**Requirements:** TBD
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
 ## Progress
 
 **Execution Order:**
