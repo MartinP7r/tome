@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
 stopped_at: Phase 27 planned (7 plans, 5 waves) — verification passed
-last_updated: "2026-06-06T11:57:10.215Z"
-last_activity: 2026-06-06 -- Phase 27 execution started
+last_updated: "2026-06-30T09:19:54.403Z"
+last_activity: 2026-06-30 -- Completed quick task 260630-pgl
 progress:
   total_phases: 4
   completed_phases: 2
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 Phase: 27 (sync-triage-ui) — EXECUTING
 Plan: 1 of 7
 Status: Executing Phase 27
-Last activity: 2026-06-06 -- Phase 27 execution started
+Last activity: 2026-06-30 -- Completed quick task 260630-pgl
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -113,6 +113,12 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 - **Frontend framework decision is load-bearing** (D-GUI-04). All UI phases (26–31) depend on it. Phase 25's spike must produce a defensible pick (React / Solid / Svelte) and lock it in writing. Mid-milestone framework swap is not acceptable.
 - **`crates/tome-desktop` as a workspace member** — adds Tauri + webview deps to the workspace. Verify cargo-dist's CLI artifact build does not start pulling Tauri deps unintentionally. Workspace-level feature flags or per-crate build matrices may be needed.
 - **CLI snapshot tests** — the v0.10–v0.16 hardening pass landed many `insta` snapshots of CLI output. Decomposing `lib.rs::run` into presenter + domain calls must preserve these snapshots byte-for-byte unless the change is explicitly intended.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260630-pgl | Remove duplicate CI job definitions that invalidate ci.yml | 2026-06-30 | f80e47d | [260630-pgl-remove-duplicate-ci-job-definitions-that](./quick/260630-pgl-remove-duplicate-ci-job-definitions-that/) |
 
 ## Session Continuity
 
