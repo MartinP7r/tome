@@ -102,6 +102,8 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ### Pending Todos / Carry-over
 
+- **Structured todos:** 2 pending items in `.planning/todos/pending/`; latest capture is
+  `2026-07-15-define-agent-skills-for-tome.md` ("Define agent skills for tome").
 - **Linux UAT (carry-over from v0.8):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime tests). Pending Linux desktop hardware. Carried over for the sixth+ consecutive milestone — formally deferred to **v2 (post-v1.0)** when Linux GUI build hardware lands.
 - **#542 Owned/Unowned enum migration** — deferred from v0.12 whole-codebase review; absorbed into Phase 25 CORE-01 scope.
 - **#548 role-transition cleanup gap** — surfaced during v0.13 dogfooding (when a directory's role transitions synced→source, ~171 stale tome symlinks linger). Standalone follow-up; not v1.0-blocking but should land before the alpha cut so dogfooding sessions don't repeat the manual cleanup.
