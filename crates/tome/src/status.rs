@@ -221,6 +221,11 @@ pub struct StatusReport {
 pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
     let configured = paths.library_dir().is_dir() || !config.directories.is_empty();
 
+    // Git directory paths are URLs. Reuse the clone cache created by sync without
+    // fetching, so status reports the same source skills that sync discovered.
+    let (resolved_paths, git_cache_warnings) =
+        lockfile::resolved_paths_from_lockfile_cache(config, paths);
+
     let library_count = if paths.library_dir().is_dir() {
         count_entries(paths.library_dir()).map_err(|e| e.to_string())
     } else {
@@ -232,14 +237,23 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         .iter()
         .map(|(name, dir_config)| {
             let role = dir_config.role();
+            let effective_path = resolved_paths
+                .get(name)
+                .map(|(path, _)| path)
+                .unwrap_or(&dir_config.path);
             let skill_count = if role.is_discovery() {
                 // For discovery directories, count SKILL.md subdirs
-                count_skill_dirs(&dir_config.path).map_err(|e| e.to_string())
+                count_skill_dirs(effective_path).map_err(|e| e.to_string())
             } else {
                 // For target-only directories, count existing symlinks
                 count_symlinks(&dir_config.path).map_err(|e| e.to_string())
             };
-            let warnings = Vec::new();
+            let directory_marker = format!("directory '{name}'");
+            let warnings = git_cache_warnings
+                .iter()
+                .filter(|warning| warning.contains(&directory_marker))
+                .cloned()
+                .collect();
             DirectoryStatus {
                 name: name.as_str().to_string(),
                 directory_type: dir_config.directory_type.to_string(),

@@ -80,6 +80,150 @@ fn status_json_output() {
 
 #[cfg(unix)]
 #[test]
+fn status_counts_skills_from_cached_git_source() {
+    let tmp = TempDir::new().unwrap();
+    let upstream_dir = tmp.path().join("upstream.git");
+    std::fs::create_dir_all(&upstream_dir).unwrap();
+    create_skill(&upstream_dir, "git-skill");
+
+    for args in [
+        &["init", "-b", "main"][..],
+        &["config", "user.email", "test@test.com"],
+        &["config", "user.name", "Test"],
+        &["add", "-A"],
+        &["commit", "-m", "seed"],
+    ] {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&upstream_dir)
+            .output()
+            .unwrap();
+    }
+
+    let config_path = write_config(
+        tmp.path(),
+        &format!(
+            "[directories.myrepo]\n\
+             path = \"file://{}\"\n\
+             type = \"git\"\n\
+             role = \"source\"\n\
+             branch = \"main\"\n",
+            upstream_dir.display()
+        ),
+    );
+
+    tome()
+        .args([
+            "--config",
+            &config_path.to_string_lossy(),
+            "sync",
+            "--no-triage",
+        ])
+        .assert()
+        .success();
+
+    let output = tome()
+        .args([
+            "--config",
+            &config_path.to_string_lossy(),
+            "status",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let directory = report["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|directory| directory["name"] == "myrepo")
+        .unwrap();
+    assert_eq!(directory["skill_count"]["count"], 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn status_warns_when_cached_git_source_is_missing() {
+    let tmp = TempDir::new().unwrap();
+    let upstream_dir = tmp.path().join("upstream.git");
+    std::fs::create_dir_all(&upstream_dir).unwrap();
+    create_skill(&upstream_dir, "git-skill");
+
+    for args in [
+        &["init", "-b", "main"][..],
+        &["config", "user.email", "test@test.com"],
+        &["config", "user.name", "Test"],
+        &["add", "-A"],
+        &["commit", "-m", "seed"],
+    ] {
+        std::process::Command::new("git")
+            .args(args)
+            .current_dir(&upstream_dir)
+            .output()
+            .unwrap();
+    }
+
+    let config_path = write_config(
+        tmp.path(),
+        &format!(
+            "[directories.myrepo]\n\
+             path = \"file://{}\"\n\
+             type = \"git\"\n\
+             role = \"source\"\n\
+             branch = \"main\"\n",
+            upstream_dir.display()
+        ),
+    );
+
+    tome()
+        .args([
+            "--config",
+            &config_path.to_string_lossy(),
+            "sync",
+            "--no-triage",
+        ])
+        .assert()
+        .success();
+
+    let cache_dir = std::fs::read_dir(tmp.path().join("repos"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    std::fs::remove_dir_all(cache_dir).unwrap();
+
+    let output = tome()
+        .args([
+            "--config",
+            &config_path.to_string_lossy(),
+            "status",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let directory = report["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|directory| directory["name"] == "myrepo")
+        .unwrap();
+    assert!(
+        directory["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|warning| warning.as_str().unwrap().contains("cache dir"))
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn machine_override_rewrites_directory_path_for_status() {
     // PORT-01 + PORT-02 smoke: declare an override in machine.toml and
     // confirm `tome status --json` reports the OVERRIDDEN path, proving
