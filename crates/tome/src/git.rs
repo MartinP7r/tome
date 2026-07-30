@@ -13,14 +13,29 @@ use crate::errors::{DomainErrorKind, WithDomainKind};
 use crate::progress::{CancelToken, ProgressEvent, ProgressSink};
 
 /// Run a git command in the given directory with env clearing, returning raw output.
+///
+/// `GIT_CEILING_DIRECTORIES` is set to `repo_dir`'s **parent** so git's
+/// repository discovery cannot walk above the cache directory. Without it,
+/// running a command in a directory that is not itself a repository silently
+/// targets the nearest ancestor repository — and the repo cache lives inside the
+/// library, which is commonly a git repo itself, so a `reset --hard` would land
+/// on the user's library instead of the cache.
+///
+/// The value must be the parent, not `repo_dir`: the variable lists directories
+/// git may not *chdir up into*, and discovery starts already inside `repo_dir`.
+/// Listing `repo_dir` therefore permits the very first upward step, which is the
+/// one that escapes. Verified against git's behaviour, not assumed.
 fn git_command(repo_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
-    std::process::Command::new("git")
-        .args(args)
+    let mut cmd = std::process::Command::new("git");
+    cmd.args(args)
         .current_dir(repo_dir)
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .output()
+        .env_remove("GIT_INDEX_FILE");
+    if let Some(parent) = repo_dir.parent() {
+        cmd.env("GIT_CEILING_DIRECTORIES", parent);
+    }
+    cmd.output()
         .with_context(|| format!("failed to run git {}", args.join(" ")))
 }
 
@@ -42,6 +57,20 @@ fn git_stdout(repo_dir: &Path, args: &[&str]) -> Result<String> {
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Whether `dir` is the root of a git repository.
+///
+/// Checks for a `.git` entry directly inside `dir` — deliberately *not* using
+/// `git rev-parse`, which walks up to ancestor repositories and would report
+/// `true` for any directory nested inside one. The repo cache lives inside the
+/// library, which is frequently a git repo, so upward-walking checks are unsafe
+/// here.
+///
+/// `.git` may be a directory (normal clone) or a file (worktree/submodule
+/// gitlink), so both are accepted.
+pub(crate) fn is_git_repo(dir: &Path) -> bool {
+    dir.join(".git").exists()
 }
 
 /// Compute the cache directory path for a git repo URL.
@@ -193,6 +222,17 @@ fn update_repo_inner(
     if cancel.is_cancelled() {
         anyhow::bail!("git update cancelled before start");
     }
+    // Refuse to fetch/reset unless the directory is itself a repository. A
+    // previous clone that failed part-way leaves the cache directory present
+    // but without `.git`; updating it would let git discovery escape upward and
+    // `reset --hard` the enclosing repository. Callers treat this as
+    // "needs a fresh clone".
+    if !is_git_repo(repo_dir) {
+        anyhow::bail!(
+            "{} exists but is not a git repository (incomplete clone); a fresh clone is required",
+            repo_dir.display()
+        );
+    }
     sink.emit(ProgressEvent::GitCloneProgress {
         directory: repo_dir.to_string_lossy().into_owned(),
         received: 0,
@@ -237,6 +277,7 @@ pub(crate) fn is_git_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::progress::NullSink;
     use tempfile::TempDir;
 
     // -- repo_cache_dir tests --
@@ -269,6 +310,131 @@ mod tests {
         let a = repo_cache_dir(repos, url);
         let b = repo_cache_dir(repos, url);
         assert_eq!(a, b);
+    }
+
+    // -- is_git_repo / enclosing-repo safety tests --
+
+    #[test]
+    fn is_git_repo_false_for_plain_directory() {
+        let tmp = TempDir::new().unwrap();
+        assert!(!is_git_repo(tmp.path()));
+    }
+
+    #[test]
+    fn is_git_repo_false_for_directory_nested_inside_a_repo() {
+        // The repo cache lives inside the library, which is often a git repo.
+        // An upward-walking check (`git rev-parse`) would answer `true` here;
+        // that is exactly the confusion that let `reset --hard` hit the library.
+        let outer = TempDir::new().unwrap();
+        std::fs::create_dir(outer.path().join(".git")).unwrap();
+        let nested = outer.path().join("repos").join("deadbeef");
+        std::fs::create_dir_all(&nested).unwrap();
+
+        assert!(is_git_repo(outer.path()), "outer is a repo");
+        assert!(
+            !is_git_repo(&nested),
+            "nested cache dir must not count as a repo just because an ancestor is one"
+        );
+    }
+
+    #[test]
+    fn is_git_repo_true_when_dot_git_is_a_file() {
+        // Worktrees and submodules use a `.git` *file* containing a gitdir pointer.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
+        assert!(is_git_repo(tmp.path()));
+    }
+
+    #[test]
+    fn update_repo_refuses_incomplete_clone_and_leaves_enclosing_repo_untouched() {
+        // Regression: a clone that failed part-way leaves the cache directory
+        // present but without `.git`. Updating it used to run
+        // `git fetch && git reset --hard FETCH_HEAD` there; git discovery walked
+        // up to the enclosing library repository and reset the user's work.
+        let library = TempDir::new().unwrap();
+        run_git(library.path(), &["init", "--initial-branch", "main"]);
+        configure_test_identity(library.path());
+        std::fs::write(library.path().join("tome.toml"), "committed = true\n").unwrap();
+        run_git(library.path(), &["add", "."]);
+        run_git(library.path(), &["commit", "-m", "initial"]);
+
+        // Uncommitted local edit, standing in for the user's work.
+        std::fs::write(library.path().join("tome.toml"), "locally = edited\n").unwrap();
+
+        // Empty cache dir, as left behind by a failed clone.
+        let cache = library.path().join("repos").join("aabbcc");
+        std::fs::create_dir_all(&cache).unwrap();
+
+        let err = update_repo(&cache, None, None, None, &NullSink, &CancelToken::new())
+            .expect_err("must refuse to update a directory that is not a repository");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("not a git repository"),
+            "unexpected error: {msg}"
+        );
+
+        // The enclosing repository must be untouched.
+        assert_eq!(
+            std::fs::read_to_string(library.path().join("tome.toml")).unwrap(),
+            "locally = edited\n",
+            "enclosing repo working tree was modified"
+        );
+    }
+
+    #[test]
+    fn git_command_cannot_reach_an_enclosing_repository() {
+        // Second line of defence, independent of the `is_git_repo` guard: even if
+        // some future caller reaches `git_command` with a non-repo directory, the
+        // ceiling must stop discovery from escaping upward.
+        let library = TempDir::new().unwrap();
+        run_git(library.path(), &["init", "--initial-branch", "main"]);
+        configure_test_identity(library.path());
+        std::fs::write(library.path().join("file.txt"), "committed\n").unwrap();
+        run_git(library.path(), &["add", "."]);
+        run_git(library.path(), &["commit", "-m", "initial"]);
+        std::fs::write(library.path().join("file.txt"), "edited\n").unwrap();
+
+        let cache = library.path().join("repos").join("aabbcc");
+        std::fs::create_dir_all(&cache).unwrap();
+
+        // Bypasses update_repo entirely — calls the command layer directly.
+        let out = git_command(&cache, &["reset", "--hard", "HEAD"]).unwrap();
+        assert!(
+            !out.status.success(),
+            "reset should fail: no repository is reachable from the cache dir"
+        );
+        assert_eq!(
+            std::fs::read_to_string(library.path().join("file.txt")).unwrap(),
+            "edited\n",
+            "enclosing repo must be untouched"
+        );
+    }
+
+    fn run_git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {:?} failed: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn configure_test_identity(dir: &Path) {
+        for args in [
+            ["config", "--local", "user.email", "test@test.com"].as_slice(),
+            ["config", "--local", "user.name", "Test"].as_slice(),
+            ["config", "--local", "commit.gpgsign", "false"].as_slice(),
+        ] {
+            run_git(dir, args);
+        }
     }
 
     // -- ref_spec_for_config tests --
