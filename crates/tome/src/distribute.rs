@@ -1,15 +1,38 @@
 //! Distribute library skills to configured directories via symlinks.
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::os::unix::fs as unix_fs;
 use std::path::Path;
 use tracing::{info, warn};
 
 use crate::change_cause::ChangeCause;
-use crate::config::{DirectoryConfig, DirectoryName};
+use crate::config::{DirectoryConfig, DirectoryName, DirectoryType};
 use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
 use crate::paths::symlink_points_to;
+
+/// Whether `target` is the personal skills directory of the same tool whose
+/// package manager owns `source`.
+///
+/// True only when `source` is a [`DirectoryType::ClaudePlugins`] directory and
+/// `target` is exactly its sibling `skills/` directory — `~/.claude/plugins`
+/// paired with `~/.claude/skills`. That is the layout Claude Code uses: the tool
+/// home holds both `plugins/` and `skills/`.
+///
+/// Deliberately *not* "the two paths share a parent". Sibling directories are not
+/// necessarily the same tool — two unrelated configured directories can sit side
+/// by side under one root (as they do in this crate's own integration fixtures),
+/// and suppressing distribution there would silently break a legitimate target.
+fn owns_same_tool_as(source: &DirectoryConfig, target: &DirectoryConfig) -> bool {
+    if source.directory_type != DirectoryType::ClaudePlugins {
+        return false;
+    }
+    source
+        .path
+        .parent()
+        .is_some_and(|tool_home| target.path == tool_home.join("skills"))
+}
 
 /// Result of distributing skills to a single directory.
 #[derive(Debug)]
@@ -25,18 +48,63 @@ pub struct DistributeResult {
     pub directory_name: DirectoryName,
 }
 
-/// Distribute skills from the library to a configured directory.
+/// Distribute skills without a directory set — no package-manager de-duplication.
 ///
-/// Creates symlinks in `dir_config.path` pointing to library entries.
-/// When `force` is true, all symlinks are recreated even if they already point to the correct target.
-/// The `manifest` is used to check whether a skill's source originated from this directory
-/// (to prevent circular symlinks when a directory is both a source and target).
-pub fn distribute_to_directory(
+/// Test-only convenience over [`distribute_to_directory_with_sources`]. Production
+/// callers must pass the configured directories so plugin-owned skills are not
+/// duplicated into the tool that already loads them.
+#[cfg(test)]
+fn distribute_to_directory(
     library_dir: &Path,
     dir_name: &DirectoryName,
     dir_config: &DirectoryConfig,
     manifest: &Manifest,
     machine_prefs: &MachinePrefs,
+    dry_run: bool,
+    force: bool,
+) -> Result<DistributeResult> {
+    distribute_to_directory_with_sources(
+        library_dir,
+        dir_name,
+        dir_config,
+        manifest,
+        machine_prefs,
+        &BTreeMap::new(),
+        dry_run,
+        force,
+    )
+}
+
+/// Distribute skills, additionally suppressing skills the target tool already
+/// loads through its own package manager.
+///
+/// `all_directories` is the full configured directory set, used to resolve each
+/// skill's *source* directory. Without it a skill discovered from a tool's plugin
+/// manager is symlinked back into that same tool's personal skills directory, so
+/// the tool loads it twice — once as `plugin:name`, once as bare `name`. The
+/// duplicate costs context on every session and makes bare-name invocation
+/// ambiguous between the live plugin and the library snapshot, which can drift.
+///
+/// Redistribution to *other* tools is the whole point of consolidating managed
+/// skills, so the suppression is deliberately narrow: it applies only when the
+/// source is a [`DirectoryType::ClaudePlugins`] directory sharing a parent with
+/// the target (e.g. `~/.claude/plugins` and `~/.claude/skills`). A Codex or
+/// Antigravity target keeps receiving them.
+///
+/// Creates symlinks in `dir_config.path` pointing to library entries. When `force`
+/// is true, all symlinks are recreated even if they already point at the correct
+/// target.
+// One argument over clippy's threshold. Grouping them into a struct would touch
+// every call site and the desktop IPC layer for no behavioural gain; the
+// parameters are all distinct types, so misordering them is a compile error.
+#[allow(clippy::too_many_arguments)]
+pub fn distribute_to_directory_with_sources(
+    library_dir: &Path,
+    dir_name: &DirectoryName,
+    dir_config: &DirectoryConfig,
+    manifest: &Manifest,
+    machine_prefs: &MachinePrefs,
+    all_directories: &BTreeMap<DirectoryName, DirectoryConfig>,
     dry_run: bool,
     force: bool,
 ) -> Result<DistributeResult> {
@@ -103,6 +171,29 @@ pub fn distribute_to_directory(
             {
                 warn!(
                     "failed to remove legacy symlink {}: {}",
+                    target_link.display(),
+                    e
+                );
+            }
+            result.skipped_managed += 1;
+            continue;
+        }
+
+        // Skip skills the target tool already loads via its own package manager
+        // (see this function's doc comment). Same cleanup of stale symlinks as
+        // the same-directory case above, so existing duplicates disappear on the
+        // next sync rather than lingering.
+        if let Some(manifest_entry) = manifest.get(skill_name_str.as_ref())
+            && let Some(source_name) = manifest_entry.source_name()
+            && let Some(source_config) = all_directories.get(source_name)
+            && owns_same_tool_as(source_config, dir_config)
+        {
+            if !dry_run
+                && target_link.is_symlink()
+                && let Err(e) = std::fs::remove_file(&target_link)
+            {
+                warn!(
+                    "failed to remove duplicate plugin symlink {}: {}",
                     target_link.display(),
                     e
                 );
@@ -634,6 +725,185 @@ mod tests {
             !target_dir.path().join("my-skill").exists(),
             "skill should NOT be distributed back to its own directory"
         );
+    }
+
+    /// Build a manifest with one skill owned by `source_name`.
+    fn manifest_owned_by(
+        skill: &str,
+        source_name: &str,
+        source_path: std::path::PathBuf,
+    ) -> Manifest {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            crate::discover::SkillName::new(skill).unwrap(),
+            SkillEntry {
+                source_path,
+                ownership: crate::manifest::SkillOwnership::Owned {
+                    source: DirectoryName::new(source_name).unwrap(),
+                },
+                content_hash: crate::validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: true,
+            },
+        );
+        manifest
+    }
+
+    fn plugins_dir_config(path: std::path::PathBuf) -> DirectoryConfig {
+        let mut c = make_dir_config(path);
+        c.directory_type = DirectoryType::ClaudePlugins;
+        c
+    }
+
+    #[test]
+    fn distribute_skips_plugin_skills_for_the_owning_tool() {
+        // Regression: a skill discovered from ~/.claude/plugins was symlinked into
+        // ~/.claude/skills, so Claude Code loaded it twice — once as
+        // `plugin:name`, once as bare `name`.
+        let library = TempDir::new().unwrap();
+        let tool_root = TempDir::new().unwrap();
+        let plugins = tool_root.path().join("plugins");
+        let skills = tool_root.path().join("skills");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&skills).unwrap();
+
+        setup_library(library.path(), &["my-skill"]);
+        let manifest = manifest_owned_by("my-skill", "claude-plugins", plugins.join("my-skill"));
+
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-plugins").unwrap(),
+            plugins_dir_config(plugins),
+        );
+
+        let target_name = DirectoryName::new("claude-skills").unwrap();
+        let target_config = make_dir_config(skills.clone());
+
+        let result = distribute_to_directory_with_sources(
+            library.path(),
+            &target_name,
+            &target_config,
+            &manifest,
+            &MachinePrefs::default(),
+            &dirs,
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.skipped_managed, 1);
+        assert_eq!(result.changed, 0);
+        assert!(
+            !skills.join("my-skill").exists(),
+            "plugin skill must not be duplicated into the same tool's skills dir"
+        );
+    }
+
+    #[test]
+    fn distribute_still_sends_plugin_skills_to_other_tools() {
+        // The whole point of consolidating managed skills is to reach tools that
+        // have no plugin manager of their own, so a different tool root must
+        // still receive them.
+        let library = TempDir::new().unwrap();
+        let claude_root = TempDir::new().unwrap();
+        let codex_root = TempDir::new().unwrap();
+        let plugins = claude_root.path().join("plugins");
+        let codex_skills = codex_root.path().join("skills");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&codex_skills).unwrap();
+
+        setup_library(library.path(), &["my-skill"]);
+        let manifest = manifest_owned_by("my-skill", "claude-plugins", plugins.join("my-skill"));
+
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-plugins").unwrap(),
+            plugins_dir_config(plugins),
+        );
+
+        let target_name = DirectoryName::new("codex-agents").unwrap();
+        let target_config = make_dir_config(codex_skills.clone());
+
+        let result = distribute_to_directory_with_sources(
+            library.path(),
+            &target_name,
+            &target_config,
+            &manifest,
+            &MachinePrefs::default(),
+            &dirs,
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 1);
+        assert!(codex_skills.join("my-skill").is_symlink());
+    }
+
+    #[test]
+    fn distribute_removes_preexisting_plugin_duplicate_symlink() {
+        // Duplicates created by earlier versions should disappear on next sync.
+        let library = TempDir::new().unwrap();
+        let tool_root = TempDir::new().unwrap();
+        let plugins = tool_root.path().join("plugins");
+        let skills = tool_root.path().join("skills");
+        std::fs::create_dir_all(&plugins).unwrap();
+        std::fs::create_dir_all(&skills).unwrap();
+
+        setup_library(library.path(), &["my-skill"]);
+        unix_fs::symlink(library.path().join("my-skill"), skills.join("my-skill")).unwrap();
+        assert!(skills.join("my-skill").is_symlink(), "precondition");
+
+        let manifest = manifest_owned_by("my-skill", "claude-plugins", plugins.join("my-skill"));
+        let mut dirs = BTreeMap::new();
+        dirs.insert(
+            DirectoryName::new("claude-plugins").unwrap(),
+            plugins_dir_config(plugins),
+        );
+
+        distribute_to_directory_with_sources(
+            library.path(),
+            &DirectoryName::new("claude-skills").unwrap(),
+            &make_dir_config(skills.clone()),
+            &manifest,
+            &MachinePrefs::default(),
+            &dirs,
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            !skills.join("my-skill").exists(),
+            "stale duplicate symlink should be cleaned up"
+        );
+    }
+
+    #[test]
+    fn owns_same_tool_as_matches_only_the_tools_own_skills_dir() {
+        let plugins = plugins_dir_config(std::path::PathBuf::from("/home/u/.claude/plugins"));
+
+        // The tool's own skills dir — the duplicate case.
+        let own_skills = make_dir_config(std::path::PathBuf::from("/home/u/.claude/skills"));
+        assert!(owns_same_tool_as(&plugins, &own_skills));
+
+        // A different tool must keep receiving plugin skills.
+        let other_tool = make_dir_config(std::path::PathBuf::from("/home/u/.agents/skills"));
+        assert!(!owns_same_tool_as(&plugins, &other_tool));
+
+        // A plain directory source is never treated as a package manager.
+        let plain = make_dir_config(std::path::PathBuf::from("/home/u/.claude/plugins"));
+        assert!(!owns_same_tool_as(&plain, &own_skills));
+
+        // Merely sharing a parent is not enough. Two unrelated directories side by
+        // side under one root (the shape used by this crate's integration
+        // fixtures) must not suppress distribution.
+        let sibling = make_dir_config(std::path::PathBuf::from("/home/u/.claude/target"));
+        assert!(!owns_same_tool_as(&plugins, &sibling));
+
+        // A broad target elsewhere in the home directory is unaffected.
+        let broad = make_dir_config(std::path::PathBuf::from("/home/u/skills"));
+        assert!(!owns_same_tool_as(&plugins, &broad));
     }
 
     #[test]

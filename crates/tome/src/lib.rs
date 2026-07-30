@@ -1669,7 +1669,12 @@ fn resolve_git_directories(
 
         let url = dir_config.path.to_string_lossy();
         let cache_dir = git::repo_cache_dir(&repos_dir, &url);
-        let already_cloned = cache_dir.is_dir();
+        // Must be a *repository*, not merely an existing directory. A clone that
+        // failed part-way leaves the directory behind without `.git`; treating
+        // that as "already cloned" sends it down the fetch/reset path, where git
+        // discovery escapes upward and `reset --hard` lands on the enclosing
+        // library repository.
+        let already_cloned = git::is_git_repo(&cache_dir);
 
         if dry_run {
             // In dry-run, use cached path if it exists, skip otherwise
@@ -1702,7 +1707,22 @@ fn resolve_git_directories(
                 cancel,
             )
         } else {
-            // Fresh clone (GIT-02)
+            // Fresh clone (GIT-02).
+            //
+            // Clear any leftover directory first: `git clone` refuses a
+            // non-empty destination, so an incomplete previous clone would
+            // otherwise fail here forever. Only the cache dir is removed, and
+            // only when it is not a repository (checked above), so no user
+            // content is at risk.
+            if cache_dir.exists()
+                && let Err(e) = std::fs::remove_dir_all(&cache_dir)
+            {
+                warn!(
+                    "failed to clear incomplete clone at {}: {e}",
+                    cache_dir.display()
+                );
+                continue;
+            }
             debug!("Cloning git directory '{}'...", name);
             git::clone_repo(
                 &url,
@@ -2239,12 +2259,13 @@ pub fn sync(
                 // there instead.
                 item: Some(name.to_string()),
             });
-            let result = distribute::distribute_to_directory(
+            let result = distribute::distribute_to_directory_with_sources(
                 paths.library_dir(),
                 name,
                 dir_config,
                 &manifest,
                 &machine_prefs,
+                &config.directories,
                 dry_run,
                 force,
             )?;

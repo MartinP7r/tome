@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`tome sync` could `git reset --hard` the user's library repository,
+  discarding local commits and uncommitted edits** (#585). Git-source
+  cache directories live under `<library>/repos/<sha256>/`, and the
+  clone-vs-update decision tested only `cache_dir.is_dir()`. A clone
+  that failed part-way leaves that directory present but without
+  `.git`, so the update path ran `git fetch && git reset --hard
+  FETCH_HEAD` inside it; git's repository discovery then walked *up*,
+  found the enclosing library repo, and reset that instead. Two
+  independent guards now apply: `update_repo` refuses a directory that
+  is not itself a repository (the caller re-clones, clearing the stale
+  directory first), and every git subprocess sets
+  `GIT_CEILING_DIRECTORIES` to the cache directory's parent so
+  discovery cannot escape upward. The variable must name the *parent* —
+  listing the directory itself still permits the first upward step.
+- **Git sources were dropped from `tome.toml` on the next sync** (#585).
+  A consequence of the reset above rather than a separate defect: the
+  config file is tracked in the library repo, so resetting it reverted
+  the entry `tome add` had just written. The source then resolved to
+  nothing and its skills were reclassified as Unowned.
+- **`tome doctor` reported every git source as a missing directory**
+  (#585). For `type = "git"` entries `path` holds a clone URL, so the
+  filesystem existence check always failed and printed the URL as a
+  nonexistent path. The check is now skipped for git directories. The
+  spurious warning actively obscured the bug above by looking like a
+  config typo.
+- **Plugin-owned skills were symlinked back into the tool that already
+  loads them, so every one loaded twice** (#586). A skill discovered
+  from `~/.claude/plugins` was distributed into `~/.claude/skills`,
+  making it visible both as `plugin:name` and as bare `name` —
+  redundant description tokens in every session, and ambiguity between
+  the live plugin and the library snapshot. Distribution now skips a
+  skill whose source is a `claude-plugins` directory when the target is
+  that same tool's sibling `skills/` directory. Redistribution to other
+  tools is unaffected, since reaching tools without a plugin manager is
+  the point of consolidating managed skills. Existing duplicate
+  symlinks are removed on the next sync.
+
 ## [0.16.1] - 2026-06-29
 
 ## [0.16.0] - 2026-05-20

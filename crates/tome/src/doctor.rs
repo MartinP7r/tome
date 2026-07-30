@@ -1795,6 +1795,14 @@ fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
     let mut issues = Vec::new();
 
     for (name, dir_config) in &config.directories {
+        // For git directories `path` holds a clone URL, not a filesystem path, so
+        // an existence check is meaningless and previously fired on every git
+        // source unconditionally — reporting the URL as a missing directory. That
+        // noise actively hid a real defect: the message looked like a config typo
+        // when the actual problem was an unpopulated repo cache.
+        if dir_config.directory_type == crate::config::DirectoryType::Git {
+            continue;
+        }
         if !dir_config.path.exists() {
             issues.push(DiagnosticIssue::config(
                 IssueSeverity::Warning,
