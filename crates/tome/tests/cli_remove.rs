@@ -23,6 +23,38 @@ fn remove_test_env(tmp: &TempDir, directories_toml: &str) -> PathBuf {
     config_path
 }
 
+fn init_git_repo(dir: &std::path::Path) {
+    let global_config = dir.with_extension("gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+    for args in [
+        &["init", "-b", "main"][..],
+        &["config", "--local", "user.email", "test@test.com"],
+        &["config", "--local", "user.name", "Test"],
+        &["config", "--local", "commit.gpgsign", "false"],
+        &["add", "-A"],
+        &["commit", "-m", "seed"],
+    ] {
+        let output = StdCommand::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global_config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
 #[test]
 fn test_remove_nonexistent_directory() {
     let tmp = TempDir::new().unwrap();
@@ -719,23 +751,7 @@ fn remove_preserves_git_lockfile_entries() {
     let upstream_dir = tmp.path().join("upstream-myrepo.git");
     std::fs::create_dir_all(&upstream_dir).unwrap();
     create_skill(&upstream_dir, "git-skill");
-    // Initialize the upstream as a real git repo so `git clone` accepts it.
-    let git_init = |dir: &std::path::Path, args: &[&str]| {
-        StdCommand::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .unwrap();
-    };
-    // `git init -b main` so the initial branch name is stable across host configs.
-    git_init(&upstream_dir, &["init", "-b", "main"]);
-    git_init(&upstream_dir, &["config", "user.email", "test@test.com"]);
-    git_init(&upstream_dir, &["config", "user.name", "Test"]);
-    git_init(&upstream_dir, &["add", "-A"]);
-    git_init(&upstream_dir, &["commit", "-m", "seed"]);
+    init_git_repo(&upstream_dir);
 
     let dummy_url = format!("file://{}", upstream_dir.display());
 
@@ -975,21 +991,7 @@ fn tome_remove_dir_cleans_git_cache() {
     let upstream_dir = tmp.path().join("upstream-test-git.git");
     std::fs::create_dir_all(&upstream_dir).unwrap();
     create_skill(&upstream_dir, "git-skill");
-    let git_init = |dir: &std::path::Path, args: &[&str]| {
-        StdCommand::new("git")
-            .args(args)
-            .current_dir(dir)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .env_remove("GIT_INDEX_FILE")
-            .output()
-            .unwrap();
-    };
-    git_init(&upstream_dir, &["init", "-b", "main"]);
-    git_init(&upstream_dir, &["config", "user.email", "test@test.com"]);
-    git_init(&upstream_dir, &["config", "user.name", "Test"]);
-    git_init(&upstream_dir, &["add", "-A"]);
-    git_init(&upstream_dir, &["commit", "-m", "seed"]);
+    init_git_repo(&upstream_dir);
 
     let url = format!("file://{}", upstream_dir.display());
 

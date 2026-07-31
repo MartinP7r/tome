@@ -1,7 +1,40 @@
 use assert_fs::TempDir;
+use std::process::Command as StdCommand;
 
 mod common;
 use common::*;
+
+fn init_git_repo(dir: &std::path::Path) {
+    let global_config = dir.with_extension("gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+    for args in [
+        &["init", "-b", "main"][..],
+        &["config", "--local", "user.email", "test@test.com"],
+        &["config", "--local", "user.name", "Test"],
+        &["config", "--local", "commit.gpgsign", "false"],
+        &["add", "-A"],
+        &["commit", "-m", "seed"],
+    ] {
+        let output = StdCommand::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global_config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
 
 #[test]
 fn status_shows_library_info() {
@@ -86,19 +119,7 @@ fn status_counts_skills_from_cached_git_source() {
     std::fs::create_dir_all(&upstream_dir).unwrap();
     create_skill(&upstream_dir, "git-skill");
 
-    for args in [
-        &["init", "-b", "main"][..],
-        &["config", "user.email", "test@test.com"],
-        &["config", "user.name", "Test"],
-        &["add", "-A"],
-        &["commit", "-m", "seed"],
-    ] {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(&upstream_dir)
-            .output()
-            .unwrap();
-    }
+    init_git_repo(&upstream_dir);
 
     let config_path = write_config(
         tmp.path(),
@@ -151,19 +172,7 @@ fn status_warns_when_cached_git_source_is_missing() {
     std::fs::create_dir_all(&upstream_dir).unwrap();
     create_skill(&upstream_dir, "git-skill");
 
-    for args in [
-        &["init", "-b", "main"][..],
-        &["config", "user.email", "test@test.com"],
-        &["config", "user.name", "Test"],
-        &["add", "-A"],
-        &["commit", "-m", "seed"],
-    ] {
-        std::process::Command::new("git")
-            .args(args)
-            .current_dir(&upstream_dir)
-            .output()
-            .unwrap();
-    }
+    init_git_repo(&upstream_dir);
 
     let config_path = write_config(
         tmp.path(),

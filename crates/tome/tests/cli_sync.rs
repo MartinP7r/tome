@@ -7,27 +7,34 @@ use common::*;
 
 /// Helper: initialize a git repo with a dummy identity (for CI).
 fn git_init(dir: &std::path::Path) {
-    StdCommand::new("git")
-        .args(["init"])
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["config", "user.email", "test@test.com"])
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    StdCommand::new("git")
-        .args(["config", "user.name", "Test"])
-        .current_dir(dir)
-        .output()
-        .unwrap();
-    // Initial commit so HEAD exists
-    StdCommand::new("git")
-        .args(["commit", "--allow-empty", "-m", "init"])
-        .current_dir(dir)
-        .output()
-        .unwrap();
+    let global_config = dir.with_extension("gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+    for args in [
+        &["init", "-b", "main"][..],
+        &["config", "--local", "user.email", "test@test.com"],
+        &["config", "--local", "user.name", "Test"],
+        &["config", "--local", "commit.gpgsign", "false"],
+        &["commit", "--allow-empty", "-m", "init"],
+    ] {
+        let output = StdCommand::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", &global_config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]

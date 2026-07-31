@@ -1182,36 +1182,59 @@ mod tests {
     /// Initialize a real git repo in `tmp/origin` with one commit. The
     /// resulting directory's path is a valid `clone` source for
     /// `git::clone_repo` — file paths work as git URLs.
-    fn make_local_test_repo(tmp: &std::path::Path) -> std::path::PathBuf {
+    fn run_test_git(repo: &std::path::Path, global_config: &std::path::Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(repo)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", global_config)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn make_local_test_repo_with_global_config(
+        tmp: &std::path::Path,
+        global_config_contents: &str,
+    ) -> std::path::PathBuf {
         let repo = tmp.join("origin");
+        let global_config = tmp.join("gitconfig");
         std::fs::create_dir_all(&repo).unwrap();
-        std::process::Command::new("git")
-            .args(["init"])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.email", "test@test.com"])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["config", "user.name", "Test"])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
+        std::fs::write(&global_config, global_config_contents).unwrap();
+        run_test_git(&repo, &global_config, &["init", "-b", "main"]);
+        run_test_git(
+            &repo,
+            &global_config,
+            &["config", "--local", "user.email", "test@test.com"],
+        );
+        run_test_git(
+            &repo,
+            &global_config,
+            &["config", "--local", "user.name", "Test"],
+        );
+        run_test_git(
+            &repo,
+            &global_config,
+            &["config", "--local", "commit.gpgsign", "false"],
+        );
         std::fs::write(repo.join("README.md"), "hi").unwrap();
-        std::process::Command::new("git")
-            .args(["add", "-A"])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
-        std::process::Command::new("git")
-            .args(["commit", "-m", "init"])
-            .current_dir(&repo)
-            .output()
-            .unwrap();
+        run_test_git(&repo, &global_config, &["add", "-A"]);
+        run_test_git(&repo, &global_config, &["commit", "-m", "init"]);
         repo
+    }
+
+    fn make_local_test_repo(tmp: &std::path::Path) -> std::path::PathBuf {
+        make_local_test_repo_with_global_config(tmp, "")
     }
 
     fn make_test_dir_config(path: std::path::PathBuf, git_ref: Option<GitRef>) -> DirectoryConfig {
@@ -1320,6 +1343,23 @@ mod tests {
             sha.chars().all(|c| c.is_ascii_hexdigit()),
             "SHA must be hex: {sha}"
         );
+    }
+
+    #[test]
+    fn git_adapter_fixture_overrides_hostile_global_commit_signing() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let origin = make_local_test_repo_with_global_config(
+            tmp.path(),
+            "[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = /definitely/not/a/gpg/program\n",
+        );
+        let dir_config = make_test_dir_config(origin, None);
+        let paths = TomePaths::new(tmp.path().to_path_buf(), tmp.path().join("library")).unwrap();
+        let adapter = GitAdapter::for_directory(&dir_config, &paths).unwrap();
+
+        adapter.install("ignored").unwrap();
+
+        let version = adapter.current_version("ignored").unwrap().unwrap();
+        assert_eq!(version.len(), 40);
     }
 
     #[test]

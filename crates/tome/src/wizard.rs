@@ -1846,8 +1846,7 @@ mod tests {
     #[test]
     fn configure_directories_preserves_custom_prefill() {
         // A custom directory (not in KNOWN_DIRECTORIES) must survive through
-        // edit. Under --no-input with an empty HOME (no auto-discovery hits),
-        // the result map should include the prefill's custom entry.
+        // edit. Auto-discovered entries may also be present on the test machine.
         use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
 
         let mut prefill_map = std::collections::BTreeMap::new();
@@ -1863,30 +1862,7 @@ mod tests {
             },
         );
 
-        // Point find_known_directories at an isolated empty HOME so
-        // auto-discovery doesn't match anything real on the dev machine.
-        // We can't set HOME directly (edition 2024 unsafe env), but we can
-        // call the pure `find_known_directories_in` through configure_directories
-        // by using an empty filesystem via a helper. The current configure_directories
-        // calls `find_known_directories()` which reads HOME; we accept this
-        // and assert on the inclusion of the custom entry (not strict equality).
-        let tmp = TempDir::new().unwrap();
-        let prev = std::env::var_os("HOME");
-        // SAFETY: single-threaded test context; we restore immediately after.
-        unsafe {
-            std::env::set_var("HOME", tmp.path());
-        }
-
         let result = configure_directories(true, Some(&prefill_map));
-
-        // Restore HOME before any assertion can panic.
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-
         let result = result.unwrap();
         assert!(
             result.contains_key(&DirectoryName::new("my-team").unwrap()),
