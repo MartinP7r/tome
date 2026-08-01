@@ -36,7 +36,7 @@
 
 **Interfaces:**
 - Consumes: Current CLI behavior documented by `tome <command> --help` and the four user docs above.
-- Produces: A portable `using-tome` skill discovered from `skills/using-tome/SKILL.md`; Task 2 packages this exact directory as a Claude plugin.
+- Produces: A portable `using-tome` skill discovered from `skills/using-tome/SKILL.md`; Task 3 packages this exact directory as a Claude plugin.
 
 - [ ] **Step 1: Run three RED baseline scenarios without a Tome skill**
 
@@ -133,7 +133,7 @@ Create `references/troubleshooting.md` with this diagnosis order:
 
 1. Capture `tome status` and `tome doctor`.
 2. Inspect effective config with `tome config`.
-3. Reproduce safely with `tome sync --dry-run --verbose`; use `TOME_LOG=tome::sync=debug` only when more detail is needed.
+3. Reproduce safely with `tome sync --dry-run --verbose`; use `TOME_LOG=tome=debug` only when more detail is needed.
 4. Classify the issue as missing source path, wrong role, missing Git `subdir`, machine disable/filter, Unowned ownership, foreign target entry, or failed managed-plugin reconciliation.
 5. Apply the narrow Tome command, rerun sync, and verify status/doctor.
 
@@ -191,7 +191,134 @@ git commit -m "feat: add Tome operations agent skill"
 
 ---
 
-### Task 2: Package the skill as a Claude plugin and marketplace
+### Task 2: Implement local path support in `tome add`
+
+**Files:**
+- Modify: `crates/tome/src/cli.rs` (`Command::Add` positional naming/help)
+- Modify: `crates/tome/src/lib.rs` (`cmd_add` argument plumbing)
+- Modify: `crates/tome/src/add.rs` (source classification, local entry construction, checked save)
+- Modify: `crates/tome/tests/cli_add.rs` (local-path end-to-end coverage)
+
+**Interfaces:**
+- Consumes: `DirectoryType::Directory::valid_roles()`, `config::expand_tilde`, and `Config::save_checked`.
+- Produces: `AddOptions { input, ... }`, private `AddSource::{Local, Git}` classification, and working `tome add ~/.pfw/skills --role managed` behavior used by Task 1 guidance.
+
+- [ ] **Step 1: Write failing source-classification unit tests**
+
+Add table-driven tests in `add.rs::tests` asserting that `/tmp/skills`, `~/.pfw/skills`, `.`, `..`, `./skills`, and `../skills` classify as local, while `owner/repo`, HTTPS URLs, SCP-style SSH URLs, and GitHub tree URLs classify as Git. Include a fixture directory named `owner/repo` and prove classification stays Git; never call `Path::exists()` to decide.
+
+- [ ] **Step 2: Write failing local-entry unit tests**
+
+Drive `add()` with an isolated config path and assert:
+
+```rust
+let entry = config.directories().get("skills").unwrap();
+assert_eq!(entry.directory_type, DirectoryType::Directory);
+assert_eq!(entry.role(), DirectoryRole::Managed);
+assert_eq!(entry.git_ref, None);
+assert_eq!(entry.subdir, None);
+```
+
+Cover default `synced` role, `--name` override, and one rejection test each for local `--branch`, `--tag`, `--rev`, and `--subdir`. Every rejection must leave the config file unchanged.
+
+- [ ] **Step 3: Write the failing CLI integration test**
+
+In `crates/tome/tests/cli_add.rs`, create a temporary HOME and existing `.pfw/skills` directory, then run:
+
+```rust
+tome()
+    .env("HOME", tmp.path())
+    .env("TOME_HOME", &tome_home)
+    .args(["add", "~/.pfw/skills", "--role", "managed"])
+    .assert()
+    .success();
+```
+
+Load the written config and assert directory `skills` has `type = directory`, role `managed`, and the expected expanded path. Read raw TOML and assert it preserves `path = "~/.pfw/skills"`.
+
+- [ ] **Step 4: Run focused tests and verify RED**
+
+Run:
+
+```bash
+cargo test -p tome add::tests -- --nocapture
+cargo test -p tome --test cli_add -- --nocapture
+```
+
+Expected: new local tests fail because all inputs currently construct Git entries; existing Git tests remain passing.
+
+- [ ] **Step 5: Implement deterministic source classification**
+
+Rename the positional field from `url` to `input` through `cli.rs`, `lib.rs`, and `AddOptions`. Add:
+
+```rust
+enum AddSource {
+    Local(PathBuf),
+    Git(String),
+}
+
+fn classify_source(input: &str) -> AddSource {
+    let path = Path::new(input);
+    let explicit_relative = matches!(input, "." | "..")
+        || input.starts_with("./")
+        || input.starts_with("../");
+    let tilde = input == "~" || input.starts_with("~/");
+
+    if path.is_absolute() || explicit_relative || tilde {
+        AddSource::Local(path.to_path_buf())
+    } else {
+        AddSource::Git(input.to_string())
+    }
+}
+```
+
+Do not use filesystem existence. Preserve every existing Git parser and warning after the Git branch is selected.
+
+- [ ] **Step 6: Implement local directory construction and checked save**
+
+For `AddSource::Local`, reject any Git ref or subdirectory option, expand tilde for validation/name derivation, derive the default name from the final component, and construct:
+
+```rust
+DirectoryConfig {
+    path: expanded_path,
+    directory_type: DirectoryType::Directory,
+    role: opts.role,
+    git_ref: None,
+    subdir: None,
+    override_applied: false,
+}
+```
+
+Validate explicit roles against `DirectoryType::Directory.valid_roles()`. Keep omitted role as `None` so it resolves to `synced`. Save both local and Git additions with `config.save_checked(opts.config_path)` rather than unchecked `save`; retain dry-run no-write behavior and render local success output as a directory path, not as `git: ...`.
+
+- [ ] **Step 7: Update CLI help without changing flag compatibility**
+
+Use positional value name `URL_OR_PATH`. Explain in long help that explicit local paths are absolute, tilde-prefixed, or dot-relative; bare `owner/repo` remains Git. State that ref/subdirectory flags apply only to Git inputs.
+
+- [ ] **Step 8: Run GREEN tests and regression gates**
+
+Run:
+
+```bash
+cargo test -p tome add::tests -- --nocapture
+cargo test -p tome --test cli_add -- --nocapture
+cargo fmt -- --check
+cargo clippy -p tome --all-targets -- -D warnings
+```
+
+Expected: all new local tests and all existing Git add tests pass; format and Clippy exit 0.
+
+- [ ] **Step 9: Commit local add support**
+
+```bash
+git add crates/tome/src/cli.rs crates/tome/src/lib.rs crates/tome/src/add.rs crates/tome/tests/cli_add.rs
+git diff --cached --check
+git commit -m "feat(add): support local skill directories" -m "OpenSpec: ship-tome-agent-skill"
+```
+
+---
+
+### Task 3: Package the skill as a Claude plugin and marketplace
 
 **Files:**
 - Create: `.claude-plugin/plugin.json`
@@ -297,7 +424,7 @@ git commit -m "feat: package Tome skill as Claude plugin"
 
 ---
 
-### Task 3: Add the interactive init recommendation
+### Task 4: Add the interactive init recommendation
 
 **Files:**
 - Modify: `crates/tome/src/wizard.rs:16-19, 128-380, 461-486, tests module`
@@ -495,7 +622,7 @@ git commit -m "feat(init): recommend Tome agent skills"
 
 ---
 
-### Task 4: Document installation, preserve the deferred task, and verify end-to-end
+### Task 5: Document installation, preserve the deferred task, and verify end-to-end
 
 **Files:**
 - Modify: `README.md:46-63`
@@ -505,7 +632,7 @@ git commit -m "feat(init): recommend Tome agent skills"
 - Move through GSD SDK: `.planning/todos/pending/2026-07-15-define-agent-skills-for-tome.md` to `.planning/todos/completed/`
 
 **Interfaces:**
-- Consumes: Installation commands from Tasks 1-2 and wizard behavior from Task 3.
+- Consumes: Skill and local-add behavior from Tasks 1-2, plugin commands from Task 3, and wizard behavior from Task 4.
 - Produces: User-facing installation instructions, release notes, retained auto-detect acceptance criteria, and completed planning state.
 
 - [ ] **Step 1: Add README installation documentation**

@@ -18,6 +18,21 @@ The skill package SHALL be installable as a Tome Git source using repository `Ma
 - **WHEN** a user runs `tome add MartinP7r/tome --subdir skills --role source` followed by sync
 - **THEN** Tome discovers `using-tome` and distributes it to configured targets according to existing machine preferences
 
+### Requirement: Local directory addition
+`tome add` SHALL classify explicitly path-shaped inputs as local directories, SHALL accept every role valid for `DirectoryType::Directory`, and SHALL preserve existing Git input behavior.
+
+#### Scenario: Managed package-manager directory
+- **WHEN** a user runs `tome add ~/.pfw/skills --role managed`
+- **THEN** Tome creates a directory-type entry named `skills` with managed role and a portable local path
+
+#### Scenario: Local input uses Git-only flags
+- **WHEN** a user passes `--branch`, `--tag`, `--rev`, or `--subdir` with an explicitly local path
+- **THEN** Tome rejects the command with an actionable error and leaves configuration unchanged
+
+#### Scenario: Bare GitHub slug remains Git
+- **WHEN** a user runs `tome add owner/repo`
+- **THEN** Tome preserves existing GitHub slug expansion and Git source behavior regardless of filesystem contents
+
 ### Requirement: Claude plugin distribution
 The repository SHALL expose the same skill package through a valid Claude plugin named `tome` in a valid marketplace named `tome`.
 

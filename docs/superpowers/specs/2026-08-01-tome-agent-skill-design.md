@@ -28,6 +28,10 @@ Add an interactive `tome init` recommendation that can register the official
 skill as a Git source. Package the same skill as a Claude plugin and marketplace
 entry so users can choose either installation route.
 
+Make the already-documented local-path form of `tome add` real so agents can
+add package-manager-owned directories with an explicit safe role instead of
+being taught a command the CLI rejects.
+
 ## Skill Package
 
 Store the skill in the repository's standard root-level skill directory:
@@ -82,6 +86,24 @@ Guide agents to:
    the first repair response.
 6. Preserve user data and use backup or plan/preview flows before destructive
    operations.
+
+## Local Path Support In `tome add`
+
+Classify explicitly path-shaped inputs as local directories before Git URL
+parsing: absolute paths; `~` and `~/...`; and `.`, `..`, `./...`, or `../...`.
+Continue treating URLs, SCP-style SSH inputs, bare `owner/repo` slugs, GitHub
+`/tree/<ref>/<subdir>` forms, and other legacy inputs as Git sources. Do not
+classify by filesystem existence because that would make `owner/repo` behavior
+depend on the current working directory.
+
+For a local path, construct `DirectoryType::Directory`, allow every role from
+`DirectoryType::Directory::valid_roles()`, and default to `synced` when no role
+is supplied. Derive the default name from the final path component and preserve
+`--name` overrides. Reject Git-only `--branch`, `--tag`, `--rev`, and `--subdir`
+flags with actionable errors. Save through `Config::save_checked` so validation,
+atomic write, round-trip checks, and portable `~/...` serialization all apply.
+Keep existing Git add parsing, role validation, ref/subdirectory precedence,
+and success output unchanged.
 
 ## Claude Plugin And Marketplace
 
@@ -174,6 +196,9 @@ Run these repository checks:
 - Focused Rust tests for recommendation insertion and duplicate suppression
 - CLI regression coverage proving `tome init --no-input` does not add the
   recommended Git source
+- Unit and CLI coverage for local-path classification, managed local entries,
+  default roles and names, Git-only flag rejection, portable save, and
+  unchanged Git URL/slug behavior
 - `make ci`
 
 ## Deferred Work
@@ -192,3 +217,5 @@ implementation reveals new acceptance criteria; do not create a duplicate.
 - No automatic recommendation under `--no-input`.
 - No recursive `tome add` subprocess from `tome init`.
 - No automatic `skills/` subdirectory adoption in `tome add`.
+- No existence-based inference for ambiguous relative local paths; require an
+  explicit `./` or `../` prefix.

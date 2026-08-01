@@ -11,6 +11,7 @@ The change must provide one canonical skill package for both ecosystems, preserv
 - Ship one progressively disclosed skill for safe Tome user operations.
 - Make the same files installable through Tome Git discovery and Claude's plugin marketplace.
 - Add a default-selected, clearly disclosed recommendation to interactive init.
+- Make `tome add` accept explicit local paths with the full directory role matrix.
 - Verify skill behavior, manifest validity, wizard insertion, duplicate suppression, and noninteractive preservation.
 
 **Non-Goals:**
@@ -38,6 +39,10 @@ Use `.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`, with plu
 
 Accepting the prompt inserts a Git/source entry named `tome-skills`, URL `https://github.com/MartinP7r/tome`, and `subdir = "skills"`. The wizard does not recursively invoke `tome add`; existing validation, checked save, and post-init sync remain the only persistence and clone paths.
 
+### Classify explicit path syntax before Git parsing
+
+Absolute, tilde-prefixed, dot, and dot-relative inputs are local directories. URLs, SSH forms, bare `owner/repo` slugs, GitHub tree URLs, and other legacy inputs retain Git behavior. Filesystem existence is not used because it would make a bare slug ambiguous across working directories. Local inputs construct `DirectoryType::Directory`, accept its full valid-role matrix, reject Git-only ref and subdirectory flags, derive names from the final component, and save through `Config::save_checked`.
+
 ### Gate all recommendation behavior on interactive mode
 
 The prompt defaults to yes but runs only when `no_input` is false. Existing equivalent sources and `tome-skills` name collisions suppress insertion without overwriting configuration. This keeps scripts and CI network-source-free while making the skill prominent for people using the wizard.
@@ -49,6 +54,7 @@ The prompt defaults to yes but runs only when `no_input` is false. Existing equi
 - [Default-yes prompt causes an unexpected clone] -> State the equivalent command and immediate post-init clone before confirmation; skip noninteractive mode.
 - [Existing configuration is overwritten or duplicated] -> Use pure detection/insertion helpers and test equivalent-source and name-collision cases.
 - [Agent guidance looks correct but does not change behavior] -> Run RED baseline scenarios before authoring and the same GREEN scenarios after authoring.
+- [A relative path can resemble a GitHub slug] -> Treat only explicit `./` and `../` relative syntax as local; preserve bare `owner/repo` as Git.
 
 ## Migration Plan
 
