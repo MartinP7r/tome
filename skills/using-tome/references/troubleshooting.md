@@ -4,7 +4,7 @@
 
 1. Capture `tome status` and `tome doctor` before changing anything.
 2. Inspect effective directory topology and resolved path overrides with `tome config`; inspect `machine.toml` for disable filters and plugin-install consent.
-3. Reproduce safely with `tome sync --dry-run --verbose`. If that is insufficient, rerun with `TOME_LOG=tome::sync=debug`.
+3. Reproduce safely with `tome sync --dry-run --verbose`. If that is insufficient, rerun with `TOME_LOG=tome=debug`.
 4. Classify the issue as a missing source path, wrong directory role, missing Git `subdir`, machine disable/filter, Unowned ownership, foreign target entry, or failed managed-plugin reconciliation.
 5. Apply the narrow Tome command, rerun `tome sync --dry-run` and `tome sync`, then verify with `tome status` and `tome doctor`.
 
