@@ -1,9 +1,9 @@
 ## 1. Tested Skill Package
 
-- [ ] 1.1 Run and record baseline agent scenarios for role selection, nested repository installation, and safe troubleshooting
-- [ ] 1.2 Create `skills/using-tome/SKILL.md` with trigger metadata, operating contract, role decisions, command map, and progressive-disclosure links
-- [ ] 1.3 Create focused configuration, operations, and troubleshooting references
-- [ ] 1.4 Validate the skill with Tome lint and rerun the baseline scenarios as passing behavior tests
+- [x] 1.1 Run and record baseline agent scenarios for role selection, nested repository installation, and safe troubleshooting
+- [x] 1.2 Create `skills/using-tome/SKILL.md` with trigger metadata, operating contract, role decisions, command map, and progressive-disclosure links
+- [x] 1.3 Create focused configuration, operations, and troubleshooting references
+- [x] 1.4 Validate the skill with Tome lint and rerun the baseline scenarios as passing behavior tests
 
 ## 2. Local Path Addition
 
