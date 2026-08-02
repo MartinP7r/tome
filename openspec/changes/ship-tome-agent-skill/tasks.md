@@ -14,9 +14,9 @@
 
 ## 3. Claude Distribution
 
-- [ ] 3.1 Add plugin metadata for `tome` version `1.0.0`
-- [ ] 3.2 Add marketplace metadata exposing the repository-root plugin as `tome@tome`
-- [ ] 3.3 Validate JSON, Claude schemas, and isolated local marketplace installation
+- [x] 3.1 Add plugin metadata for `tome` version `1.0.0`
+- [x] 3.2 Add marketplace metadata exposing the repository-root plugin as `tome@tome`
+- [x] 3.3 Validate JSON, Claude schemas, and isolated local marketplace installation
 
 ## 4. Interactive Init Recommendation
 
