@@ -1,0 +1,15 @@
+{
+  "name": "tome",
+  "owner": {
+    "name": "Martin Pfundmair",
+    "url": "https://github.com/MartinP7r"
+  },
+  "description": "Official agent skills for operating Tome.",
+  "plugins": [
+    {
+      "name": "tome",
+      "source": "./",
+      "description": "Operate Tome skill libraries safely across AI coding tools."
+    }
+  ]
+}
