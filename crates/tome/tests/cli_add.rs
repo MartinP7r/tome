@@ -1,8 +1,40 @@
 use assert_fs::TempDir;
 use predicates::prelude::*;
+use tome::config::{Config, DirectoryName, DirectoryRole, DirectoryType, expand_tilde};
 
 mod common;
 use common::*;
+
+#[test]
+fn test_add_managed_local_directory_preserves_portable_path() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join("tome-home");
+    std::fs::create_dir_all(tmp.path().join(".pfw/skills")).unwrap();
+
+    tome()
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .args(["add", "~/.pfw/skills", "--role", "managed"])
+        .assert()
+        .success();
+
+    let config_path = tome_home.join("tome.toml");
+    let config = Config::load(&config_path).unwrap();
+    let entry = config
+        .directories()
+        .get(&DirectoryName::new("skills").unwrap())
+        .unwrap();
+    assert_eq!(entry.directory_type, DirectoryType::Directory);
+    assert_eq!(entry.role(), DirectoryRole::Managed);
+    assert_eq!(
+        entry.path,
+        expand_tilde(std::path::Path::new("~/.pfw/skills")).unwrap()
+    );
+
+    let raw = std::fs::read_to_string(config_path).unwrap();
+    assert!(raw.contains("path = \"~/.pfw/skills\""), "{raw}");
+}
 
 #[test]
 fn test_add_happy_path() {

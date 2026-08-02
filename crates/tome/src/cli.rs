@@ -139,37 +139,41 @@ pub enum LintFormat {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Add a git skill repository
+    /// Add a Git skill repository or local skill directory
     #[command(after_help = "Examples:\n  \
                       tome add https://github.com/user/skills.git\n  \
                       tome add user/skills                                 # bare slug → github.com\n  \
                       tome add user/skills/tree/main/skills                # /tree/<ref>/<subdir> shortcut\n  \
                       tome add user/skills --subdir skills                 # explicit --subdir flag\n  \
                       tome add user/skills --name my-skills                # custom directory name\n  \
-                      tome add git@github.com:user/skills.git --branch main")]
+                      tome add git@github.com:user/skills.git --branch main\n  \
+                      tome add ~/.pfw/skills --role managed")]
     Add {
-        /// Git repository URL (HTTPS or SSH) or `owner/repo` slug.
+        /// Git repository URL, `owner/repo` slug, or explicit local path.
         ///
-        /// Supports a GitHub `/tree/<ref>/<subdir>` suffix — the URL form
+        /// Local paths must be absolute, tilde-prefixed, or dot-relative;
+        /// bare `owner/repo` remains a GitHub slug. Git inputs support a
+        /// GitHub `/tree/<ref>/<subdir>` suffix — the URL form
         /// the browser shows when navigating into a subdir on github.com.
         /// The `<ref>` becomes the default branch and `<subdir>` becomes
         /// the discovery subdir. Explicit `--branch` / `--subdir` flags
-        /// override the URL-embedded values (with a warning).
-        #[arg(value_name = "URL")]
-        url: String,
-        /// Custom directory name (default: extracted from URL)
+        /// override URL-embedded values (with a warning). Ref and subdirectory
+        /// flags apply only to Git inputs.
+        #[arg(value_name = "URL_OR_PATH")]
+        input: String,
+        /// Custom directory name (default: extracted from URL or path)
         #[arg(long)]
         name: Option<String>,
-        /// Track a specific branch
+        /// Track a specific branch (Git inputs only)
         #[arg(long, conflicts_with_all = ["tag", "rev"])]
         branch: Option<String>,
-        /// Pin to a specific tag
+        /// Pin to a specific tag (Git inputs only)
         #[arg(long, conflicts_with_all = ["branch", "rev"])]
         tag: Option<String>,
-        /// Pin to a specific commit SHA
+        /// Pin to a specific commit SHA (Git inputs only)
         #[arg(long, conflicts_with_all = ["branch", "tag"])]
         rev: Option<String>,
-        /// Restrict discovery to a subdirectory of the clone.
+        /// Restrict discovery to a subdirectory of the clone (Git inputs only).
         ///
         /// When set, discovery scans `<clone>/<SUBDIR>/*/SKILL.md` instead
         /// of `<clone>/*/SKILL.md`. Common for Claude Code plugin repos
@@ -187,7 +191,7 @@ pub enum Command {
         /// `directory` → synced, `git` → source. **The `directory` →
         /// `synced` default writes distribution symlinks BACK into the
         /// source dir, which is the wrong choice for read-only package
-        /// manager dirs like `~/.pfw/skills` — use `--role source` for
+        /// manager dirs like `~/.pfw/skills` — use `--role managed` for
         /// those.** Validated against `valid_roles()` for the chosen type.
         #[arg(long, value_name = "ROLE")]
         role: Option<crate::config::DirectoryRole>,

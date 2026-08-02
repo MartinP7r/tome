@@ -1,7 +1,7 @@
-//! Add a git skill repository to the config.
+//! Add a Git skill repository or local skill directory to the config.
 //!
-//! `tome add <url>` creates a `[directories.<name>]` entry with `type = "git"` in `tome.toml`.
-//! The directory name is extracted from the URL unless overridden with `--name`.
+//! `tome add <url-or-path>` creates a `[directories.<name>]` entry in `tome.toml`.
+//! The directory name is extracted from the URL or path unless overridden with `--name`.
 //!
 //! ## URL forms
 //!
@@ -23,6 +23,24 @@ use console::style;
 use tracing::warn;
 
 use crate::config::{Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, GitRef};
+
+enum AddSource {
+    Local(PathBuf),
+    Git(String),
+}
+
+fn classify_source(input: &str) -> AddSource {
+    let path = Path::new(input);
+    let explicit_relative =
+        matches!(input, "." | "..") || input.starts_with("./") || input.starts_with("../");
+    let tilde = input == "~" || input.starts_with("~/");
+
+    if path.is_absolute() || explicit_relative || tilde {
+        AddSource::Local(path.to_path_buf())
+    } else {
+        AddSource::Git(input.to_string())
+    }
+}
 
 /// Result of parsing a GitHub `/tree/<ref>/<subdir>` suffix off the input URL.
 ///
@@ -199,7 +217,7 @@ fn extract_repo_name(url: &str) -> String {
 
 /// Options for the `tome add` command.
 pub(crate) struct AddOptions<'a> {
-    pub url: &'a str,
+    pub input: &'a str,
     pub name: Option<&'a str>,
     pub branch: Option<&'a str>,
     pub tag: Option<&'a str>,
@@ -222,15 +240,109 @@ pub(crate) struct AddOptions<'a> {
     pub config_path: &'a Path,
 }
 
-/// Add a git directory entry to the config.
+/// Add a local or git directory entry to the config.
 ///
 /// This is config-only — no sync is triggered. The user should run `tome sync`
 /// afterwards to clone the repo and discover skills.
 pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
+    match classify_source(opts.input) {
+        AddSource::Local(path) => add_local(config, opts, path),
+        AddSource::Git(input) => add_git(config, opts, &input),
+    }
+}
+
+fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result<()> {
+    if opts.branch.is_some() {
+        bail!("--branch applies only to Git inputs");
+    }
+    if opts.tag.is_some() {
+        bail!("--tag applies only to Git inputs");
+    }
+    if opts.rev.is_some() {
+        bail!("--rev applies only to Git inputs");
+    }
+    if opts.subdir.is_some() {
+        bail!("--subdir applies only to Git inputs");
+    }
+
+    let expanded_path = crate::config::expand_tilde(&path)?;
+    let dir_name_str = match opts.name {
+        Some(name) => name.to_string(),
+        None => expanded_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(String::from)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "could not extract directory name from '{}'. Use --name to specify manually.",
+                    opts.input
+                )
+            })?,
+    };
+    let dir_name = DirectoryName::new(&dir_name_str)?;
+    if config.directories.contains_key(&dir_name) {
+        bail!("directory '{}' already exists in config", dir_name_str);
+    }
+
+    if let Some(role) = opts.role {
+        let valid = DirectoryType::Directory.valid_roles();
+        if !valid.contains(&role) {
+            let valid_str: Vec<String> = valid
+                .iter()
+                .map(|role| role.kebab_case().to_string())
+                .collect();
+            bail!(
+                "role '{}' is not valid for type 'directory' — valid roles: {}",
+                role.kebab_case(),
+                valid_str.join(", ")
+            );
+        }
+    }
+
+    let dir_config = DirectoryConfig {
+        path: expanded_path.clone(),
+        directory_type: DirectoryType::Directory,
+        role: opts.role,
+        git_ref: None,
+        subdir: None,
+        override_applied: false,
+    };
+    let resolved_role = opts
+        .role
+        .unwrap_or_else(|| DirectoryType::Directory.default_role());
+
+    if opts.dry_run {
+        println!(
+            "{} add directory '{}' (path: {}, role: {})",
+            style("Would").yellow(),
+            style(&dir_name_str).cyan(),
+            expanded_path.display(),
+            style(resolved_role.kebab_case()).yellow(),
+        );
+    } else {
+        config.directories.insert(dir_name, dir_config);
+        config.save_checked(opts.config_path)?;
+        println!(
+            "{} directory '{}' (path: {}, role: {})",
+            style("Added").green(),
+            style(&dir_name_str).cyan(),
+            expanded_path.display(),
+            style(resolved_role.kebab_case()).cyan(),
+        );
+        println!(
+            "  {}",
+            style(format!("→ {}", resolved_role.description())).dim(),
+        );
+    }
+
+    Ok(())
+}
+
+fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()> {
     // Strip the GitHub `/tree/<ref>/<subdir>` suffix first; its extracted
     // branch + subdir become defaults that explicit --branch / --subdir
     // flags can override.
-    let parsed = parse_tree_suffix(opts.url);
+    let parsed = parse_tree_suffix(input);
 
     // The stored URL must be the expanded form — git clone won't resolve
     // bare slugs on its own.
@@ -244,7 +356,7 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
     if dir_name_str.is_empty() {
         bail!(
             "could not extract repository name from '{}'. Use --name to specify manually.",
-            opts.url
+            input
         );
     }
 
@@ -362,7 +474,7 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
         );
     } else {
         config.directories.insert(dir_name, dir_config);
-        config.save(opts.config_path)?;
+        config.save_checked(opts.config_path)?;
         println!(
             "{} directory '{}' (git: {}, role: {})",
             style("Added").green(),
@@ -382,6 +494,41 @@ pub(crate) fn add(config: &mut Config, opts: AddOptions<'_>) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn classify_source_recognizes_explicit_local_paths() {
+        for input in [
+            "/tmp/skills",
+            "~/.pfw/skills",
+            ".",
+            "..",
+            "./skills",
+            "../skills",
+        ] {
+            assert!(
+                matches!(classify_source(input), AddSource::Local(_)),
+                "expected '{input}' to classify as local"
+            );
+        }
+    }
+
+    #[test]
+    fn classify_source_preserves_git_inputs_even_when_slug_exists_locally() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("owner/repo")).unwrap();
+
+        for input in [
+            "owner/repo",
+            "https://github.com/owner/repo",
+            "git@github.com:owner/repo.git",
+            "owner/repo/tree/main/skills",
+        ] {
+            assert!(
+                matches!(classify_source(input), AddSource::Git(_)),
+                "expected '{input}' to classify as Git"
+            );
+        }
+    }
 
     #[test]
     fn test_extract_repo_name_https() {
@@ -605,6 +752,110 @@ mod tests {
         assert_eq!(parsed.subdir, None);
     }
 
+    fn local_add_fixture() -> (tempfile::TempDir, Config, PathBuf, PathBuf) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("tome.toml");
+        let library_dir = tmp.path().join("library");
+        let source_dir = tmp.path().join("skills");
+        std::fs::create_dir_all(&library_dir).unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let config = Config {
+            library_dir,
+            ..Config::default()
+        };
+        (tmp, config, config_path, source_dir)
+    }
+
+    fn local_add_options<'a>(input: &'a Path, config_path: &'a Path) -> AddOptions<'a> {
+        AddOptions {
+            input: input.to_str().unwrap(),
+            name: None,
+            branch: None,
+            tag: None,
+            rev: None,
+            subdir: None,
+            role: None,
+            dry_run: false,
+            config_path,
+        }
+    }
+
+    #[test]
+    fn add_local_directory_with_managed_role() {
+        let (_tmp, mut config, config_path, source_dir) = local_add_fixture();
+        let mut opts = local_add_options(&source_dir, &config_path);
+        opts.role = Some(DirectoryRole::Managed);
+
+        add(&mut config, opts).unwrap();
+
+        let entry = config.directories().get("skills").unwrap();
+        assert_eq!(entry.directory_type, DirectoryType::Directory);
+        assert_eq!(entry.role(), DirectoryRole::Managed);
+        assert_eq!(entry.git_ref, None);
+        assert_eq!(entry.subdir, None);
+    }
+
+    #[test]
+    fn add_local_directory_defaults_to_synced_role() {
+        let (_tmp, mut config, config_path, source_dir) = local_add_fixture();
+
+        add(&mut config, local_add_options(&source_dir, &config_path)).unwrap();
+
+        let entry = config.directories().get("skills").unwrap();
+        assert_eq!(entry.role, None);
+        assert_eq!(entry.role(), DirectoryRole::Synced);
+    }
+
+    #[test]
+    fn add_local_directory_honors_name_override() {
+        let (_tmp, mut config, config_path, source_dir) = local_add_fixture();
+        let mut opts = local_add_options(&source_dir, &config_path);
+        opts.name = Some("pfw-skills");
+
+        add(&mut config, opts).unwrap();
+
+        assert!(config.directories().contains_key("pfw-skills"));
+    }
+
+    fn assert_local_git_option_rejected(
+        set_option: impl FnOnce(&mut AddOptions<'_>),
+        option_name: &str,
+    ) {
+        let (_tmp, mut config, config_path, source_dir) = local_add_fixture();
+        let original = "# unchanged\n";
+        std::fs::write(&config_path, original).unwrap();
+        let mut opts = local_add_options(&source_dir, &config_path);
+        set_option(&mut opts);
+
+        let error = add(&mut config, opts).unwrap_err().to_string();
+
+        assert!(
+            error.contains(option_name) && error.contains("Git"),
+            "expected actionable error for {option_name}, got: {error}"
+        );
+        assert_eq!(std::fs::read_to_string(&config_path).unwrap(), original);
+    }
+
+    #[test]
+    fn add_local_directory_rejects_branch_without_saving() {
+        assert_local_git_option_rejected(|opts| opts.branch = Some("main"), "--branch");
+    }
+
+    #[test]
+    fn add_local_directory_rejects_tag_without_saving() {
+        assert_local_git_option_rejected(|opts| opts.tag = Some("v1"), "--tag");
+    }
+
+    #[test]
+    fn add_local_directory_rejects_rev_without_saving() {
+        assert_local_git_option_rejected(|opts| opts.rev = Some("abc123"), "--rev");
+    }
+
+    #[test]
+    fn add_local_directory_rejects_subdir_without_saving() {
+        assert_local_git_option_rejected(|opts| opts.subdir = Some("nested"), "--subdir");
+    }
+
     // -- add() integration tests (Layer 1 + 2: URL parsing + --subdir wiring) --
 
     #[test]
@@ -619,7 +870,7 @@ mod tests {
         };
 
         let opts = AddOptions {
-            url: "signerlabs/shipswift-skills/tree/main/skills",
+            input: "signerlabs/shipswift-skills/tree/main/skills",
             name: None,
             branch: None,
             tag: None,
@@ -653,7 +904,7 @@ mod tests {
         };
 
         let opts = AddOptions {
-            url: "owner/repo",
+            input: "owner/repo",
             name: None,
             branch: None,
             tag: None,
@@ -685,7 +936,7 @@ mod tests {
 
         // URL says `skills`, flag says `packages` — flag should win.
         let opts = AddOptions {
-            url: "owner/repo/tree/main/skills",
+            input: "owner/repo/tree/main/skills",
             name: None,
             branch: None,
             tag: None,
@@ -717,7 +968,7 @@ mod tests {
 
         // URL says `main`, --branch says `dev` — flag wins.
         let opts = AddOptions {
-            url: "owner/repo/tree/main/skills",
+            input: "owner/repo/tree/main/skills",
             name: None,
             branch: Some("dev"),
             tag: None,
@@ -749,7 +1000,7 @@ mod tests {
             ..Config::default()
         };
         let opts = AddOptions {
-            url: "owner/repo",
+            input: "owner/repo",
             name: None,
             branch: None,
             tag: None,
@@ -776,7 +1027,7 @@ mod tests {
             ..Config::default()
         };
         let opts = AddOptions {
-            url: "owner/repo",
+            input: "owner/repo",
             name: None,
             branch: None,
             tag: None,
@@ -809,7 +1060,7 @@ mod tests {
             ..Config::default()
         };
         let opts = AddOptions {
-            url: "owner/repo",
+            input: "owner/repo",
             name: None,
             branch: None,
             tag: None,

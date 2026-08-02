@@ -648,7 +648,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Init => unreachable_early_return("Command::Init"),
         Command::Version => unreachable_early_return("Command::Version"),
         Command::Add {
-            url,
+            input,
             name,
             branch,
             tag,
@@ -656,7 +656,7 @@ pub fn run(cli: Cli) -> Result<()> {
             subdir,
             role,
         } => cmd_add(
-            url,
+            input,
             name,
             branch,
             tag,
@@ -755,10 +755,10 @@ fn unreachable_early_return(variant: &str) -> Result<()> {
 // once (paths, config, machine prefs). Helpers do NOT re-load config or paths.
 // ---------------------------------------------------------------------------
 
-/// `tome add <url>` — register a git directory in config from a URL.
+/// `tome add <url-or-path>` — register a Git or local directory in config.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn cmd_add(
-    url: String,
+    input: String,
     name: Option<String>,
     branch: Option<String>,
     tag: Option<String>,
@@ -773,7 +773,7 @@ pub(crate) fn cmd_add(
     add::add(
         &mut config,
         add::AddOptions {
-            url: &url,
+            input: &input,
             name: name.as_deref(),
             branch: branch.as_deref(),
             tag: tag.as_deref(),
