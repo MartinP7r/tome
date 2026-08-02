@@ -90,6 +90,14 @@ fn init_dry_run_no_input_empty_home() {
         "expected empty directories on empty HOME, got: {:?}",
         config.directories().keys().collect::<Vec<_>>(),
     );
+    assert!(
+        !config.directories().contains_key("tome-skills"),
+        "--no-input must not add the network-backed recommendation",
+    );
+    assert!(
+        !stderr.contains("Add Tome's official agent skills?"),
+        "--no-input must not render the interactive recommendation",
+    );
 
     assert_eq!(
         config.library_dir(),
@@ -296,7 +304,7 @@ fn init_no_input_writes_config_and_reloads() {
 }
 
 #[test]
-fn init_prints_resolved_tome_home_with_default_source() {
+fn init_prints_tome_data_folder_with_default_source() {
     // No TOME_HOME set, HOME has no ~/.config/tome/config.toml → Default source.
     let tmp = TempDir::new().unwrap();
 
@@ -312,11 +320,11 @@ fn init_prints_resolved_tome_home_with_default_source() {
         "tome init failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
+    // HARD-15: wizard chrome (the Tome data folder line) emits on stderr.
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("resolved tome_home:"),
-        "stderr missing resolved tome_home line:\n{stderr}"
+        stderr.contains("Tome data folder:"),
+        "stderr missing Tome data folder line:\n{stderr}"
     );
     assert!(
         stderr.contains("(from default)"),
@@ -325,7 +333,7 @@ fn init_prints_resolved_tome_home_with_default_source() {
 }
 
 #[test]
-fn init_prints_resolved_tome_home_with_env_source() {
+fn init_prints_tome_data_folder_with_env_source() {
     let tmp = TempDir::new().unwrap();
     let tome_home = tmp.path().join(".tome");
 
@@ -338,7 +346,7 @@ fn init_prints_resolved_tome_home_with_env_source() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "stderr: {stderr}");
-    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
+    // HARD-15: wizard chrome (the Tome data folder line) emits on stderr.
     assert!(
         stderr.contains("(from TOME_HOME env)"),
         "stderr missing '(from TOME_HOME env)' label:\n{stderr}"
@@ -350,7 +358,7 @@ fn init_prints_resolved_tome_home_with_env_source() {
 }
 
 #[test]
-fn init_prints_resolved_tome_home_with_flag_source() {
+fn init_prints_tome_data_folder_with_flag_source() {
     let tmp = TempDir::new().unwrap();
     let custom = tmp.path().join("custom-home");
 
@@ -369,7 +377,7 @@ fn init_prints_resolved_tome_home_with_flag_source() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(output.status.success(), "stderr: {stderr}");
-    // HARD-15: wizard chrome (the resolved tome_home line) emits on stderr.
+    // HARD-15: wizard chrome (the Tome data folder line) emits on stderr.
     assert!(
         stderr.contains("(from --tome-home flag)"),
         "stderr missing '--tome-home flag' label:\n{stderr}"
@@ -377,7 +385,7 @@ fn init_prints_resolved_tome_home_with_flag_source() {
 }
 
 #[test]
-fn init_resolved_tome_home_line_precedes_step_prompts() {
+fn init_tome_data_folder_line_precedes_step_prompts() {
     let tmp = TempDir::new().unwrap();
     let tome_home = tmp.path().join(".tome");
 
@@ -390,17 +398,15 @@ fn init_resolved_tome_home_line_precedes_step_prompts() {
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
     assert!(output.status.success(), "stderr: {stderr}");
-    // HARD-15: wizard chrome (the resolved tome_home line and the Step 1
+    // HARD-15: wizard chrome (the Tome data folder line and the Step 1
     // header) both emit on stderr.
 
-    let resolved_idx = stderr
-        .find("resolved tome_home:")
-        .expect("missing info line");
+    let data_folder_idx = stderr.find("Tome data folder:").expect("missing info line");
     let step1_idx = stderr.find("Step 1").expect("missing Step 1 prompt header");
     assert!(
-        resolved_idx < step1_idx,
-        "resolved tome_home line must come BEFORE Step 1.\n\
-         resolved_idx={resolved_idx}, step1_idx={step1_idx}\nstderr:\n{stderr}"
+        data_folder_idx < step1_idx,
+        "Tome data folder line must come BEFORE Step 1.\n\
+         data_folder_idx={data_folder_idx}, step1_idx={step1_idx}\nstderr:\n{stderr}"
     );
 }
 
@@ -524,15 +530,15 @@ fn init_greenfield_no_input_skips_step_0_prompt() {
     );
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    // HARD-15: Step header and resolved tome_home line both emit on stderr.
+    // HARD-15: Step header and Tome data folder line both emit on stderr.
     assert!(
         !stderr.contains("Step 0:"),
         "--no-input must skip Step 0 prompt, but stderr contains it:\n{stderr}"
     );
     // WUX-04 info line still prints (informational, not a prompt)
     assert!(
-        stderr.contains("resolved tome_home:"),
-        "resolved tome_home line must still appear in --no-input mode:\n{stderr}"
+        stderr.contains("Tome data folder:"),
+        "Tome data folder line must still appear in --no-input mode:\n{stderr}"
     );
 }
 

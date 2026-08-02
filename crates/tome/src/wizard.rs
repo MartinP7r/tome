@@ -125,6 +125,72 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
 // Public entry point
 // ---------------------------------------------------------------------------
 
+pub(crate) fn choose_tome_home(
+    initial: &Path,
+    source: TomeHomeSource,
+    no_input: bool,
+) -> Result<PathBuf> {
+    if !matches!(source, TomeHomeSource::Default) || no_input {
+        return Ok(initial.to_path_buf());
+    }
+
+    step_divider("Step 0: Tome data folder");
+    eprintln!("Where should Tome store its portable data?");
+    let default_home = dirs::home_dir()
+        .context("could not determine home directory")?
+        .join(".tome");
+    let options = vec![
+        format!("{} (default)", crate::paths::collapse_home(&default_home)),
+        "Custom path...".to_string(),
+    ];
+    let selection = Select::new()
+        .with_prompt("Tome data folder path")
+        .items(&options)
+        .default(0)
+        .interact()?;
+    let mut selected = initial.to_path_buf();
+    if selection == 1 {
+        let custom: String = Input::<String>::new()
+            .with_prompt("Tome data folder path")
+            .validate_with(|value: &String| -> std::result::Result<(), String> {
+                let expanded =
+                    expand_tilde(Path::new(value)).map_err(|_| "could not expand ~".to_string())?;
+                validate_tome_home_path(&expanded)
+            })
+            .interact_text()?;
+        selected = expand_tilde(Path::new(&custom))?;
+
+        let persist = Confirm::new()
+            .with_prompt(
+                "Persist this choice to ~/.config/tome/config.toml?\n  \
+                 (otherwise subsequent `tome sync`/`tome status` need TOME_HOME=... or --tome-home=...)",
+            )
+            .default(true)
+            .interact()?;
+        if persist {
+            crate::config::write_xdg_tome_home(&selected)?;
+            eprintln!(
+                "  {} Wrote tome_home to ~/.config/tome/config.toml",
+                style("done").green()
+            );
+        }
+    }
+    eprintln!("Machine-local settings remain in ~/.config/tome.");
+    eprintln!();
+
+    Ok(selected)
+}
+
+fn validate_tome_home_path(path: &Path) -> std::result::Result<(), String> {
+    if !path.is_absolute() {
+        return Err("must be absolute".to_string());
+    }
+    if path.exists() && !path.is_dir() {
+        return Err("path exists but is not a directory".to_string());
+    }
+    Ok(())
+}
+
 /// Run the interactive setup wizard.
 ///
 /// When `no_input` is true, every dialoguer prompt is replaced with its
@@ -138,7 +204,6 @@ pub(crate) fn run(
     dry_run: bool,
     no_input: bool,
     tome_home: &Path,
-    tome_home_source: TomeHomeSource,
     prefill: Option<&Config>,
 ) -> Result<Config> {
     // HARD-15: wizard chrome (banner, step dividers, status confirmations,
@@ -163,71 +228,30 @@ pub(crate) fn run(
     eprintln!("  into the library -- your originals are never touched.");
     eprintln!();
 
-    // Step 0: Greenfield tome_home prompt (WUX-01)
-    // Only runs when:
-    // - the user has NOT already indicated a tome_home (flag, env, or XDG),
-    // - AND we're not in --no-input mode.
-    // If the user picks a custom path, also offer to persist via XDG (WUX-05).
-    //
-    // Use a distinct local name `chosen_tome_home` (not `tome_home`) so the
-    // owned buffer never shadows the `&Path` parameter (avoids clippy::shadow_same).
-    let mut chosen_tome_home = tome_home.to_path_buf();
-    if matches!(tome_home_source, TomeHomeSource::Default) && !no_input {
-        step_divider("Step 0: Tome home location");
-        let default_home = dirs::home_dir()
-            .context("could not determine home directory")?
-            .join(".tome");
-        let options = vec![
-            format!("{} (default)", crate::paths::collapse_home(&default_home)),
-            "Custom path...".to_string(),
-        ];
-        let selection = Select::new()
-            .with_prompt("Where should tome_home live?")
-            .items(&options)
-            .default(0)
-            .interact()?;
-        if selection == 1 {
-            let custom: String = Input::<String>::new()
-                .with_prompt("tome_home path")
-                .validate_with(|s: &String| -> std::result::Result<(), String> {
-                    let path = PathBuf::from(s);
-                    let expanded =
-                        expand_tilde(&path).map_err(|_| "could not expand ~".to_string())?;
-                    if !expanded.is_absolute() {
-                        return Err("must be absolute".to_string());
-                    }
-                    if expanded.exists() && !expanded.is_dir() {
-                        return Err("path exists but is not a directory".to_string());
-                    }
-                    Ok(())
-                })
-                .interact_text()?;
-            chosen_tome_home = expand_tilde(&PathBuf::from(custom))?;
+    // Step 1: Auto-discover and select directories
+    let mut directories = configure_directories(no_input, prefill.map(|c| c.directories()))?;
 
-            // WUX-05: offer to persist custom choice to XDG
-            let persist = Confirm::new()
-                .with_prompt(
-                    "Persist this choice to ~/.config/tome/config.toml?\n  \
-                     (otherwise subsequent `tome sync`/`tome status` need TOME_HOME=... or --tome-home=...)",
-                )
-                .default(true)
-                .interact()?;
-            if persist {
-                crate::config::write_xdg_tome_home(&chosen_tome_home)?;
-                eprintln!(
-                    "  {} Wrote tome_home to ~/.config/tome/config.toml",
-                    style("done").green()
-                );
-            }
+    if !no_input
+        && !has_tome_skills_source(&directories)
+        && !directories.contains_key(TOME_SKILLS_NAME)
+    {
+        eprintln!("Tome includes an official agent skill for setup, sync, and recovery.");
+        eprintln!("  Equivalent command:");
+        eprintln!(
+            "  {}",
+            style("tome add MartinP7r/tome --subdir skills --role source").bold()
+        );
+        eprintln!("  Accepting will clone the repository during the post-init sync.");
+
+        if Confirm::new()
+            .with_prompt("Add Tome's official agent skills?")
+            .default(true)
+            .interact()?
+        {
+            insert_tome_skills_source(&mut directories)?;
         }
         eprintln!();
     }
-    // Downstream helpers take `&Path`; rebind a borrow under the name they expect.
-    // `chosen_tome_home` equals the incoming parameter unless Step 0 chose a custom path.
-    let tome_home: &Path = &chosen_tome_home;
-
-    // Step 1: Auto-discover and select directories
-    let mut directories = configure_directories(no_input, prefill.map(|c| c.directories()))?;
 
     // Discover skills now so step 3 can offer an exclusion picker
     let discovered = {
@@ -462,6 +486,44 @@ pub(crate) fn run(
 // ---------------------------------------------------------------------------
 // Pure config assembly — unit-testable without dialoguer
 // ---------------------------------------------------------------------------
+
+const TOME_SKILLS_NAME: &str = "tome-skills";
+const TOME_REPOSITORY_URL: &str = "https://github.com/MartinP7r/tome";
+const TOME_SKILLS_SUBDIR: &str = "skills";
+
+fn tome_skills_directory() -> Result<(DirectoryName, DirectoryConfig)> {
+    Ok((
+        DirectoryName::new(TOME_SKILLS_NAME)?,
+        DirectoryConfig {
+            path: PathBuf::from(TOME_REPOSITORY_URL),
+            directory_type: DirectoryType::Git,
+            role: Some(DirectoryRole::Source),
+            git_ref: None,
+            subdir: Some(TOME_SKILLS_SUBDIR.to_string()),
+            override_applied: false,
+        },
+    ))
+}
+
+fn has_tome_skills_source(directories: &BTreeMap<DirectoryName, DirectoryConfig>) -> bool {
+    directories.values().any(|directory| {
+        directory.directory_type == DirectoryType::Git
+            && directory.path == Path::new(TOME_REPOSITORY_URL)
+            && directory.subdir.as_deref() == Some(TOME_SKILLS_SUBDIR)
+    })
+}
+
+fn insert_tome_skills_source(
+    directories: &mut BTreeMap<DirectoryName, DirectoryConfig>,
+) -> Result<bool> {
+    if has_tome_skills_source(directories) || directories.contains_key(TOME_SKILLS_NAME) {
+        return Ok(false);
+    }
+
+    let (name, directory) = tome_skills_directory()?;
+    directories.insert(name, directory);
+    Ok(true)
+}
 
 /// Assemble the final `Config` from wizard-produced inputs.
 ///
@@ -1430,6 +1492,91 @@ mod tests {
     }
 
     #[test]
+    fn choose_tome_home_no_input_returns_initial_path() {
+        let tmp = TempDir::new().unwrap();
+        let initial = tmp.path().join("initial");
+
+        let selected = choose_tome_home(&initial, TomeHomeSource::Default, true).unwrap();
+
+        assert_eq!(selected, initial);
+    }
+
+    #[test]
+    fn validate_tome_home_path_accepts_existing_absolute_directory() {
+        let tmp = TempDir::new().unwrap();
+
+        assert!(validate_tome_home_path(tmp.path()).is_ok());
+    }
+
+    #[test]
+    fn validate_tome_home_path_rejects_relative_path() {
+        let error = validate_tome_home_path(Path::new("relative/repository")).unwrap_err();
+
+        assert_eq!(error, "must be absolute");
+    }
+
+    #[test]
+    fn validate_tome_home_path_rejects_existing_file() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("not-a-repository");
+        std::fs::write(&file, "content").unwrap();
+
+        let error = validate_tome_home_path(&file).unwrap_err();
+
+        assert_eq!(error, "path exists but is not a directory");
+    }
+
+    #[test]
+    fn tome_skills_directory_is_valid_git_source() {
+        let (name, directory) = tome_skills_directory().unwrap();
+        assert_eq!(name.as_str(), "tome-skills");
+        assert_eq!(
+            directory.path,
+            PathBuf::from("https://github.com/MartinP7r/tome")
+        );
+        assert_eq!(directory.directory_type, DirectoryType::Git);
+        assert_eq!(directory.role(), DirectoryRole::Source);
+        assert_eq!(directory.subdir.as_deref(), Some("skills"));
+    }
+
+    #[test]
+    fn insert_tome_skills_source_adds_once() {
+        let mut directories = BTreeMap::new();
+        assert!(insert_tome_skills_source(&mut directories).unwrap());
+        assert!(!insert_tome_skills_source(&mut directories).unwrap());
+        assert_eq!(directories.len(), 1);
+    }
+
+    #[test]
+    fn insert_tome_skills_source_preserves_name_collision() {
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new("tome-skills").unwrap(),
+            test_dir(
+                "~/other-skills",
+                DirectoryType::Directory,
+                DirectoryRole::Source,
+            ),
+        );
+
+        assert!(!insert_tome_skills_source(&mut directories).unwrap());
+        assert_eq!(
+            directories["tome-skills"].path,
+            PathBuf::from("~/other-skills")
+        );
+    }
+
+    #[test]
+    fn detects_equivalent_tome_skills_source_under_another_name() {
+        let (_, directory) = tome_skills_directory().unwrap();
+        let mut directories = BTreeMap::new();
+        directories.insert(DirectoryName::new("official").unwrap(), directory);
+
+        assert!(has_tome_skills_source(&directories));
+        assert!(!insert_tome_skills_source(&mut directories).unwrap());
+    }
+
+    #[test]
     fn assemble_config_empty_inputs_produces_empty_config() {
         let config = assemble_config(
             BTreeMap::new(),
@@ -1713,6 +1860,30 @@ mod tests {
         .unwrap();
         let state = detect_machine_state(home, &tome_home).unwrap();
         assert!(matches!(state, MachineState::Brownfield { .. }));
+    }
+
+    #[test]
+    fn detect_machine_state_uses_selected_repository_dotted_config() {
+        let tmp = TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        let selected_repo = tmp.path().join("selected-repository");
+        let config_path = selected_repo.join(".tome/tome.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_path,
+            "library_dir = \"~/.tome/skills\"\n[directories]\n",
+        )
+        .unwrap();
+
+        let state = detect_machine_state(&home, &selected_repo).unwrap();
+
+        match state {
+            MachineState::Brownfield {
+                existing_config_path,
+                ..
+            } => assert_eq!(existing_config_path, config_path),
+            other => panic!("expected selected repository brownfield state, got {other:?}"),
+        }
     }
 
     #[test]

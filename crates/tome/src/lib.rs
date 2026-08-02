@@ -458,6 +458,15 @@ fn resolve_config_path(
     Ok(None)
 }
 
+fn prepare_post_init_sync(tome_home: PathBuf, config: &Config) -> Result<(Config, TomePaths)> {
+    let mut expanded = config.clone();
+    expanded
+        .expand_tildes()
+        .context("failed to expand ~ in wizard-produced config")?;
+    let paths = TomePaths::new(tome_home, expanded.library_dir.clone())?;
+    Ok((expanded, paths))
+}
+
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
     if matches!(cli.command, Command::Version) {
@@ -468,12 +477,6 @@ pub fn run(cli: Cli) -> Result<()> {
     let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
-        if let Err(e) = Config::load_or_default(effective_config.as_deref()) {
-            eprintln!(
-                "warning: existing config is malformed ({}), the wizard will create a new one",
-                e
-            );
-        }
         // WUX-04: surface the resolved tome_home + its source BEFORE any
         // wizard prompts so the user can Ctrl-C if the wrong path is about
         // to be populated (e.g. a stray `TOME_HOME=/wrong/path` in their
@@ -483,16 +486,28 @@ pub fn run(cli: Cli) -> Result<()> {
         // interactive flow), so it goes to stderr alongside wizard.rs's
         // banner. Stdout stays reserved for the dry-run TOML body.
         //
-        // `tome_home_source` is intentionally bound here; later plans in
-        // this phase will consume it to gate greenfield prompts (WUX-01).
-        let (tome_home, tome_home_source) =
+        // The source gates Step 0: explicit flag/env/XDG choices are preserved,
+        // while the implicit default may be changed interactively.
+        let (initial_tome_home, tome_home_source) =
             config::resolve_tome_home_with_source(cli.tome_home.as_deref(), cli.config.as_deref())?;
         eprintln!();
         eprintln!(
-            "resolved tome_home: {} (from {})",
-            style(tome_home.display()).cyan(),
+            "Tome data folder: {} (from {})",
+            style(initial_tome_home.display()).cyan(),
             tome_home_source.label()
         );
+        let tome_home =
+            wizard::choose_tome_home(&initial_tome_home, tome_home_source, cli.no_input)?;
+        let selected_config = cli
+            .config
+            .clone()
+            .unwrap_or_else(|| config::resolve_config_dir(&tome_home).join("tome.toml"));
+        if let Err(e) = Config::load_or_default(Some(&selected_config)) {
+            eprintln!(
+                "warning: existing config is malformed ({}), the wizard will create a new one",
+                e
+            );
+        }
 
         // WUX-03: Detect and handle legacy pre-v0.6 ~/.config/tome/config.toml.
         // The legacy file is silently ignored by v0.6+ (only its `tome_home`
@@ -563,24 +578,14 @@ pub fn run(cli: Cli) -> Result<()> {
             _ => None,
         };
 
-        let config = wizard::run(
-            cli.dry_run,
-            cli.no_input,
-            &tome_home,
-            tome_home_source,
-            prefill.as_ref(),
-        )?;
+        let config = wizard::run(cli.dry_run, cli.no_input, &tome_home, prefill.as_ref())?;
         config.validate()?;
         if !cli.dry_run {
             // Expand `~` in library_dir before passing to TomePaths, which
             // requires absolute paths. The wizard preserves tilde-shaped paths
             // so the on-disk TOML stays portable; here we resolve them for the
             // post-init sync call.
-            let mut expanded = config.clone();
-            expanded
-                .expand_tildes()
-                .context("failed to expand ~ in wizard-produced config")?;
-            let paths = TomePaths::new(tome_home, expanded.library_dir.clone())?;
+            let (expanded, paths) = prepare_post_init_sync(tome_home, &config)?;
             // Load machine prefs once at the top of the post-Init sync path
             // (mirrors the canonical `run()` load order). Init does NOT use
             // `Config::load_with_overrides` because the wizard runs against
@@ -3128,6 +3133,24 @@ mod tests {
     use std::os::unix::fs as unix_fs;
     use std::path::PathBuf;
     use tempfile::TempDir;
+
+    #[test]
+    fn prepare_post_init_sync_uses_selected_tome_home() {
+        let tmp = TempDir::new().unwrap();
+        let initial = tmp.path().join("initial");
+        let selected = tmp.path().join("selected");
+        let library_dir = tmp.path().join("library");
+        let config = Config {
+            library_dir: library_dir.clone(),
+            ..Config::default()
+        };
+
+        let (expanded, paths) = prepare_post_init_sync(selected.clone(), &config).unwrap();
+
+        assert_eq!(expanded.library_dir(), library_dir);
+        assert_eq!(paths.tome_home(), selected);
+        assert_ne!(paths.tome_home(), initial);
+    }
 
     /// CORE-04 harness (RESEARCH Test Map): drive a real `sync()` with a
     /// `RecordingSink` and assert that every `SyncStage` emits at least one
