@@ -105,6 +105,18 @@ atomic write, round-trip checks, and portable `~/...` serialization all apply.
 Keep existing Git add parsing, role validation, ref/subdirectory precedence,
 and success output unchanged.
 
+## Desktop Data Folder Label
+
+Extend `StatusReport` with the canonical `TomePaths::tome_home()` value rather
+than deriving it from `library_dir`. In the desktop status view, label this row
+`TOME DATA FOLDER` and describe it as the portable Tome root, explicitly noting
+that machine settings live under `~/.config/tome`. Keep `LIBRARY` as a separate
+row sourced from `library_dir`.
+
+Remove the client-side parent-directory heuristic. A custom library may be
+outside Tome home, and the default library ends in `/skills`, so derivation is
+both conceptually ambiguous and technically incorrect.
+
 ## Claude Plugin And Marketplace
 
 Add the standard Claude plugin metadata at the repository root:
@@ -170,6 +182,15 @@ recommendation if an equivalent Tome repository source is already configured;
 never add a duplicate entry or overwrite a differently configured
 `tome-skills` entry.
 
+Move the Step 0 custom data-folder selection before machine-state detection.
+Label it `Tome data folder` and explain that it is the portable root, while
+`~/.config/tome` contains machine-local settings and an optional pointer. If the
+selected folder contains `.tome/tome.toml` (or root `tome.toml`), run the normal
+brownfield Use existing / Edit / Reinitialize / Cancel flow against that config.
+Thread the selected folder unchanged through wizard save and post-init sync.
+Do not retain the initially resolved default after the user selects a custom
+folder.
+
 ## Documentation
 
 Add a concise "Agent skill" installation section to the README and relevant
@@ -199,6 +220,10 @@ Run these repository checks:
 - Unit and CLI coverage for local-path classification, managed local entries,
   default roles and names, Git-only flag rejection, portable save, and
   unchanged Git URL/slug behavior
+- Rust and React coverage proving the desktop displays canonical Tome data and
+  library paths independently with explanatory copy
+- Init coverage proving an existing custom data folder is detected before
+  configuration and the selected path reaches post-init path construction
 - `make ci`
 
 ## Deferred Work
@@ -219,3 +244,5 @@ implementation reveals new acceptance criteria; do not create a duplicate.
 - No automatic `skills/` subdirectory adoption in `tome add`.
 - No existence-based inference for ambiguous relative local paths; require an
   explicit `./` or `../` prefix.
+- No rename of the internal `tome_home` API or environment variable; this is a
+  user-facing copy and canonical-data fix.

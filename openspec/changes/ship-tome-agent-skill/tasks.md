@@ -18,17 +18,26 @@
 - [x] 3.2 Add marketplace metadata exposing the repository-root plugin as `tome@tome`
 - [x] 3.3 Validate JSON, Claude schemas, and isolated local marketplace installation
 
-## 4. Interactive Init Recommendation
+## 4. Canonical Desktop Data Folder
 
-- [ ] 4.1 Add failing unit tests for official source construction, insertion, equivalent-source detection, and name-collision preservation
-- [ ] 4.2 Add CLI regression coverage proving `--no-input` omits the recommendation
-- [ ] 4.3 Implement pure official-source helpers and the default-yes interactive prompt with clone disclosure
-- [ ] 4.4 Run focused wizard and init tests plus Rust format and Clippy checks
+- [ ] 4.1 Add failing Rust coverage for canonical `tome_home` independent from `library_dir`
+- [ ] 4.2 Add `tome_home` to `StatusReport` and regenerate TypeScript bindings
+- [ ] 4.3 Replace the desktop heuristic with `TOME DATA FOLDER`, separate library display, and explanatory copy
+- [ ] 4.4 Add React rendering coverage and run focused Rust/UI checks
 
-## 5. Documentation And Closure
+## 5. Interactive Init Recommendation
 
-- [ ] 5.1 Document local-path add behavior plus cross-tool and Claude plugin installation in README and command reference
-- [ ] 5.2 Restore the Unreleased changelog section and current comparison links
-- [ ] 5.3 Refine the existing auto-subdirectory todo with the official repository regression fixture without implementing the feature
-- [ ] 5.4 Complete the fulfilled agent-skills planning todo through `gsd-sdk`
-- [ ] 5.5 Run skill, plugin, focused Rust, and full `make ci` verification
+- [ ] 5.1 Add tests for canonical custom data-folder threading and existing `.tome/tome.toml` detection
+- [ ] 5.2 Move Step 0 selection before machine-state detection and update user-facing data-folder copy
+- [ ] 5.3 Add failing unit tests for official source construction, insertion, equivalent-source detection, and name-collision preservation
+- [ ] 5.4 Add CLI regression coverage proving `--no-input` omits the recommendation
+- [ ] 5.5 Implement pure official-source helpers and the default-yes interactive prompt with clone disclosure
+- [ ] 5.6 Run focused wizard and init tests plus Rust format and Clippy checks
+
+## 6. Documentation And Closure
+
+- [ ] 6.1 Document local-path add behavior plus cross-tool and Claude plugin installation in README and command reference
+- [ ] 6.2 Restore the Unreleased changelog section and current comparison links
+- [ ] 6.3 Refine the existing auto-subdirectory todo with the official repository regression fixture without implementing the feature
+- [ ] 6.4 Complete the fulfilled agent-skills planning todo through `gsd-sdk`
+- [ ] 6.5 Run skill, plugin, focused Rust/UI, and full `make ci` verification

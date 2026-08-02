@@ -12,6 +12,7 @@ The change must provide one canonical skill package for both ecosystems, preserv
 - Make the same files installable through Tome Git discovery and Claude's plugin marketplace.
 - Add a default-selected, clearly disclosed recommendation to interactive init.
 - Make `tome add` accept explicit local paths with the full directory role matrix.
+- Display canonical Tome data and library paths independently in the desktop status view.
 - Verify skill behavior, manifest validity, wizard insertion, duplicate suppression, and noninteractive preservation.
 
 **Non-Goals:**
@@ -47,6 +48,14 @@ Absolute, tilde-prefixed, dot, and dot-relative inputs are local directories. UR
 
 The prompt defaults to yes but runs only when `no_input` is false. Existing equivalent sources and `tome-skills` name collisions suppress insertion without overwriting configuration. This keeps scripts and CI network-source-free while making the skill prominent for people using the wizard.
 
+### Resolve the selected data folder before brownfield handling
+
+Extract Step 0 selection from the main wizard body and invoke it in `lib.rs` before `detect_machine_state`. The returned path becomes the only Tome home used for config detection, wizard save, and post-init `TomePaths`. Rename user-facing Step 0 copy to `Tome data folder` and distinguish the portable root from machine-local `~/.config/tome`. This fixes the current split-brain path where a custom prompt selection can save to one folder while sync retains the initial default.
+
+### Surface canonical Tome home across the IPC boundary
+
+Add `tome_home` to `StatusReport` from `TomePaths::tome_home()` and regenerate the committed TypeScript binding. Remove the React heuristic that derives home from `library_dir`; custom and default library layouts make that inference invalid. Render `TOME DATA FOLDER` with explanatory copy that distinguishes portable Tome data from machine settings under `~/.config/tome`, then keep the existing library path as its own row.
+
 ## Risks / Trade-offs
 
 - [Plugin source is the repository root and includes unrelated project files] -> Keep one canonical package and validate the real installation; revisit a dedicated plugin subdirectory only if cache size becomes material.
@@ -55,6 +64,8 @@ The prompt defaults to yes but runs only when `no_input` is false. Existing equi
 - [Existing configuration is overwritten or duplicated] -> Use pure detection/insertion helpers and test equivalent-source and name-collision cases.
 - [Agent guidance looks correct but does not change behavior] -> Run RED baseline scenarios before authoring and the same GREEN scenarios after authoring.
 - [A relative path can resemble a GitHub slug] -> Treat only explicit `./` and `../` relative syntax as local; preserve bare `owner/repo` as Git.
+- [Adding `tome_home` changes status JSON shape] -> Make the field additive, update struct fixtures and bindings, and preserve all existing fields and text rendering.
+- [Custom Step 0 selection points at an existing repo] -> Detect root or `.tome/tome.toml` after selection and route through the established brownfield choices before any write.
 
 ## Migration Plan
 
