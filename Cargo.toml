@@ -42,6 +42,7 @@ serde_yaml = "0.9"
 ratatui = "0.30"
 crossterm = "0.29"
 nucleo-matcher = "0.3"
+syntect = { version = "5.3", default-features = false, features = ["default-syntaxes", "default-themes", "regex-onig"] }
 
 # Dev dependencies
 assert_cmd = "2"

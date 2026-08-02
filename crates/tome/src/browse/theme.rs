@@ -10,6 +10,7 @@ use ratatui::style::{Color, Modifier, Style};
 /// via methods to ensure they always stay consistent with the base colors.
 #[derive(Clone)]
 pub struct Theme {
+    light: bool,
     /// Cyan family -- headers, badges, selection indicators.
     pub accent: Color,
     /// Yellow family -- group headers, search display, match highlights.
@@ -46,6 +47,7 @@ impl Theme {
     /// Dark palette (default) for dark-background terminals.
     pub fn dark() -> Self {
         Self {
+            light: false,
             accent: Color::Cyan,
             alert: Color::Yellow,
             muted: Color::Gray,
@@ -61,6 +63,7 @@ impl Theme {
     /// Light palette for light-background terminals.
     pub fn light() -> Self {
         Self {
+            light: true,
             accent: Color::Indexed(30),       // dark cyan
             alert: Color::Indexed(136),       // dark yellow
             muted: Color::Indexed(243),       // medium gray
@@ -95,6 +98,11 @@ impl Theme {
         Style::default().fg(self.code_fg)
     }
 
+    /// Muted divider style for fenced-code delimiters in the preview pane.
+    pub fn preview_code_fence(&self) -> Style {
+        Style::default().fg(self.muted)
+    }
+
     /// alert fg + Bold -- fuzzy match character highlights.
     pub fn match_highlight(&self) -> Style {
         Style::default().fg(self.alert).add_modifier(Modifier::BOLD)
@@ -103,6 +111,11 @@ impl Theme {
     /// alert fg + Bold -- source group headers.
     pub fn group_header(&self) -> Style {
         Style::default().fg(self.alert).add_modifier(Modifier::BOLD)
+    }
+
+    /// Whether this theme is using the light browse palette.
+    pub fn is_light(&self) -> bool {
+        self.light
     }
 }
 
