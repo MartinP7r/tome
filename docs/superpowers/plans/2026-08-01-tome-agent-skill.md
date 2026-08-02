@@ -438,7 +438,7 @@ git commit -m "feat: package Tome skill as Claude plugin"
 - Consumes: `TomePaths::tome_home()` and existing `StatusReport.library_dir`.
 - Produces: additive `StatusReport.tome_home: PathBuf`, generated TypeScript `tome_home: string`, and a status UI that presents data folder and library independently.
 
-- [ ] **Step 1: Write the failing Rust test**
+- [x] **Step 1: Write the failing Rust test**
 
 Add a status test that constructs unrelated absolute Tome home and library paths, gathers status, and asserts:
 
@@ -450,7 +450,7 @@ assert_ne!(report.tome_home, report.library_dir);
 
 Run `cargo test -p tome status::tests::gather_includes_canonical_tome_home -- --nocapture`. Expected: FAIL because `StatusReport` has no `tome_home` field.
 
-- [ ] **Step 2: Add canonical Tome home to the Rust report**
+- [x] **Step 2: Add canonical Tome home to the Rust report**
 
 Add this field immediately before `library_dir`:
 
@@ -462,7 +462,7 @@ pub tome_home: PathBuf,
 
 Populate it in `gather()` with `paths.tome_home().to_path_buf()`. Update every direct `StatusReport` test fixture with an explicit Tome home; do not derive fixture values from `library_dir` unless the fixture intentionally models the default layout. Preserve existing text rendering and all current fields.
 
-- [ ] **Step 3: Regenerate TypeScript bindings**
+- [x] **Step 3: Regenerate TypeScript bindings**
 
 Run:
 
@@ -472,7 +472,7 @@ cargo run -p tome-desktop --bin gen-bindings
 
 Expected: `bindings.ts` adds `tome_home: string` to `StatusReport_Serialize` with no unrelated generated changes.
 
-- [ ] **Step 4: Write the failing React rendering test**
+- [x] **Step 4: Write the failing React rendering test**
 
 Create `StatusView.test.tsx`, mock `useStatus()` with `tome_home = "/portable/tome"` and `library_dir = "/external/skills"`, render `StatusView`, and assert:
 
@@ -487,11 +487,11 @@ expect(screen.queryByText("TOME HOME")).not.toBeInTheDocument();
 
 Run `npm test -- StatusView.test.tsx` from `crates/tome-desktop/ui`. Expected: FAIL because the view still derives and labels Tome home.
 
-- [ ] **Step 5: Add descriptive row support**
+- [x] **Step 5: Add descriptive row support**
 
 Extend `KeyValueRowProps` with optional `description?: ReactNode`. Wrap value and description in a `.content` element, render description beneath the value, and add subdued 12px description styling that works in light/dark mode. Preserve the existing label, value, mono, and trailing behavior for rows without descriptions.
 
-- [ ] **Step 6: Replace the desktop heuristic**
+- [x] **Step 6: Replace the desktop heuristic**
 
 Delete `deriveTomeHome`. Render:
 
@@ -512,7 +512,7 @@ Delete `deriveTomeHome`. Render:
 
 Keep the underlying Rust/API identifier `tome_home`; only user-facing copy changes.
 
-- [ ] **Step 7: Run focused Rust and UI verification**
+- [x] **Step 7: Run focused Rust and UI verification**
 
 Run:
 
@@ -528,7 +528,7 @@ cargo clippy -p tome --all-targets -- -D warnings
 
 Expected: all commands pass and a final binding regeneration leaves no diff beyond the intended `tome_home` field.
 
-- [ ] **Step 8: Commit the canonical data-folder change**
+- [x] **Step 8: Commit the canonical data-folder change**
 
 ```bash
 git add \

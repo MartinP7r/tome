@@ -20,10 +20,10 @@
 
 ## 4. Canonical Desktop Data Folder
 
-- [ ] 4.1 Add failing Rust coverage for canonical `tome_home` independent from `library_dir`
-- [ ] 4.2 Add `tome_home` to `StatusReport` and regenerate TypeScript bindings
-- [ ] 4.3 Replace the desktop heuristic with `TOME DATA FOLDER`, separate library display, and explanatory copy
-- [ ] 4.4 Add React rendering coverage and run focused Rust/UI checks
+- [x] 4.1 Add failing Rust coverage for canonical `tome_home` independent from `library_dir`
+- [x] 4.2 Add `tome_home` to `StatusReport` and regenerate TypeScript bindings
+- [x] 4.3 Replace the desktop heuristic with `TOME DATA FOLDER`, separate library display, and explanatory copy
+- [x] 4.4 Add React rendering coverage and run focused Rust/UI checks
 
 ## 5. Interactive Init Recommendation
 
