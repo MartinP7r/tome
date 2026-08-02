@@ -555,7 +555,7 @@ git commit -m "fix(desktop): clarify the Tome data folder" -m "OpenSpec: ship-to
 - Consumes: `DirectoryName`, `DirectoryConfig`, `DirectoryType::Git`, `DirectoryRole::Source`, `TomeHomeSource`, and existing brownfield detection.
 - Produces: `choose_tome_home(...) -> Result<PathBuf>` called before `detect_machine_state`, plus `tome_skills_directory()`, `has_tome_skills_source(...)`, and `insert_tome_skills_source(...)`.
 
-- [ ] **Step 1: Write canonical data-folder regression tests**
+- [x] **Step 1: Write canonical data-folder regression tests**
 
 Add tests that pin these invariants:
 
@@ -566,7 +566,7 @@ Add tests that pin these invariants:
 
 The existing `init_brownfield_*` CLI tests remain the integration anchor for Use existing / Edit / Reinitialize / Cancel.
 
-- [ ] **Step 2: Move Step 0 before machine-state detection**
+- [x] **Step 2: Move Step 0 before machine-state detection**
 
 Extract the Step 0 prompt from `wizard::run` into:
 
@@ -589,7 +589,7 @@ Machine-local settings remain in ~/.config/tome.
 
 In `lib.rs`, call it immediately after surfacing the initially resolved path and before `detect_machine_state`. Pass the returned path to machine-state detection and `wizard::run`, and move it into `TomePaths::new` for post-init sync. Remove Step 0 from `wizard::run` and remove its `TomeHomeSource` parameter. Update the informational line from `resolved tome_home:` to `Tome data folder:` while preserving the source label.
 
-- [ ] **Step 3: Write failing pure-helper unit tests**
+- [x] **Step 3: Write failing pure-helper unit tests**
 
 Add tests in `wizard.rs::tests` for these contracts:
 
@@ -635,7 +635,7 @@ fn detects_equivalent_tome_skills_source_under_another_name() {
 }
 ```
 
-- [ ] **Step 4: Write the failing noninteractive regression assertion**
+- [x] **Step 4: Write the failing noninteractive regression assertion**
 
 Extend `init_dry_run_no_input_empty_home` in `crates/tome/tests/cli_init.rs`:
 
@@ -652,7 +652,7 @@ assert!(
 
 The existing empty-directories assertion remains. This test passes before implementation and is a regression guard, while the new helper tests provide RED.
 
-- [ ] **Step 5: Run focused tests and verify RED**
+- [x] **Step 5: Run focused tests and verify RED**
 
 Run:
 
@@ -664,7 +664,7 @@ cargo test -p tome --test cli_init init_dry_run_no_input_empty_home -- --nocaptu
 
 Expected: unit tests fail to compile because the helpers do not exist; the CLI regression test passes.
 
-- [ ] **Step 6: Implement the pure helper functions**
+- [x] **Step 6: Implement the pure helper functions**
 
 Add constants and helpers near `assemble_config`:
 
@@ -714,7 +714,7 @@ fn insert_tome_skills_source(
 
 Keep these helpers private; only co-located unit tests need direct access.
 
-- [ ] **Step 7: Add the interactive prompt**
+- [x] **Step 7: Add the interactive prompt**
 
 Immediately after `configure_directories(...)` and before discovery, add an interactive-only block:
 
@@ -742,7 +742,7 @@ if !no_input && !has_tome_skills_source(&directories) && !directories.contains_k
 
 Do not prompt when `tome-skills` is occupied by another entry; preserve it silently per the approved no-overwrite contract. The summary table later in the wizard shows whether the official source was added.
 
-- [ ] **Step 8: Run focused tests and verify GREEN**
+- [x] **Step 8: Run focused tests and verify GREEN**
 
 Run:
 
@@ -758,7 +758,7 @@ cargo test -p tome --test cli_init init_brownfield -- --nocapture
 
 Expected: all tests pass; noninteractive generated config remains network-source-free.
 
-- [ ] **Step 9: Check formatting and lint for the Rust change**
+- [x] **Step 9: Check formatting and lint for the Rust change**
 
 Run:
 
@@ -769,7 +769,7 @@ cargo clippy -p tome --all-targets -- -D warnings
 
 Expected: both exit 0. If rustfmt reports changes, run `cargo fmt`, inspect only the intended files, and rerun both checks.
 
-- [ ] **Step 10: Commit the wizard change**
+- [x] **Step 10: Commit the wizard change**
 
 ```bash
 git add crates/tome/src/lib.rs crates/tome/src/wizard.rs crates/tome/tests/cli_init.rs

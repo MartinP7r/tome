@@ -27,12 +27,12 @@
 
 ## 5. Interactive Init Recommendation
 
-- [ ] 5.1 Add tests for canonical custom data-folder threading and existing `.tome/tome.toml` detection
-- [ ] 5.2 Move Step 0 selection before machine-state detection and update user-facing data-folder copy
-- [ ] 5.3 Add failing unit tests for official source construction, insertion, equivalent-source detection, and name-collision preservation
-- [ ] 5.4 Add CLI regression coverage proving `--no-input` omits the recommendation
-- [ ] 5.5 Implement pure official-source helpers and the default-yes interactive prompt with clone disclosure
-- [ ] 5.6 Run focused wizard and init tests plus Rust format and Clippy checks
+- [x] 5.1 Add tests for canonical custom data-folder threading and existing `.tome/tome.toml` detection
+- [x] 5.2 Move Step 0 selection before machine-state detection and update user-facing data-folder copy
+- [x] 5.3 Add failing unit tests for official source construction, insertion, equivalent-source detection, and name-collision preservation
+- [x] 5.4 Add CLI regression coverage proving `--no-input` omits the recommendation
+- [x] 5.5 Implement pure official-source helpers and the default-yes interactive prompt with clone disclosure
+- [x] 5.6 Run focused wizard and init tests plus Rust format and Clippy checks
 
 ## 6. Documentation And Closure
 
