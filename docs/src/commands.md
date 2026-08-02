@@ -4,7 +4,7 @@
 |---------|-------------|
 | `tome init` | Interactive wizard to configure directories |
 | `tome sync` | Reconcile, discover, consolidate, distribute, and clean up skills |
-| `tome add <url\|slug>` | Register a git skill repository in `tome.toml` |
+| `tome add <url\|path>` | Register a Git skill repository or explicit local directory in `tome.toml` |
 | `tome remove dir <name>` | Remove a directory entry (manifest entries transition to Unowned per LIB-04) |
 | `tome remove skill <name>` | Delete an Unowned skill from the library (manifest + library + distribution + lockfile + machine.toml cleanup) |
 | `tome reassign <skill> --to <directory>` | Reassign a skill to a different directory (accepts Owned + Unowned input per UNOWN-01) |
@@ -36,6 +36,28 @@
 
 ## Command Details
 
+### `tome init`
+
+When using the default Tome home, interactive setup first offers Tome data
+folder selection. This portable root determines configuration lookup, cached
+repositories, the lockfile, and the default library location. Existing
+configuration is detected in the selected folder before setup continues, and
+the same folder is used for saving configuration and the post-init sync. A
+custom library may live elsewhere; machine-local settings remain under
+`~/.config/tome`.
+
+Interactive init also offers Tome's official `using-tome` agent skill, defaults
+to yes, and displays the equivalent command:
+
+```bash
+tome add MartinP7r/tome --subdir skills --role source
+```
+
+Accepting registers `MartinP7r/tome` as a Git/source directory with
+`subdir = "skills"`; the post-init sync clones it immediately. `--no-input`
+omits this recommendation and performs no new network request for the official
+repository.
+
 ### `tome sync`
 
 Runs the full pipeline: discover skills from configured directories, consolidate into the library, diff the lockfile to surface changes, distribute to targets, and clean up stale entries. When new or changed skills are detected, an interactive triage prompt lets you disable unwanted skills. Generates a `tome.lock` lockfile for reproducible snapshots.
@@ -47,9 +69,13 @@ Runs the full pipeline: discover skills from configured directories, consolidate
 
 ### `tome add`
 
-Register a git skill repository in `tome.toml`. Accepts either a full git URL (`https://github.com/owner/repo`, `git@github.com:owner/repo.git`) or a bare GitHub slug (`owner/repo`), which is expanded to `https://github.com/owner/repo` (v0.8.2+). The clone is shallow and lives in `~/.tome/repos/<sha256>/`.
+Register a Git skill repository or explicit local directory in `tome.toml`.
+Git inputs accept either a full URL (`https://github.com/owner/repo`,
+`git@github.com:owner/repo.git`) or a bare GitHub slug (`owner/repo`), which is
+expanded to `https://github.com/owner/repo` (v0.8.2+). The clone is shallow and
+lives in `~/.tome/repos/<sha256>/`.
 
-#### URL forms
+#### Git forms
 
 ```bash
 tome add https://github.com/user/skills           # full HTTPS URL
@@ -61,6 +87,21 @@ tome add user/skills --subdir skills              # explicit --subdir flag (v0.1
 
 The `/tree/<ref>/<subdir>` URL form mimics how GitHub renders navigation into a subdirectory in your browser — copy-paste from `github.com/owner/repo/tree/main/skills` and it just works. Extracted `<ref>` becomes the default branch; `<subdir>` becomes the discovery subdirectory. Explicit `--branch` / `--subdir` flags override URL-embedded values (with a warning).
 
+#### Local path forms
+
+Explicit local paths may be absolute, tilde-prefixed (`~` or `~/...`), or
+dot-relative (`.`, `..`, `./...`, or `../...`). Bare `owner/repo` inputs remain
+GitHub slugs even if a matching path exists. The default name is the path's
+final component, and local directories default to role `synced`.
+
+```bash
+tome add ~/.pfw/skills --role managed
+tome add ./team-skills --role source --name team
+```
+
+Git-only `--branch`, `--tag`, `--rev`, and `--subdir` flags are rejected for
+local paths. Tome saves tilde-based paths portably in `tome.toml`.
+
 #### Auto-detection of common subdirs (v0.13+)
 
 If `tome sync` finds zero skills at a directory's root AND no `subdir` is configured, it probes common Claude Code plugin layouts (`skills/`, `.claude-plugin/skills/`) and emits a `subdir = "..."` hint if any candidate has skills inside. Catches the "I added a Claude plugin repo and got zero skills" case without forcing the user to know the convention up front.
@@ -69,8 +110,8 @@ If `tome sync` finds zero skills at a directory's root AND no `subdir` is config
 
 | Flag | Description |
 |------|-------------|
-| `URL` | Git repository URL or `owner/repo` slug (optionally with `/tree/<ref>/<subdir>` suffix) |
-| `--name <name>` | Custom directory name (default: extracted from URL) |
+| `URL_OR_PATH` | Git repository URL, `owner/repo` slug, or explicit local path |
+| `--name <name>` | Custom directory name (default: derived from the URL or local path) |
 | `--branch <branch>` | Track a specific branch (overrides URL-embedded `/tree/<ref>/...`) |
 | `--tag <tag>` | Pin to a specific tag |
 | `--rev <sha>` | Pin to a specific commit SHA |
