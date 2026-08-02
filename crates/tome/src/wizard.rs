@@ -129,6 +129,7 @@ pub(crate) fn choose_tome_home(
     initial: &Path,
     source: TomeHomeSource,
     no_input: bool,
+    dry_run: bool,
 ) -> Result<PathBuf> {
     if !matches!(source, TomeHomeSource::Default) || no_input {
         return Ok(initial.to_path_buf());
@@ -167,18 +168,24 @@ pub(crate) fn choose_tome_home(
             )
             .default(true)
             .interact()?;
-        if persist {
+        if should_write_tome_home_pointer(dry_run, persist) {
             crate::config::write_xdg_tome_home(&selected)?;
             eprintln!(
                 "  {} Wrote tome_home to ~/.config/tome/config.toml",
                 style("done").green()
             );
+        } else if persist {
+            eprintln!("  (dry run -- would write tome_home to ~/.config/tome/config.toml)");
         }
     }
     eprintln!("Machine-local settings remain in ~/.config/tome.");
     eprintln!();
 
     Ok(selected)
+}
+
+fn should_write_tome_home_pointer(dry_run: bool, persist: bool) -> bool {
+    persist && !dry_run
 }
 
 fn validate_tome_home_path(path: &Path) -> std::result::Result<(), String> {
@@ -205,7 +212,7 @@ pub(crate) fn run(
     no_input: bool,
     tome_home: &Path,
     prefill: Option<&Config>,
-) -> Result<Config> {
+) -> Result<WizardOutcome> {
     // HARD-15: wizard chrome (banner, step dividers, status confirmations,
     // tables) emits to stderr. Dialoguer renders prompts on its own
     // (already on stderr by default) — we don't compete with it. The only
@@ -417,8 +424,7 @@ pub(crate) fn run(
     if dry_run {
         eprintln!("  (dry run -- not saving)");
         // Dry-run validates the same way a real save would, but without writing
-        // to disk. Use a clone so we can expand tildes without mutating the
-        // original Config (which is returned to the caller).
+        // to disk. Use a clone so the emitted preview can contain expanded paths.
         let mut expanded = config.clone();
         expanded
             .expand_tildes()
@@ -438,6 +444,7 @@ pub(crate) fn run(
         eprintln!();
         eprintln!("{}", style("Generated config:").bold());
         println!("{}", toml_str);
+        Ok(WizardOutcome::Preview)
     } else if no_input
         || Confirm::new()
             .with_prompt("Save configuration?")
@@ -478,14 +485,30 @@ pub(crate) fn run(
                 }
             }
         }
+        Ok(WizardOutcome::Saved(config))
+    } else {
+        Ok(WizardOutcome::NotSaved)
     }
-
-    Ok(config)
 }
 
 // ---------------------------------------------------------------------------
 // Pure config assembly — unit-testable without dialoguer
 // ---------------------------------------------------------------------------
+
+pub(crate) enum WizardOutcome {
+    Preview,
+    Saved(Config),
+    NotSaved,
+}
+
+impl WizardOutcome {
+    pub(crate) fn into_saved_config(self) -> Option<Config> {
+        match self {
+            Self::Saved(config) => Some(config),
+            Self::Preview | Self::NotSaved => None,
+        }
+    }
+}
 
 const TOME_SKILLS_NAME: &str = "tome-skills";
 const TOME_REPOSITORY_URL: &str = "https://github.com/MartinP7r/tome";
@@ -1496,9 +1519,38 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let initial = tmp.path().join("initial");
 
-        let selected = choose_tome_home(&initial, TomeHomeSource::Default, true).unwrap();
+        let selected = choose_tome_home(&initial, TomeHomeSource::Default, true, false).unwrap();
 
         assert_eq!(selected, initial);
+    }
+
+    #[test]
+    fn rejected_save_exposes_no_post_init_config() {
+        assert!(
+            WizardOutcome::NotSaved.into_saved_config().is_none(),
+            "a rejected save must suppress post-init sync",
+        );
+    }
+
+    #[test]
+    fn dry_run_suppresses_accepted_tome_home_pointer_write() {
+        assert!(
+            !should_write_tome_home_pointer(true, true),
+            "dry-run must suppress the XDG pointer write even when persistence was accepted",
+        );
+    }
+
+    #[test]
+    fn accepted_tome_home_pointer_write_proceeds_outside_dry_run() {
+        assert!(should_write_tome_home_pointer(false, true));
+        assert!(!should_write_tome_home_pointer(false, false));
+    }
+
+    #[test]
+    fn dry_run_preview_exposes_no_post_init_config() {
+        let outcome = WizardOutcome::Preview;
+
+        assert!(outcome.into_saved_config().is_none());
     }
 
     #[test]

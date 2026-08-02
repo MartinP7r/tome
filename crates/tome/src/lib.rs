@@ -496,8 +496,12 @@ pub fn run(cli: Cli) -> Result<()> {
             style(initial_tome_home.display()).cyan(),
             tome_home_source.label()
         );
-        let tome_home =
-            wizard::choose_tome_home(&initial_tome_home, tome_home_source, cli.no_input)?;
+        let tome_home = wizard::choose_tome_home(
+            &initial_tome_home,
+            tome_home_source,
+            cli.no_input,
+            cli.dry_run,
+        )?;
         let selected_config = cli
             .config
             .clone()
@@ -578,7 +582,10 @@ pub fn run(cli: Cli) -> Result<()> {
             _ => None,
         };
 
-        let config = wizard::run(cli.dry_run, cli.no_input, &tome_home, prefill.as_ref())?;
+        let outcome = wizard::run(cli.dry_run, cli.no_input, &tome_home, prefill.as_ref())?;
+        let Some(config) = outcome.into_saved_config() else {
+            return Ok(());
+        };
         config.validate()?;
         if !cli.dry_run {
             // Expand `~` in library_dir before passing to TomePaths, which
