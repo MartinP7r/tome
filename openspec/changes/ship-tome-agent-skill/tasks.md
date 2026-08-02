@@ -7,10 +7,10 @@
 
 ## 2. Local Path Addition
 
-- [ ] 2.1 Add failing classification and CLI tests for explicit local paths, managed role, default name and role, portable save, and Git-only flag rejection
-- [ ] 2.2 Implement deterministic local-vs-Git source classification without filesystem-existence inference
-- [ ] 2.3 Construct and checked-save directory-type entries while preserving existing Git behavior
-- [ ] 2.4 Run focused add tests, format, and Clippy checks
+- [x] 2.1 Add failing classification and CLI tests for explicit local paths, managed role, default name and role, portable save, and Git-only flag rejection
+- [x] 2.2 Implement deterministic local-vs-Git source classification without filesystem-existence inference
+- [x] 2.3 Construct and checked-save directory-type entries while preserving existing Git behavior
+- [x] 2.4 Run focused add tests, format, and Clippy checks
 
 ## 3. Claude Distribution
 
