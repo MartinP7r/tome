@@ -107,7 +107,10 @@ resolves to the same add-time location regardless of later working directories.
 Keep explicit `~/...` inputs portable and preserve `--name` overrides. Reject
 Git-only `--branch`, `--tag`, `--rev`, and `--subdir` flags with actionable
 errors. Keep existing Git add parsing, role validation, ref/subdirectory
-precedence, and success output unchanged.
+precedence, and success output unchanged. Load a fresh portable configuration
+without machine directory overrides for every add mutation, and save to the
+resolved config file so machine-local paths can never leak into `tome.toml`,
+including when `--config` selects a non-default filename.
 
 ## Desktop Data Folder Label
 
@@ -184,7 +187,10 @@ Skip the recommendation under `tome init --no-input` so automation retains its
 current network behavior. When editing an existing configuration, suppress the
 recommendation if an equivalent Tome repository source is already configured;
 never add a duplicate entry or overwrite a differently configured
-`tome-skills` entry.
+`tome-skills` entry. Equivalent official sources include HTTPS with optional
+`.git` or trailing slash, SCP-style `git@github.com:MartinP7r/tome.git`, and
+`ssh://git@github.com/MartinP7r/tome.git`, but not forks, other hosts, or Git
+sources scoped to another subdirectory.
 
 Move the Step 0 custom data-folder selection before machine-state detection.
 Label it `Tome data folder` and explain that it is the portable root, while

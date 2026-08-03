@@ -41,3 +41,10 @@
 - [x] 6.3 Refine the existing auto-subdirectory todo with the official repository regression fixture without implementing the feature
 - [x] 6.4 Complete the fulfilled agent-skills planning todo through `gsd-sdk`
 - [x] 6.5 Run skill, plugin, focused Rust/UI, and full `make ci` verification
+
+## 7. Final Review Corrections
+
+- [x] 7.1 Add a failing CLI regression for local and Git adds with a portable path, machine override, and explicit config file
+- [x] 7.2 Dispatch add mutations with a fresh pre-override config and the resolved config path
+- [x] 7.3 Add failing unit coverage and recognize common equivalent official GitHub clone URLs without matching forks, other hosts, or other subdirectories
+- [x] 7.4 Run focused add/init/wizard tests, format, Clippy, OpenSpec validation, and full `make ci`

@@ -531,9 +531,24 @@ fn tome_skills_directory() -> Result<(DirectoryName, DirectoryConfig)> {
 fn has_tome_skills_source(directories: &BTreeMap<DirectoryName, DirectoryConfig>) -> bool {
     directories.values().any(|directory| {
         directory.directory_type == DirectoryType::Git
-            && directory.path == Path::new(TOME_REPOSITORY_URL)
+            && is_tome_repository_url(&directory.path)
             && directory.subdir.as_deref() == Some(TOME_SKILLS_SUBDIR)
     })
+}
+
+fn is_tome_repository_url(path: &Path) -> bool {
+    let Some(url) = path.to_str() else {
+        return false;
+    };
+    let url = url.trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+
+    matches!(
+        url,
+        TOME_REPOSITORY_URL
+            | "git@github.com:MartinP7r/tome"
+            | "ssh://git@github.com/MartinP7r/tome"
+    )
 }
 
 fn insert_tome_skills_source(
@@ -1626,6 +1641,51 @@ mod tests {
 
         assert!(has_tome_skills_source(&directories));
         assert!(!insert_tome_skills_source(&mut directories).unwrap());
+    }
+
+    #[test]
+    fn detects_common_official_tome_repository_clone_urls() {
+        for url in [
+            "https://github.com/MartinP7r/tome/",
+            "https://github.com/MartinP7r/tome.git",
+            "https://github.com/MartinP7r/tome.git/",
+            "git@github.com:MartinP7r/tome.git",
+            "ssh://git@github.com/MartinP7r/tome.git",
+        ] {
+            let mut directory = tome_skills_directory().unwrap().1;
+            directory.path = PathBuf::from(url);
+            let mut directories = BTreeMap::new();
+            directories.insert(DirectoryName::new("official").unwrap(), directory);
+
+            assert!(has_tome_skills_source(&directories), "URL: {url}");
+            assert!(
+                !insert_tome_skills_source(&mut directories).unwrap(),
+                "equivalent source should suppress recommendation insertion: {url}"
+            );
+            assert_eq!(directories.len(), 1, "URL: {url}");
+        }
+    }
+
+    #[test]
+    fn does_not_treat_other_git_sources_as_official_tome_skills() {
+        for (url, subdir) in [
+            ("https://github.com/someone/tome.git", "skills"),
+            ("https://gitlab.com/MartinP7r/tome.git", "skills"),
+            ("https://github.com/MartinP7r/tome.git", "other-skills"),
+        ] {
+            let mut directory = tome_skills_directory().unwrap().1;
+            directory.path = PathBuf::from(url);
+            directory.subdir = Some(subdir.to_string());
+            let mut directories = BTreeMap::new();
+            directories.insert(DirectoryName::new("existing").unwrap(), directory);
+
+            assert!(!has_tome_skills_source(&directories), "URL: {url}");
+            assert!(
+                insert_tome_skills_source(&mut directories).unwrap(),
+                "non-equivalent source should not suppress insertion: {url}"
+            );
+            assert_eq!(directories.len(), 2, "URL: {url}");
+        }
     }
 
     #[test]

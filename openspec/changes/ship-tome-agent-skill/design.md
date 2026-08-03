@@ -44,9 +44,13 @@ Accepting the prompt inserts a Git/source entry named `tome-skills`, URL `https:
 
 Absolute, tilde-prefixed, dot, and dot-relative inputs are local directories. URLs, SSH forms, bare `owner/repo` slugs, GitHub tree URLs, and other legacy inputs retain Git behavior. Filesystem existence is not used because it would make a bare slug ambiguous across working directories. Local inputs construct `DirectoryType::Directory`, accept its full valid-role matrix, and reject Git-only ref and subdirectory flags. Dot-relative inputs are lexically anchored to the `tome add` working directory before default-name derivation without existence checks or canonicalization. Every local addition uses normal checked save: anchored paths outside home serialize absolute, paths under home may serialize as portable `~/...`, and either representation resolves to the same add-time location independently of later working directories. Explicit `~/...` inputs retain portable serialization.
 
+All add mutations reload the portable config without applying machine directory overrides and save to the resolved config file. This prevents machine-local paths from being serialized into portable configuration and preserves explicit `--config` filenames.
+
 ### Gate all recommendation behavior on interactive mode
 
 The prompt defaults to yes but runs only when `no_input` is false. Existing equivalent sources and `tome-skills` name collisions suppress insertion without overwriting configuration. This keeps scripts and CI network-source-free while making the skill prominent for people using the wizard.
+
+Equivalent official sources include HTTPS with optional `.git` or trailing slash, SCP-style SSH, and `ssh://git@github.com` spellings for `MartinP7r/tome`. Forks, other hosts, and sources not scoped to `subdir = "skills"` remain distinct.
 
 ### Resolve the selected data folder before brownfield handling
 

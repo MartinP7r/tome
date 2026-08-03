@@ -19,7 +19,7 @@ The skill package SHALL be installable as a Tome Git source using repository `Ma
 - **THEN** Tome discovers `using-tome` and distributes it to configured targets according to existing machine preferences
 
 ### Requirement: Local directory addition
-`tome add` SHALL classify explicitly path-shaped inputs as local directories, SHALL accept every role valid for `DirectoryType::Directory`, SHALL anchor dot-relative inputs to the invocation working directory without filesystem canonicalization, and SHALL preserve existing Git input behavior and portable tilde-prefixed paths. Normal checked save MAY serialize an anchored path under home as `~/...`; absolute and tilde representations MUST resolve to the same add-time location independently of later working directories.
+`tome add` SHALL classify explicitly path-shaped inputs as local directories, SHALL accept every role valid for `DirectoryType::Directory`, SHALL anchor dot-relative inputs to the invocation working directory without filesystem canonicalization, and SHALL preserve existing Git input behavior and portable tilde-prefixed paths. Every add mutation SHALL use a fresh portable config without machine directory overrides and SHALL save to the resolved config file. Normal checked save MAY serialize an anchored path under home as `~/...`; absolute and tilde representations MUST resolve to the same add-time location independently of later working directories.
 
 #### Scenario: Managed package-manager directory
 - **WHEN** a user runs `tome add ~/.pfw/skills --role managed`
@@ -36,6 +36,10 @@ The skill package SHALL be installable as a Tome Git source using repository `Ma
 #### Scenario: Bare GitHub slug remains Git
 - **WHEN** a user runs `tome add owner/repo`
 - **THEN** Tome preserves existing GitHub slug expansion and Git source behavior regardless of filesystem contents
+
+#### Scenario: Machine override remains local
+- **WHEN** a portable directory has a machine path override and the user adds either a local or Git source
+- **THEN** Tome saves the new source to the resolved config file, retains the original portable path, and does not serialize the override path
 
 ### Requirement: Claude plugin distribution
 The repository SHALL expose the same skill package through a valid Claude plugin named `tome` in a valid marketplace named `tome`.
@@ -63,8 +67,12 @@ Interactive `tome init` SHALL offer the official skill as a default-selected Git
 - **THEN** the generated config contains `tome-skills` with the official URL, Git type, source role, and `subdir = "skills"`
 
 #### Scenario: Equivalent source already exists
-- **WHEN** an existing configuration already contains the official Git source scoped to `skills`
+- **WHEN** an existing configuration already contains the official Git source scoped to `skills` using HTTPS with optional `.git` or trailing slash, SCP-style SSH, or `ssh://git@github.com`
 - **THEN** init does not prompt for or insert a duplicate source
+
+#### Scenario: Similar source is not equivalent
+- **WHEN** a Git source is a fork, uses another host, or is scoped to a subdirectory other than `skills`
+- **THEN** init does not treat it as the official source and may offer the recommendation
 
 #### Scenario: Recommendation name is occupied
 - **WHEN** `tome-skills` names a different existing directory

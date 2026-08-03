@@ -641,13 +641,17 @@ pub fn run(cli: Cli) -> Result<()> {
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
     let machine_prefs = machine::load(&machine_path)?;
 
-    let config = Config::load_or_default_with_overrides(
-        effective_config.as_deref(),
-        &machine_path,
-        &machine_prefs,
-    )?;
-    // Note: load_or_default_with_overrides already runs validate() internally —
-    // no separate config.validate()? call here.
+    let config = if matches!(&cli.command, Command::Add { .. }) {
+        Config::load_or_default(effective_config.as_deref())?
+    } else {
+        Config::load_or_default_with_overrides(
+            effective_config.as_deref(),
+            &machine_path,
+            &machine_prefs,
+        )?
+    };
+    // Note: both load paths already run validate() internally — no separate
+    // config.validate()? call here.
     let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
     let paths = TomePaths::new(tome_home, config.library_dir.clone())?;
 
@@ -667,18 +671,24 @@ pub fn run(cli: Cli) -> Result<()> {
             rev,
             subdir,
             role,
-        } => cmd_add(
-            input,
-            name,
-            branch,
-            tag,
-            rev,
-            subdir,
-            role,
-            config,
-            &paths,
-            cli.dry_run,
-        ),
+        } => {
+            let config_path = match effective_config {
+                Some(path) => path,
+                None => config::default_config_path()?,
+            };
+            cmd_add(
+                input,
+                name,
+                branch,
+                tag,
+                rev,
+                subdir,
+                role,
+                config,
+                &config_path,
+                cli.dry_run,
+            )
+        }
         Command::Sync {
             force,
             no_triage,
@@ -778,7 +788,7 @@ pub(crate) fn cmd_add(
     subdir: Option<String>,
     role: Option<config::DirectoryRole>,
     config: Config,
-    paths: &TomePaths,
+    config_path: &Path,
     dry_run: bool,
 ) -> Result<()> {
     let mut config = config;
@@ -793,7 +803,7 @@ pub(crate) fn cmd_add(
             subdir: subdir.as_deref(),
             role,
             dry_run,
-            config_path: &paths.config_path(),
+            config_path,
         },
     )?;
     Ok(())
