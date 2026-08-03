@@ -92,7 +92,11 @@ The `/tree/<ref>/<subdir>` URL form mimics how GitHub renders navigation into a 
 Explicit local paths may be absolute, tilde-prefixed (`~` or `~/...`), or
 dot-relative (`.`, `..`, `./...`, or `../...`). Bare `owner/repo` inputs remain
 GitHub slugs even if a matching path exists. The default name is the path's
-final component, and local directories default to role `synced`.
+final component, and local directories default to role `synced`. Dot-relative
+inputs are resolved lexically against the `tome add` working directory and
+stored as absolute paths, so later commands do not reinterpret them from a
+different working directory. This does not canonicalize the source or resolve
+symlinks. Explicit `~/...` inputs retain portable tilde-based serialization.
 
 ```bash
 tome add ~/.pfw/skills --role managed
@@ -100,7 +104,7 @@ tome add ./team-skills --role source --name team
 ```
 
 Git-only `--branch`, `--tag`, `--rev`, and `--subdir` flags are rejected for
-local paths. Tome saves tilde-based paths portably in `tome.toml`.
+local paths.
 
 #### Auto-detection of common subdirs (v0.13+)
 

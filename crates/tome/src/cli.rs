@@ -151,7 +151,8 @@ pub enum Command {
     Add {
         /// Git repository URL, `owner/repo` slug, or explicit local path.
         ///
-        /// Local paths must be absolute, tilde-prefixed, or dot-relative;
+        /// Local paths must be absolute, tilde-prefixed, or dot-relative.
+        /// Dot-relative paths are anchored to the current working directory;
         /// bare `owner/repo` remains a GitHub slug. Git inputs support a
         /// GitHub `/tree/<ref>/<subdir>` suffix — the URL form
         /// the browser shows when navigating into a subdir on github.com.

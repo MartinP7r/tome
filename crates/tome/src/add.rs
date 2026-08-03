@@ -29,13 +29,15 @@ enum AddSource {
     Git(String),
 }
 
+fn is_dot_relative(input: &str) -> bool {
+    matches!(input, "." | "..") || input.starts_with("./") || input.starts_with("../")
+}
+
 fn classify_source(input: &str) -> AddSource {
     let path = Path::new(input);
-    let explicit_relative =
-        matches!(input, "." | "..") || input.starts_with("./") || input.starts_with("../");
     let tilde = input == "~" || input.starts_with("~/");
 
-    if path.is_absolute() || explicit_relative || tilde {
+    if path.is_absolute() || is_dot_relative(input) || tilde {
         AddSource::Local(path.to_path_buf())
     } else {
         AddSource::Git(input.to_string())
@@ -265,10 +267,16 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
         bail!("--subdir applies only to Git inputs");
     }
 
+    let preserve_absolute = is_dot_relative(opts.input);
     let expanded_path = crate::config::expand_tilde(&path)?;
+    let resolved_path = if preserve_absolute {
+        std::path::absolute(expanded_path)?
+    } else {
+        expanded_path
+    };
     let dir_name_str = match opts.name {
         Some(name) => name.to_string(),
-        None => expanded_path
+        None => resolved_path
             .file_name()
             .and_then(|name| name.to_str())
             .map(String::from)
@@ -300,7 +308,7 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
     }
 
     let dir_config = DirectoryConfig {
-        path: expanded_path.clone(),
+        path: resolved_path.clone(),
         directory_type: DirectoryType::Directory,
         role: opts.role,
         git_ref: None,
@@ -316,17 +324,21 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
             "{} add directory '{}' (path: {}, role: {})",
             style("Would").yellow(),
             style(&dir_name_str).cyan(),
-            expanded_path.display(),
+            resolved_path.display(),
             style(resolved_role.kebab_case()).yellow(),
         );
     } else {
-        config.directories.insert(dir_name, dir_config);
-        config.save_checked(opts.config_path)?;
+        config.directories.insert(dir_name.clone(), dir_config);
+        if preserve_absolute {
+            config.save_checked_preserving_absolute_directory_path(opts.config_path, &dir_name)?;
+        } else {
+            config.save_checked(opts.config_path)?;
+        }
         println!(
             "{} directory '{}' (path: {}, role: {})",
             style("Added").green(),
             style(&dir_name_str).cyan(),
-            expanded_path.display(),
+            resolved_path.display(),
             style(resolved_role.kebab_case()).cyan(),
         );
         println!(
@@ -804,6 +816,31 @@ mod tests {
         let entry = config.directories().get("skills").unwrap();
         assert_eq!(entry.role, None);
         assert_eq!(entry.role(), DirectoryRole::Synced);
+    }
+
+    #[test]
+    fn add_local_dot_relative_path_is_anchored_to_current_directory() {
+        let (_tmp, mut config, config_path, _source_dir) = local_add_fixture();
+        let input = Path::new("./team-skills");
+        let expected = std::path::absolute(input).unwrap();
+
+        add(&mut config, local_add_options(input, &config_path)).unwrap();
+
+        let entry = config.directories().get("team-skills").unwrap();
+        assert!(entry.path.is_absolute());
+        assert_eq!(entry.path, expected);
+    }
+
+    #[test]
+    fn add_local_current_directory_derives_stable_default_name() {
+        let (_tmp, mut config, config_path, _source_dir) = local_add_fixture();
+        let expected = std::path::absolute(".").unwrap();
+        let expected_name = expected.file_name().unwrap().to_str().unwrap();
+
+        add(&mut config, local_add_options(Path::new("."), &config_path)).unwrap();
+
+        let entry = config.directories().get(expected_name).unwrap();
+        assert_eq!(entry.path, expected);
     }
 
     #[test]

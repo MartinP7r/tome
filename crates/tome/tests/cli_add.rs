@@ -37,6 +37,48 @@ fn test_add_managed_local_directory_preserves_portable_path() {
 }
 
 #[test]
+fn test_add_dot_relative_directory_is_anchored_across_working_directories() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let add_cwd = home.join("project");
+    let source_input = add_cwd.join("team-skills");
+    let later_cwd = home.join("elsewhere");
+    let tome_home = home.join("tome-home");
+    std::fs::create_dir_all(&source_input).unwrap();
+    std::fs::create_dir_all(&later_cwd).unwrap();
+    // macOS reports /private/var for a process started under the /var alias.
+    // Resolve only the fixture CWD; the source suffix must remain lexical.
+    let source = add_cwd.canonicalize().unwrap().join("team-skills");
+
+    tome()
+        .current_dir(&add_cwd)
+        .env("HOME", &home)
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .args(["add", "./team-skills"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(source.display().to_string()));
+
+    let config_path = tome_home.join("tome.toml");
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw.contains(&format!("path = \"{}\"", source.display())),
+        "dot-relative input must be stored as its anchored absolute path: {raw}"
+    );
+
+    tome()
+        .current_dir(&later_cwd)
+        .env("HOME", &home)
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .arg("config")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(source.display().to_string()));
+}
+
+#[test]
 fn test_add_happy_path() {
     let tmp = TempDir::new().unwrap();
 

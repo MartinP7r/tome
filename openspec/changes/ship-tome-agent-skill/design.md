@@ -42,7 +42,7 @@ Accepting the prompt inserts a Git/source entry named `tome-skills`, URL `https:
 
 ### Classify explicit path syntax before Git parsing
 
-Absolute, tilde-prefixed, dot, and dot-relative inputs are local directories. URLs, SSH forms, bare `owner/repo` slugs, GitHub tree URLs, and other legacy inputs retain Git behavior. Filesystem existence is not used because it would make a bare slug ambiguous across working directories. Local inputs construct `DirectoryType::Directory`, accept its full valid-role matrix, reject Git-only ref and subdirectory flags, derive names from the final component, and save through `Config::save_checked`.
+Absolute, tilde-prefixed, dot, and dot-relative inputs are local directories. URLs, SSH forms, bare `owner/repo` slugs, GitHub tree URLs, and other legacy inputs retain Git behavior. Filesystem existence is not used because it would make a bare slug ambiguous across working directories. Local inputs construct `DirectoryType::Directory`, accept its full valid-role matrix, and reject Git-only ref and subdirectory flags. Dot-relative inputs are lexically anchored to the `tome add` working directory before default-name derivation and stored as absolute paths without existence checks or canonicalization; explicit `~/...` inputs retain portable serialization. Saving retains checked validation, atomic write, and round-trip guarantees.
 
 ### Gate all recommendation behavior on interactive mode
 
