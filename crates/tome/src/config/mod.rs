@@ -284,27 +284,6 @@ impl Config {
     /// Call this instead of `save()` from the wizard or any other code that
     /// produces a Config in-memory rather than loading it from disk.
     pub fn save_checked(&self, path: &Path) -> Result<()> {
-        self.save_checked_impl(path, None)
-    }
-
-    /// Checked-save while preserving one directory's absolute path verbatim.
-    ///
-    /// Used for dot-relative `tome add` inputs after they are anchored to the
-    /// invocation directory. Explicit `~/...` inputs still use [`Self::save_checked`]
-    /// and retain the normal portable serialization behavior.
-    pub(crate) fn save_checked_preserving_absolute_directory_path(
-        &self,
-        path: &Path,
-        directory_name: &DirectoryName,
-    ) -> Result<()> {
-        self.save_checked_impl(path, Some(directory_name))
-    }
-
-    fn save_checked_impl(
-        &self,
-        path: &Path,
-        preserve_absolute_directory: Option<&DirectoryName>,
-    ) -> Result<()> {
         // 1. Validation copy: validate() needs absolute paths to detect overlaps,
         //    so build an expanded clone for the check. The caller's Config is
         //    never mutated.
@@ -323,10 +302,8 @@ impl Config {
         //    (lib.rs::sync save chain saves the pre-override Config).
         let mut for_save = self.clone();
         for_save.library_dir = crate::paths::unexpand_tilde(&for_save.library_dir);
-        for (name, dir) in &mut for_save.directories {
-            if preserve_absolute_directory != Some(name) {
-                dir.path = crate::paths::unexpand_tilde(&dir.path);
-            }
+        for dir in for_save.directories.values_mut() {
+            dir.path = crate::paths::unexpand_tilde(&dir.path);
         }
 
         // 3. TOML round-trip: serialize, parse back, re-serialize, compare the

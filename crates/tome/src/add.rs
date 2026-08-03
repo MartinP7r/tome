@@ -267,9 +267,8 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
         bail!("--subdir applies only to Git inputs");
     }
 
-    let preserve_absolute = is_dot_relative(opts.input);
     let expanded_path = crate::config::expand_tilde(&path)?;
-    let resolved_path = if preserve_absolute {
+    let resolved_path = if is_dot_relative(opts.input) {
         std::path::absolute(expanded_path)?
     } else {
         expanded_path
@@ -328,12 +327,8 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
             style(resolved_role.kebab_case()).yellow(),
         );
     } else {
-        config.directories.insert(dir_name.clone(), dir_config);
-        if preserve_absolute {
-            config.save_checked_preserving_absolute_directory_path(opts.config_path, &dir_name)?;
-        } else {
-            config.save_checked(opts.config_path)?;
-        }
+        config.directories.insert(dir_name, dir_config);
+        config.save_checked(opts.config_path)?;
         println!(
             "{} directory '{}' (path: {}, role: {})",
             style("Added").green(),

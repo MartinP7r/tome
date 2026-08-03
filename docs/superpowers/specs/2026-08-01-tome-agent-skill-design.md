@@ -99,13 +99,15 @@ depend on the current working directory.
 For a local path, construct `DirectoryType::Directory`, allow every role from
 `DirectoryType::Directory::valid_roles()`, and default to `synced` when no role
 is supplied. Lexically anchor dot-relative inputs to the `tome add` working
-directory before deriving the default name and store them as absolute paths;
-do not require existence or canonicalize, so symlink identity is preserved.
+directory before deriving the default name; do not require existence or
+canonicalize, so symlink identity is preserved. Save every local addition
+through the normal checked-save pipeline. Anchored paths outside home serialize
+absolute, while paths under home may serialize as portable `~/...`; either form
+resolves to the same add-time location regardless of later working directories.
 Keep explicit `~/...` inputs portable and preserve `--name` overrides. Reject
 Git-only `--branch`, `--tag`, `--rev`, and `--subdir` flags with actionable
-errors. Save through the checked-save pipeline so validation, atomic write, and
-round-trip checks still apply. Keep existing Git add parsing, role validation,
-ref/subdirectory precedence, and success output unchanged.
+errors. Keep existing Git add parsing, role validation, ref/subdirectory
+precedence, and success output unchanged.
 
 ## Desktop Data Folder Label
 

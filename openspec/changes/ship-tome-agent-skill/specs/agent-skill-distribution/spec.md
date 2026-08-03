@@ -19,7 +19,7 @@ The skill package SHALL be installable as a Tome Git source using repository `Ma
 - **THEN** Tome discovers `using-tome` and distributes it to configured targets according to existing machine preferences
 
 ### Requirement: Local directory addition
-`tome add` SHALL classify explicitly path-shaped inputs as local directories, SHALL accept every role valid for `DirectoryType::Directory`, SHALL anchor dot-relative inputs to the invocation working directory without filesystem canonicalization, and SHALL preserve existing Git input behavior and portable tilde-prefixed paths.
+`tome add` SHALL classify explicitly path-shaped inputs as local directories, SHALL accept every role valid for `DirectoryType::Directory`, SHALL anchor dot-relative inputs to the invocation working directory without filesystem canonicalization, and SHALL preserve existing Git input behavior and portable tilde-prefixed paths. Normal checked save MAY serialize an anchored path under home as `~/...`; absolute and tilde representations MUST resolve to the same add-time location independently of later working directories.
 
 #### Scenario: Managed package-manager directory
 - **WHEN** a user runs `tome add ~/.pfw/skills --role managed`
@@ -30,8 +30,8 @@ The skill package SHALL be installable as a Tome Git source using repository `Ma
 - **THEN** Tome rejects the command with an actionable error and leaves configuration unchanged
 
 #### Scenario: Dot-relative source remains stable
-- **WHEN** a user adds `./team-skills` from one working directory and runs Tome later from another
-- **THEN** Tome stores an absolute path anchored to the add-time working directory without resolving source symlinks
+- **WHEN** a user adds `./team-skills` from one working directory, performs a later checked save, and runs Tome from another working directory
+- **THEN** Tome resolves the source to the original add-time location without resolving source symlinks, whether checked save serialized it as an absolute path or portable `~/...`
 
 #### Scenario: Bare GitHub slug remains Git
 - **WHEN** a user runs `tome add owner/repo`

@@ -76,8 +76,10 @@ claude plugin install tome@tome
 
 `tome add` also accepts explicit local paths: absolute paths, `~` paths, and
 dot-relative paths such as `./skills`. Dot-relative inputs are anchored to the
-command's working directory and stored as absolute paths; `~/...` inputs remain
-portable. Local directories default to the write-back `synced` role, so use
+command's working directory. Anchored paths outside your home directory are
+stored as absolute paths; paths under home may use portable `~/...` form. Both
+resolve to the same add-time location, independent of later working directories.
+Local directories default to the write-back `synced` role, so use
 `--role managed` for package-manager-owned skills or `--role source` for other
 read-only directories.
 

@@ -94,9 +94,11 @@ dot-relative (`.`, `..`, `./...`, or `../...`). Bare `owner/repo` inputs remain
 GitHub slugs even if a matching path exists. The default name is the path's
 final component, and local directories default to role `synced`. Dot-relative
 inputs are resolved lexically against the `tome add` working directory and
-stored as absolute paths, so later commands do not reinterpret them from a
-different working directory. This does not canonicalize the source or resolve
-symlinks. Explicit `~/...` inputs retain portable tilde-based serialization.
+do not depend on later commands' working directories. Checked save serializes
+anchored paths outside home as absolute paths and may serialize paths under home
+as portable `~/...`; both resolve to the same add-time location. Anchoring does
+not require the source to exist, canonicalize it, or resolve symlinks. Explicit
+`~/...` inputs retain the same portable behavior.
 
 ```bash
 tome add ~/.pfw/skills --role managed
