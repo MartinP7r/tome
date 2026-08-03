@@ -792,7 +792,7 @@ git commit -m "feat(init): clarify data folder and recommend skills" -m "OpenSpe
 - Consumes: Skill and local-add behavior from Tasks 1-2, plugin commands from Task 3, canonical desktop paths from Task 4, and wizard behavior from Task 5.
 - Produces: User-facing installation instructions, release notes, retained auto-detect acceptance criteria, and completed planning state.
 
-- [ ] **Step 1: Add README installation documentation**
+- [x] **Step 1: Add README installation documentation**
 
 After Quick Start and before Development, add `## Agent Skill` with the cross-tool route first:
 
@@ -816,7 +816,7 @@ claude plugin install tome@tome
 ```
 ````
 
-- [ ] **Step 2: Document init behavior in the command reference**
+- [x] **Step 2: Document init behavior in the command reference**
 
 Add a `### tome init` section before `### tome sync` in `docs/src/commands.md`. State:
 
@@ -825,7 +825,7 @@ Add a `### tome init` section before `### tome sync` in `docs/src/commands.md`. 
 - post-init sync clones it immediately;
 - `--no-input` omits the recommendation and performs no new official-repository network request.
 
-- [ ] **Step 3: Add an Unreleased changelog entry**
+- [x] **Step 3: Add an Unreleased changelog entry**
 
 Restore the standard accumulator above `0.16.4`:
 
@@ -849,7 +849,7 @@ At the bottom of `CHANGELOG.md`, replace the stale comparison link and add the r
 [0.16.4]: https://github.com/MartinP7r/tome/compare/v0.16.3...v0.16.4
 ```
 
-- [ ] **Step 4: Refine the existing auto-subdirectory task without implementing it**
+- [x] **Step 4: Refine the existing auto-subdirectory task without implementing it**
 
 Append an acceptance criterion to `.planning/todos/pending/2026-06-26-tome-add-auto-detect-subdir.md`:
 
@@ -862,7 +862,7 @@ Append an acceptance criterion to `.planning/todos/pending/2026-06-26-tome-add-a
 
 Do not change production `tome add` code in this task.
 
-- [ ] **Step 5: Complete the fulfilled planning todo through GSD**
+- [x] **Step 5: Complete the fulfilled planning todo through GSD**
 
 Run:
 
@@ -872,7 +872,7 @@ gsd-sdk query todo.complete 2026-07-15-define-agent-skills-for-tome.md
 
 Expected: JSON reports `"completed": true`; the todo moves from `pending/` to `completed/` with a completion date.
 
-- [ ] **Step 6: Run focused package and behavior validation**
+- [x] **Step 6: Run focused package and behavior validation**
 
 Run:
 
@@ -885,7 +885,7 @@ cargo test -p tome --test cli_init -- --nocapture
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Run the complete quality gate**
+- [x] **Step 7: Run the complete quality gate**
 
 Run:
 
@@ -895,7 +895,7 @@ make ci
 
 Expected: format check, Clippy with `-D warnings`, and all tests pass.
 
-- [ ] **Step 8: Review the complete diff**
+- [x] **Step 8: Review the complete diff**
 
 Run:
 
@@ -908,7 +908,7 @@ git diff
 
 Confirm `.claude/scheduled_tasks.lock` remains untracked and unstaged. Confirm no automatic subdirectory implementation or unrelated Phase 28 planning changes entered the diff.
 
-- [ ] **Step 9: Commit documentation and planning closure**
+- [x] **Step 9: Commit documentation and planning closure**
 
 ```bash
 git add \

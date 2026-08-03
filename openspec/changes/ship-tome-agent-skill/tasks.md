@@ -36,8 +36,8 @@
 
 ## 6. Documentation And Closure
 
-- [ ] 6.1 Document local-path add behavior plus cross-tool and Claude plugin installation in README and command reference
-- [ ] 6.2 Restore the Unreleased changelog section and current comparison links
-- [ ] 6.3 Refine the existing auto-subdirectory todo with the official repository regression fixture without implementing the feature
-- [ ] 6.4 Complete the fulfilled agent-skills planning todo through `gsd-sdk`
-- [ ] 6.5 Run skill, plugin, focused Rust/UI, and full `make ci` verification
+- [x] 6.1 Document local-path add behavior plus cross-tool and Claude plugin installation in README and command reference
+- [x] 6.2 Restore the Unreleased changelog section and current comparison links
+- [x] 6.3 Refine the existing auto-subdirectory todo with the official repository regression fixture without implementing the feature
+- [x] 6.4 Complete the fulfilled agent-skills planning todo through `gsd-sdk`
+- [x] 6.5 Run skill, plugin, focused Rust/UI, and full `make ci` verification
