@@ -506,7 +506,9 @@ pub fn run(cli: Cli) -> Result<()> {
             .config
             .clone()
             .unwrap_or_else(|| config::resolve_config_dir(&tome_home).join("tome.toml"));
-        if let Err(e) = Config::load_or_default(Some(&selected_config)) {
+        if selected_config.exists()
+            && let Err(e) = Config::load(&selected_config)
+        {
             eprintln!(
                 "warning: existing config is malformed ({}), the wizard will create a new one",
                 e

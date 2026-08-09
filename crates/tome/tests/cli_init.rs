@@ -236,6 +236,10 @@ fn init_no_input_writes_config_and_reloads() {
         output.status.success(),
         "tome init --no-input failed.\nstdout:\n{stdout}\nstderr:\n{stderr}",
     );
+    assert!(
+        !stderr.contains("existing config is malformed"),
+        "fresh init must not report a missing config as malformed:\n{stderr}",
+    );
 
     assert!(
         config_path.exists(),
