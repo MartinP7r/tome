@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Official `using-tome` agent skill** for safe setup, configuration, sync,
+  diagnosis, and recovery. The repository now doubles as a Claude plugin
+  marketplace (`tome@tome`), and interactive `tome init` can add the same skill
+  as a cross-tool Git source. Noninteractive init remains network-source-free.
+
 ## [0.16.4] - 2026-07-30
 
 ### Fixed
@@ -1103,7 +1112,8 @@ role = "target"
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.16.4...HEAD
+[0.16.4]: https://github.com/MartinP7r/tome/compare/v0.16.3...v0.16.4
 [0.7.0]: https://github.com/MartinP7r/tome/compare/v0.6.2...v0.7.0
 [0.6.0]: https://github.com/MartinP7r/tome/compare/v0.5.4...v0.6.0
 [0.3.3]: https://github.com/MartinP7r/tome/compare/v0.3.2...v0.3.3

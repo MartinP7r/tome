@@ -1,0 +1,14 @@
+{
+  "name": "tome",
+  "displayName": "Tome",
+  "version": "1.0.0",
+  "description": "Operate Tome skill libraries safely across AI coding tools.",
+  "author": {
+    "name": "Martin Pfundmair",
+    "url": "https://github.com/MartinP7r"
+  },
+  "homepage": "https://github.com/MartinP7r/tome",
+  "repository": "https://github.com/MartinP7r/tome",
+  "license": "MIT",
+  "keywords": ["agent-skills", "skill-management", "claude-code", "codex"]
+}

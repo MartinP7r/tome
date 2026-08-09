@@ -36,7 +36,7 @@
 
 **Interfaces:**
 - Consumes: Current CLI behavior documented by `tome <command> --help` and the four user docs above.
-- Produces: A portable `using-tome` skill discovered from `skills/using-tome/SKILL.md`; Task 2 packages this exact directory as a Claude plugin.
+- Produces: A portable `using-tome` skill discovered from `skills/using-tome/SKILL.md`; Task 3 packages this exact directory as a Claude plugin.
 
 - [ ] **Step 1: Run three RED baseline scenarios without a Tome skill**
 
@@ -133,7 +133,7 @@ Create `references/troubleshooting.md` with this diagnosis order:
 
 1. Capture `tome status` and `tome doctor`.
 2. Inspect effective config with `tome config`.
-3. Reproduce safely with `tome sync --dry-run --verbose`; use `TOME_LOG=tome::sync=debug` only when more detail is needed.
+3. Reproduce safely with `tome sync --dry-run --verbose`; use `TOME_LOG=tome=debug` only when more detail is needed.
 4. Classify the issue as missing source path, wrong role, missing Git `subdir`, machine disable/filter, Unowned ownership, foreign target entry, or failed managed-plugin reconciliation.
 5. Apply the narrow Tome command, rerun sync, and verify status/doctor.
 
@@ -191,7 +191,134 @@ git commit -m "feat: add Tome operations agent skill"
 
 ---
 
-### Task 2: Package the skill as a Claude plugin and marketplace
+### Task 2: Implement local path support in `tome add`
+
+**Files:**
+- Modify: `crates/tome/src/cli.rs` (`Command::Add` positional naming/help)
+- Modify: `crates/tome/src/lib.rs` (`cmd_add` argument plumbing)
+- Modify: `crates/tome/src/add.rs` (source classification, local entry construction, checked save)
+- Modify: `crates/tome/tests/cli_add.rs` (local-path end-to-end coverage)
+
+**Interfaces:**
+- Consumes: `DirectoryType::Directory::valid_roles()`, `config::expand_tilde`, and `Config::save_checked`.
+- Produces: `AddOptions { input, ... }`, private `AddSource::{Local, Git}` classification, and working `tome add ~/.pfw/skills --role managed` behavior used by Task 1 guidance.
+
+- [ ] **Step 1: Write failing source-classification unit tests**
+
+Add table-driven tests in `add.rs::tests` asserting that `/tmp/skills`, `~/.pfw/skills`, `.`, `..`, `./skills`, and `../skills` classify as local, while `owner/repo`, HTTPS URLs, SCP-style SSH URLs, and GitHub tree URLs classify as Git. Include a fixture directory named `owner/repo` and prove classification stays Git; never call `Path::exists()` to decide.
+
+- [ ] **Step 2: Write failing local-entry unit tests**
+
+Drive `add()` with an isolated config path and assert:
+
+```rust
+let entry = config.directories().get("skills").unwrap();
+assert_eq!(entry.directory_type, DirectoryType::Directory);
+assert_eq!(entry.role(), DirectoryRole::Managed);
+assert_eq!(entry.git_ref, None);
+assert_eq!(entry.subdir, None);
+```
+
+Cover default `synced` role, `--name` override, and one rejection test each for local `--branch`, `--tag`, `--rev`, and `--subdir`. Every rejection must leave the config file unchanged.
+
+- [ ] **Step 3: Write the failing CLI integration test**
+
+In `crates/tome/tests/cli_add.rs`, create a temporary HOME and existing `.pfw/skills` directory, then run:
+
+```rust
+tome()
+    .env("HOME", tmp.path())
+    .env("TOME_HOME", &tome_home)
+    .args(["add", "~/.pfw/skills", "--role", "managed"])
+    .assert()
+    .success();
+```
+
+Load the written config and assert directory `skills` has `type = directory`, role `managed`, and the expected expanded path. Read raw TOML and assert it preserves `path = "~/.pfw/skills"`.
+
+- [ ] **Step 4: Run focused tests and verify RED**
+
+Run:
+
+```bash
+cargo test -p tome add::tests -- --nocapture
+cargo test -p tome --test cli_add -- --nocapture
+```
+
+Expected: new local tests fail because all inputs currently construct Git entries; existing Git tests remain passing.
+
+- [ ] **Step 5: Implement deterministic source classification**
+
+Rename the positional field from `url` to `input` through `cli.rs`, `lib.rs`, and `AddOptions`. Add:
+
+```rust
+enum AddSource {
+    Local(PathBuf),
+    Git(String),
+}
+
+fn classify_source(input: &str) -> AddSource {
+    let path = Path::new(input);
+    let explicit_relative = matches!(input, "." | "..")
+        || input.starts_with("./")
+        || input.starts_with("../");
+    let tilde = input == "~" || input.starts_with("~/");
+
+    if path.is_absolute() || explicit_relative || tilde {
+        AddSource::Local(path.to_path_buf())
+    } else {
+        AddSource::Git(input.to_string())
+    }
+}
+```
+
+Do not use filesystem existence. Preserve every existing Git parser and warning after the Git branch is selected.
+
+- [ ] **Step 6: Implement local directory construction and checked save**
+
+For `AddSource::Local`, reject any Git ref or subdirectory option, expand tilde for validation/name derivation, derive the default name from the final component, and construct:
+
+```rust
+DirectoryConfig {
+    path: expanded_path,
+    directory_type: DirectoryType::Directory,
+    role: opts.role,
+    git_ref: None,
+    subdir: None,
+    override_applied: false,
+}
+```
+
+Validate explicit roles against `DirectoryType::Directory.valid_roles()`. Keep omitted role as `None` so it resolves to `synced`. Save both local and Git additions with `config.save_checked(opts.config_path)` rather than unchecked `save`; retain dry-run no-write behavior and render local success output as a directory path, not as `git: ...`.
+
+- [ ] **Step 7: Update CLI help without changing flag compatibility**
+
+Use positional value name `URL_OR_PATH`. Explain in long help that explicit local paths are absolute, tilde-prefixed, or dot-relative; bare `owner/repo` remains Git. State that ref/subdirectory flags apply only to Git inputs.
+
+- [ ] **Step 8: Run GREEN tests and regression gates**
+
+Run:
+
+```bash
+cargo test -p tome add::tests -- --nocapture
+cargo test -p tome --test cli_add -- --nocapture
+cargo fmt -- --check
+cargo clippy -p tome --all-targets -- -D warnings
+```
+
+Expected: all new local tests and all existing Git add tests pass; format and Clippy exit 0.
+
+- [ ] **Step 9: Commit local add support**
+
+```bash
+git add crates/tome/src/cli.rs crates/tome/src/lib.rs crates/tome/src/add.rs crates/tome/tests/cli_add.rs
+git diff --cached --check
+git commit -m "feat(add): support local skill directories" -m "OpenSpec: ship-tome-agent-skill"
+```
+
+---
+
+### Task 3: Package the skill as a Claude plugin and marketplace
 
 **Files:**
 - Create: `.claude-plugin/plugin.json`
@@ -297,17 +424,172 @@ git commit -m "feat: package Tome skill as Claude plugin"
 
 ---
 
-### Task 3: Add the interactive init recommendation
+### Task 4: Display the canonical Tome data folder
 
 **Files:**
+- Modify: `crates/tome/src/status.rs` (`StatusReport`, gather, struct fixtures/tests)
+- Modify generated: `crates/tome-desktop/ui/src/bindings.ts`
+- Modify: `crates/tome-desktop/ui/src/views/StatusView.tsx`
+- Modify: `crates/tome-desktop/ui/src/components/KeyValueRow.tsx`
+- Modify: `crates/tome-desktop/ui/src/components/KeyValueRow.module.css`
+- Create: `crates/tome-desktop/ui/src/views/__tests__/StatusView.test.tsx`
+
+**Interfaces:**
+- Consumes: `TomePaths::tome_home()` and existing `StatusReport.library_dir`.
+- Produces: additive `StatusReport.tome_home: PathBuf`, generated TypeScript `tome_home: string`, and a status UI that presents data folder and library independently.
+
+- [x] **Step 1: Write the failing Rust test**
+
+Add a status test that constructs unrelated absolute Tome home and library paths, gathers status, and asserts:
+
+```rust
+assert_eq!(report.tome_home, paths.tome_home());
+assert_eq!(report.library_dir, paths.library_dir());
+assert_ne!(report.tome_home, report.library_dir);
+```
+
+Run `cargo test -p tome status::tests::gather_includes_canonical_tome_home -- --nocapture`. Expected: FAIL because `StatusReport` has no `tome_home` field.
+
+- [x] **Step 2: Add canonical Tome home to the Rust report**
+
+Add this field immediately before `library_dir`:
+
+```rust
+/// Root of Tome-managed portable data. Distinct from the configurable skill library
+/// and machine-local settings under `~/.config/tome`.
+pub tome_home: PathBuf,
+```
+
+Populate it in `gather()` with `paths.tome_home().to_path_buf()`. Update every direct `StatusReport` test fixture with an explicit Tome home; do not derive fixture values from `library_dir` unless the fixture intentionally models the default layout. Preserve existing text rendering and all current fields.
+
+- [x] **Step 3: Regenerate TypeScript bindings**
+
+Run:
+
+```bash
+cargo run -p tome-desktop --bin gen-bindings
+```
+
+Expected: `bindings.ts` adds `tome_home: string` to `StatusReport_Serialize` with no unrelated generated changes.
+
+- [x] **Step 4: Write the failing React rendering test**
+
+Create `StatusView.test.tsx`, mock `useStatus()` with `tome_home = "/portable/tome"` and `library_dir = "/external/skills"`, render `StatusView`, and assert:
+
+```ts
+expect(screen.getByText("TOME DATA FOLDER")).toBeInTheDocument();
+expect(screen.getByText("/portable/tome")).toBeInTheDocument();
+expect(screen.getByText("LIBRARY")).toBeInTheDocument();
+expect(screen.getByText("/external/skills")).toBeInTheDocument();
+expect(screen.getByText(/machine settings live in ~\/\.config\/tome/i)).toBeInTheDocument();
+expect(screen.queryByText("TOME HOME")).not.toBeInTheDocument();
+```
+
+Run `npm test -- StatusView.test.tsx` from `crates/tome-desktop/ui`. Expected: FAIL because the view still derives and labels Tome home.
+
+- [x] **Step 5: Add descriptive row support**
+
+Extend `KeyValueRowProps` with optional `description?: ReactNode`. Wrap value and description in a `.content` element, render description beneath the value, and add subdued 12px description styling that works in light/dark mode. Preserve the existing label, value, mono, and trailing behavior for rows without descriptions.
+
+- [x] **Step 6: Replace the desktop heuristic**
+
+Delete `deriveTomeHome`. Render:
+
+```tsx
+<KeyValueRow
+  label="TOME DATA FOLDER"
+  value={status.tome_home}
+  description="Portable Tome data; machine settings live in ~/.config/tome."
+  mono
+/>
+<KeyValueRow
+  label="LIBRARY"
+  value={status.library_dir}
+  mono
+  trailing={<span>{formatSkillCount(status)}</span>}
+/>
+```
+
+Keep the underlying Rust/API identifier `tome_home`; only user-facing copy changes.
+
+- [x] **Step 7: Run focused Rust and UI verification**
+
+Run:
+
+```bash
+cargo test -p tome status::tests -- --nocapture
+cargo run -p tome-desktop --bin gen-bindings
+npm ci
+npm test -- StatusView.test.tsx
+npm run build
+cargo fmt -- --check
+cargo clippy -p tome --all-targets -- -D warnings
+```
+
+Expected: all commands pass and a final binding regeneration leaves no diff beyond the intended `tome_home` field.
+
+- [x] **Step 8: Commit the canonical data-folder change**
+
+```bash
+git add \
+  crates/tome/src/status.rs \
+  crates/tome-desktop/ui/src/bindings.ts \
+  crates/tome-desktop/ui/src/views/StatusView.tsx \
+  crates/tome-desktop/ui/src/views/__tests__/StatusView.test.tsx \
+  crates/tome-desktop/ui/src/components/KeyValueRow.tsx \
+  crates/tome-desktop/ui/src/components/KeyValueRow.module.css
+git diff --cached --check
+git commit -m "fix(desktop): clarify the Tome data folder" -m "OpenSpec: ship-tome-agent-skill"
+```
+
+---
+
+### Task 5: Add the interactive init recommendation
+
+**Files:**
+- Modify: `crates/tome/src/lib.rs:470-623` (resolve selected data folder before machine-state detection and post-init sync)
 - Modify: `crates/tome/src/wizard.rs:16-19, 128-380, 461-486, tests module`
 - Modify: `crates/tome/tests/cli_init.rs:64-197`
 
 **Interfaces:**
-- Consumes: `DirectoryName`, `DirectoryConfig`, `DirectoryType::Git`, and `DirectoryRole::Source` from `crate::config`.
-- Produces: `tome_skills_directory() -> Result<(DirectoryName, DirectoryConfig)>`, `has_tome_skills_source(&BTreeMap<DirectoryName, DirectoryConfig>) -> bool`, and `insert_tome_skills_source(&mut BTreeMap<DirectoryName, DirectoryConfig>) -> Result<bool>`.
+- Consumes: `DirectoryName`, `DirectoryConfig`, `DirectoryType::Git`, `DirectoryRole::Source`, `TomeHomeSource`, and existing brownfield detection.
+- Produces: `choose_tome_home(...) -> Result<PathBuf>` called before `detect_machine_state`, plus `tome_skills_directory()`, `has_tome_skills_source(...)`, and `insert_tome_skills_source(...)`.
 
-- [ ] **Step 1: Write failing pure-helper unit tests**
+- [x] **Step 1: Write canonical data-folder regression tests**
+
+Add tests that pin these invariants:
+
+- `choose_tome_home` under `--no-input` returns the initially resolved path without prompting.
+- Custom-path validation accepts an existing absolute repository and rejects relative paths or existing files.
+- `detect_machine_state(home, selected_repo)` finds `selected_repo/.tome/tome.toml` and returns the established brownfield state.
+- A helper constructing post-init paths uses the selected Tome home, not the initial default, when library configuration is unchanged.
+
+The existing `init_brownfield_*` CLI tests remain the integration anchor for Use existing / Edit / Reinitialize / Cancel.
+
+- [x] **Step 2: Move Step 0 before machine-state detection**
+
+Extract the Step 0 prompt from `wizard::run` into:
+
+```rust
+pub(crate) fn choose_tome_home(
+    initial: &Path,
+    source: TomeHomeSource,
+    no_input: bool,
+) -> Result<PathBuf>
+```
+
+Keep default/custom selection and optional XDG pointer persistence in this function, but change user-facing copy to:
+
+```text
+-- Step 0: Tome data folder
+Where should Tome store its portable data?
+Tome data folder path
+Machine-local settings remain in ~/.config/tome.
+```
+
+In `lib.rs`, call it immediately after surfacing the initially resolved path and before `detect_machine_state`. Pass the returned path to machine-state detection and `wizard::run`, and move it into `TomePaths::new` for post-init sync. Remove Step 0 from `wizard::run` and remove its `TomeHomeSource` parameter. Update the informational line from `resolved tome_home:` to `Tome data folder:` while preserving the source label.
+
+- [x] **Step 3: Write failing pure-helper unit tests**
 
 Add tests in `wizard.rs::tests` for these contracts:
 
@@ -353,7 +635,7 @@ fn detects_equivalent_tome_skills_source_under_another_name() {
 }
 ```
 
-- [ ] **Step 2: Write the failing noninteractive regression assertion**
+- [x] **Step 4: Write the failing noninteractive regression assertion**
 
 Extend `init_dry_run_no_input_empty_home` in `crates/tome/tests/cli_init.rs`:
 
@@ -370,7 +652,7 @@ assert!(
 
 The existing empty-directories assertion remains. This test passes before implementation and is a regression guard, while the new helper tests provide RED.
 
-- [ ] **Step 3: Run focused tests and verify RED**
+- [x] **Step 5: Run focused tests and verify RED**
 
 Run:
 
@@ -382,7 +664,7 @@ cargo test -p tome --test cli_init init_dry_run_no_input_empty_home -- --nocaptu
 
 Expected: unit tests fail to compile because the helpers do not exist; the CLI regression test passes.
 
-- [ ] **Step 4: Implement the pure helper functions**
+- [x] **Step 6: Implement the pure helper functions**
 
 Add constants and helpers near `assemble_config`:
 
@@ -432,7 +714,7 @@ fn insert_tome_skills_source(
 
 Keep these helpers private; only co-located unit tests need direct access.
 
-- [ ] **Step 5: Add the interactive prompt**
+- [x] **Step 7: Add the interactive prompt**
 
 Immediately after `configure_directories(...)` and before discovery, add an interactive-only block:
 
@@ -460,7 +742,7 @@ if !no_input && !has_tome_skills_source(&directories) && !directories.contains_k
 
 Do not prompt when `tome-skills` is occupied by another entry; preserve it silently per the approved no-overwrite contract. The summary table later in the wizard shows whether the official source was added.
 
-- [ ] **Step 6: Run focused tests and verify GREEN**
+- [x] **Step 8: Run focused tests and verify GREEN**
 
 Run:
 
@@ -468,13 +750,15 @@ Run:
 cargo test -p tome wizard::tests::tome_skills -- --nocapture
 cargo test -p tome wizard::tests::insert_tome_skills -- --nocapture
 cargo test -p tome wizard::tests::detects_equivalent -- --nocapture
+cargo test -p tome wizard::tests::choose_tome_home -- --nocapture
 cargo test -p tome --test cli_init init_dry_run_no_input_empty_home -- --nocapture
 cargo test -p tome --test cli_init init_dry_run_no_input_seeded_home -- --nocapture
+cargo test -p tome --test cli_init init_brownfield -- --nocapture
 ```
 
 Expected: all tests pass; noninteractive generated config remains network-source-free.
 
-- [ ] **Step 7: Check formatting and lint for the Rust change**
+- [x] **Step 9: Check formatting and lint for the Rust change**
 
 Run:
 
@@ -485,17 +769,17 @@ cargo clippy -p tome --all-targets -- -D warnings
 
 Expected: both exit 0. If rustfmt reports changes, run `cargo fmt`, inspect only the intended files, and rerun both checks.
 
-- [ ] **Step 8: Commit the wizard change**
+- [x] **Step 10: Commit the wizard change**
 
 ```bash
-git add crates/tome/src/wizard.rs crates/tome/tests/cli_init.rs
+git add crates/tome/src/lib.rs crates/tome/src/wizard.rs crates/tome/tests/cli_init.rs
 git diff --cached --check
-git commit -m "feat(init): recommend Tome agent skills"
+git commit -m "feat(init): clarify data folder and recommend skills" -m "OpenSpec: ship-tome-agent-skill"
 ```
 
 ---
 
-### Task 4: Document installation, preserve the deferred task, and verify end-to-end
+### Task 6: Document installation, preserve the deferred task, and verify end-to-end
 
 **Files:**
 - Modify: `README.md:46-63`
@@ -505,10 +789,10 @@ git commit -m "feat(init): recommend Tome agent skills"
 - Move through GSD SDK: `.planning/todos/pending/2026-07-15-define-agent-skills-for-tome.md` to `.planning/todos/completed/`
 
 **Interfaces:**
-- Consumes: Installation commands from Tasks 1-2 and wizard behavior from Task 3.
+- Consumes: Skill and local-add behavior from Tasks 1-2, plugin commands from Task 3, canonical desktop paths from Task 4, and wizard behavior from Task 5.
 - Produces: User-facing installation instructions, release notes, retained auto-detect acceptance criteria, and completed planning state.
 
-- [ ] **Step 1: Add README installation documentation**
+- [x] **Step 1: Add README installation documentation**
 
 After Quick Start and before Development, add `## Agent Skill` with the cross-tool route first:
 
@@ -532,7 +816,7 @@ claude plugin install tome@tome
 ```
 ````
 
-- [ ] **Step 2: Document init behavior in the command reference**
+- [x] **Step 2: Document init behavior in the command reference**
 
 Add a `### tome init` section before `### tome sync` in `docs/src/commands.md`. State:
 
@@ -541,7 +825,7 @@ Add a `### tome init` section before `### tome sync` in `docs/src/commands.md`. 
 - post-init sync clones it immediately;
 - `--no-input` omits the recommendation and performs no new official-repository network request.
 
-- [ ] **Step 3: Add an Unreleased changelog entry**
+- [x] **Step 3: Add an Unreleased changelog entry**
 
 Restore the standard accumulator above `0.16.4`:
 
@@ -565,7 +849,7 @@ At the bottom of `CHANGELOG.md`, replace the stale comparison link and add the r
 [0.16.4]: https://github.com/MartinP7r/tome/compare/v0.16.3...v0.16.4
 ```
 
-- [ ] **Step 4: Refine the existing auto-subdirectory task without implementing it**
+- [x] **Step 4: Refine the existing auto-subdirectory task without implementing it**
 
 Append an acceptance criterion to `.planning/todos/pending/2026-06-26-tome-add-auto-detect-subdir.md`:
 
@@ -578,7 +862,7 @@ Append an acceptance criterion to `.planning/todos/pending/2026-06-26-tome-add-a
 
 Do not change production `tome add` code in this task.
 
-- [ ] **Step 5: Complete the fulfilled planning todo through GSD**
+- [x] **Step 5: Complete the fulfilled planning todo through GSD**
 
 Run:
 
@@ -588,7 +872,7 @@ gsd-sdk query todo.complete 2026-07-15-define-agent-skills-for-tome.md
 
 Expected: JSON reports `"completed": true`; the todo moves from `pending/` to `completed/` with a completion date.
 
-- [ ] **Step 6: Run focused package and behavior validation**
+- [x] **Step 6: Run focused package and behavior validation**
 
 Run:
 
@@ -601,7 +885,7 @@ cargo test -p tome --test cli_init -- --nocapture
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Run the complete quality gate**
+- [x] **Step 7: Run the complete quality gate**
 
 Run:
 
@@ -611,7 +895,7 @@ make ci
 
 Expected: format check, Clippy with `-D warnings`, and all tests pass.
 
-- [ ] **Step 8: Review the complete diff**
+- [x] **Step 8: Review the complete diff**
 
 Run:
 
@@ -624,7 +908,7 @@ git diff
 
 Confirm `.claude/scheduled_tasks.lock` remains untracked and unstaged. Confirm no automatic subdirectory implementation or unrelated Phase 28 planning changes entered the diff.
 
-- [ ] **Step 9: Commit documentation and planning closure**
+- [x] **Step 9: Commit documentation and planning closure**
 
 ```bash
 git add \
@@ -637,7 +921,7 @@ git diff --cached --check
 git commit -m "docs: publish Tome agent skill installation"
 ```
 
-- [ ] **Step 10: Push and verify remote synchronization**
+- [x] **Step 10: Push and verify remote synchronization**
 
 ```bash
 git push

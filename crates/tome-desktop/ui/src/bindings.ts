@@ -1091,6 +1091,11 @@ export type StatusReport = StatusReport_Serialize | StatusReport_Deserialize;
 /**  Complete status report for the tome system. */
 export type StatusReport_Deserialize = {
 	configured: boolean,
+	/**
+	 *  Root of Tome-managed portable data. Distinct from the configurable skill library
+	 *  and machine-local settings under `~/.config/tome`.
+	 */
+	tome_home: string,
 	library_dir: string,
 	/**  Number of skills consolidated in the library, or an error message. */
 	library_count: CountOrError_Deserialize,
@@ -1127,6 +1132,11 @@ export type StatusReport_Deserialize = {
 /**  Complete status report for the tome system. */
 export type StatusReport_Serialize = {
 	configured: boolean,
+	/**
+	 *  Root of Tome-managed portable data. Distinct from the configurable skill library
+	 *  and machine-local settings under `~/.config/tome`.
+	 */
+	tome_home: string,
 	library_dir: string,
 	/**  Number of skills consolidated in the library, or an error message. */
 	library_count: CountOrError_Serialize,

@@ -1,5 +1,6 @@
 ---
 created: 2026-07-15T01:10:16.896Z
+completed: 2026-08-02
 title: Define agent skills for tome
 area: planning
 files:

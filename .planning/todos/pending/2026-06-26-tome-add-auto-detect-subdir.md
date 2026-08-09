@@ -23,6 +23,10 @@ found at the repo root but one or more are found in a subdirectory:
    ("Skills found in: skills/, extras/ — use which?") or accept them all as separate dirs.
 3. If a single unambiguous subdir is found, apply it silently and note it in the output
    ("Detected skill subdirectory: skills/").
+4. Regression fixture: `tome add MartinP7r/tome` detects the repository's
+   `skills/using-tome/SKILL.md`, persists `subdir = "skills"`, and reports the
+   detected subdirectory. This replaces the explicit `--subdir skills` needed
+   by the initial agent-skill release.
 
 The existing `--subdir` flag stays; explicit always wins over auto-detected. The clone
 already happens as part of `tome add` (via `git.rs`), so no extra network round-trip is

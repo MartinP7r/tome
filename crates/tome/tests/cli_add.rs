@@ -1,8 +1,176 @@
 use assert_fs::TempDir;
 use predicates::prelude::*;
+use tome::config::{Config, DirectoryName, DirectoryRole, DirectoryType, expand_tilde};
 
 mod common;
 use common::*;
+
+#[test]
+fn test_add_managed_local_directory_preserves_portable_path() {
+    let tmp = TempDir::new().unwrap();
+    let tome_home = tmp.path().join("tome-home");
+    std::fs::create_dir_all(tmp.path().join(".pfw/skills")).unwrap();
+
+    tome()
+        .env("HOME", tmp.path())
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .args(["add", "~/.pfw/skills", "--role", "managed"])
+        .assert()
+        .success();
+
+    let config_path = tome_home.join("tome.toml");
+    let config = Config::load(&config_path).unwrap();
+    let entry = config
+        .directories()
+        .get(&DirectoryName::new("skills").unwrap())
+        .unwrap();
+    assert_eq!(entry.directory_type, DirectoryType::Directory);
+    assert_eq!(entry.role(), DirectoryRole::Managed);
+    assert_eq!(
+        entry.path,
+        expand_tilde(std::path::Path::new("~/.pfw/skills")).unwrap()
+    );
+
+    let raw = std::fs::read_to_string(config_path).unwrap();
+    assert!(raw.contains("path = \"~/.pfw/skills\""), "{raw}");
+}
+
+#[test]
+fn test_add_dot_relative_directory_is_anchored_across_working_directories() {
+    let tmp = TempDir::new().unwrap();
+    let home_input = tmp.path().join("home");
+    std::fs::create_dir_all(&home_input).unwrap();
+    // Avoid macOS's /var -> /private/var alias so HOME and process CWD agree.
+    let home = home_input.canonicalize().unwrap();
+    let add_cwd = home.join("project");
+    let source = add_cwd.join("team-skills");
+    let later_cwd = home.join("elsewhere");
+    let tome_home = home.join("tome-home");
+    let other_source = home.join("other-skills");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&later_cwd).unwrap();
+    std::fs::create_dir_all(&other_source).unwrap();
+
+    tome()
+        .current_dir(&add_cwd)
+        .env("HOME", &home)
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .args(["add", "./team-skills"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(source.display().to_string()));
+
+    let config_path = tome_home.join("tome.toml");
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw.contains("path = \"~/project/team-skills\""),
+        "anchored under-HOME path should use normal portable serialization: {raw}"
+    );
+
+    tome()
+        .current_dir(&later_cwd)
+        .env("HOME", &home)
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .args(["add", "~/other-skills", "--role", "source"])
+        .assert()
+        .success();
+
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw.contains("path = \"~/project/team-skills\""),
+        "subsequent checked save must retain the stable portable path: {raw}"
+    );
+
+    tome()
+        .current_dir(&later_cwd)
+        .env("HOME", &home)
+        .env("TOME_HOME", &tome_home)
+        .env("NO_COLOR", "1")
+        .arg("config")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(source.display().to_string()));
+}
+
+#[test]
+fn test_add_preserves_portable_paths_when_machine_override_is_configured() {
+    let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let tome_home = home.join("tome-home");
+    let library = tome_home.join("library");
+    let portable_source = home.join("portable-skills");
+    let override_source = home.join("machine-skills");
+    let local_source = home.join("local-skills");
+    let config_path = tome_home.join("portable.toml");
+    let machine_path = home.join("machine.toml");
+    std::fs::create_dir_all(&library).unwrap();
+    std::fs::create_dir_all(&portable_source).unwrap();
+    std::fs::create_dir_all(&override_source).unwrap();
+    std::fs::create_dir_all(&local_source).unwrap();
+    std::fs::write(
+        &config_path,
+        format!(
+            "library_dir = \"{}\"\n\
+             [directories.existing]\n\
+             path = \"~/portable-skills\"\n\
+             type = \"directory\"\n\
+             role = \"source\"\n",
+            library.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        &machine_path,
+        format!(
+            "[directory_overrides.existing]\npath = \"{}\"\n",
+            override_source.display()
+        ),
+    )
+    .unwrap();
+
+    for args in [
+        vec![
+            "add".to_string(),
+            local_source.display().to_string(),
+            "--role".to_string(),
+            "source".to_string(),
+        ],
+        vec![
+            "add".to_string(),
+            "example/skills".to_string(),
+            "--role".to_string(),
+            "source".to_string(),
+        ],
+    ] {
+        tome()
+            .env("HOME", &home)
+            .env_remove("TOME_HOME")
+            .env("NO_COLOR", "1")
+            .arg("--config")
+            .arg(&config_path)
+            .arg("--machine")
+            .arg(&machine_path)
+            .args(args)
+            .assert()
+            .success();
+    }
+
+    let raw = std::fs::read_to_string(&config_path).unwrap();
+    assert!(raw.contains("path = \"~/portable-skills\""), "{raw}");
+    assert!(raw.contains("[directories.local-skills]"), "{raw}");
+    assert!(raw.contains("[directories.skills]"), "{raw}");
+    assert!(
+        !raw.contains(&override_source.display().to_string()),
+        "machine override leaked into portable config: {raw}"
+    );
+    assert!(
+        !tome_home.join("tome.toml").exists(),
+        "add must save to the explicit --config path"
+    );
+}
 
 #[test]
 fn test_add_happy_path() {

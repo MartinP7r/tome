@@ -28,6 +28,10 @@ Add an interactive `tome init` recommendation that can register the official
 skill as a Git source. Package the same skill as a Claude plugin and marketplace
 entry so users can choose either installation route.
 
+Make the already-documented local-path form of `tome add` real so agents can
+add package-manager-owned directories with an explicit safe role instead of
+being taught a command the CLI rejects.
+
 ## Skill Package
 
 Store the skill in the repository's standard root-level skill directory:
@@ -82,6 +86,43 @@ Guide agents to:
    the first repair response.
 6. Preserve user data and use backup or plan/preview flows before destructive
    operations.
+
+## Local Path Support In `tome add`
+
+Classify explicitly path-shaped inputs as local directories before Git URL
+parsing: absolute paths; `~` and `~/...`; and `.`, `..`, `./...`, or `../...`.
+Continue treating URLs, SCP-style SSH inputs, bare `owner/repo` slugs, GitHub
+`/tree/<ref>/<subdir>` forms, and other legacy inputs as Git sources. Do not
+classify by filesystem existence because that would make `owner/repo` behavior
+depend on the current working directory.
+
+For a local path, construct `DirectoryType::Directory`, allow every role from
+`DirectoryType::Directory::valid_roles()`, and default to `synced` when no role
+is supplied. Lexically anchor dot-relative inputs to the `tome add` working
+directory before deriving the default name; do not require existence or
+canonicalize, so symlink identity is preserved. Save every local addition
+through the normal checked-save pipeline. Anchored paths outside home serialize
+absolute, while paths under home may serialize as portable `~/...`; either form
+resolves to the same add-time location regardless of later working directories.
+Keep explicit `~/...` inputs portable and preserve `--name` overrides. Reject
+Git-only `--branch`, `--tag`, `--rev`, and `--subdir` flags with actionable
+errors. Keep existing Git add parsing, role validation, ref/subdirectory
+precedence, and success output unchanged. Load a fresh portable configuration
+without machine directory overrides for every add mutation, and save to the
+resolved config file so machine-local paths can never leak into `tome.toml`,
+including when `--config` selects a non-default filename.
+
+## Desktop Data Folder Label
+
+Extend `StatusReport` with the canonical `TomePaths::tome_home()` value rather
+than deriving it from `library_dir`. In the desktop status view, label this row
+`TOME DATA FOLDER` and describe it as the portable Tome root, explicitly noting
+that machine settings live under `~/.config/tome`. Keep `LIBRARY` as a separate
+row sourced from `library_dir`.
+
+Remove the client-side parent-directory heuristic. A custom library may be
+outside Tome home, and the default library ends in `/skills`, so derivation is
+both conceptually ambiguous and technically incorrect.
 
 ## Claude Plugin And Marketplace
 
@@ -146,7 +187,19 @@ Skip the recommendation under `tome init --no-input` so automation retains its
 current network behavior. When editing an existing configuration, suppress the
 recommendation if an equivalent Tome repository source is already configured;
 never add a duplicate entry or overwrite a differently configured
-`tome-skills` entry.
+`tome-skills` entry. Equivalent official sources include HTTPS with optional
+`.git` or trailing slash, SCP-style `git@github.com:MartinP7r/tome.git`, and
+`ssh://git@github.com/MartinP7r/tome.git`, but not forks, other hosts, or Git
+sources scoped to another subdirectory.
+
+Move the Step 0 custom data-folder selection before machine-state detection.
+Label it `Tome data folder` and explain that it is the portable root, while
+`~/.config/tome` contains machine-local settings and an optional pointer. If the
+selected folder contains `.tome/tome.toml` (or root `tome.toml`), run the normal
+brownfield Use existing / Edit / Reinitialize / Cancel flow against that config.
+Thread the selected folder unchanged through wizard save and post-init sync.
+Do not retain the initially resolved default after the user selects a custom
+folder.
 
 ## Documentation
 
@@ -174,6 +227,13 @@ Run these repository checks:
 - Focused Rust tests for recommendation insertion and duplicate suppression
 - CLI regression coverage proving `tome init --no-input` does not add the
   recommended Git source
+- Unit and CLI coverage for local-path classification, managed local entries,
+  default roles and names, Git-only flag rejection, portable save, and
+  unchanged Git URL/slug behavior
+- Rust and React coverage proving the desktop displays canonical Tome data and
+  library paths independently with explanatory copy
+- Init coverage proving an existing custom data folder is detected before
+  configuration and the selected path reaches post-init path construction
 - `make ci`
 
 ## Deferred Work
@@ -192,3 +252,7 @@ implementation reveals new acceptance criteria; do not create a duplicate.
 - No automatic recommendation under `--no-input`.
 - No recursive `tome add` subprocess from `tome init`.
 - No automatic `skills/` subdirectory adoption in `tome add`.
+- No existence-based inference for ambiguous relative local paths; require an
+  explicit `./` or `../` prefix.
+- No rename of the internal `tome_home` API or environment variable; this is a
+  user-facing copy and canonical-data fix.

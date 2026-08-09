@@ -23,6 +23,7 @@
 // Fixture data — keep small but representative.
 const STATUS_REPORT = {
   configured: true,
+  tome_home: "/Users/test/tome-data",
   library_dir: "/Users/test/.tome/skills",
   library_count: { count: 3, error: null },
   last_sync: "2026-05-29T08:00:00Z",

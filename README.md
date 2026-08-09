@@ -56,6 +56,33 @@ tome sync
 tome status
 ```
 
+## Agent Skill
+
+Tome ships a `using-tome` skill that teaches coding agents how to configure,
+sync, diagnose, and recover a Tome library safely. `tome init` offers it during
+interactive setup, or add it directly:
+
+```bash
+tome add MartinP7r/tome --subdir skills --role source
+tome sync
+```
+
+Claude Code users can alternatively install the same skill as a plugin:
+
+```bash
+claude plugin marketplace add MartinP7r/tome
+claude plugin install tome@tome
+```
+
+`tome add` also accepts explicit local paths: absolute paths, `~` paths, and
+dot-relative paths such as `./skills`. Dot-relative inputs are anchored to the
+command's working directory. Anchored paths outside your home directory are
+stored as absolute paths; paths under home may use portable `~/...` form. Both
+resolve to the same add-time location, independent of later working directories.
+Local directories default to the write-back `synced` role, so use
+`--role managed` for package-manager-owned skills or `--role source` for other
+read-only directories.
+
 ## Development
 
 For repository workflow guidance, see [docs/src/development-workflow.md](docs/src/development-workflow.md). It explains when `tome` uses GitHub Issues vs OpenSpec vs GSD, and how to link them cleanly in commits and PRs.

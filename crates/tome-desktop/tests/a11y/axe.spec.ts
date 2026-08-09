@@ -56,13 +56,19 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("status view passes axe WCAG-AA", async ({ page }) => {
-  // Already on Status from `beforeEach`. Verify a representative
-  // KeyValueRow value has rendered so axe scans the real DOM, not a
-  // loading-placeholder shell. The fixture's library_dir appears in
-  // both the LIBRARY row and (derived) the TOME HOME row, so use
-  // `.first()` to dodge the strict-mode duplicate hit.
+  // Already on Status from `beforeEach`. Verify the canonical Tome data
+  // folder and independently configured library have both rendered so axe
+  // scans the real DOM, not a loading-placeholder shell.
+  const statusView = page.getByLabel("Status", { exact: true });
   await expect(
-    page.getByText("/Users/test/.tome/skills").first(),
+    statusView.getByText("TOME DATA FOLDER", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    statusView.getByText("/Users/test/tome-data", { exact: true }),
+  ).toBeVisible();
+  await expect(statusView.getByText("LIBRARY", { exact: true })).toBeVisible();
+  await expect(
+    statusView.getByText("/Users/test/.tome/skills", { exact: true }),
   ).toBeVisible();
 
   const results = await new AxeBuilder({ page })

@@ -190,6 +190,9 @@ pub struct DirectoryStatus {
 #[cfg_attr(feature = "bindings", derive(specta::Type))]
 pub struct StatusReport {
     pub configured: bool,
+    /// Root of Tome-managed portable data. Distinct from the configurable skill library
+    /// and machine-local settings under `~/.config/tome`.
+    pub tome_home: PathBuf,
     pub library_dir: PathBuf,
     /// Number of skills consolidated in the library, or an error message.
     pub library_count: CountOrError,
@@ -315,6 +318,7 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
 
     Ok(StatusReport {
         configured,
+        tome_home: paths.tome_home().to_path_buf(),
         library_dir: paths.library_dir().to_path_buf(),
         library_count: library_count.into(),
         last_sync,
@@ -635,6 +639,23 @@ mod tests {
         .unwrap();
         assert!(!report.configured);
         assert!(report.directories.is_empty());
+    }
+
+    #[test]
+    fn gather_includes_canonical_tome_home() {
+        let tome_home = PathBuf::from("/nonexistent/portable/tome");
+        let library_dir = PathBuf::from("/nonexistent/external/skills");
+        let config = Config {
+            library_dir: library_dir.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home, library_dir).unwrap();
+
+        let report = gather(&config, &paths).unwrap();
+
+        assert_eq!(report.tome_home, paths.tome_home());
+        assert_eq!(report.library_dir, paths.library_dir());
+        assert_ne!(report.tome_home, report.library_dir);
     }
 
     #[test]
@@ -1177,6 +1198,7 @@ mod tests {
     fn json_status_always_includes_unowned_field() {
         let report = StatusReport {
             configured: false,
+            tome_home: PathBuf::from("/tmp/tome"),
             library_dir: PathBuf::from("/tmp/lib"),
             library_count: CountOrError {
                 count: Some(0),
@@ -1221,6 +1243,7 @@ mod tests {
         let summary = crate::summary::SkillSummary::from_entry(&name, &entry);
         let report = StatusReport {
             configured: true,
+            tome_home: PathBuf::from("/tmp/tome"),
             library_dir: PathBuf::from("/tmp/lib"),
             library_count: CountOrError {
                 count: Some(1),
