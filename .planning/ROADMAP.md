@@ -272,14 +272,15 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
 - [x] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase. (completed 2026-06-07)
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
-  **Plans:** 6 plans
+  **Plans:** 7 plans
   Plans:
   - [ ] 28-01-PLAN.md — Rust setup/configuration draft domain with durable directory ordering
   - [ ] 28-02-PLAN.md — Typed IPC boundary, bindings freshness, and fifth navigation section
   - [ ] 28-03-PLAN.md — Dedicated setup gate and validated list/detail directory editor
   - [ ] 28-04-PLAN.md — Clone-verified Git source review and draft integration
-  - [ ] 28-05-PLAN.md — Complete machine-preferences editor with diff Apply
-  - [ ] 28-06-PLAN.md — Beta journey integration, accessibility, and requirement evidence
+  - [ ] 28-05-PLAN.md — Complete Rust machine-preferences projection and preview/apply domain
+  - [ ] 28-06-PLAN.md — Reviewed Git intake and machine-preferences UI through completed seams
+  - [ ] 28-07-PLAN.md — Beta journey integration, accessibility, and requirement evidence
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
 - [ ] **Phase 30: Backup UI — rc cut** (BAK-01..04 + NF-04) — Backup history view, snapshot action, diff view, restore flow with automatic post-restore sync. **v1.0-rc cut.**
 - [ ] **Phase 31: Distribution — v1.0 ship** (DIST-01..05) — Sign + notarize + DMG (aarch64 + x86_64), `tauri-plugin-updater` auto-update with signed manifest, combined GitHub Actions release workflow (CLI cargo-dist outputs preserved), first-launch UX, embedded CLI with "Show in terminal" affordances. **v1.0 ship.**
