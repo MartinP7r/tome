@@ -277,7 +277,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   - [ ] 28-01-PLAN.md — Rust setup/configuration draft domain with durable directory ordering
   - [ ] 28-02-PLAN.md — Typed IPC boundary, bindings freshness, and fifth navigation section
   - [ ] 28-03-PLAN.md — Dedicated setup gate and validated list/detail directory editor
-  - [ ] 28-04-PLAN.md — Clone-verified Git source review and draft integration
+  - [ ] 28-04-PLAN.md — Clone-verified Git source review after preference-domain exports
   - [ ] 28-05-PLAN.md — Complete Rust machine-preferences projection and preview/apply domain
   - [ ] 28-06-PLAN.md — Reviewed Git intake and machine-preferences UI through completed seams
   - [ ] 28-07-PLAN.md — Beta journey integration, accessibility, and requirement evidence

@@ -279,14 +279,17 @@ Use this only in a row shape without nested interactive controls; otherwise use 
 | A2 | `ConfigDraft` / `ConfigTomlPreview` are suitable new wire-type names. | Code Examples | Naming only; planner may choose repository-consistent alternatives. |
 | A3 | A complete machine preference projection needs new public accessors/mutators rather than exposing fields. | Common Pitfalls / Plan structure | Exact API shape requires implementation design. |
 
-## Open Questions
+## Resolved Open Questions
 
-1. **How is directory order persisted?**
-   - What we know: directory storage is `BTreeMap`, which has key order, while D-07 requires reorder. [VERIFIED: crates/tome/src/config/types.rs:414-443]
-   - Recommendation: resolve in plan 28-01 before designing drag/drop persistence; do not fake a persisted behavior.
-2. **What is the deterministic “best” Git skill-root selection rule?**
-   - What we know: folded todo requires common ancestor detection and explicit handling of unrelated roots. [VERIFIED: .planning/todos/pending/2026-06-26-tome-add-auto-detect-subdir.md:16-32]
-   - Recommendation: define a pure scanner returning `None`, one recommended root, or multiple candidates; React only labels/requires review.
+1. **Directory order persistence — RESOLVED.**
+    - Add an explicit `Config` schema field containing an ordered `Vec<DirectoryName>` alongside the lookup-oriented `directories: BTreeMap<DirectoryName, DirectoryConfig>`.
+    - Validation requires the sequence to be complete and one-to-one with configured directories: every entry is configured, no name appears twice, and no configured name is omitted.
+    - Existing TOML without the field loads with a deterministic migration default: configured names in the BTreeMap's stable key-sorted order. New saves emit the normalized complete ordered sequence. User order is never inferred from BTreeMap iteration.
+    - D-07 drag/drop and Move up/down mutate this explicit schema field in the draft; Rust validates and persists it through the canonical config save path.
+2. **Git skill-root selection — RESOLVED.**
+    - Scan the cloned repository for candidate directories that directly contain `SKILL.md`. The repository root is a candidate when `<clone>/SKILL.md` exists and is represented by normalized relative path `.`.
+    - Normalize candidate relative paths, sort first by component depth (shallowest first), then lexicographically by normalized relative path for same-depth ties. The first candidate is the deterministic prefill.
+    - Return the complete sorted candidate list and the prefill to the UI. The UI labels the prefill as an assistive recommendation and requires review; an explicit user subdirectory always wins over the recommendation.
 
 ## Environment Availability
 
