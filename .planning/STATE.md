@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 status: executing
-stopped_at: Phase 27 planned (7 plans, 5 waves) — verification passed
-last_updated: "2026-06-30T09:19:54.403Z"
+stopped_at: Phase 28 context gathered; ready to re-plan
+last_updated: "2026-08-13T13:29:02.286Z"
 last_activity: 2026-06-30 -- Completed quick task 260630-pgl
 progress:
-  total_phases: 4
-  completed_phases: 2
+  total_phases: 10
+  completed_phases: 3
   total_plans: 21
-  completed_plans: 14
-  percent: 50
+  completed_plans: 21
+  percent: 30
 ---
 
 # Project State
@@ -104,6 +104,7 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 - **Structured todos:** 2 pending items in `.planning/todos/pending/`; latest capture is
   `2026-07-15-define-agent-skills-for-tome.md` ("Define agent skills for tome").
+
 - **Linux UAT (carry-over from v0.8):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime tests). Pending Linux desktop hardware. Carried over for the sixth+ consecutive milestone — formally deferred to **v2 (post-v1.0)** when Linux GUI build hardware lands.
 - **#542 Owned/Unowned enum migration** — deferred from v0.12 whole-codebase review; absorbed into Phase 25 CORE-01 scope.
 - **#548 role-transition cleanup gap** — surfaced during v0.13 dogfooding (when a directory's role transitions synced→source, ~171 stale tome symlinks linger). Standalone follow-up; not v1.0-blocking but should land before the alpha cut so dogfooding sessions don't repeat the manual cleanup.
@@ -124,6 +125,6 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 
 ## Session Continuity
 
-Last session: 2026-06-05T12:16:58.288Z
-Stopped at: Phase 27 planned (7 plans, 5 waves) — verification passed
-Resume file: .planning/phases/27-sync-triage-ui/27-01a-PLAN.md
+Last session: 2026-08-13T13:29:02.276Z
+Stopped at: Phase 28 context gathered; ready to re-plan
+Resume file: .planning/phases/28-configuration-ui-beta-cut/28-CONTEXT.md
