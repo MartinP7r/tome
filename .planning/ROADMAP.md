@@ -350,6 +350,17 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] 27-04-PLAN.md — Cancellation invariant integration test + `StageStepper` + `SyncToast` hand-rolled (SYNC-04)
 - [x] 27-05-PLAN.md — `SyncOutcome` wrapping struct + partial-failure rendering (D-20) + retry-from-stage and retry-failed-items handlers (SYNC-05)
 
+### Phase 28: Configuration UI — beta cut
+**Goal**: Make Tome configuration manageable from the desktop app: guide first-run setup, edit directories and Git sources with live validation, and preview machine-preference changes before writing them. This phase produces the v1.0 beta cut.
+**Depends on**: Phase 27 (Sync + triage UI) — reuses its Tauri command patterns, progress events, `machine.toml` preview/apply flow, and desktop UI primitives.
+**Requirements**: CFG-01, CFG-02, CFG-03, CFG-04, CFG-05, NF-04
+**Success Criteria** (what must be TRUE):
+  1. A first-run desktop flow launches when no resolved `tome.toml` exists and covers greenfield, brownfield, and legacy states with the same configuration semantics as `tome init` (CFG-01).
+  2. Users can add, edit, remove, and reorder directories; type/role and path-overlap validation appear before save, and invalid configurations cannot be persisted (CFG-02, CFG-05).
+  3. An Add Git repository form supports an optional name and branch, tag, or revision pin, while clone progress is rendered through the existing sync-progress event channel (CFG-03).
+  4. Users can edit all machine preferences and inspect a `machine.toml` diff before explicitly applying changes (CFG-04).
+  5. Every configuration mutation presents its plan and requires explicit confirmation; all config writes use `Config::save_checked` (CFG-05, NF-04).
+
 ## Backlog
 
 Unsequenced ideas captured for future planning. Promote via `/gsd:review-backlog` when ready.
