@@ -412,7 +412,7 @@ impl Default for BackupConfig {
 }
 
 /// Top-level configuration for tome.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Where the consolidated skill library lives
@@ -427,6 +427,14 @@ pub struct Config {
     #[serde(default)]
     pub(crate) directories: BTreeMap<DirectoryName, DirectoryConfig>,
 
+    /// Presentation and processing order for directories.
+    ///
+    /// The directory map intentionally remains sorted for lookup stability;
+    /// this sequence is the durable user-selected order used by configuration
+    /// editors. Files written before this field existed receive the map's
+    /// stable key order during deserialization.
+    pub(crate) directory_order: Vec<DirectoryName>,
+
     /// Backup settings
     #[serde(default)]
     pub(crate) backup: BackupConfig,
@@ -438,8 +446,43 @@ impl Default for Config {
             library_dir: super::defaults::library_dir(),
             exclude: BTreeSet::new(),
             directories: BTreeMap::new(),
+            directory_order: Vec::new(),
             backup: BackupConfig::default(),
         }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ConfigRaw {
+    #[serde(default = "super::defaults::library_dir")]
+    library_dir: PathBuf,
+    #[serde(default)]
+    exclude: BTreeSet<SkillName>,
+    #[serde(default)]
+    directories: BTreeMap<DirectoryName, DirectoryConfig>,
+    #[serde(default)]
+    directory_order: Option<Vec<DirectoryName>>,
+    #[serde(default)]
+    backup: BackupConfig,
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = ConfigRaw::deserialize(deserializer)?;
+        let directory_order = raw
+            .directory_order
+            .unwrap_or_else(|| raw.directories.keys().cloned().collect());
+        Ok(Self {
+            library_dir: raw.library_dir,
+            exclude: raw.exclude,
+            directories: raw.directories,
+            directory_order,
+            backup: raw.backup,
+        })
     }
 }
 
