@@ -608,6 +608,58 @@ mod tests {
     use crate::discover::SkillName;
     use std::collections::BTreeMap;
 
+    #[test]
+    fn draft_preview_and_apply_share_validated_ordered_projection() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        std::fs::write(&path, "library_dir = \"/tmp/library\"\n[directories]\n").unwrap();
+
+        let draft = ConfigDraft {
+            library_dir: tmp.path().join("library").display().to_string(),
+            exclude: Vec::new(),
+            directories: vec![
+                DirectoryDraft::local("second", tmp.path().join("second")),
+                DirectoryDraft::local("first", tmp.path().join("first")),
+            ],
+            directory_order: vec!["second".to_string(), "first".to_string()],
+        };
+
+        let preview = preview_draft(&draft, &path).unwrap();
+        assert!(preview.validation.is_valid());
+        assert!(!std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("directory_order"));
+
+        apply_draft(&draft, &path).unwrap();
+        let saved = Config::load(&path).unwrap();
+        assert_eq!(
+            saved.directory_order().iter().map(DirectoryName::as_str).collect::<Vec<_>>(),
+            vec!["second", "first"]
+        );
+    }
+
+    #[test]
+    fn draft_validation_keeps_invalid_fields_and_blocks_writes() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let path = tmp.path().join("tome.toml");
+        let original = "library_dir = \"/tmp/original\"\n[directories]\n";
+        std::fs::write(&path, original).unwrap();
+        let draft = ConfigDraft {
+            library_dir: tmp.path().join("library").display().to_string(),
+            exclude: Vec::new(),
+            directories: vec![DirectoryDraft::local("bad/name", tmp.path().join("source"))],
+            directory_order: vec!["missing".to_string(), "missing".to_string()],
+        };
+
+        let validation = validate_draft(&draft);
+        assert!(!validation.is_valid());
+        assert!(validation.errors.contains_key("directories.0.name"));
+        assert!(validation.errors.contains_key("directory_order"));
+
+        assert!(apply_draft(&draft, &path).is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
     // --- Convenience iterator tests ---
 
     #[test]
