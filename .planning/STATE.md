@@ -2,16 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: executing
-stopped_at: Phase 28 context gathered; ready to re-plan
-last_updated: "2026-08-13T13:29:02.286Z"
-last_activity: 2026-06-30 -- Completed quick task 260630-pgl
+current_phase: 27.1
+current_phase_name: multi-machine-shared-pool-configuration
+status: planning
+stopped_at: Phase 27.1 inserted; Phase 28 plans superseded pending re-plan
+last_updated: "2026-08-15T11:59:22.419Z"
+last_activity: 2026-06-30
+last_activity_desc: Completed quick task 260630-pgl
 progress:
-  total_phases: 10
+  total_phases: 5
   completed_phases: 3
-  total_plans: 21
+  total_plans: 28
   completed_plans: 21
-  percent: 30
+  percent: 60
 ---
 
 # Project State
@@ -21,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 27 — sync-triage-ui
+**Current focus:** Phase 27.1 — multi-machine-shared-pool-configuration
 
 ## Current Position
 
-Phase: 27 (sync-triage-ui) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 27
-Last activity: 2026-06-30 -- Completed quick task 260630-pgl
+Phase: 27.1 (multi-machine-shared-pool-configuration) — PLANNING
+Plan: Not planned
+Status: Phase inserted; context captured
+Last activity: 2026-08-15 -- Superseded Phase 28 plans and inserted Phase 27.1
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -37,6 +40,7 @@ Last activity: 2026-06-30 -- Completed quick task 260630-pgl
 | 25 | Rust core extraction + Tauri integration spike | CORE-01..05 (5) | — |
 | 26 | Read-only views | VIEW-01..06 (6) + NF-01..03, NF-05 | **alpha** |
 | 27 | Sync + triage UI | SYNC-01..05 (5) | — |
+| 27.1 | Multi-machine shared pool configuration | TBD | — |
 | 28 | Configuration UI | CFG-01..05 (5) + NF-04 | **beta** |
 | 29 | Mutating operations UI | OPS-01..04 (4) + NF-04 | — |
 | 30 | Backup UI | BAK-01..04 (4) + NF-04 | **rc** |
@@ -91,14 +95,15 @@ Historical decisions are archived in:
 25 (Rust core extraction + Tauri integration spike)
  ├── 26 (Read-only views) ── alpha cut
  │    └── 27 (Sync + triage UI)
- │         └── 28 (Configuration UI) ── beta cut
- │              └── 29 (Mutating operations UI)
- │                   └── 30 (Backup UI) ── rc cut
- │                        └── 31 (Distribution) ── v1.0 ship
+ │         └── 27.1 (Multi-machine shared pool configuration)
+ │              └── 28 (Configuration UI) ── beta cut
+ │                   └── 29 (Mutating operations UI)
+ │                        └── 30 (Backup UI) ── rc cut
+ │                             └── 31 (Distribution) ── v1.0 ship
  └── (NF-01..05 verified at cut boundaries — alpha + beta + rc + final)
 ```
 
-Phases 26–31 form a strict linear chain; each depends on the previous. NF gates (perf, a11y, HIG, safety, concurrency) are verified at the indicated cuts, not as their own phase.
+Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on the previous. NF gates (perf, a11y, HIG, safety, concurrency) are verified at the indicated cuts, not as their own phase.
 
 ### Pending Todos / Carry-over
 
@@ -123,8 +128,12 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 |---|-------------|------|--------|-----------|
 | 260630-pgl | Remove duplicate CI job definitions that invalidate ci.yml | 2026-06-30 | f80e47d | [260630-pgl-remove-duplicate-ci-job-definitions-that](./quick/260630-pgl-remove-duplicate-ci-job-definitions-that/) |
 
+### Roadmap Evolution
+
+- Phase 27.1 inserted after Phase 27: Multi-machine shared pool configuration (URGENT)
+
 ## Session Continuity
 
-Last session: 2026-08-13T13:29:02.276Z
-Stopped at: Phase 28 context gathered; ready to re-plan
-Resume file: .planning/phases/28-configuration-ui-beta-cut/28-CONTEXT.md
+Last session: 2026-08-15
+Stopped at: Phase 27.1 inserted; Phase 28 plans superseded pending re-plan
+Resume file: .planning/phases/27.1-multi-machine-shared-pool-configuration/27.1-CONTEXT.md
