@@ -9,7 +9,7 @@
 //! dist inside library (C).
 
 use anyhow::Result;
-use std::{collections::BTreeSet, path::Path};
+use std::path::Path;
 
 use super::types::{Config, DirectoryRole, DirectoryType};
 use crate::errors::{DomainErrorKind, WithDomainKind};
@@ -29,31 +29,10 @@ impl Config {
     /// Both tags are transparent — the human-readable `{e:#}` chain (and every
     /// `assert_cmd` `contains()` integration assertion) is unchanged.
     pub fn validate(&self) -> Result<()> {
-        self.validate_directory_order()
-            .with_domain_kind(DomainErrorKind::Validation)?;
         self.validate_roles_and_fields()
             .with_domain_kind(DomainErrorKind::Validation)?;
         self.validate_no_path_overlap()
             .with_domain_kind(DomainErrorKind::Conflict)?;
-        Ok(())
-    }
-
-    fn validate_directory_order(&self) -> Result<()> {
-        // Direct in-memory Config construction predates this field. Match the
-        // legacy-load migration default; save_checked materializes it on disk.
-        if self.directory_order.is_empty() {
-            return Ok(());
-        }
-        let configured: BTreeSet<_> = self.directories.keys().collect();
-        let ordered: BTreeSet<_> = self.directory_order.iter().collect();
-        anyhow::ensure!(
-            ordered.len() == self.directory_order.len(),
-            "directory_order contains duplicate directory names"
-        );
-        anyhow::ensure!(
-            ordered == configured,
-            "directory_order must contain every configured directory exactly once"
-        );
         Ok(())
     }
 

@@ -20,7 +20,6 @@
 //! call sites continue to compile byte-identically.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -36,248 +35,6 @@ pub use crate::paths::expand_tilde;
 pub use types::{
     BackupConfig, Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, GitRef,
 };
-
-/// Untrusted, serializable directory input retained by the desktop until Rust
-/// validates it. Strings intentionally preserve invalid fields for correction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct DirectoryDraft {
-    pub name: String,
-    pub path: String,
-    pub directory_type: String,
-    pub role: String,
-    pub git_ref_kind: Option<String>,
-    pub git_ref: Option<String>,
-    pub subdir: Option<String>,
-}
-
-impl DirectoryDraft {
-    pub fn local(name: impl Into<String>, path: PathBuf) -> Self {
-        Self {
-            name: name.into(),
-            path: path.display().to_string(),
-            directory_type: "directory".to_string(),
-            role: "source".to_string(),
-            git_ref_kind: None,
-            git_ref: None,
-            subdir: None,
-        }
-    }
-}
-
-/// Serializable portable configuration draft used by desktop callers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct ConfigDraft {
-    pub library_dir: String,
-    pub exclude: Vec<String>,
-    pub directories: Vec<DirectoryDraft>,
-    pub directory_order: Vec<String>,
-}
-
-/// Field-keyed validation result that leaves the caller's original draft intact.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct DraftValidation {
-    pub errors: BTreeMap<String, Vec<String>>,
-}
-
-impl DraftValidation {
-    pub fn is_valid(&self) -> bool {
-        self.errors.is_empty()
-    }
-
-    fn push(&mut self, field: impl Into<String>, error: impl Into<String>) {
-        self.errors
-            .entry(field.into())
-            .or_default()
-            .push(error.into());
-    }
-}
-
-/// A server-derived line change for the preview-before-apply confirmation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct ConfigTomlLineDiff {
-    pub before: Option<String>,
-    pub after: Option<String>,
-}
-
-/// Read-only preview of the exact TOML bytes that apply would write.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct ConfigDraftPreview {
-    pub validation: DraftValidation,
-    pub diff: Vec<ConfigTomlLineDiff>,
-}
-
-/// Parse and validate a draft without writing configuration files.
-pub fn validate_draft(draft: &ConfigDraft) -> DraftValidation {
-    build_draft_config(draft).map_or_else(|validation| validation, |_| DraftValidation::default())
-}
-
-/// Produce a read-only diff from the same validated projection used by apply.
-pub fn preview_draft(draft: &ConfigDraft, path: &Path) -> Result<ConfigDraftPreview> {
-    let config = match build_draft_config(draft) {
-        Ok(config) => config,
-        Err(validation) => {
-            return Ok(ConfigDraftPreview {
-                validation,
-                diff: Vec::new(),
-            });
-        }
-    };
-    let proposed = config.checked_toml()?;
-    let current = std::fs::read_to_string(path).unwrap_or_default();
-    Ok(ConfigDraftPreview {
-        validation: DraftValidation::default(),
-        diff: line_diff(&current, &proposed),
-    })
-}
-
-/// Revalidate a draft and save only through [`Config::save_checked`].
-pub fn apply_draft(draft: &ConfigDraft, path: &Path) -> Result<()> {
-    let config = build_draft_config(draft).map_err(|validation| {
-        anyhow::anyhow!("configuration draft is invalid: {:?}", validation.errors)
-    })?;
-    config.save_checked(path)
-}
-
-fn build_draft_config(draft: &ConfigDraft) -> std::result::Result<Config, DraftValidation> {
-    let mut validation = DraftValidation::default();
-    let mut directories = BTreeMap::new();
-    for (index, entry) in draft.directories.iter().enumerate() {
-        let field = |name: &str| format!("directories.{index}.{name}");
-        let name = match DirectoryName::new(entry.name.clone()) {
-            Ok(name) => name,
-            Err(error) => {
-                validation.push(field("name"), error.to_string());
-                continue;
-            }
-        };
-        let directory_type = match entry.directory_type.as_str() {
-            "claude-plugins" => DirectoryType::ClaudePlugins,
-            "directory" => DirectoryType::Directory,
-            "git" => DirectoryType::Git,
-            _ => {
-                validation.push(
-                    field("directory_type"),
-                    "must be claude-plugins, directory, or git",
-                );
-                continue;
-            }
-        };
-        let role = match entry.role.as_str() {
-            "managed" => DirectoryRole::Managed,
-            "synced" => DirectoryRole::Synced,
-            "source" => DirectoryRole::Source,
-            "target" => DirectoryRole::Target,
-            _ => {
-                validation.push(field("role"), "must be managed, synced, source, or target");
-                continue;
-            }
-        };
-        let git_ref = match (&entry.git_ref_kind, &entry.git_ref) {
-            (None, None) => None,
-            (Some(kind), Some(value)) if !value.trim().is_empty() => match kind.as_str() {
-                "branch" => Some(GitRef::Branch(value.clone())),
-                "tag" => Some(GitRef::Tag(value.clone())),
-                "rev" => Some(GitRef::Rev(value.clone())),
-                _ => {
-                    validation.push(field("git_ref_kind"), "must be branch, tag, or rev");
-                    continue;
-                }
-            },
-            _ => {
-                validation.push(
-                    field("git_ref"),
-                    "reference kind and value must be supplied together",
-                );
-                continue;
-            }
-        };
-        let config = DirectoryConfig {
-            path: PathBuf::from(&entry.path),
-            directory_type,
-            role: Some(role),
-            git_ref,
-            subdir: entry.subdir.clone(),
-            override_applied: false,
-        };
-        if directories.insert(name, config).is_some() {
-            validation.push(field("name"), "duplicate directory name");
-        }
-    }
-
-    let exclude = draft
-        .exclude
-        .iter()
-        .filter_map(|name| match crate::discover::SkillName::new(name) {
-            Ok(name) => Some(name),
-            Err(error) => {
-                validation.push("exclude", error.to_string());
-                None
-            }
-        })
-        .collect();
-    let directory_order: Vec<DirectoryName> = draft
-        .directory_order
-        .iter()
-        .filter_map(|name| match DirectoryName::new(name) {
-            Ok(name) => Some(name),
-            Err(error) => {
-                validation.push("directory_order", error.to_string());
-                None
-            }
-        })
-        .collect();
-    let ordered_names: std::collections::BTreeSet<_> = directory_order.iter().collect();
-    let configured_names: std::collections::BTreeSet<_> = directories.keys().collect();
-    if ordered_names.len() != directory_order.len() || ordered_names != configured_names {
-        validation.push(
-            "directory_order",
-            "must contain every configured directory exactly once",
-        );
-    }
-    let config = Config {
-        library_dir: PathBuf::from(&draft.library_dir),
-        exclude,
-        directories,
-        directory_order,
-        ..Config::default()
-    };
-    if validation.is_valid() {
-        if let Err(error) = config.validate() {
-            let field = if error.to_string().starts_with("directory_order") {
-                "directory_order"
-            } else {
-                "config"
-            };
-            validation.push(field, error.to_string());
-        }
-    }
-    if validation.is_valid() {
-        Ok(config)
-    } else {
-        Err(validation)
-    }
-}
-
-fn line_diff(current: &str, proposed: &str) -> Vec<ConfigTomlLineDiff> {
-    let mut diff = Vec::new();
-    let mut current = current.lines();
-    let mut proposed = proposed.lines();
-    loop {
-        match (current.next(), proposed.next()) {
-            (None, None) => return diff,
-            (before, after) if before == after => {}
-            (before, after) => diff.push(ConfigTomlLineDiff {
-                before: before.map(str::to_owned),
-                after: after.map(str::to_owned),
-            }),
-        }
-    }
-}
 
 use crate::machine::MachinePrefs;
 use overrides::format_override_validation_error;
@@ -352,19 +109,6 @@ impl Config {
     /// widening field visibility or forcing a clone.
     pub fn directories(&self) -> &BTreeMap<DirectoryName, DirectoryConfig> {
         &self.directories
-    }
-
-    /// Persisted user-selected directory order, independent of map ordering.
-    pub fn directory_order(&self) -> &[DirectoryName] {
-        &self.directory_order
-    }
-
-    fn normalized_directory_order(&self) -> Vec<DirectoryName> {
-        if self.directory_order.is_empty() {
-            self.directories.keys().cloned().collect()
-        } else {
-            self.directory_order.clone()
-        }
     }
 
     pub fn library_dir(&self) -> &Path {
@@ -540,13 +284,6 @@ impl Config {
     /// Call this instead of `save()` from the wizard or any other code that
     /// produces a Config in-memory rather than loading it from disk.
     pub fn save_checked(&self, path: &Path) -> Result<()> {
-        let emitted = self.checked_toml()?;
-        atomic_write_toml(path, &emitted)
-    }
-
-    /// Validate and serialize the exact portable TOML that [`Self::save_checked`]
-    /// will atomically write. Kept crate-visible for read-only draft previews.
-    pub(crate) fn checked_toml(&self) -> Result<String> {
         // 1. Validation copy: validate() needs absolute paths to detect overlaps,
         //    so build an expanded clone for the check. The caller's Config is
         //    never mutated.
@@ -564,7 +301,6 @@ impl Config {
         //    caller's responsibility to undo before passing to save_checked
         //    (lib.rs::sync save chain saves the pre-override Config).
         let mut for_save = self.clone();
-        for_save.directory_order = self.normalized_directory_order();
         for_save.library_dir = crate::paths::unexpand_tilde(&for_save.library_dir);
         for dir in for_save.directories.values_mut() {
             dir.path = crate::paths::unexpand_tilde(&dir.path);
@@ -588,7 +324,10 @@ impl Config {
              --- first emit ---\n{emitted}\n--- second emit ---\n{reemitted}"
         );
 
-        Ok(emitted)
+        // 4. Safe to save — write the same bytes we verified, atomically.
+        // HARD-08: temp+rename so a crash mid-rename preserves the prior
+        // on-disk tome.toml (the regression test pins this contract).
+        atomic_write_toml(path, &emitted)
     }
 }
 
@@ -868,64 +607,6 @@ mod tests {
     use super::*;
     use crate::discover::SkillName;
     use std::collections::BTreeMap;
-
-    #[test]
-    fn draft_preview_and_apply_share_validated_ordered_projection() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("tome.toml");
-        std::fs::write(&path, "library_dir = \"/tmp/library\"\n[directories]\n").unwrap();
-
-        let draft = ConfigDraft {
-            library_dir: tmp.path().join("library").display().to_string(),
-            exclude: Vec::new(),
-            directories: vec![
-                DirectoryDraft::local("second", tmp.path().join("second")),
-                DirectoryDraft::local("first", tmp.path().join("first")),
-            ],
-            directory_order: vec!["second".to_string(), "first".to_string()],
-        };
-
-        let preview = preview_draft(&draft, &path).unwrap();
-        assert!(preview.validation.is_valid());
-        assert!(
-            !std::fs::read_to_string(&path)
-                .unwrap()
-                .contains("directory_order")
-        );
-
-        apply_draft(&draft, &path).unwrap();
-        let saved = Config::load(&path).unwrap();
-        assert_eq!(
-            saved
-                .directory_order()
-                .iter()
-                .map(DirectoryName::as_str)
-                .collect::<Vec<_>>(),
-            vec!["second", "first"]
-        );
-    }
-
-    #[test]
-    fn draft_validation_keeps_invalid_fields_and_blocks_writes() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let path = tmp.path().join("tome.toml");
-        let original = "library_dir = \"/tmp/original\"\n[directories]\n";
-        std::fs::write(&path, original).unwrap();
-        let draft = ConfigDraft {
-            library_dir: tmp.path().join("library").display().to_string(),
-            exclude: Vec::new(),
-            directories: vec![DirectoryDraft::local("bad/name", tmp.path().join("source"))],
-            directory_order: vec!["missing".to_string(), "missing".to_string()],
-        };
-
-        let validation = validate_draft(&draft);
-        assert!(!validation.is_valid());
-        assert!(validation.errors.contains_key("directories.0.name"));
-        assert!(validation.errors.contains_key("directory_order"));
-
-        assert!(apply_draft(&draft, &path).is_err());
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
-    }
 
     // --- Convenience iterator tests ---
 
@@ -1774,7 +1455,6 @@ skills_dir = "/tmp"
         let config_a = Config {
             library_dir: lib_dir.clone(),
             directories: BTreeMap::new(),
-            directory_order: Vec::new(),
             exclude: Default::default(),
             backup: Default::default(),
         };
@@ -1796,7 +1476,6 @@ skills_dir = "/tmp"
         let config_b = Config {
             library_dir: lib_dir_b,
             directories: BTreeMap::new(),
-            directory_order: Vec::new(),
             exclude: Default::default(),
             backup: Default::default(),
         };
