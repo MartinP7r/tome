@@ -37,6 +37,6 @@
   "runtime": "opencode",
   "model_policy": {
     "provider": "openai",
-    "budget": "high"
+    "budget": "medium"
   }
 }
