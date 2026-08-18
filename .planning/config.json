@@ -33,5 +33,10 @@
   },
   "agent_skills": {},
   "mode": "yolo",
-  "granularity": "coarse"
+  "granularity": "coarse",
+  "runtime": "opencode",
+  "model_policy": {
+    "provider": "openai",
+    "budget": "high"
+  }
 }
