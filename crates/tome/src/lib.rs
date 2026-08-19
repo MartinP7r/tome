@@ -105,6 +105,7 @@ pub mod manifest;
 pub mod marketplace;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
+pub mod profiles;
 // `progress` is `pub` because its trait + event vocabulary
 // (`ProgressSink`/`ProgressEvent`/`SyncStage`/`CancelToken`) is the domain
 // half of the "structure at the edge" pattern (D-09/D-11): the GUI's
@@ -154,7 +155,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
-use cli::{Cli, Command};
+use cli::{Cli, Command, ProfileCommand};
 use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
@@ -637,20 +638,32 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
+    if let Command::Profile {
+        sub: ProfileCommand::Select { name },
+    } = &cli.command
+    {
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        profiles::select_profile(&settings_path, name)?;
+        println!("✓ Selected profile '{name}'");
+        return Ok(());
+    }
+
     // Load per-machine preferences first — they may rewrite directory paths via
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let machine_prefs = machine::load(&machine_path)?;
-
-    let config = if matches!(&cli.command, Command::Add { .. }) {
-        Config::load_or_default(effective_config.as_deref())?
+    let (config, machine_prefs) = if matches!(&cli.command, Command::Add { .. }) {
+        (
+            Config::load_or_default(effective_config.as_deref())?,
+            machine::load(&machine_path)?,
+        )
     } else {
-        Config::load_or_default_with_overrides(
-            effective_config.as_deref(),
-            &machine_path,
-            &machine_prefs,
-        )?
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        let context = profiles::load_effective_context(&config_path, &settings_path)?;
+        (context.config, context.machine_prefs)
     };
     // Note: both load paths already run validate() internally — no separate
     // config.validate()? call here.
@@ -757,7 +770,14 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::List { json } => cmd_list(&config, cli.log_level().is_quiet(), json),
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
+        Command::Profile { .. } => unreachable_early_return("Command::Profile"),
     }
+}
+
+fn default_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".config/tome/settings.toml")
 }
 
 /// Guard for command variants whose handling is dispatched via an early

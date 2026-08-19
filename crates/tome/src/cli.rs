@@ -105,6 +105,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub machine: Option<PathBuf>,
 
+    /// Path to local profile selection and runtime settings.
+    #[arg(long, global = true)]
+    pub settings: Option<PathBuf>,
+
     /// Disable all interactive prompts — takes the default at every prompt.
     ///
     /// For `tome init`, this also skips the optional git-init-for-backup step
@@ -385,6 +389,17 @@ pub enum Command {
         #[command(subcommand)]
         sub: BackupCommand,
     },
+    /// Create, list, or select committed machine profiles.
+    Profile {
+        #[command(subcommand)]
+        sub: ProfileCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    /// Select the profile used by normal commands on this machine.
+    Select { name: String },
 }
 
 /// Variant of `tome remove` — directory removal vs unowned-skill deletion.

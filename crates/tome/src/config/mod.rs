@@ -40,6 +40,20 @@ use crate::machine::MachinePrefs;
 use overrides::format_override_validation_error;
 
 impl Config {
+    /// Construct the existing effective model from validated persisted layers.
+    pub(crate) fn from_layers(
+        library_dir: PathBuf,
+        exclude: std::collections::BTreeSet<crate::discover::SkillName>,
+        backup: BackupConfig,
+        directories: BTreeMap<DirectoryName, DirectoryConfig>,
+    ) -> Self {
+        Self {
+            library_dir,
+            exclude,
+            directories,
+            backup,
+        }
+    }
     /// Load config from file, or return defaults if file doesn't exist.
     ///
     /// When parsing fails, checks for old-format keys and appends a migration hint.

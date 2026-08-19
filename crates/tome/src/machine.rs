@@ -122,6 +122,23 @@ pub struct MachinePrefs {
 }
 
 impl MachinePrefs {
+    /// Project a committed profile and local installation consent into the legacy filter model.
+    pub(crate) fn from_profile(
+        disabled: BTreeSet<SkillName>,
+        disabled_directories: BTreeSet<DirectoryName>,
+        directory: BTreeMap<DirectoryName, DirectoryPrefs>,
+        auto_install_plugins: Option<AutoInstall>,
+    ) -> Result<Self> {
+        let prefs = Self {
+            disabled,
+            disabled_directories,
+            directory,
+            directory_overrides: BTreeMap::new(),
+            auto_install_plugins,
+        };
+        prefs.validate()?;
+        Ok(prefs)
+    }
     /// Returns true if the given skill is disabled on this machine.
     pub fn is_disabled(&self, name: &str) -> bool {
         self.disabled.contains(name)
