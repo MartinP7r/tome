@@ -4,16 +4,16 @@ milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
-status: planning
-stopped_at: Phase 27.1 inserted; Phase 28 plans superseded pending re-plan
-last_updated: "2026-08-19T09:43:07.919Z"
-last_activity: 2026-08-15
-last_activity_desc: Superseded Phase 28 plans and inserted Phase 27.1
+status: executing
+stopped_at: Completed 27.1-01-PLAN.md
+last_updated: "2026-08-19T15:30:43.313Z"
+last_activity: 2026-08-19
+last_activity_desc: Phase 27.1 execution started
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 27
-  completed_plans: 21
+  completed_plans: 22
   percent: 60
 ---
 
@@ -28,10 +28,10 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 
 ## Current Position
 
-Phase: 27.1 (multi-machine-shared-pool-configuration) — PLANNING
-Plan: Not planned
-Status: Phase inserted; context captured
-Last activity: 2026-08-15 -- Superseded Phase 28 plans and inserted Phase 27.1
+Phase: 27.1 (multi-machine-shared-pool-configuration) — EXECUTING
+Plan: 2 of 6
+Status: Ready to execute
+Last activity: 2026-08-19 — Phase 27.1 execution started
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -78,6 +78,8 @@ Historical decisions are archived in:
 - [Phase 25]: 25-04: stood up crates/tome-desktop (Tauri 2, path dep on tome+bindings, specta trio pinned =2.0.0-rc.25). get_status command returns real StatusReport; TauriEventSink bridges typed ProgressEvent→SyncProgress (typed SyncStage, saturating casts); make_builder() is the single command/event registry shared by main.rs + gen-bindings; committed bindings.ts is an INTENTIONAL Wave-3 partial snapshot (Result<StatusReport,String>, pre-TomeError — 25-05 regenerates). Exported bindings from gen-bindings bin not build.rs (D-07 corrected); Builder::dangerously_cast_bigints_to_number() to export usize counts as TS number (no library type change); CI bindings-freshness gate + macOS desktop-build job on macos-latest; [package.metadata.dist] dist=false excludes tome-desktop from cargo-dist (release CLI-only, release.yml untouched) (CORE-02/03/04, D-06/D-07)
 - [Phase 25]: 25-05: TomeError IPC-boundary classification (CORE-05). RESEARCH .with_context(|| DomainErrorKind) is NOT downcastable through anyhow — replaced with a transparent DomainTagged wrapper (Display delegates to underlying top, source() skips it) so the {e:#} chain is byte-for-byte unchanged while chain().find_map(downcast_ref) recovers the kind. Boundary classifies DomainTagged + bare DomainErrorKind, else Internal; ErrorCode has ALL+const _ guard + exhaustive From<&DomainErrorKind>. Sentinels at Config::validate (Validation/Conflict), bad --config (NotFound), git clone/update (Git). bindings.ts regenerated with TomeError+ErrorCode (supersedes 25-04 Wave-3 snapshot; freshness clean).
 - [Phase 25]: 25-06: v1.0 frontend framework = React (D-GUI-04, irreversible from Phase 26). Built 3-way StatusReport spike (React/Solid/Svelte) scored 1-5 x4 criteria; React+Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization/NF-02 a11y/NF-03 HIG). Bundle gzip: Solid 6.20kB / Svelte 15.85kB / React 62.29kB. Winner collapsed into crates/tome-desktop/ui/ (one canonical bindings.ts, relative ./bindings import); losers deleted. ADR: .planning/research/v1.0-frontend-framework-decision.md
+- [Phase ?]: Profile create, list, and select operate on committed machines/<name>.toml files; selection refuses a nonexistent profile.
+- [Phase ?]: An explicit --machine path retains legacy directory_overrides loading and emits a deprecation warning.
 
 ### v1.0 design context (consume during phase planning)
 
@@ -134,6 +136,12 @@ Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on th
 
 ## Session Continuity
 
-Last session: 2026-08-15
-Stopped at: Phase 27.1 inserted; Phase 28 plans superseded pending re-plan
-Resume file: .planning/phases/27.1-multi-machine-shared-pool-configuration/27.1-CONTEXT.md
+Last session: 2026-08-19T15:30:43.302Z
+Stopped at: Completed 27.1-01-PLAN.md
+Resume file: None
+
+## Performance Metrics
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 27.1 P01 | 38m | 2 tasks | 6 files |

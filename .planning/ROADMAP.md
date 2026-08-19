@@ -307,7 +307,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [ ] **Phase 27.1: Multi-machine shared pool configuration** (INSERTED) — Separate shared pool policy, versioned machine profiles, and local runtime settings; preserve accumulated skills and provenance across machine-specific source/target topologies; add consent-driven Git synchronization and explicit conflict handling.
   **Plans:** 6 plans
 
-  - [ ] 27.1-01-PLAN.md — Layered configuration, explicit profile selection, and legacy override compatibility (POOL-01)
+  - [x] 27.1-01-PLAN.md — Layered configuration, explicit profile selection, and legacy override compatibility (POOL-01)
   - [ ] 27.1-02-PLAN.md — Interactive, previewed legacy configuration migration (POOL-02)
   - [ ] 27.1-03-PLAN.md — Accumulating pool, provenance catalog, and explicit conflict handling (POOL-03..05)
   - [ ] 27.1-04-PLAN.md — Consent-driven safe Git pull/publish and owned-path staging (POOL-06..07)
@@ -411,7 +411,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Goal:** Make one Git-backed skill pool safely accumulate skills and provenance from machines with independent source and distribution topologies, while keeping runtime consent local and preventing silent cross-machine overwrites or removals.
 **Requirements**: TBD
 **Depends on:** Phase 27
-**Plans:** 0 plans
+**Plans:** 1/6 plans executed
 
 Plans:
 
