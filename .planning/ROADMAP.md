@@ -305,6 +305,13 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 - [x] **Phase 26: Read-only views — alpha cut** (VIEW-01..06 + NF-01..03, NF-05) — Status dashboard, virtualised skill list (2000 skills @ 60fps on M1), detail pane + markdown preview, doctor health pane with one-click fixes, file watcher auto-refresh. Keyboard + VoiceOver. **v1.0-alpha cut.** (completed 2026-05-29)
 - [x] **Phase 27: Sync + triage UI** (SYNC-01..05) — Per-stage progress, lockfile diff with per-skill triage decisions, previewable `machine.toml` diff, cancellable sync, per-stage failure summary + retry. Highest-UX-risk phase. (completed 2026-06-07)
 - [ ] **Phase 27.1: Multi-machine shared pool configuration** (INSERTED) — Separate shared pool policy, versioned machine profiles, and local runtime settings; preserve accumulated skills and provenance across machine-specific source/target topologies; add consent-driven Git synchronization and explicit conflict handling.
+  **Plans:** 6 plans
+  - [ ] 27.1-01-PLAN.md — Layered configuration, explicit profile selection, and legacy override compatibility (POOL-01)
+  - [ ] 27.1-02-PLAN.md — Interactive, previewed legacy configuration migration (POOL-02)
+  - [ ] 27.1-03-PLAN.md — Accumulating pool, provenance catalog, and explicit conflict handling (POOL-03..05)
+  - [ ] 27.1-04-PLAN.md — Consent-driven safe Git pull/publish and owned-path staging (POOL-06..07)
+  - [ ] 27.1-05-PLAN.md — Profile and Git health in CLI status (POOL-08)
+  - [ ] 27.1-06-PLAN.md — Desktop effective-context, status, and watcher parity (POOL-01, POOL-06, POOL-08)
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
   **Plans:** Superseded; re-plan after Phase 27.1.
 - [ ] **Phase 29: Mutating operations UI** (OPS-01..04 + NF-04) — Remove/reassign/fork/relocate/eject with plan-preview-confirm flows. Partial-failure aggregation (SAFE-01 semantics) with retry-per-item.
