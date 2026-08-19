@@ -6,13 +6,13 @@ current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
 status: planning
 stopped_at: Phase 27.1 inserted; Phase 28 plans superseded pending re-plan
-last_updated: "2026-08-15T11:59:22.419Z"
-last_activity: 2026-06-30
-last_activity_desc: Completed quick task 260630-pgl
+last_updated: "2026-08-19T09:43:07.919Z"
+last_activity: 2026-08-15
+last_activity_desc: Superseded Phase 28 plans and inserted Phase 27.1
 progress:
   total_phases: 5
   completed_phases: 3
-  total_plans: 28
+  total_plans: 27
   completed_plans: 21
   percent: 60
 ---
