@@ -638,13 +638,26 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    if let Command::Profile {
-        sub: ProfileCommand::Select { name },
-    } = &cli.command
-    {
-        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
-        profiles::select_profile(&settings_path, name)?;
-        println!("✓ Selected profile '{name}'");
+    if let Command::Profile { sub } = &cli.command {
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        match sub {
+            ProfileCommand::Create { name } => {
+                profiles::create_profile(&config_path, name)?;
+                println!("✓ Created profile '{name}'");
+            }
+            ProfileCommand::List => {
+                for name in profiles::list_profiles(&config_path)? {
+                    println!("{name}");
+                }
+            }
+            ProfileCommand::Select { name } => {
+                let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+                profiles::select_profile(&settings_path, &config_path, name)?;
+                println!("✓ Selected profile '{name}'");
+            }
+        }
         return Ok(());
     }
 
@@ -652,19 +665,35 @@ pub fn run(cli: Cli) -> Result<()> {
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let (config, machine_prefs) = if matches!(&cli.command, Command::Add { .. }) {
-        (
-            Config::load_or_default(effective_config.as_deref())?,
-            machine::load(&machine_path)?,
-        )
-    } else {
-        let config_path = effective_config
-            .clone()
-            .unwrap_or(config::default_config_path()?);
-        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
-        let context = profiles::load_effective_context(&config_path, &settings_path)?;
-        (context.config, context.machine_prefs)
-    };
+    let (config, machine_prefs) =
+        if matches!(&cli.command, Command::Add { .. } | Command::Config { .. }) {
+            (
+                Config::load_or_default(effective_config.as_deref())?,
+                machine::load(&machine_path)?,
+            )
+        } else if cli.machine.is_some() {
+            let machine_prefs = machine::load(&machine_path)?;
+            if !machine_prefs.directory_overrides.is_empty() {
+                eprintln!(
+                    "warning: directory_overrides is deprecated; migrate it into a named profile"
+                );
+            }
+            (
+                Config::load_or_default_with_overrides(
+                    effective_config.as_deref(),
+                    &machine_path,
+                    &machine_prefs,
+                )?,
+                machine_prefs,
+            )
+        } else {
+            let config_path = effective_config
+                .clone()
+                .unwrap_or(config::default_config_path()?);
+            let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+            let context = profiles::load_effective_context(&config_path, &settings_path)?;
+            (context.config, context.machine_prefs)
+        };
     // Note: both load paths already run validate() internally — no separate
     // config.validate()? call here.
     let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;

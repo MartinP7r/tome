@@ -398,6 +398,10 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ProfileCommand {
+    /// Create an empty committed machine profile.
+    Create { name: String },
+    /// List committed machine profiles.
+    List,
     /// Select the profile used by normal commands on this machine.
     Select { name: String },
 }

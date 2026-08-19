@@ -152,18 +152,74 @@ pub fn load_settings(path: &Path) -> Result<LocalSettings> {
 
 pub fn save_settings(settings: &LocalSettings, path: &Path) -> Result<()> {
     let content = toml::to_string_pretty(settings).context("failed to serialize local settings")?;
+    let reparsed: LocalSettings =
+        toml::from_str(&content).context("round-trip: generated local settings did not reparse")?;
+    anyhow::ensure!(
+        content
+            == toml::to_string_pretty(&reparsed).context("failed to serialize local settings")?,
+        "round-trip mismatch while serializing local settings"
+    );
     atomic_write(path, &content)
 }
 
-pub fn select_profile(path: &Path, name: &str) -> Result<()> {
+/// Create an empty committed machine profile without local runtime policy.
+pub fn create_profile(config_path: &Path, name: &str) -> Result<()> {
     let name = DirectoryName::new(name.to_owned())?;
-    let mut settings = if path.exists() {
-        load_settings(path)?
+    let path = profile_path(config_path, &name)?;
+    anyhow::ensure!(
+        !path.exists(),
+        "profile '{}' already exists at {}",
+        name,
+        path.display()
+    );
+    save_profile(&MachineProfile::default(), &path)
+}
+
+/// List valid committed machine profile names in deterministic order.
+pub fn list_profiles(config_path: &Path) -> Result<Vec<DirectoryName>> {
+    let config_dir = config_path
+        .parent()
+        .context("config path has no parent directory")?;
+    let machines_dir = config_dir.join("machines");
+    if !machines_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut profiles = Vec::new();
+    for entry in std::fs::read_dir(&machines_dir)
+        .with_context(|| format!("failed to read {}", machines_dir.display()))?
+    {
+        let path = entry
+            .with_context(|| format!("failed to read {}", machines_dir.display()))?
+            .path();
+        if path
+            .extension()
+            .is_some_and(|extension| extension == "toml")
+            && let Some(name) = path.file_stem().and_then(|name| name.to_str())
+        {
+            profiles.push(DirectoryName::new(name.to_owned())?);
+        }
+    }
+    profiles.sort();
+    Ok(profiles)
+}
+
+pub fn select_profile(settings_path: &Path, config_path: &Path, name: &str) -> Result<()> {
+    let name = DirectoryName::new(name.to_owned())?;
+    let profile_path = profile_path(config_path, &name)?;
+    anyhow::ensure!(
+        profile_path.is_file(),
+        "profile '{}' does not exist at {}",
+        name,
+        profile_path.display()
+    );
+    let mut settings = if settings_path.exists() {
+        load_settings(settings_path)?
     } else {
         LocalSettings::default()
     };
     settings.profile = Some(name.to_string());
-    save_settings(&settings, path)
+    save_settings(&settings, settings_path)
 }
 
 pub fn profile_recovery_message() -> &'static str {
@@ -184,6 +240,25 @@ fn atomic_write(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+fn profile_path(config_path: &Path, name: &DirectoryName) -> Result<PathBuf> {
+    let config_dir = config_path
+        .parent()
+        .context("config path has no parent directory")?;
+    Ok(config_dir.join("machines").join(format!("{name}.toml")))
+}
+
+fn save_profile(profile: &MachineProfile, path: &Path) -> Result<()> {
+    let content = toml::to_string_pretty(profile).context("failed to serialize machine profile")?;
+    let reparsed: MachineProfile = toml::from_str(&content)
+        .context("round-trip: generated machine profile did not reparse")?;
+    anyhow::ensure!(
+        content
+            == toml::to_string_pretty(&reparsed).context("failed to serialize machine profile")?,
+        "round-trip mismatch while serializing machine profile"
+    );
+    atomic_write(path, &content)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +272,39 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.to_string().contains("profile select"));
+    }
+
+    #[test]
+    fn profile_serialization_excludes_local_runtime_policy() {
+        let serialized = toml::to_string_pretty(&MachineProfile::default()).unwrap();
+        assert!(!serialized.contains("git_sync"));
+        assert!(!serialized.contains("managed_plugin_install"));
+        assert!(!serialized.contains("backup_runtime"));
+    }
+
+    #[test]
+    fn unchanged_layers_project_deterministically() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("tome.toml");
+        let settings_path = tmp.path().join("settings.toml");
+        std::fs::create_dir_all(tmp.path().join("machines")).unwrap();
+        std::fs::write(
+            &config_path,
+            format!(
+                "library_dir = \"{}\"\n",
+                tmp.path().join("library").display()
+            ),
+        )
+        .unwrap();
+        std::fs::write(tmp.path().join("machines/work.toml"), "").unwrap();
+        std::fs::write(
+            &settings_path,
+            "profile = \"work\"\ngit_sync = \"never\"\nmanaged_plugin_install = \"never\"\nbackup_runtime = \"always\"\n",
+        )
+        .unwrap();
+
+        let first = load_effective_context(&config_path, &settings_path).unwrap();
+        let second = load_effective_context(&config_path, &settings_path).unwrap();
+        assert_eq!(format!("{first:?}"), format!("{second:?}"));
     }
 }
