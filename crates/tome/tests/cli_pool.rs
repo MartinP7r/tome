@@ -260,3 +260,101 @@ fn git_policy_matrix_uses_pulled_profile_in_the_same_sync() {
     assert!(library.join("from-b/SKILL.md").is_file());
     assert!(!library.join("from-a").exists());
 }
+
+#[test]
+fn git_owned_path_staging_commits_only_pool_content() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let remote = root.join("remote.git");
+    let local = root.join("local");
+    let source = root.join("source");
+    common::create_skill(&source, "managed-skill");
+    git(root, &["init", "--bare", remote.to_str().unwrap()]);
+    git(
+        root,
+        &["clone", remote.to_str().unwrap(), local.to_str().unwrap()],
+    );
+    git(&local, &["config", "user.email", "test@example.com"]);
+    git(&local, &["config", "user.name", "Test User"]);
+    std::fs::create_dir_all(local.join("machines")).unwrap();
+    std::fs::write(
+        local.join("tome.toml"),
+        format!("library_dir = \"{}\"\n", local.join("skills").display()),
+    )
+    .unwrap();
+    std::fs::write(
+        local.join("machines/test.toml"),
+        format!(
+            "[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            source.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(local.join("agent-notes"), "do not commit me").unwrap();
+    std::fs::create_dir_all(local.join("repos/cache")).unwrap();
+    std::fs::write(local.join("repos/cache/untracked"), "cache stays local").unwrap();
+    git(&local, &["add", "tome.toml", "machines/test.toml"]);
+    git(&local, &["commit", "-m", "initial pool config"]);
+    git(&local, &["push", "-u", "origin", "HEAD"]);
+
+    let settings = root.join("settings.toml");
+    std::fs::write(&settings, "profile = \"test\"\ngit_sync = \"always\"\n").unwrap();
+    let mut command = cargo_bin_cmd!("tome");
+    command.args([
+        "--config",
+        local.join("tome.toml").to_str().unwrap(),
+        "--settings",
+        settings.to_str().unwrap(),
+        "--tome-home",
+        local.to_str().unwrap(),
+        "--no-input",
+        "sync",
+    ]);
+    command.assert().success();
+
+    let changed = std::process::Command::new("git")
+        .args(["show", "--format=", "--name-only", "HEAD"])
+        .current_dir(&local)
+        .output()
+        .unwrap();
+    let changed = String::from_utf8(changed.stdout).unwrap();
+    assert!(changed.lines().any(|path| path == "tome.lock"));
+    assert!(changed.lines().all(|path| {
+        path == "tome.lock"
+            || path == "tome.toml"
+            || path == "machines/test.toml"
+            || path.starts_with("skills/")
+    }));
+    assert_eq!(
+        std::fs::read_to_string(local.join("agent-notes")).unwrap(),
+        "do not commit me"
+    );
+    assert_eq!(
+        std::fs::read_to_string(local.join("repos/cache/untracked")).unwrap(),
+        "cache stays local"
+    );
+
+    std::fs::write(local.join("staged-unrelated"), "keep staged").unwrap();
+    git(&local, &["add", "staged-unrelated"]);
+    let mut blocked = cargo_bin_cmd!("tome");
+    blocked.args([
+        "--config",
+        local.join("tome.toml").to_str().unwrap(),
+        "--settings",
+        settings.to_str().unwrap(),
+        "--tome-home",
+        local.to_str().unwrap(),
+        "--no-input",
+        "sync",
+    ]);
+    blocked.assert().success();
+    let staged = std::process::Command::new("git")
+        .args(["diff", "--cached", "--name-only"])
+        .current_dir(&local)
+        .output()
+        .unwrap();
+    assert_eq!(
+        String::from_utf8(staged.stdout).unwrap(),
+        "staged-unrelated\n"
+    );
+}
