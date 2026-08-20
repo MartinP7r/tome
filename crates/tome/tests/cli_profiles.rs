@@ -1,3 +1,4 @@
+use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::TempDir;
 
@@ -194,4 +195,46 @@ fn legacy_layout_is_refused_with_migration_guidance() {
         .assert()
         .failure()
         .stderr(predicates::str::contains("tome migrate profiles"));
+}
+
+#[test]
+fn migrate_profiles_happy_path() {
+    let (tmp, config, settings) = fixture();
+    std::fs::remove_file(tmp.path().join("machines/work.toml")).unwrap();
+    let legacy_machine = tmp.path().join(".config/tome/machine.toml");
+    std::fs::create_dir_all(legacy_machine.parent().unwrap()).unwrap();
+    std::fs::write(
+        &config,
+        format!(
+            "library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            tmp.path().join("library").display(),
+            tmp.path().join("source").display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(&legacy_machine, "disabled = []\n").unwrap();
+
+    Command::new("script")
+        .args([
+            "-q",
+            "/dev/null",
+            cargo_bin_cmd!("tome").get_program().to_str().unwrap(),
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "migrate",
+            "profiles",
+        ])
+        .env("HOME", tmp.path())
+        .write_stdin("work\ny\n")
+        .assert()
+        .success();
+
+    let migrated_pool = std::fs::read_to_string(&config).unwrap();
+    assert!(migrated_pool.contains("library_dir"));
+    assert!(!migrated_pool.contains("directories"));
+    assert!(tmp.path().join("machines/work.toml").is_file());
+    assert!(settings.is_file());
+    assert!(!legacy_machine.exists());
 }

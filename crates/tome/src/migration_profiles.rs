@@ -35,6 +35,7 @@ pub(crate) struct MigrationPlan {
     settings: String,
     legacy_config_bytes: String,
     legacy_machine_bytes: String,
+    previous_settings_bytes: Option<String>,
 }
 
 /// A legacy layout is identified by portable directory topology in tome.toml
@@ -75,6 +76,14 @@ pub(crate) fn plan(
         .with_context(|| format!("failed to read {}", config_path.display()))?;
     let legacy_machine_bytes = std::fs::read_to_string(machine_path)
         .with_context(|| format!("failed to read {}", machine_path.display()))?;
+    let previous_settings_bytes = if settings_path.exists() {
+        Some(
+            std::fs::read_to_string(settings_path)
+                .with_context(|| format!("failed to read {}", settings_path.display()))?,
+        )
+    } else {
+        None
+    };
     let legacy: Config = toml::from_str(&legacy_config_bytes)
         .with_context(|| format!("failed to parse {}", config_path.display()))?;
     let prefs: MachinePrefs = toml::from_str(&legacy_machine_bytes)
@@ -95,6 +104,7 @@ pub(crate) fn plan(
         settings,
         legacy_config_bytes,
         legacy_machine_bytes,
+        previous_settings_bytes,
     })
 }
 
@@ -120,6 +130,9 @@ pub(crate) fn render_plan_to(plan: &MigrationPlan, writer: &mut impl Write) -> s
 pub(crate) fn execute(plan: &MigrationPlan, fail_at: Option<FailurePoint>) -> Result<()> {
     backup(&plan.legacy_config, &plan.legacy_config_bytes)?;
     backup(&plan.legacy_machine, &plan.legacy_machine_bytes)?;
+    if let Some(settings) = &plan.previous_settings_bytes {
+        backup(&plan.settings_path, settings)?;
+    }
     let journal = Journal::from_plan(plan);
     write_journal(&plan.journal_path, &journal)?;
     fail(fail_at, FailurePoint::Journal)?;
@@ -166,7 +179,11 @@ pub(crate) fn recover(config_path: &Path) -> Result<()> {
         profiles::atomic_write_bytes(&journal.legacy_config, &journal.legacy_config_bytes)?;
         profiles::atomic_write_bytes(&journal.legacy_machine, &journal.legacy_machine_bytes)?;
         let _ = std::fs::remove_file(&journal.profile_path);
-        let _ = std::fs::remove_file(&journal.settings_path);
+        if let Some(settings) = &journal.previous_settings_bytes {
+            profiles::atomic_write_bytes(&journal.settings_path, settings)?;
+        } else {
+            let _ = std::fs::remove_file(&journal.settings_path);
+        }
     }
     std::fs::remove_file(journal_path)?;
     Ok(())
@@ -224,6 +241,7 @@ struct Journal {
     settings: String,
     legacy_config_bytes: String,
     legacy_machine_bytes: String,
+    previous_settings_bytes: Option<String>,
 }
 impl Journal {
     fn from_plan(plan: &MigrationPlan) -> Self {
@@ -238,6 +256,7 @@ impl Journal {
             settings: plan.settings.clone(),
             legacy_config_bytes: plan.legacy_config_bytes.clone(),
             legacy_machine_bytes: plan.legacy_machine_bytes.clone(),
+            previous_settings_bytes: plan.previous_settings_bytes.clone(),
         }
     }
 }
