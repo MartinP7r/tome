@@ -176,3 +176,22 @@ fn empty_profile_bypass_environment_variable_has_no_effect() {
         .failure()
         .stderr(predicates::str::contains("does not exist"));
 }
+
+#[test]
+fn legacy_layout_is_refused_with_migration_guidance() {
+    let (tmp, config, settings) = fixture();
+    let machine = tmp.path().join("machine.toml");
+    std::fs::write(&config, format!("library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", tmp.path().join("library").display(), tmp.path().join("source").display())).unwrap();
+    std::fs::write(&machine, "").unwrap();
+    cargo_bin_cmd!("tome")
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "status",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("tome migrate profiles"));
+}

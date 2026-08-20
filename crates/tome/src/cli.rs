@@ -296,6 +296,12 @@ pub enum Command {
         yes: bool,
     },
 
+    /// Interactively migrate legacy configuration into a named profile.
+    Migrate {
+        #[command(subcommand)]
+        sub: MigrateCommand,
+    },
+
     /// Interactively browse discovered skills
     #[command(after_help = "Examples:\n  tome browse")]
     Browse,
@@ -404,6 +410,12 @@ pub enum ProfileCommand {
     List,
     /// Select the profile used by normal commands on this machine.
     Select { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MigrateCommand {
+    /// Preview and migrate the legacy portable configuration into a profile.
+    Profiles,
 }
 
 /// Variant of `tome remove` — directory removal vs unowned-skill deletion.

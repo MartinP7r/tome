@@ -103,6 +103,7 @@ pub(crate) mod machine;
 // `tome::list` was lifted in plan 26-02.
 pub mod manifest;
 pub mod marketplace;
+pub(crate) mod migration_profiles;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
 pub mod profiles;
@@ -155,7 +156,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
-use cli::{Cli, Command, ProfileCommand};
+use cli::{Cli, Command, MigrateCommand, ProfileCommand};
 use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
@@ -661,6 +662,47 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
+    if let Command::Migrate {
+        sub: MigrateCommand::Profiles,
+    } = &cli.command
+    {
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        migration_profiles::recover(&config_path)?;
+        migration_profiles::require_interactive(cli.no_input, cli.dry_run)?;
+        anyhow::ensure!(
+            cli.machine.is_none(),
+            "tome migrate profiles does not accept --machine; migrate the active legacy machine.toml"
+        );
+        let name: String = dialoguer::Input::new()
+            .with_prompt("New profile name")
+            .interact_text()?;
+        let plan = migration_profiles::plan(&config_path, &machine_path, &settings_path, &name)?;
+        migration_profiles::render_plan_to(&plan, &mut std::io::stderr().lock())?;
+        if migration_profiles::confirm()? {
+            migration_profiles::execute(&plan, None)?;
+        }
+        return Ok(());
+    }
+
+    // A journal is always resolved before normal loading. A legacy installation
+    // is never interpreted as a partial profile layout.
+    let config_path_for_recovery = effective_config
+        .clone()
+        .unwrap_or(config::default_config_path()?);
+    migration_profiles::recover(&config_path_for_recovery)?;
+    let legacy_machine_path = resolve_machine_path(cli.machine.as_deref())?;
+    if cli.machine.is_none()
+        && migration_profiles::legacy_layout(&config_path_for_recovery, &legacy_machine_path)?
+    {
+        anyhow::bail!(
+            "legacy configuration detected. Run `tome migrate profiles` from a terminal to preview and migrate it."
+        );
+    }
+
     // Load per-machine preferences first — they may rewrite directory paths via
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
@@ -789,6 +831,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::MigrateLibrary { dry_run, yes } => {
             cmd_migrate_library(&paths, dry_run || cli.dry_run, yes, cli.no_input)
         }
+        Command::Migrate { .. } => unreachable_early_return("Command::Migrate"),
         Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
         Command::Relocate { new_path } => cmd_relocate(
             new_path,

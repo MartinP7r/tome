@@ -31,7 +31,7 @@ pub enum BackupRuntimePolicy {
 }
 
 /// Shared policy persisted in `tome.toml`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PoolPolicy {
     #[serde(default = "crate::config::defaults::library_dir")]
@@ -257,6 +257,72 @@ fn save_profile(profile: &MachineProfile, path: &Path) -> Result<()> {
         "round-trip mismatch while serializing machine profile"
     );
     atomic_write(path, &content)
+}
+
+/// Produce checked TOML for a legacy-layout migration without writing it.
+///
+/// Kept here because the persisted layer fields are deliberately private to this
+/// module; callers must not be able to accidentally put local consent in a
+/// committed profile.
+pub(crate) fn migration_layers(
+    legacy: &Config,
+    prefs: &MachinePrefs,
+) -> Result<(String, String, String)> {
+    let pool = PoolPolicy {
+        library_dir: legacy.library_dir.clone(),
+        exclude: legacy.exclude.clone(),
+        backup: legacy.backup.clone(),
+    };
+    let profile = MachineProfile {
+        directories: legacy.directories.clone(),
+        disabled: prefs.disabled.clone(),
+        disabled_directories: prefs.disabled_directories.clone(),
+        directory: prefs.directory.clone(),
+    };
+    let settings = LocalSettings {
+        profile: None,
+        git_sync: GitSyncPolicy::default(),
+        managed_plugin_install: prefs.auto_install_plugins,
+        backup_runtime: BackupRuntimePolicy::default(),
+    };
+    checked_toml(&pool, "pool policy")
+        .and_then(|pool| checked_toml(&profile, "machine profile").map(|profile| (pool, profile)))
+        .and_then(|(pool, profile)| {
+            checked_toml(&settings, "local settings").map(|settings| (pool, profile, settings))
+        })
+}
+
+pub(crate) fn migration_settings(profile: &DirectoryName, prefs: &MachinePrefs) -> Result<String> {
+    checked_toml(
+        &LocalSettings {
+            profile: Some(profile.to_string()),
+            git_sync: GitSyncPolicy::default(),
+            managed_plugin_install: prefs.auto_install_plugins,
+            backup_runtime: BackupRuntimePolicy::default(),
+        },
+        "local settings",
+    )
+}
+
+pub(crate) fn atomic_write_bytes(path: &Path, content: &str) -> Result<()> {
+    atomic_write(path, content)
+}
+
+fn checked_toml<T>(value: &T, label: &str) -> Result<String>
+where
+    T: Serialize + for<'de> Deserialize<'de>,
+{
+    let content =
+        toml::to_string_pretty(value).with_context(|| format!("failed to serialize {label}"))?;
+    let reparsed: T = toml::from_str(&content)
+        .with_context(|| format!("round-trip: generated {label} did not reparse"))?;
+    anyhow::ensure!(
+        content
+            == toml::to_string_pretty(&reparsed)
+                .with_context(|| format!("failed to serialize {label}"))?,
+        "round-trip mismatch while serializing {label}"
+    );
+    Ok(content)
 }
 
 #[cfg(test)]
