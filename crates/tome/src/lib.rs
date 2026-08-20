@@ -150,7 +150,6 @@ pub(crate) mod wizard;
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::process::Command as GitCommand;
 
 use anyhow::{Context, Result};
 use console::style;
@@ -749,12 +748,15 @@ pub fn run(cli: Cli) -> Result<()> {
             log.is_verbose(),
             log.is_quiet(),
         );
+        if result.is_ok() && !cli.dry_run {
+            repo_session.publish(&paths, policy, cli.no_input)?;
+        }
         drop(repo_session);
         return result;
     }
 
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let (config, machine_prefs) = if matches!(
+    let (config, _machine_prefs) = if matches!(
         &cli.command,
         Command::Add { .. } | Command::Config { .. } | Command::Lint { path: Some(_), .. }
     ) {
@@ -2701,30 +2703,6 @@ pub fn sync(
         }
     }
 
-    // Offer git commit if tome home is a git repo with changes
-    let committed = if !dry_run && !quiet {
-        offer_git_commit(
-            paths.tome_home(),
-            report.consolidate.created,
-            report.consolidate.updated,
-            report.cleanup.removed_from_library,
-        )?
-    } else {
-        false
-    };
-
-    // Push to remote after commit (only if something was committed)
-    if committed && has_remote {
-        match backup::push(paths.tome_home()) {
-            Ok(()) => {
-                if !quiet {
-                    println!("  {} Pushed to remote", console::style("↑").cyan());
-                }
-            }
-            Err(e) => warn!("remote push failed: {e}"),
-        }
-    }
-
     // SAFE-01 mirror: surface non-zero exit when distribution-symlink
     // cleanup hit per-symlink I/O failures. The grouped summary already
     // printed via cleanup::render_distribution_cleanup_failures; this
@@ -3185,91 +3163,7 @@ fn generate_tome_home_gitignore(tome_home: &Path) -> Result<()> {
     Ok(())
 }
 
-/// If tome home is a git repo with uncommitted changes, prompt the user to commit.
-///
-/// Returns `true` if a commit was created, `false` otherwise.
-fn offer_git_commit(
-    tome_home: &Path,
-    created: usize,
-    updated: usize,
-    removed: usize,
-) -> Result<bool> {
-    if !tome_home.join(".git").exists() || !std::io::stdin().is_terminal() {
-        return Ok(false);
-    }
-
-    let output = match GitCommand::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(tome_home)
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("warning: could not run git status: {e}");
-            return Ok(false);
-        }
-    };
-
-    if !output.status.success() {
-        eprintln!(
-            "warning: git status returned non-zero exit code {:?}",
-            output.status.code()
-        );
-        return Ok(false);
-    }
-    if output.stdout.is_empty() {
-        return Ok(false);
-    }
-
-    let msg = sync_commit_message(created, updated, removed);
-
-    let confirm = dialoguer::Confirm::new()
-        .with_prompt(format!("Commit changes? ({})", msg))
-        .default(true)
-        .interact_opt()?;
-
-    if confirm != Some(true) {
-        return Ok(false);
-    }
-
-    // Stage all tracked files — .gitignore handles exclusions.
-    // The repo is at tome_home (~/.tome/) and covers skills, config, and lockfile.
-    let add_output = GitCommand::new("git")
-        .args(["add", "-A"])
-        .current_dir(tome_home)
-        .output()?;
-    if !add_output.status.success() {
-        eprintln!(
-            "warning: git add failed (exit code {:?})",
-            add_output.status.code()
-        );
-        let stderr = String::from_utf8_lossy(&add_output.stderr);
-        if !stderr.trim().is_empty() {
-            eprintln!("  git said: {}", stderr.trim());
-        }
-        return Ok(false);
-    }
-
-    let commit_output = GitCommand::new("git")
-        .args(["commit", "-m", &msg])
-        .current_dir(tome_home)
-        .output()?;
-    if !commit_output.status.success() {
-        eprintln!(
-            "warning: git commit failed (exit code {:?})",
-            commit_output.status.code()
-        );
-        let stderr = String::from_utf8_lossy(&commit_output.stderr);
-        if !stderr.trim().is_empty() {
-            eprintln!("  git said: {}", stderr.trim());
-        }
-        return Ok(false);
-    }
-
-    Ok(true)
-}
-
-/// Build a commit message summarizing sync changes.
+#[cfg(test)]
 fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String {
     let mut parts = Vec::new();
     if created > 0 {
@@ -3282,9 +3176,10 @@ fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String
         parts.push(format!("{removed} removed"));
     }
     if parts.is_empty() {
-        return "tome sync".to_string();
+        "tome sync".to_string()
+    } else {
+        format!("tome sync: {}", parts.join(", "))
     }
-    format!("tome sync: {}", parts.join(", "))
 }
 
 /// Print shell completions to stdout.

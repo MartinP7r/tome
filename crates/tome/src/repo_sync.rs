@@ -45,13 +45,16 @@ impl RepoSync {
                 )
             })?;
         use std::io::Write;
-        writeln!(
+        if let Err(error) = writeln!(
             lock,
             "pid={} started_at={:?}",
             std::process::id(),
             std::time::SystemTime::now()
-        )
-        .with_context(|| format!("failed to write sync lock {}", lock_path.display()))?;
+        ) {
+            let _ = std::fs::remove_file(&lock_path);
+            return Err(error)
+                .with_context(|| format!("failed to write sync lock {}", lock_path.display()));
+        }
 
         let repo_root = repository_root(config_dir)?;
         let session = Self {
@@ -64,6 +67,103 @@ impl RepoSync {
 
     pub(crate) fn repo_root(&self) -> Option<&Path> {
         self.repo_root.as_deref()
+    }
+
+    /// Commit and push only changed Tome-owned paths after reconciliation.
+    /// A failed push deliberately retains the local commit for the next sync.
+    pub(crate) fn publish(
+        &self,
+        paths: &crate::paths::TomePaths,
+        policy: GitSyncPolicy,
+        no_input: bool,
+    ) -> Result<()> {
+        if matches!(policy, GitSyncPolicy::Never) {
+            return Ok(());
+        }
+        let Some(repo_root) = self.repo_root() else {
+            return Ok(());
+        };
+        let status = status_snapshot(repo_root)?;
+        if let Some(reason) = status.unsafe_reason() {
+            eprintln!(
+                "warning: managed Git publication is unavailable: {reason}; local changes were retained"
+            );
+            return Ok(());
+        }
+        let owned = match owned_paths(repo_root, paths) {
+            Ok(owned) => owned,
+            Err(error) => {
+                eprintln!("warning: {error:#}; continuing local-only");
+                return Ok(());
+            }
+        };
+        let changed = changed_owned_paths(repo_root, &owned)?;
+        if changed.is_empty() {
+            if status.ahead > 0 {
+                return self.push_if_consented(
+                    repo_root,
+                    policy,
+                    no_input,
+                    "existing Tome commits",
+                );
+            }
+            return Ok(());
+        }
+        let summary = changed.join(", ");
+        let approved = match policy {
+            GitSyncPolicy::Always => true,
+            GitSyncPolicy::Ask if no_input || !std::io::stdin().is_terminal() => {
+                eprintln!(
+                    "warning: git_sync = \"ask\" is noninteractive; local pool changes were not committed"
+                );
+                false
+            }
+            GitSyncPolicy::Ask => dialoguer::Confirm::new()
+                .with_prompt(format!(
+                    "Commit and push these Tome-owned changes? {summary}"
+                ))
+                .default(false)
+                .interact()?,
+            GitSyncPolicy::Never => false,
+        };
+        if !approved {
+            return Ok(());
+        }
+        let mut add_args = vec!["add", "--"];
+        add_args.extend(changed.iter().map(String::as_str));
+        git_success(repo_root, &add_args)?;
+        git_success(
+            repo_root,
+            &["commit", "-m", "tome sync: update shared pool"],
+        )?;
+        self.push_if_consented(repo_root, policy, no_input, "new Tome pool commit")
+    }
+
+    fn push_if_consented(
+        &self,
+        repo_root: &Path,
+        policy: GitSyncPolicy,
+        no_input: bool,
+        description: &str,
+    ) -> Result<()> {
+        let approved = match policy {
+            GitSyncPolicy::Always => true,
+            GitSyncPolicy::Ask if no_input || !std::io::stdin().is_terminal() => false,
+            GitSyncPolicy::Ask => dialoguer::Confirm::new()
+                .with_prompt(format!("Push {description}?"))
+                .default(false)
+                .interact()?,
+            GitSyncPolicy::Never => false,
+        };
+        if !approved {
+            return Ok(());
+        }
+        if let Err(error) = git_success(repo_root, &["push"]) {
+            eprintln!(
+                "warning: git push failed; retained the local Tome commit for a later push: {error:#}"
+            );
+        }
+        Ok(())
     }
 
     fn pull_if_consented(
@@ -141,6 +241,70 @@ impl RepoSync {
         }
         Ok(())
     }
+}
+
+fn owned_paths(repo_root: &Path, paths: &crate::paths::TomePaths) -> Result<Vec<String>> {
+    let mut owned = vec![
+        repository_relative(repo_root, paths.library_dir())?,
+        repository_relative(repo_root, &paths.config_path())?,
+        repository_relative(repo_root, &paths.lockfile_path())?,
+        repository_relative(repo_root, &paths.config_dir().join("machines"))?,
+    ];
+    owned.sort();
+    owned.dedup();
+    Ok(owned)
+}
+
+fn repository_relative(repo_root: &Path, path: &Path) -> Result<String> {
+    let canonical_root = std::fs::canonicalize(repo_root).with_context(|| {
+        format!(
+            "failed to resolve repository worktree {}",
+            repo_root.display()
+        )
+    })?;
+    let canonical_path = std::fs::canonicalize(path).with_context(|| {
+        format!(
+            "failed to resolve Tome-owned path {} before Git publication",
+            path.display()
+        )
+    })?;
+    let relative = canonical_path.strip_prefix(&canonical_root).with_context(|| {
+        format!(
+            "shared-pool Git coordination is unavailable because Tome-owned path {} lies outside repository worktree {}",
+            path.display(),
+            repo_root.display()
+        )
+    })?;
+    anyhow::ensure!(
+        !relative.as_os_str().is_empty(),
+        "repository root itself is not a valid Tome-owned Git path"
+    );
+    relative
+        .to_str()
+        .map(str::to_owned)
+        .context("Tome-owned path is not valid UTF-8 for Git")
+}
+
+fn changed_owned_paths(repo_root: &Path, owned: &[String]) -> Result<Vec<String>> {
+    let owned_refs: Vec<_> = owned.iter().map(String::as_str).collect();
+    let mut diff_args = vec!["diff", "--name-only", "--"];
+    diff_args.extend(owned_refs.iter().copied());
+    let mut changed: Vec<String> = git_stdout(repo_root, &diff_args)?
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let mut untracked_args = vec!["ls-files", "--others", "--exclude-standard", "--"];
+    untracked_args.extend(owned_refs);
+    changed.extend(
+        git_stdout(repo_root, &untracked_args)?
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(str::to_owned),
+    );
+    changed.sort();
+    changed.dedup();
+    Ok(changed)
 }
 
 #[derive(Debug, Default)]

@@ -263,15 +263,10 @@ pub(crate) fn pull(repo_dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
-/// Push the current branch to origin.
-pub(crate) fn push(repo_dir: &Path) -> Result<()> {
+#[cfg(test)]
+fn push(repo_dir: &Path) -> Result<()> {
     let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
-    let output = git(repo_dir, &["push", "origin", &branch])?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git push failed: {}", stderr.trim());
-    }
-    Ok(())
+    git_success(repo_dir, &["push", "origin", &branch])
 }
 
 /// Add a remote named "origin" to the repo.
