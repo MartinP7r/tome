@@ -707,17 +707,14 @@ pub fn run(cli: Cli) -> Result<()> {
     // Load per-machine preferences first — they may rewrite directory paths via
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
-    if let Command::Sync {
-        force,
-        no_triage,
-        no_install,
-        git_sync,
-    } = &cli.command
+    if cli.machine.is_none()
+        && let Command::Sync {
+            force,
+            no_triage,
+            no_install,
+            git_sync,
+        } = &cli.command
     {
-        anyhow::ensure!(
-            cli.machine.is_none(),
-            "tome sync Git coordination requires a selected profile; --machine remains legacy compatibility mode"
-        );
         let config_path = effective_config
             .clone()
             .unwrap_or(config::default_config_path()?);
@@ -756,7 +753,7 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let (config, _machine_prefs) = if matches!(
+    let (config, machine_prefs) = if matches!(
         &cli.command,
         Command::Add { .. } | Command::Config { .. } | Command::Lint { path: Some(_), .. }
     ) {
@@ -826,7 +823,27 @@ pub fn run(cli: Cli) -> Result<()> {
                 cli.dry_run,
             )
         }
-        Command::Sync { .. } => unreachable_early_return("Command::Sync"),
+        Command::Sync {
+            force,
+            no_triage,
+            no_install,
+            ..
+        } => {
+            let log = cli.log_level();
+            cmd_sync(
+                force,
+                no_triage,
+                no_install,
+                &config,
+                &paths,
+                &machine_path,
+                &machine_prefs,
+                cli.dry_run,
+                cli.no_input,
+                log.is_verbose(),
+                log.is_quiet(),
+            )
+        }
         Command::Status { json } => cmd_status(&config, &paths, json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
@@ -2163,23 +2180,6 @@ pub fn sync(
 
     // Cache git state to avoid repeated subprocess calls
     let has_backup_repo = backup::has_repo(paths.tome_home());
-    let has_remote = has_backup_repo && backup::has_remote(paths.tome_home());
-
-    // Pull from remote before anything else (if configured)
-    if !dry_run && has_remote {
-        match backup::pull(paths.tome_home()) {
-            Ok(true) => {
-                if !quiet {
-                    println!(
-                        "  {} Pulled changes from remote",
-                        console::style("↓").cyan()
-                    );
-                }
-            }
-            Ok(false) => {} // up to date
-            Err(e) => warn!("remote pull failed: {e}"),
-        }
-    }
 
     // Pre-sync auto-snapshot if configured
     if !dry_run && config.backup.enabled && config.backup.auto_snapshot && has_backup_repo {

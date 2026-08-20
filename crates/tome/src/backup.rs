@@ -239,7 +239,8 @@ pub(crate) fn has_remote(repo_dir: &Path) -> bool {
 ///
 /// Returns `Ok(true)` if changes were pulled, `Ok(false)` if already up-to-date.
 /// Bails on diverged histories — the user must resolve manually.
-pub(crate) fn pull(repo_dir: &Path) -> Result<bool> {
+#[cfg(test)]
+fn pull(repo_dir: &Path) -> Result<bool> {
     git_success(repo_dir, &["fetch", "origin"])?;
 
     // Determine the remote branch: use whatever origin/HEAD points to,
@@ -297,6 +298,7 @@ pub(crate) fn push_initial(repo_dir: &Path) -> Result<()> {
 ///
 /// Tries `origin/main`, then `origin/master`, then `origin/<current-branch>`.
 /// Bails if none of the candidates exist on the remote.
+#[cfg(test)]
 fn detect_remote_branch(repo_dir: &Path) -> Result<String> {
     let branch = git_stdout(repo_dir, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     let candidates = [
