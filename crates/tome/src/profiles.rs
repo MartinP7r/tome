@@ -98,6 +98,11 @@ pub fn load_effective_context(
     let profile_path = config_dir
         .join("machines")
         .join(format!("{}.toml", profile_name.as_str()));
+
+    let pool_text = std::fs::read_to_string(config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let pool: PoolPolicy = toml::from_str(&pool_text)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
     anyhow::ensure!(
         profile_path.is_file(),
         "selected profile '{}' does not exist at {}. {}",
@@ -105,11 +110,6 @@ pub fn load_effective_context(
         profile_path.display(),
         profile_recovery_message()
     );
-
-    let pool_text = std::fs::read_to_string(config_path)
-        .with_context(|| format!("failed to read {}", config_path.display()))?;
-    let pool: PoolPolicy = toml::from_str(&pool_text)
-        .with_context(|| format!("failed to parse {}", config_path.display()))?;
     let profile_text = std::fs::read_to_string(&profile_path)
         .with_context(|| format!("failed to read {}", profile_path.display()))?;
     let profile: MachineProfile = toml::from_str(&profile_text)

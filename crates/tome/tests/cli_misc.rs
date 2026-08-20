@@ -4,6 +4,19 @@ use predicates::prelude::*;
 mod common;
 use common::*;
 
+fn seed_selected_profile(tome_home: &std::path::Path) {
+    std::fs::create_dir_all(tome_home.join("library")).unwrap();
+    std::fs::write(
+        tome_home.join("tome.toml"),
+        format!(
+            "library_dir = \"{}\"\n",
+            tome_home.join("library").display()
+        ),
+    )
+    .unwrap();
+    write_test_profile(tome_home, "");
+}
+
 #[test]
 fn help_shows_usage() {
     tome()
@@ -56,9 +69,12 @@ fn verbose_short_flag_still_works() {
 fn completions_fish_installs_to_file() {
     let home = TempDir::new().unwrap();
     let xdg_config = home.path().join(".config");
+    let tome_home = home.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    seed_selected_profile(&tome_home);
     tome()
         .env("HOME", home.path())
-        .env("TOME_HOME", home.path().join(".tome"))
+        .env("TOME_HOME", &tome_home)
         .env("XDG_CONFIG_HOME", &xdg_config)
         .args(["completions", "fish"])
         .assert()
@@ -74,9 +90,12 @@ fn completions_fish_installs_to_file() {
 fn completions_bash_installs_to_file() {
     let home = TempDir::new().unwrap();
     let xdg_data = home.path().join(".local/share");
+    let tome_home = home.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    seed_selected_profile(&tome_home);
     tome()
         .env("HOME", home.path())
-        .env("TOME_HOME", home.path().join(".tome"))
+        .env("TOME_HOME", &tome_home)
         .env("XDG_DATA_HOME", &xdg_data)
         .args(["completions", "bash"])
         .assert()
@@ -91,9 +110,12 @@ fn completions_bash_installs_to_file() {
 #[test]
 fn completions_zsh_installs_to_file() {
     let home = TempDir::new().unwrap();
+    let tome_home = home.path().join(".tome");
+    std::fs::create_dir_all(&tome_home).unwrap();
+    seed_selected_profile(&tome_home);
     tome()
         .env("HOME", home.path())
-        .env("TOME_HOME", home.path().join(".tome"))
+        .env("TOME_HOME", &tome_home)
         .args(["completions", "zsh"])
         .assert()
         .success()
@@ -112,6 +134,7 @@ fn completions_invalid_shell_fails() {
 #[test]
 fn completions_powershell_errors_with_instructions() {
     let tmp = TempDir::new().unwrap();
+    seed_selected_profile(tmp.path());
     tome()
         .env("TOME_HOME", tmp.path())
         .args(["completions", "powershell"])
@@ -126,6 +149,7 @@ fn completions_powershell_errors_with_instructions() {
 #[test]
 fn completions_print_outputs_to_stdout() {
     let tmp = TempDir::new().unwrap();
+    seed_selected_profile(tmp.path());
     tome()
         .env("TOME_HOME", tmp.path())
         .args(["completions", "fish", "--print"])

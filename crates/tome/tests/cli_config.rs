@@ -30,7 +30,9 @@ fn tome_home_flag_overrides_default() {
     std::fs::create_dir_all(&custom_home).unwrap();
 
     // Copy config into the custom home so tome can find it
-    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+    let config_path = custom_home.join("tome.toml");
+    std::fs::copy(&env.config_path, &config_path).unwrap();
+    copy_selected_profile(&env.config_path, &config_path);
 
     tome()
         .arg("--tome-home")
@@ -56,7 +58,9 @@ fn tome_home_env_var_overrides_default() {
 
     let custom_home = env.tmp.path().join("env-tome-home");
     std::fs::create_dir_all(&custom_home).unwrap();
-    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+    let config_path = custom_home.join("tome.toml");
+    std::fs::copy(&env.config_path, &config_path).unwrap();
+    copy_selected_profile(&env.config_path, &config_path);
 
     tome()
         .env("TOME_HOME", &custom_home)
@@ -84,8 +88,12 @@ fn tome_home_flag_takes_precedence_over_env() {
     std::fs::create_dir_all(&flag_home).unwrap();
 
     // Copy config to both locations
-    std::fs::copy(&env.config_path, env_home.join("tome.toml")).unwrap();
-    std::fs::copy(&env.config_path, flag_home.join("tome.toml")).unwrap();
+    let env_config = env_home.join("tome.toml");
+    let flag_config = flag_home.join("tome.toml");
+    std::fs::copy(&env.config_path, &env_config).unwrap();
+    std::fs::copy(&env.config_path, &flag_config).unwrap();
+    copy_selected_profile(&env.config_path, &env_config);
+    copy_selected_profile(&env.config_path, &flag_config);
 
     tome()
         .env("TOME_HOME", &env_home)
@@ -118,7 +126,9 @@ fn tome_home_finds_config_in_dotdir() {
     let repo_root = env.tmp.path().join("my-repo");
     let dotdir = repo_root.join(".tome");
     std::fs::create_dir_all(&dotdir).unwrap();
-    std::fs::copy(&env.config_path, dotdir.join("tome.toml")).unwrap();
+    let config_path = dotdir.join("tome.toml");
+    std::fs::copy(&env.config_path, &config_path).unwrap();
+    copy_selected_profile(&env.config_path, &config_path);
 
     tome()
         .arg("--tome-home")
@@ -153,7 +163,9 @@ fn tome_home_falls_back_to_root_config() {
 
     let custom_home = env.tmp.path().join("root-config-home");
     std::fs::create_dir_all(&custom_home).unwrap();
-    std::fs::copy(&env.config_path, custom_home.join("tome.toml")).unwrap();
+    let config_path = custom_home.join("tome.toml");
+    std::fs::copy(&env.config_path, &config_path).unwrap();
+    copy_selected_profile(&env.config_path, &config_path);
 
     tome()
         .arg("--tome-home")
@@ -188,8 +200,12 @@ fn tome_home_dotdir_wins_over_root() {
     std::fs::create_dir_all(&dotdir).unwrap();
 
     // Put config in both locations
-    std::fs::copy(&env.config_path, dotdir.join("tome.toml")).unwrap();
-    std::fs::copy(&env.config_path, repo_root.join("tome.toml")).unwrap();
+    let dot_config = dotdir.join("tome.toml");
+    let root_config = repo_root.join("tome.toml");
+    std::fs::copy(&env.config_path, &dot_config).unwrap();
+    std::fs::copy(&env.config_path, &root_config).unwrap();
+    copy_selected_profile(&env.config_path, &dot_config);
+    copy_selected_profile(&env.config_path, &root_config);
 
     tome()
         .arg("--tome-home")

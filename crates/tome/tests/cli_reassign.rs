@@ -15,19 +15,23 @@ fn reassign_test_env(tmp: &TempDir) {
     let library_dir = tmp.path().join("library");
     std::fs::create_dir_all(&library_dir).unwrap();
 
-    let config_content = format!(
+    let profile_content = format!(
         // local-target uses `synced` role rather than `target` — Phase 14
         // D-A2 refuses reassign into target-only directories (a target-only
         // dir doesn't get rediscovered on next sync). `synced` participates
         // in both discovery and distribution, so reassign succeeds.
-        "library_dir = \"{}\"\n\n[directories.local-source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.local-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"synced\"\n",
-        library_dir.display(),
+        "[directories.local-source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n\n[directories.local-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"synced\"\n",
         source_dir.display(),
         target_dir.display()
     );
 
     let config_path = tmp.path().join("tome.toml");
-    std::fs::write(&config_path, config_content).unwrap();
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"\n", library_dir.display()),
+    )
+    .unwrap();
+    write_test_profile(tmp.path(), &profile_content);
 
     // Sync to populate library and manifest
     tome()

@@ -67,6 +67,7 @@ fn status_without_config_shows_init_prompt() {
         format!("library_dir = \"{}\"", nonexistent_library.display()),
     )
     .unwrap();
+    write_test_profile(tmp.path(), "");
 
     let output = tome()
         .args(["--config", config_path.to_str().unwrap(), "status"])

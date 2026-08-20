@@ -157,3 +157,22 @@ fn status_requires_explicit_profile_selection() {
         .failure()
         .stderr(predicates::str::contains("profile select"));
 }
+
+#[test]
+fn empty_profile_bypass_environment_variable_has_no_effect() {
+    let (_tmp, config, settings) = fixture();
+    std::fs::write(&settings, "profile = \"missing\"\n").unwrap();
+
+    cargo_bin_cmd!("tome")
+        .env("TOME_TEST_ALLOW_EMPTY_PROFILE", "1")
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "status",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("does not exist"));
+}
