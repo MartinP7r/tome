@@ -106,6 +106,7 @@ pub mod marketplace;
 pub(crate) mod migration_profiles;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
+pub(crate) mod pool;
 pub mod profiles;
 // `progress` is `pub` because its trait + event vocabulary
 // (`ProgressSink`/`ProgressEvent`/`SyncStage`/`CancelToken`) is the domain
@@ -2198,7 +2199,7 @@ pub fn sync(
     if cancel.is_cancelled() {
         anyhow::bail!("sync cancelled");
     }
-    let skills = {
+    let (skills, pool_catalog) = {
         let _span = info_span!("discover").entered();
         // D-09/D-11: the Discover stage drives the "Discovering skills..."
         // spinner. Git resolution below emits GitCloneProgress events that
@@ -2217,7 +2218,7 @@ pub fn sync(
 
         // 1. Discover
         let mut warnings = Vec::new();
-        let mut discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        let mut discovered = discover::discover_all_candidates(config, &resolved, &mut warnings)?;
 
         // D-16: join in the manifest's per-skill `synced_at` timestamp.
         // Extracted into `join_synced_at_from_manifest` so the join logic is
@@ -2236,15 +2237,41 @@ pub fn sync(
             warn!("{}", w);
         }
 
-        discovered
-    };
-
-    if skills.is_empty() {
-        if !quiet {
-            println!("No skills found. Run `tome init` to configure sources.");
+        let directory_types = config
+            .directories()
+            .iter()
+            .map(|(name, directory)| (name.clone(), directory.directory_type.clone()))
+            .collect();
+        let candidates = pool::collect(discovered, &directory_types, "active")?;
+        let settings = profiles::load_pool_settings(&paths.config_path())?;
+        let existing = old_lockfile
+            .as_ref()
+            .map(|lockfile| &lockfile.skills)
+            .cloned()
+            .unwrap_or_default();
+        let (selected, entries, conflicts) = pool::reconcile(
+            &existing,
+            &candidates,
+            &settings.source_pins,
+            &settings.exclude,
+            "active",
+        );
+        if !conflicts.is_empty() {
+            for conflict in conflicts {
+                eprintln!("conflict: skill '{}' has different content:", conflict.skill);
+                for candidate in conflict.candidates {
+                    eprintln!(
+                        "  identity={} hash={} location={}",
+                        candidate.identity,
+                        candidate.hash,
+                        candidate.location.display()
+                    );
+                }
+            }
+            anyhow::bail!("pool reconciliation halted: resolve the conflicting source explicitly");
         }
-        return Ok(());
-    }
+        (selected, lockfile::Lockfile { version: 2, skills: entries })
+    };
 
     debug!("Found {} skills", skills.len());
 
@@ -2282,7 +2309,7 @@ pub fn sync(
     };
 
     // 3. Diff lockfile and triage changes (pre-cleanup snapshot for diffing)
-    let pre_cleanup_lockfile = lockfile::generate(&manifest, &skills);
+    let pre_cleanup_lockfile = pool_catalog.clone();
     if !no_triage && !quiet {
         if let Some(ref old) = old_lockfile {
             let d = update::diff(old, &pre_cleanup_lockfile);
@@ -2336,7 +2363,7 @@ pub fn sync(
     )?;
 
     // Regenerate lockfile after cleanup so it reflects removals
-    let new_lockfile = lockfile::generate(&manifest, &skills);
+    let new_lockfile = pool_catalog;
 
     // Stage boundary: cancellation checked before distribute begins (D-12).
     if cancel.is_cancelled() {

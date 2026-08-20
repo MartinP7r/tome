@@ -40,6 +40,37 @@ struct PoolPolicy {
     exclude: BTreeSet<SkillName>,
     #[serde(default)]
     backup: BackupConfig,
+    #[serde(default)]
+    source_pins: BTreeMap<SkillName, String>,
+}
+
+/// Shared choices used by pool reconciliation. Persisted only in pool policy.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PoolSettings {
+    pub exclude: BTreeSet<SkillName>,
+    pub source_pins: BTreeMap<SkillName, String>,
+}
+
+pub(crate) fn load_pool_settings(config_path: &Path) -> Result<PoolSettings> {
+    let text = std::fs::read_to_string(config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let policy: PoolPolicy = toml::from_str(&text)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+    Ok(PoolSettings { exclude: policy.exclude, source_pins: policy.source_pins })
+}
+
+pub(crate) fn save_pool_settings(
+    config_path: &Path,
+    settings: &PoolSettings,
+) -> Result<()> {
+    let text = std::fs::read_to_string(config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let mut policy: PoolPolicy = toml::from_str(&text)
+        .with_context(|| format!("failed to parse {}", config_path.display()))?;
+    policy.exclude = settings.exclude.clone();
+    policy.source_pins = settings.source_pins.clone();
+    let content = checked_toml(&policy, "pool policy")?;
+    atomic_write(config_path, &content)
 }
 
 /// Complete, committed topology and distribution preferences for one profile.
@@ -272,6 +303,7 @@ pub(crate) fn migration_layers(
         library_dir: legacy.library_dir.clone(),
         exclude: legacy.exclude.clone(),
         backup: legacy.backup.clone(),
+        source_pins: BTreeMap::new(),
     };
     let profile = MachineProfile {
         directories: legacy.directories.clone(),

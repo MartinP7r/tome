@@ -1384,6 +1384,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile {
@@ -1431,6 +1432,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile {
@@ -1472,6 +1474,7 @@ mod tests {
                     registry_id: None,
                     version: None,
                     git_commit_sha: None,
+                    observations: Vec::new(),
                 },
             );
         }

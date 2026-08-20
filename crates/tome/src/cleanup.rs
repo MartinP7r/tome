@@ -343,6 +343,10 @@ pub fn cleanup_library(
         return Ok(result);
     }
 
+    // Shared pools accumulate. A source being absent from this profile, empty,
+    // or temporarily unavailable is observation state, never deletion intent.
+    // Explicit pool removal owns deletion through its durable exclusion marker.
+    let _ = (discovered_names, config);
     let interactive = !no_input && std::io::stdin().is_terminal() && !quiet;
 
     // Stale candidates = manifest entries whose skill names weren't discovered.
@@ -353,18 +357,7 @@ pub fn cleanup_library(
     // Already-Unowned entries (source_name == None) are filtered out of the
     // stale set entirely; they have no source to compare against and are
     // preserved by definition (LIB-04). They were skipped from discover too.
-    let stale: Vec<SkillName> = manifest
-        .keys()
-        .filter(|name| !discovered_names.contains(name.as_str()))
-        .filter(|name| {
-            // Skip already-Unowned entries — they're preserved by definition.
-            manifest
-                .get(name.as_str())
-                .map(|e| e.source_name().is_some())
-                .unwrap_or(false)
-        })
-        .cloned()
-        .collect();
+    let stale: Vec<SkillName> = Vec::new();
 
     // Partition stale entries into Case 1 (transition / Bucket A) and
     // Case 2 (delete / Bucket B). Capture the source-name pairing for
