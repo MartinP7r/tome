@@ -13,12 +13,20 @@ const JOURNAL_FILE: &str = ".tome-profiles-migration.toml";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FailurePoint {
-    Journal,
-    Pool,
-    Profile,
-    Settings,
-    Validate,
-    RetireLegacy,
+    BeforeJournal,
+    AfterJournal,
+    BeforePool,
+    AfterPool,
+    BeforeProfile,
+    AfterProfile,
+    BeforeSettings,
+    AfterSettings,
+    BeforeValidate,
+    AfterValidate,
+    BeforeRetireLegacy,
+    AfterRetireLegacy,
+    BeforeJournalCompletion,
+    AfterJournalCompletion,
 }
 
 #[derive(Debug)]
@@ -84,11 +92,16 @@ pub(crate) fn plan(
     } else {
         None
     };
-    let legacy: Config = toml::from_str(&legacy_config_bytes)
+    let mut legacy: Config = toml::from_str(&legacy_config_bytes)
         .with_context(|| format!("failed to parse {}", config_path.display()))?;
     let prefs: MachinePrefs = toml::from_str(&legacy_machine_bytes)
         .with_context(|| format!("failed to parse {}", machine_path.display()))?;
     prefs.validate()?;
+    // Legacy overrides are part of the effective topology. Apply them before
+    // serializing the profile so their syntax remains only in the backup.
+    legacy.expand_tildes()?;
+    legacy.apply_machine_overrides(&prefs)?;
+    legacy.validate()?;
     let (pool, profile_toml, _) = profiles::migration_layers(&legacy, &prefs)?;
     let settings = profiles::migration_settings(&profile, &prefs)?;
     Ok(MigrationPlan {
@@ -134,20 +147,33 @@ pub(crate) fn execute(plan: &MigrationPlan, fail_at: Option<FailurePoint>) -> Re
         backup(&plan.settings_path, settings)?;
     }
     let journal = Journal::from_plan(plan);
+    fail(fail_at, FailurePoint::BeforeJournal)?;
     write_journal(&plan.journal_path, &journal)?;
-    fail(fail_at, FailurePoint::Journal)?;
+    fail(fail_at, FailurePoint::AfterJournal)?;
+    fail(fail_at, FailurePoint::BeforePool)?;
     profiles::atomic_write_bytes(&plan.pool_path, &plan.pool)?;
-    fail(fail_at, FailurePoint::Pool)?;
+    fail(fail_at, FailurePoint::AfterPool)?;
+    fail(fail_at, FailurePoint::BeforeProfile)?;
     profiles::atomic_write_bytes(&plan.profile_path, &plan.profile_toml)?;
-    fail(fail_at, FailurePoint::Profile)?;
+    fail(fail_at, FailurePoint::AfterProfile)?;
+    fail(fail_at, FailurePoint::BeforeSettings)?;
     profiles::atomic_write_bytes(&plan.settings_path, &plan.settings)?;
-    fail(fail_at, FailurePoint::Settings)?;
+    fail(fail_at, FailurePoint::AfterSettings)?;
+    fail(fail_at, FailurePoint::BeforeValidate)?;
     profiles::load_effective_context(&plan.pool_path, &plan.settings_path)?;
-    fail(fail_at, FailurePoint::Validate)?;
+    fail(fail_at, FailurePoint::AfterValidate)?;
+    fail(fail_at, FailurePoint::BeforeRetireLegacy)?;
     std::fs::remove_file(&plan.legacy_machine)
         .with_context(|| format!("failed to retire {}", plan.legacy_machine.display()))?;
-    fail(fail_at, FailurePoint::RetireLegacy)?;
-    let _ = std::fs::remove_file(&plan.journal_path);
+    fail(fail_at, FailurePoint::AfterRetireLegacy)?;
+    fail(fail_at, FailurePoint::BeforeJournalCompletion)?;
+    std::fs::remove_file(&plan.journal_path).with_context(|| {
+        format!(
+            "failed to complete migration journal {}",
+            plan.journal_path.display()
+        )
+    })?;
+    fail(fail_at, FailurePoint::AfterJournalCompletion)?;
     Ok(())
 }
 
@@ -185,7 +211,12 @@ pub(crate) fn recover(config_path: &Path) -> Result<()> {
             let _ = std::fs::remove_file(&journal.settings_path);
         }
     }
-    std::fs::remove_file(journal_path)?;
+    std::fs::remove_file(&journal_path).with_context(|| {
+        format!(
+            "failed to complete migration journal {}",
+            journal_path.display()
+        )
+    })?;
     Ok(())
 }
 
@@ -277,31 +308,111 @@ mod tests {
         (tmp, config, machine, settings)
     }
     #[test]
-    fn migration_recovers_each_interruption() {
+    fn migration_recovers_each_interruption_to_one_complete_layout() {
         for point in [
-            FailurePoint::Journal,
-            FailurePoint::Pool,
-            FailurePoint::Profile,
-            FailurePoint::Settings,
-            FailurePoint::Validate,
-            FailurePoint::RetireLegacy,
+            FailurePoint::BeforeJournal,
+            FailurePoint::AfterJournal,
+            FailurePoint::BeforePool,
+            FailurePoint::AfterPool,
+            FailurePoint::BeforeProfile,
+            FailurePoint::AfterProfile,
+            FailurePoint::BeforeSettings,
+            FailurePoint::AfterSettings,
+            FailurePoint::BeforeValidate,
+            FailurePoint::AfterValidate,
+            FailurePoint::BeforeRetireLegacy,
+            FailurePoint::AfterRetireLegacy,
+            FailurePoint::BeforeJournalCompletion,
+            FailurePoint::AfterJournalCompletion,
         ] {
             let (_tmp, config, machine, settings) = fixture();
+            let legacy_config = std::fs::read_to_string(&config).unwrap();
+            let legacy_machine = std::fs::read_to_string(&machine).unwrap();
             let plan = plan(&config, &machine, &settings, "work").unwrap();
             assert!(execute(&plan, Some(point)).is_err());
             recover(&config).unwrap();
+
+            let restored_legacy = std::fs::read_to_string(&config).unwrap() == legacy_config
+                && std::fs::read_to_string(&machine).unwrap() == legacy_machine
+                && !plan.profile_path.exists()
+                && !settings.exists();
+            let completed_new = std::fs::read_to_string(&config).unwrap() == plan.pool
+                && std::fs::read_to_string(&plan.profile_path).unwrap() == plan.profile_toml
+                && std::fs::read_to_string(&settings).unwrap() == plan.settings
+                && !machine.exists()
+                && profiles::load_effective_context(&config, &settings).is_ok();
             assert!(
-                machine.exists() || profiles::load_effective_context(&config, &settings).is_ok()
+                restored_legacy || completed_new,
+                "{point:?} left neither complete layout"
             );
+            assert!(!plan.journal_path.exists());
         }
     }
     #[test]
     fn completed_migration_is_idempotent() {
         let (_tmp, config, machine, settings) = fixture();
-        let plan = plan(&config, &machine, &settings, "work").unwrap();
-        execute(&plan, None).unwrap();
-        let before = std::fs::read_to_string(&config).unwrap();
+        let migration = plan(&config, &machine, &settings, "work").unwrap();
+        execute(&migration, None).unwrap();
+        let before = (
+            std::fs::read_to_string(&config).unwrap(),
+            std::fs::read_to_string(&migration.profile_path).unwrap(),
+            std::fs::read_to_string(&settings).unwrap(),
+        );
         assert!(!legacy_layout(&config, &machine).unwrap());
-        assert_eq!(before, std::fs::read_to_string(&config).unwrap());
+        assert!(plan(&config, &machine, &settings, "work").is_err());
+        assert_eq!(
+            before,
+            (
+                std::fs::read_to_string(&config).unwrap(),
+                std::fs::read_to_string(&migration.profile_path).unwrap(),
+                std::fs::read_to_string(&settings).unwrap(),
+            )
+        );
+    }
+
+    #[test]
+    fn migration_bakes_legacy_overrides_into_the_profile() {
+        let (tmp, config, machine, settings) = fixture();
+        let overridden_source = tmp.path().join("overridden-source");
+        std::fs::write(
+            &machine,
+            format!(
+                "[directory_overrides.source]\npath = \"{}\"\n",
+                overridden_source.display()
+            ),
+        )
+        .unwrap();
+
+        let plan = plan(&config, &machine, &settings, "work").unwrap();
+
+        assert!(
+            plan.profile_toml
+                .contains(&format!("path = \"{}\"", overridden_source.display()))
+        );
+        assert!(!plan.profile_toml.contains("directory_overrides"));
+    }
+
+    #[test]
+    fn migration_refusals_do_not_convert_any_files() {
+        let (tmp, config, machine, settings) = fixture();
+        let legacy_config = std::fs::read_to_string(&config).unwrap();
+        let legacy_machine = std::fs::read_to_string(&machine).unwrap();
+        let existing_profile = tmp.path().join("machines/work.toml");
+        std::fs::create_dir_all(existing_profile.parent().unwrap()).unwrap();
+        std::fs::write(&existing_profile, "").unwrap();
+
+        assert!(plan(&config, &machine, &settings, "work").is_err());
+        assert_eq!(legacy_config, std::fs::read_to_string(&config).unwrap());
+        assert_eq!(legacy_machine, std::fs::read_to_string(&machine).unwrap());
+        assert!(!settings.exists());
+
+        std::fs::remove_file(existing_profile).unwrap();
+        std::fs::write(&config, "not valid TOML = [").unwrap();
+        let malformed = std::fs::read_to_string(&config).unwrap();
+
+        assert!(plan(&config, &machine, &settings, "other").is_err());
+        assert_eq!(malformed, std::fs::read_to_string(&config).unwrap());
+        assert_eq!(legacy_machine, std::fs::read_to_string(&machine).unwrap());
+        assert!(!settings.exists());
     }
 }

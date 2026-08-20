@@ -231,7 +231,7 @@ fn test_add_custom_name() {
 }
 
 #[test]
-fn test_add_duplicate_name_fails() {
+fn test_add_refuses_legacy_layout_before_duplicate_detection() {
     let tmp = TempDir::new().unwrap();
     let config_path = tmp.path().join("tome.toml");
     std::fs::write(
@@ -251,7 +251,7 @@ fn test_add_duplicate_name_fails() {
         .env("NO_COLOR", "1")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("already exists in config"));
+        .stderr(predicate::str::contains("tome migrate profiles"));
 }
 
 #[test]
