@@ -5,15 +5,15 @@ milestone_name: tome Desktop (Tauri GUI)
 current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
 status: executing
-stopped_at: Completed 27.1-03-PLAN.md
-last_updated: "2026-08-20T14:37:16.146Z"
+stopped_at: Completed 27.1-04-PLAN.md
+last_updated: "2026-08-20T15:00:37.077Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 27.1 execution started
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 27
-  completed_plans: 24
+  completed_plans: 25
   percent: 60
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 ## Current Position
 
 Phase: 27.1 (multi-machine-shared-pool-configuration) — EXECUTING
-Plan: 4 of 6
+Plan: 5 of 6
 Status: Ready to execute
 Last activity: 2026-08-19 — Phase 27.1 execution started
 
@@ -84,6 +84,8 @@ Historical decisions are archived in:
 - [Phase ?]: Legacy directory overrides are applied before migrated profile serialization, preserving override syntax only in backups.
 - [Phase ?]: Selected-profile pool sync owns reconciliation; explicit legacy machine paths retain compatibility behavior.
 - [Phase ?]: Pool removal persists a shared exclusion before its recovery marker and derived cleanup.
+- [Phase ?]: Selected-profile sync reads only local Git consent before optional fast-forward pull, then loads the effective context once from the pulled checkout.
+- [Phase ?]: Pool publication stages sorted changed Tome-owned paths only and preserves a local commit when push fails.
 
 ### v1.0 design context (consume during phase planning)
 
@@ -140,8 +142,8 @@ Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on th
 
 ## Session Continuity
 
-Last session: 2026-08-20T14:37:16.109Z
-Stopped at: Completed 27.1-03-PLAN.md
+Last session: 2026-08-20T15:00:37.060Z
+Stopped at: Completed 27.1-04-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -151,3 +153,4 @@ Resume file: None
 | Phase 27.1 P01 | 38m | 2 tasks | 6 files |
 | Phase 27.1 P02 | 47m | 2 tasks | 6 files |
 | Phase 27.1 P03 | 58min | 2 tasks | 12 files |
+| Phase 27.1 P04 | 16min | 2 tasks | 6 files |
