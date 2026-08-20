@@ -79,3 +79,38 @@ fn conflicting_candidates_do_not_mutate_pool() {
     assert!(!library.join("same").exists());
     assert!(!root.join("tome.lock").exists());
 }
+
+#[test]
+fn pool_remove_excludes_before_cleanup_and_restore_allows_import() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let library = root.join("library");
+    let source = root.join("source");
+    std::fs::create_dir_all(&library).unwrap();
+    common::create_skill(&source, "removed-skill");
+    let config = root.join("tome.toml");
+    std::fs::write(&config, format!("library_dir = \"{}\"\n", library.display())).unwrap();
+    std::fs::create_dir_all(root.join("machines")).unwrap();
+    std::fs::write(
+        root.join("machines/test.toml"),
+        format!("[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", source.display()),
+    ).unwrap();
+    let settings = root.join("settings.toml");
+    std::fs::write(&settings, "profile = \"test\"\ngit_sync = \"never\"\n").unwrap();
+    run(&config, &settings).assert().success();
+
+    let mut remove = cargo_bin_cmd!("tome");
+    remove.args(["--config", config.to_str().unwrap(), "--settings", settings.to_str().unwrap(), "--no-input", "remove", "pool", "removed-skill", "--yes"]);
+    remove.assert().success();
+    assert!(!library.join("removed-skill").exists());
+    assert!(std::fs::read_to_string(&config).unwrap().contains("removed-skill"));
+
+    run(&config, &settings).assert().success();
+    assert!(!library.join("removed-skill").exists());
+
+    let mut restore = cargo_bin_cmd!("tome");
+    restore.args(["--config", config.to_str().unwrap(), "--settings", settings.to_str().unwrap(), "--no-input", "pool", "restore", "removed-skill"]);
+    restore.assert().success();
+    run(&config, &settings).assert().success();
+    assert!(library.join("removed-skill").exists());
+}
