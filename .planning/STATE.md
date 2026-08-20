@@ -5,15 +5,15 @@ milestone_name: tome Desktop (Tauri GUI)
 current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
 status: executing
-stopped_at: Completed 27.1-01-PLAN.md
-last_updated: "2026-08-19T15:30:43.313Z"
+stopped_at: Completed 27.1-02-PLAN.md
+last_updated: "2026-08-20T14:06:25.882Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 27.1 execution started
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 27
-  completed_plans: 22
+  completed_plans: 23
   percent: 60
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 ## Current Position
 
 Phase: 27.1 (multi-machine-shared-pool-configuration) — EXECUTING
-Plan: 2 of 6
+Plan: 3 of 6
 Status: Ready to execute
 Last activity: 2026-08-19 — Phase 27.1 execution started
 
@@ -80,6 +80,8 @@ Historical decisions are archived in:
 - [Phase 25]: 25-06: v1.0 frontend framework = React (D-GUI-04, irreversible from Phase 26). Built 3-way StatusReport spike (React/Solid/Svelte) scored 1-5 x4 criteria; React+Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization/NF-02 a11y/NF-03 HIG). Bundle gzip: Solid 6.20kB / Svelte 15.85kB / React 62.29kB. Winner collapsed into crates/tome-desktop/ui/ (one canonical bindings.ts, relative ./bindings import); losers deleted. ADR: .planning/research/v1.0-frontend-framework-decision.md
 - [Phase ?]: Profile create, list, and select operate on committed machines/<name>.toml files; selection refuses a nonexistent profile.
 - [Phase ?]: An explicit --machine path retains legacy directory_overrides loading and emits a deprecation warning.
+- [Phase ?]: Migration recovery restores exact legacy bytes unless all three journaled targets validate as the complete new layout.
+- [Phase ?]: Legacy directory overrides are applied before migrated profile serialization, preserving override syntax only in backups.
 
 ### v1.0 design context (consume during phase planning)
 
@@ -136,8 +138,8 @@ Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on th
 
 ## Session Continuity
 
-Last session: 2026-08-19T15:30:43.302Z
-Stopped at: Completed 27.1-01-PLAN.md
+Last session: 2026-08-20T14:06:25.794Z
+Stopped at: Completed 27.1-02-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -145,3 +147,4 @@ Resume file: None
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 27.1 P01 | 38m | 2 tasks | 6 files |
+| Phase 27.1 P02 | 47m | 2 tasks | 6 files |
