@@ -252,16 +252,18 @@ pub fn discover_all(
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
     let all = discover_all_candidates(config, resolved_paths, warnings)?;
-    let mut seen = HashSet::new();
+    let mut seen: BTreeMap<String, DirectoryName> = BTreeMap::new();
     let mut skills = Vec::new();
     for skill in all {
-        if seen.insert(skill.name.as_str().to_owned()) {
-            skills.push(skill);
-        } else {
+        let name = skill.name.as_str().to_owned();
+        if let Some(winner) = seen.get(&name) {
             warnings.push(format!(
-                "skill '{}' appears in multiple sources; pool reconciliation will require matching content or an explicit resolution",
-                skill.name
+                "skill '{}' found in both '{}' and '{}', using '{}'",
+                name, winner, skill.source_name, winner
             ));
+        } else {
+            seen.insert(name, skill.source_name.clone());
+            skills.push(skill);
         }
     }
     Ok(skills)
