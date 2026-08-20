@@ -54,15 +54,24 @@ pub(crate) struct PoolSettings {
 pub(crate) fn load_pool_settings(config_path: &Path) -> Result<PoolSettings> {
     let text = std::fs::read_to_string(config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
-    let policy: PoolPolicy = toml::from_str(&text)
-        .with_context(|| format!("failed to parse {}", config_path.display()))?;
-    Ok(PoolSettings { exclude: policy.exclude, source_pins: policy.source_pins })
+    let policy: PoolPolicy = match toml::from_str(&text) {
+        Ok(policy) => policy,
+        Err(_) => {
+            let legacy: Config = toml::from_str(&text)
+                .with_context(|| format!("failed to parse {}", config_path.display()))?;
+            return Ok(PoolSettings {
+                exclude: legacy.exclude,
+                source_pins: BTreeMap::new(),
+            });
+        }
+    };
+    Ok(PoolSettings {
+        exclude: policy.exclude,
+        source_pins: policy.source_pins,
+    })
 }
 
-pub(crate) fn save_pool_settings(
-    config_path: &Path,
-    settings: &PoolSettings,
-) -> Result<()> {
+pub(crate) fn save_pool_settings(config_path: &Path, settings: &PoolSettings) -> Result<()> {
     let text = std::fs::read_to_string(config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
     let mut policy: PoolPolicy = toml::from_str(&text)

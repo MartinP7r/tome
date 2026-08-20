@@ -51,9 +51,18 @@ pub(crate) fn collect(
         let locator = skill.path.display().to_string();
         let identity = stable_identity(&skill, kind, profile);
         let hash = crate::manifest::hash_directory(&skill.path).with_context(|| {
-            format!("failed to hash candidate '{}' at {}", skill.name, skill.path.display())
+            format!(
+                "failed to hash candidate '{}' at {}",
+                skill.name,
+                skill.path.display()
+            )
         })?;
-        candidates.push(Candidate { skill, identity, locator, hash });
+        candidates.push(Candidate {
+            skill,
+            identity,
+            locator,
+            hash,
+        });
     }
     candidates.sort_by(|a, b| {
         a.skill
@@ -93,21 +102,31 @@ pub(crate) fn reconcile(
     pins: &BTreeMap<SkillName, String>,
     excluded: &BTreeSet<SkillName>,
     profile: &str,
-) -> (Vec<DiscoveredSkill>, BTreeMap<SkillName, LockEntry>, Vec<Conflict>) {
+) -> (
+    Vec<DiscoveredSkill>,
+    BTreeMap<SkillName, LockEntry>,
+    Vec<Conflict>,
+) {
     let mut entries = existing.clone();
     let mut selected = Vec::new();
     let mut conflicts = Vec::new();
     let mut by_name: BTreeMap<SkillName, Vec<&Candidate>> = BTreeMap::new();
     for candidate in candidates {
         if !excluded.contains(&candidate.skill.name) {
-            by_name.entry(candidate.skill.name.clone()).or_default().push(candidate);
+            by_name
+                .entry(candidate.skill.name.clone())
+                .or_default()
+                .push(candidate);
         }
     }
 
     for (name, group) in by_name {
         let pin = pins.get(&name);
         let usable: Vec<&Candidate> = match pin {
-            Some(identity) => group.into_iter().filter(|c| &c.identity == identity).collect(),
+            Some(identity) => group
+                .into_iter()
+                .filter(|c| &c.identity == identity)
+                .collect(),
             None => group,
         };
         if usable.is_empty() {
@@ -166,12 +185,62 @@ pub(crate) fn removal_marker(config_dir: &Path, skill: &SkillName) -> PathBuf {
     config_dir.join(format!(".tome-pool-remove-{}.json", skill.as_str()))
 }
 
+/// Resume interrupted exclusion-first removals before discovering candidates.
+/// Markers are cleared only after library, manifest, and catalog agree.
+pub(crate) fn recover_pending_removals(paths: &crate::paths::TomePaths) -> Result<()> {
+    let prefix = ".tome-pool-remove-";
+    let entries = match std::fs::read_dir(paths.config_dir()) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read {}", paths.config_dir().display()));
+        }
+    };
+    for entry in entries {
+        let marker = entry?.path();
+        let Some(file_name) = marker.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(name) = file_name
+            .strip_prefix(prefix)
+            .and_then(|name| name.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let skill = SkillName::new(name.to_owned())?;
+        let library_path = paths.library_dir().join(skill.as_str());
+        if library_path.is_dir() {
+            std::fs::remove_dir_all(&library_path).with_context(|| {
+                format!("failed to resume removal of {}", library_path.display())
+            })?;
+        } else if library_path.is_symlink() {
+            std::fs::remove_file(&library_path).with_context(|| {
+                format!("failed to resume removal of {}", library_path.display())
+            })?;
+        }
+        let mut manifest = crate::manifest::load(paths.config_dir())?;
+        manifest.remove(skill.as_str());
+        crate::manifest::save(&manifest, paths.config_dir())?;
+        if let Some(mut catalog) = crate::lockfile::load(paths.config_dir())? {
+            catalog.skills.remove(&skill);
+            crate::lockfile::save(&catalog, paths.config_dir())?;
+        }
+        std::fs::remove_file(&marker)
+            .with_context(|| format!("failed to clear recovered marker {}", marker.display()))?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn normalized_git_urls_merge() {
-        assert_eq!(normalize_git_url("HTTPS://EXAMPLE.COM/team/repo.git/"), "https://example.com/team/repo");
+        assert_eq!(
+            normalize_git_url("HTTPS://EXAMPLE.COM/team/repo.git/"),
+            "https://example.com/team/repo"
+        );
     }
 }

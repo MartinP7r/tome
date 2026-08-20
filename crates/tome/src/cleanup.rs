@@ -328,6 +328,7 @@ pub(crate) fn render_distribution_cleanup_failures(
 /// When stdin is a TTY and `quiet` is false, prompts the user before deleting
 /// Case 2 entries. Case 1 transitions are silent (info-level eprintln) — no
 /// confirmation needed because library content is preserved.
+#[allow(dead_code)] // retained for direct legacy cleanup callers and unit coverage
 pub fn cleanup_library(
     library_dir: &Path,
     discovered_names: &HashSet<String>,
@@ -343,10 +344,6 @@ pub fn cleanup_library(
         return Ok(result);
     }
 
-    // Shared pools accumulate. A source being absent from this profile, empty,
-    // or temporarily unavailable is observation state, never deletion intent.
-    // Explicit pool removal owns deletion through its durable exclusion marker.
-    let _ = (discovered_names, config);
     let interactive = !no_input && std::io::stdin().is_terminal() && !quiet;
 
     // Stale candidates = manifest entries whose skill names weren't discovered.
@@ -357,7 +354,17 @@ pub fn cleanup_library(
     // Already-Unowned entries (source_name == None) are filtered out of the
     // stale set entirely; they have no source to compare against and are
     // preserved by definition (LIB-04). They were skipped from discover too.
-    let stale: Vec<SkillName> = Vec::new();
+    let stale: Vec<SkillName> = manifest
+        .keys()
+        .filter(|name| !discovered_names.contains(name.as_str()))
+        .filter(|name| {
+            manifest
+                .get(name.as_str())
+                .map(|entry| entry.source_name().is_some())
+                .unwrap_or(false)
+        })
+        .cloned()
+        .collect();
 
     // Partition stale entries into Case 1 (transition / Bucket A) and
     // Case 2 (delete / Bucket B). Capture the source-name pairing for
@@ -508,6 +515,13 @@ pub fn cleanup_library(
     }
 
     Ok(result)
+}
+
+/// Shared-pool cleanup deliberately does not infer deletion from discovery.
+/// Explicit exclusion-first pool removal is the only operation allowed to
+/// delete accumulated content.
+pub(crate) fn cleanup_pool_library() -> CleanupResult {
+    CleanupResult::default()
 }
 
 /// Remove stale symlinks from a target directory.

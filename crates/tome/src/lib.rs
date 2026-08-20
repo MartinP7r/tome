@@ -146,7 +146,7 @@ pub mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::Command as GitCommand;
@@ -157,7 +157,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
-use cli::{Cli, Command, MigrateCommand, ProfileCommand};
+use cli::{Cli, Command, MigrateCommand, PoolCommand, ProfileCommand};
 use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
@@ -823,6 +823,7 @@ pub fn run(cli: Cli) -> Result<()> {
             cli.dry_run,
             cli.no_input,
         ),
+        Command::Pool { sub } => cmd_pool(sub, &paths),
         Command::Reassign { skill, to, force } => {
             cmd_reassign(skill, to, force, &config, &paths, cli.dry_run)
         }
@@ -1044,7 +1045,72 @@ pub(crate) fn cmd_remove(
         cli::RemoveKind::Skill { name, yes } => {
             cmd_remove_skill(name, yes, &config, paths, cli_machine, dry_run, no_input)
         }
+        cli::RemoveKind::Pool { name, yes } => cmd_remove_pool(name, yes, paths, dry_run),
     }
+}
+
+fn cmd_remove_pool(name: String, yes: bool, paths: &TomePaths, dry_run: bool) -> Result<()> {
+    let skill = discover::SkillName::new(name)?;
+    anyhow::ensure!(yes || dry_run, "tome remove pool requires --yes");
+    if dry_run {
+        println!("Dry run — would exclude and remove pool skill '{skill}'.");
+        return Ok(());
+    }
+    // The exclusion is the durable first write. A later interruption cannot
+    // permit another profile to re-import the removed candidate.
+    let mut settings = profiles::load_pool_settings(&paths.config_path())?;
+    settings.exclude.insert(skill.clone());
+    profiles::save_pool_settings(&paths.config_path(), &settings)?;
+    let marker = pool::removal_marker(paths.config_dir(), &skill);
+    std::fs::write(&marker, skill.as_str())
+        .with_context(|| format!("failed to write pool removal marker {}", marker.display()))?;
+
+    let library_path = paths.library_dir().join(skill.as_str());
+    if library_path.is_dir() {
+        std::fs::remove_dir_all(&library_path)
+            .with_context(|| format!("failed to remove {}", library_path.display()))?;
+    } else if library_path.is_symlink() {
+        std::fs::remove_file(&library_path)
+            .with_context(|| format!("failed to remove {}", library_path.display()))?;
+    }
+    let mut manifest = manifest::load(paths.config_dir())?;
+    manifest.remove(skill.as_str());
+    manifest::save(&manifest, paths.config_dir())?;
+    if let Some(mut catalog) = lockfile::load(paths.config_dir())? {
+        catalog.skills.remove(&skill);
+        lockfile::save(&catalog, paths.config_dir())?;
+    }
+    std::fs::remove_file(&marker)
+        .with_context(|| format!("failed to complete pool removal {}", marker.display()))?;
+    println!("✓ Removed pool skill '{skill}' and added a shared exclusion.");
+    Ok(())
+}
+
+fn cmd_pool(sub: PoolCommand, paths: &TomePaths) -> Result<()> {
+    let mut settings = profiles::load_pool_settings(&paths.config_path())?;
+    match sub {
+        PoolCommand::Restore { name } => {
+            let skill = discover::SkillName::new(name)?;
+            settings.exclude.remove(&skill);
+            let marker = pool::removal_marker(paths.config_dir(), &skill);
+            if marker.exists() {
+                anyhow::bail!("pool removal for '{skill}' needs recovery before restore");
+            }
+            println!("✓ Restored pool import eligibility for '{skill}'.");
+        }
+        PoolCommand::AcceptSource { name, identity }
+        | PoolCommand::RetainCurrent { name, identity } => {
+            settings
+                .source_pins
+                .insert(discover::SkillName::new(name)?, identity);
+            println!("✓ Saved shared source pin.");
+        }
+        PoolCommand::Exclude { name } => {
+            settings.exclude.insert(discover::SkillName::new(name)?);
+            println!("✓ Saved shared pool exclusion.");
+        }
+    }
+    profiles::save_pool_settings(&paths.config_path(), &settings)
 }
 
 /// `tome remove dir <name>` — remove a directory entry from `tome.toml` and
@@ -2059,6 +2125,13 @@ pub fn sync(
     // it after the reconcile block (below) populates it.
     let mut reconcile_install_failures: Vec<marketplace::InstallFailure> = Vec::new();
 
+    // A prior exclusion-first removal may have been interrupted after its
+    // durable policy write. Recover before discovery so excluded candidates
+    // can never be re-imported through a partial cleanup window.
+    if !dry_run {
+        pool::recover_pending_removals(paths)?;
+    }
+
     // Cache git state to avoid repeated subprocess calls
     let has_backup_repo = backup::has_repo(paths.tome_home());
     let has_remote = has_backup_repo && backup::has_remote(paths.tome_home());
@@ -2199,7 +2272,7 @@ pub fn sync(
     if cancel.is_cancelled() {
         anyhow::bail!("sync cancelled");
     }
-    let (skills, pool_catalog) = {
+    let (skills, pool_catalog, shared_pool_mode) = {
         let _span = info_span!("discover").entered();
         // D-09/D-11: the Discover stage drives the "Discovering skills..."
         // spinner. Git resolution below emits GitCloneProgress events that
@@ -2237,18 +2310,32 @@ pub fn sync(
             warn!("{}", w);
         }
 
+        let shared_pool_mode = std::fs::read_to_string(paths.config_path())
+            .map(|text| !text.contains("[directories"))
+            .unwrap_or(false);
+        if !shared_pool_mode {
+            discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        }
         let directory_types = config
             .directories()
             .iter()
             .map(|(name, directory)| (name.clone(), directory.directory_type.clone()))
             .collect();
         let candidates = pool::collect(discovered, &directory_types, "active")?;
-        let settings = profiles::load_pool_settings(&paths.config_path())?;
-        let existing = old_lockfile
-            .as_ref()
-            .map(|lockfile| &lockfile.skills)
-            .cloned()
-            .unwrap_or_default();
+        let settings = if paths.config_path().is_file() {
+            profiles::load_pool_settings(&paths.config_path())?
+        } else {
+            profiles::PoolSettings::default()
+        };
+        let existing = if shared_pool_mode {
+            old_lockfile
+                .as_ref()
+                .map(|lockfile| &lockfile.skills)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        };
         let (selected, entries, conflicts) = pool::reconcile(
             &existing,
             &candidates,
@@ -2258,7 +2345,10 @@ pub fn sync(
         );
         if !conflicts.is_empty() {
             for conflict in conflicts {
-                eprintln!("conflict: skill '{}' has different content:", conflict.skill);
+                eprintln!(
+                    "conflict: skill '{}' has different content:",
+                    conflict.skill
+                );
                 for candidate in conflict.candidates {
                     eprintln!(
                         "  identity={} hash={} location={}",
@@ -2270,7 +2360,14 @@ pub fn sync(
             }
             anyhow::bail!("pool reconciliation halted: resolve the conflicting source explicitly");
         }
-        (selected, lockfile::Lockfile { version: 2, skills: entries })
+        (
+            selected,
+            lockfile::Lockfile {
+                version: 2,
+                skills: entries,
+            },
+            shared_pool_mode,
+        )
     };
 
     debug!("Found {} skills", skills.len());
@@ -2309,7 +2406,11 @@ pub fn sync(
     };
 
     // 3. Diff lockfile and triage changes (pre-cleanup snapshot for diffing)
-    let pre_cleanup_lockfile = pool_catalog.clone();
+    let pre_cleanup_lockfile = if shared_pool_mode {
+        pool_catalog.clone()
+    } else {
+        lockfile::generate(&manifest, &skills)
+    };
     if !no_triage && !quiet {
         if let Some(ref old) = old_lockfile {
             let d = update::diff(old, &pre_cleanup_lockfile);
@@ -2335,9 +2436,6 @@ pub fn sync(
         }
     }
 
-    let discovered_names: HashSet<String> =
-        skills.iter().map(|s| s.name.as_str().to_string()).collect();
-
     // Warn about disabled_directories that don't match any configured directory
     if !quiet {
         warn_unknown_disabled_directories(&machine_prefs, config);
@@ -2352,18 +2450,30 @@ pub fn sync(
     //    by the single `cleanup` step span at the end of the pipeline; the
     //    library-cleanup portion happens outside of any step span (small,
     //    fast, and naming-collision-free under the OBS-03 grep contract).
-    let cleanup_result = cleanup::cleanup_library(
-        paths.library_dir(),
-        &discovered_names,
-        &mut manifest,
-        config,
-        dry_run,
-        quiet,
-        no_input,
-    )?;
+    let cleanup_result = if shared_pool_mode {
+        cleanup::cleanup_pool_library()
+    } else {
+        let discovered_names = skills
+            .iter()
+            .map(|skill| skill.name.as_str().to_string())
+            .collect();
+        cleanup::cleanup_library(
+            paths.library_dir(),
+            &discovered_names,
+            &mut manifest,
+            config,
+            dry_run,
+            quiet,
+            no_input,
+        )?
+    };
 
     // Regenerate lockfile after cleanup so it reflects removals
-    let new_lockfile = pool_catalog;
+    let new_lockfile = if shared_pool_mode {
+        pool_catalog
+    } else {
+        lockfile::generate(&manifest, &skills)
+    };
 
     // Stage boundary: cancellation checked before distribute begins (D-12).
     if cancel.is_cancelled() {

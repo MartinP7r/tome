@@ -91,6 +91,9 @@ pub struct Observation {
     pub imported_at: String,
     pub last_observed_at: String,
     pub observing_profile: String,
+    /// Legacy operational directory name; stable identity remains authoritative.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<DirectoryName>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -103,7 +106,12 @@ pub struct Observation {
 impl Observation {
     pub(crate) fn from_candidate(candidate: &crate::pool::Candidate, profile: &str) -> Self {
         let provenance = candidate.skill.origin.provenance();
-        let source_kind = if provenance.is_some() { "managed" } else { "local" }.to_string();
+        let source_kind = if provenance.is_some() {
+            "managed"
+        } else {
+            "local"
+        }
+        .to_string();
         let now = crate::manifest::now_iso8601();
         Self {
             source_kind,
@@ -114,6 +122,7 @@ impl Observation {
             imported_at: now.clone(),
             last_observed_at: now,
             observing_profile: profile.to_string(),
+            source_name: Some(candidate.skill.source_name.clone()),
             version: provenance.and_then(|p| p.version.clone()),
             git_commit_sha: provenance.and_then(|p| p.git_commit_sha.clone()),
             observed_local_path: Some(candidate.skill.path.clone()),
@@ -124,10 +133,13 @@ impl Observation {
 impl LockEntry {
     pub(crate) fn from_observation(observation: Observation) -> Self {
         Self {
-            source_name: None,
+            source_name: observation.source_name.clone(),
             previous_source: None,
             content_hash: observation.current_content_hash.clone(),
-            registry_id: observation.stable_identity.strip_prefix("registry:").map(str::to_owned),
+            registry_id: observation
+                .stable_identity
+                .strip_prefix("registry:")
+                .map(str::to_owned),
             version: observation.version.clone(),
             git_commit_sha: observation.git_commit_sha.clone(),
             observations: vec![observation],
@@ -135,7 +147,9 @@ impl LockEntry {
     }
 
     pub(crate) fn has_identity(&self, identity: &str) -> bool {
-        self.observations.iter().any(|o| o.stable_identity == identity)
+        self.observations
+            .iter()
+            .any(|o| o.stable_identity == identity)
     }
 
     /// Preserve first facts and deduplicate identical repeated observations;
@@ -160,9 +174,11 @@ impl LockEntry {
             existing.version = observation.version.clone();
             existing.git_commit_sha = observation.git_commit_sha.clone();
             existing.observed_local_path = observation.observed_local_path.clone();
+            self.source_name = observation.source_name.clone();
         } else {
             self.observations.push(observation.clone());
-            self.observations.sort_by(|a, b| a.stable_identity.cmp(&b.stable_identity));
+            self.observations
+                .sort_by(|a, b| a.stable_identity.cmp(&b.stable_identity));
         }
         self.content_hash = observation.current_content_hash;
         self.version = observation.version;

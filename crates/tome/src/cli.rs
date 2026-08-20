@@ -319,6 +319,11 @@ pub enum Command {
         #[command(subcommand)]
         kind: RemoveKind,
     },
+    /// Resolve shared pool exclusions and source choices.
+    Pool {
+        #[command(subcommand)]
+        sub: PoolCommand,
+    },
 
     /// Reassign a skill to a different directory. Accepts both Owned skills
     /// (today's behaviour) and Unowned skills (re-anchors them per UNOWN-01 /
@@ -447,6 +452,25 @@ pub enum RemoveKind {
         #[arg(long, short)]
         yes: bool,
     },
+    /// Remove a pooled skill globally and exclude it from all future imports.
+    Pool {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PoolCommand {
+    /// Restore a deliberately removed skill by clearing its shared exclusion.
+    Restore { name: String },
+    /// Persist a source choice for a conflicted skill.
+    AcceptSource { name: String, identity: String },
+    /// Preserve the current pool candidate when conflicting sources are seen.
+    RetainCurrent { name: String, identity: String },
+    /// Exclude a conflicted skill from every profile.
+    Exclude { name: String },
 }
 
 #[derive(Debug, Subcommand)]

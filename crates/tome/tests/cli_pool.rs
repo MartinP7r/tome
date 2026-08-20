@@ -28,16 +28,26 @@ fn cross_profile_pool_preserves_and_distributes() {
     std::fs::create_dir_all(&target).unwrap();
     common::create_skill(&source, "shared-skill");
     let config = root.join("tome.toml");
-    std::fs::write(&config, format!("library_dir = \"{}\"\n", library.display())).unwrap();
+    std::fs::write(
+        &config,
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
     std::fs::create_dir_all(root.join("machines")).unwrap();
     std::fs::write(
         root.join("machines/profile-a.toml"),
-        format!("[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", source.display()),
+        format!(
+            "[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            source.display()
+        ),
     )
     .unwrap();
     std::fs::write(
         root.join("machines/profile-b.toml"),
-        format!("[directories.target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n", target.display()),
+        format!(
+            "[directories.target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            target.display()
+        ),
     )
     .unwrap();
     let settings = root.join("settings.toml");
@@ -64,7 +74,11 @@ fn conflicting_candidates_do_not_mutate_pool() {
     common::create_skill(&right, "same");
     std::fs::write(right.join("same/SKILL.md"), "different").unwrap();
     let config = root.join("tome.toml");
-    std::fs::write(&config, format!("library_dir = \"{}\"\n", library.display())).unwrap();
+    std::fs::write(
+        &config,
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
     std::fs::create_dir_all(root.join("machines")).unwrap();
     std::fs::write(
         root.join("machines/test.toml"),
@@ -89,27 +103,58 @@ fn pool_remove_excludes_before_cleanup_and_restore_allows_import() {
     std::fs::create_dir_all(&library).unwrap();
     common::create_skill(&source, "removed-skill");
     let config = root.join("tome.toml");
-    std::fs::write(&config, format!("library_dir = \"{}\"\n", library.display())).unwrap();
+    std::fs::write(
+        &config,
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
     std::fs::create_dir_all(root.join("machines")).unwrap();
     std::fs::write(
         root.join("machines/test.toml"),
-        format!("[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", source.display()),
-    ).unwrap();
+        format!(
+            "[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            source.display()
+        ),
+    )
+    .unwrap();
     let settings = root.join("settings.toml");
     std::fs::write(&settings, "profile = \"test\"\ngit_sync = \"never\"\n").unwrap();
     run(&config, &settings).assert().success();
 
     let mut remove = cargo_bin_cmd!("tome");
-    remove.args(["--config", config.to_str().unwrap(), "--settings", settings.to_str().unwrap(), "--no-input", "remove", "pool", "removed-skill", "--yes"]);
+    remove.args([
+        "--config",
+        config.to_str().unwrap(),
+        "--settings",
+        settings.to_str().unwrap(),
+        "--no-input",
+        "remove",
+        "pool",
+        "removed-skill",
+        "--yes",
+    ]);
     remove.assert().success();
     assert!(!library.join("removed-skill").exists());
-    assert!(std::fs::read_to_string(&config).unwrap().contains("removed-skill"));
+    assert!(
+        std::fs::read_to_string(&config)
+            .unwrap()
+            .contains("removed-skill")
+    );
 
     run(&config, &settings).assert().success();
     assert!(!library.join("removed-skill").exists());
 
     let mut restore = cargo_bin_cmd!("tome");
-    restore.args(["--config", config.to_str().unwrap(), "--settings", settings.to_str().unwrap(), "--no-input", "pool", "restore", "removed-skill"]);
+    restore.args([
+        "--config",
+        config.to_str().unwrap(),
+        "--settings",
+        settings.to_str().unwrap(),
+        "--no-input",
+        "pool",
+        "restore",
+        "removed-skill",
+    ]);
     restore.assert().success();
     run(&config, &settings).assert().success();
     assert!(library.join("removed-skill").exists());
