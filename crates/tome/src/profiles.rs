@@ -11,7 +11,7 @@ use crate::discover::SkillName;
 use crate::machine::{AutoInstall, DirectoryPrefs, MachinePrefs};
 
 /// Local consent for synchronising the shared pool repository.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum GitSyncPolicy {
     #[default]

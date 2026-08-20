@@ -231,6 +231,9 @@ pub enum Command {
         /// `machine.toml`. Mirrors Cargo's `--frozen` / `--locked`.
         #[arg(long)]
         no_install: bool,
+        /// Override local Git synchronization consent for this invocation only.
+        #[arg(long, value_enum)]
+        git_sync: Option<crate::profiles::GitSyncPolicy>,
     },
 
     /// Show library, directories, last-sync, and health summary

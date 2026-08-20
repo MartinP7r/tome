@@ -4,6 +4,23 @@ use assert_cmd::{Command, cargo_bin_cmd};
 use predicates::prelude::*;
 use tempfile::TempDir;
 
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {} failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 fn run(config: &std::path::Path, settings: &std::path::Path) -> Command {
     let mut command = cargo_bin_cmd!("tome");
     command.args([
@@ -158,4 +175,88 @@ fn pool_remove_excludes_before_cleanup_and_restore_allows_import() {
     restore.assert().success();
     run(&config, &settings).assert().success();
     assert!(library.join("removed-skill").exists());
+}
+
+#[test]
+fn git_policy_matrix_uses_pulled_profile_in_the_same_sync() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path();
+    let remote = root.join("remote.git");
+    let seed = root.join("seed");
+    let library = root.join("library");
+    let source_a = root.join("source-a");
+    let source_b = root.join("source-b");
+    std::fs::create_dir_all(&library).unwrap();
+    common::create_skill(&source_a, "from-a");
+    common::create_skill(&source_b, "from-b");
+    git(root, &["init", "--bare", remote.to_str().unwrap()]);
+    git(
+        root,
+        &["clone", remote.to_str().unwrap(), seed.to_str().unwrap()],
+    );
+    git(&seed, &["config", "user.email", "test@example.com"]);
+    git(&seed, &["config", "user.name", "Test User"]);
+    std::fs::create_dir_all(seed.join("machines")).unwrap();
+    std::fs::write(
+        seed.join("tome.toml"),
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        seed.join("machines/test.toml"),
+        format!(
+            "[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            source_a.display()
+        ),
+    )
+    .unwrap();
+    git(&seed, &["add", "tome.toml", "machines/test.toml"]);
+    git(&seed, &["commit", "-m", "initial pool profile"]);
+    git(&seed, &["push", "-u", "origin", "HEAD"]);
+
+    let local = root.join("local");
+    let writer = root.join("writer");
+    git(
+        root,
+        &["clone", remote.to_str().unwrap(), local.to_str().unwrap()],
+    );
+    git(
+        root,
+        &["clone", remote.to_str().unwrap(), writer.to_str().unwrap()],
+    );
+    git(&writer, &["config", "user.email", "test@example.com"]);
+    git(&writer, &["config", "user.name", "Test User"]);
+    std::fs::write(
+        writer.join("machines/test.toml"),
+        format!(
+            "[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            source_b.display()
+        ),
+    )
+    .unwrap();
+    git(&writer, &["add", "machines/test.toml"]);
+    git(
+        &writer,
+        &["commit", "-m", "switch selected profile topology"],
+    );
+    git(&writer, &["push"]);
+
+    let settings = root.join("settings.toml");
+    std::fs::write(&settings, "profile = \"test\"\ngit_sync = \"never\"\n").unwrap();
+    let mut command = cargo_bin_cmd!("tome");
+    command.args([
+        "--config",
+        local.join("tome.toml").to_str().unwrap(),
+        "--settings",
+        settings.to_str().unwrap(),
+        "--tome-home",
+        local.to_str().unwrap(),
+        "--no-input",
+        "sync",
+        "--git-sync",
+        "always",
+    ]);
+    command.assert().success();
+    assert!(library.join("from-b/SKILL.md").is_file());
+    assert!(!library.join("from-a").exists());
 }

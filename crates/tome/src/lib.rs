@@ -120,6 +120,7 @@ pub(crate) mod reassign;
 pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
+pub(crate) mod repo_sync;
 // `skill` is `pub` so `tome-desktop` can call `skill::collect_detail` and
 // consume `SkillDetail` + `SkillFrontmatterView` directly across the crate
 // boundary (Phase 26 plan 26-03 / VIEW-03 / D-05). The CLI/TUI keep using
@@ -707,6 +708,51 @@ pub fn run(cli: Cli) -> Result<()> {
     // Load per-machine preferences first — they may rewrite directory paths via
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
+    if let Command::Sync {
+        force,
+        no_triage,
+        no_install,
+        git_sync,
+    } = &cli.command
+    {
+        anyhow::ensure!(
+            cli.machine.is_none(),
+            "tome sync Git coordination requires a selected profile; --machine remains legacy compatibility mode"
+        );
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        // Only local settings and the one-run override are read before a
+        // consented pull. Pool policy and the selected profile must reflect
+        // the post-pull checkout and are loaded exactly once below.
+        let policy = git_sync.unwrap_or(profiles::load_settings(&settings_path)?.git_sync);
+        let config_dir = config_path
+            .parent()
+            .context("config path has no parent directory")?;
+        let repo_session =
+            repo_sync::RepoSync::begin(config_dir, policy, cli.no_input, cli.dry_run)?;
+        let context = profiles::load_effective_context(&config_path, &settings_path)?;
+        let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
+        let paths = TomePaths::new(tome_home, context.config.library_dir.clone())?;
+        let log = cli.log_level();
+        let result = cmd_sync(
+            *force,
+            *no_triage,
+            *no_install,
+            &context.config,
+            &paths,
+            &resolve_machine_path(cli.machine.as_deref())?,
+            &context.machine_prefs,
+            cli.dry_run,
+            cli.no_input,
+            log.is_verbose(),
+            log.is_quiet(),
+        );
+        drop(repo_session);
+        return result;
+    }
+
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
     let (config, machine_prefs) = if matches!(
         &cli.command,
@@ -778,26 +824,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 cli.dry_run,
             )
         }
-        Command::Sync {
-            force,
-            no_triage,
-            no_install,
-        } => {
-            let log = cli.log_level();
-            cmd_sync(
-                force,
-                no_triage,
-                no_install,
-                &config,
-                &paths,
-                &machine_path,
-                &machine_prefs,
-                cli.dry_run,
-                cli.no_input,
-                log.is_verbose(),
-                log.is_quiet(),
-            )
-        }
+        Command::Sync { .. } => unreachable_early_return("Command::Sync"),
         Command::Status { json } => cmd_status(&config, &paths, json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
