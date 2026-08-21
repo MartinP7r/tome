@@ -307,22 +307,35 @@ fn changed_owned_paths(repo_root: &Path, owned: &[String]) -> Result<Vec<String>
     Ok(changed)
 }
 
-#[derive(Debug, Default)]
-struct StatusSnapshot {
-    staged: bool,
-    unmerged: bool,
-    ahead: usize,
-    behind: usize,
-    operation_in_progress: bool,
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ChangeSummary {
+    pub total: usize,
+    pub added: usize,
+    pub modified: usize,
+    pub deleted: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct StatusSnapshot {
+    pub staged: ChangeSummary,
+    pub unstaged: ChangeSummary,
+    pub unmerged: bool,
+    pub ahead: usize,
+    pub behind: usize,
+    pub detached: bool,
+    pub upstream_available: bool,
+    pub remote_available: bool,
+    pub operation_in_progress: Option<String>,
+    pub latest_commit_age_seconds: Option<u64>,
 }
 
 impl StatusSnapshot {
     fn unsafe_reason(&self) -> Option<&'static str> {
         if self.unmerged {
             Some("the repository has unresolved conflicts")
-        } else if self.staged {
+        } else if self.staged.total > 0 {
             Some("the repository has pre-existing staged changes")
-        } else if self.operation_in_progress {
+        } else if self.operation_in_progress.is_some() {
             Some("a merge or rebase is in progress")
         } else if self.ahead > 0 && self.behind > 0 {
             Some("the branch has diverged from its upstream")
@@ -344,6 +357,25 @@ fn repository_root(config_dir: &Path) -> Result<Option<PathBuf>> {
     )))
 }
 
+pub(crate) fn inspect_status(config_dir: &Path) -> Result<Option<StatusSnapshot>> {
+    let Some(repo_root) = repository_root(config_dir)? else {
+        return Ok(None);
+    };
+    status_snapshot(&repo_root).map(Some)
+}
+
+fn record_change(summary: &mut ChangeSummary, status: u8) {
+    if status == b'.' || status == b' ' {
+        return;
+    }
+    summary.total += 1;
+    match status {
+        b'A' | b'?' => summary.added += 1,
+        b'D' => summary.deleted += 1,
+        _ => summary.modified += 1,
+    }
+}
+
 fn status_snapshot(repo_root: &Path) -> Result<StatusSnapshot> {
     let output = git(
         repo_root,
@@ -361,8 +393,34 @@ fn status_snapshot(repo_root: &Path) -> Result<StatusSnapshot> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    let mut snapshot = parse_status_snapshot(&String::from_utf8_lossy(&output.stdout));
+    let git_dir = git_stdout(repo_root, &["rev-parse", "--git-dir"])?;
+    let git_dir = repo_root.join(git_dir);
+    snapshot.operation_in_progress = if git_dir.join("MERGE_HEAD").exists() {
+        Some("merge".to_string())
+    } else if git_dir.join("rebase-merge").exists() || git_dir.join("rebase-apply").exists() {
+        Some("rebase".to_string())
+    } else {
+        None
+    };
+    snapshot.remote_available = !git_stdout(repo_root, &["remote"])
+        .unwrap_or_default()
+        .is_empty();
+    snapshot.latest_commit_age_seconds = git_stdout(repo_root, &["log", "-1", "--format=%ct"])
+        .ok()
+        .and_then(|timestamp| timestamp.parse::<u64>().ok())
+        .and_then(|timestamp| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|now| now.as_secs().saturating_sub(timestamp))
+        });
+    Ok(snapshot)
+}
+
+fn parse_status_snapshot(output: &str) -> StatusSnapshot {
     let mut snapshot = StatusSnapshot::default();
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
+    for line in output.lines() {
         if let Some(ab) = line.strip_prefix("# branch.ab +") {
             let mut fields = ab.split(" -");
             snapshot.ahead = fields
@@ -373,23 +431,25 @@ fn status_snapshot(repo_root: &Path) -> Result<StatusSnapshot> {
                 .next()
                 .and_then(|value| value.parse().ok())
                 .unwrap_or_default();
+        } else if let Some(head) = line.strip_prefix("# branch.head ") {
+            snapshot.detached = head == "(detached)";
+        } else if line.starts_with("# branch.upstream ") {
+            snapshot.upstream_available = true;
         } else if line.starts_with("u ") {
             snapshot.unmerged = true;
+        } else if line.starts_with("? ") {
+            record_change(&mut snapshot.unstaged, b'?');
         } else if (line.starts_with("1 ") || line.starts_with("2 "))
-            && line
-                .split_whitespace()
-                .nth(1)
-                .is_some_and(|xy| xy.as_bytes().first() != Some(&b'.'))
+            && let Some(xy) = line.split_whitespace().nth(1)
         {
-            snapshot.staged = true;
+            let bytes = xy.as_bytes();
+            if bytes.len() >= 2 {
+                record_change(&mut snapshot.staged, bytes[0]);
+                record_change(&mut snapshot.unstaged, bytes[1]);
+            }
         }
     }
-    let git_dir = git_stdout(repo_root, &["rev-parse", "--git-dir"])?;
-    let git_dir = repo_root.join(git_dir);
-    snapshot.operation_in_progress = ["MERGE_HEAD", "rebase-merge", "rebase-apply"]
-        .iter()
-        .any(|name| git_dir.join(name).exists());
-    Ok(snapshot)
+    snapshot
 }
 
 fn git(repo_dir: &Path, args: &[&str]) -> Result<std::process::Output> {
@@ -444,7 +504,10 @@ mod tests {
     fn unsafe_status_reasons_prioritize_index_and_history_protection() {
         assert_eq!(
             StatusSnapshot {
-                staged: true,
+                staged: ChangeSummary {
+                    total: 1,
+                    ..Default::default()
+                },
                 ..Default::default()
             }
             .unsafe_reason(),
@@ -467,5 +530,37 @@ mod tests {
             .unsafe_reason(),
             Some("the branch has diverged from its upstream")
         );
+    }
+
+    #[test]
+    fn porcelain_parser_projects_dirty_and_topology_states() {
+        let snapshot = parse_status_snapshot(
+            "# branch.oid abcdef\n\
+             # branch.head main\n\
+             # branch.upstream origin/main\n\
+             # branch.ab +2 -3\n\
+             1 AM N... 100644 100644 100644 abcdef abcdef staged-and-unstaged\n\
+             1 .D N... 100644 100644 000000 abcdef abcdef deleted\n\
+             ? untracked\n",
+        );
+
+        assert_eq!(snapshot.staged.total, 1);
+        assert_eq!(snapshot.staged.added, 1);
+        assert_eq!(snapshot.unstaged.total, 3);
+        assert_eq!(snapshot.unstaged.added, 1);
+        assert_eq!(snapshot.unstaged.deleted, 1);
+        assert_eq!(snapshot.unstaged.modified, 1);
+        assert_eq!(snapshot.ahead, 2);
+        assert_eq!(snapshot.behind, 3);
+        assert!(snapshot.upstream_available);
+        assert!(!snapshot.detached);
+
+        let detached = parse_status_snapshot("# branch.head (detached)\n");
+        assert!(detached.detached);
+        assert!(!detached.upstream_available);
+
+        let conflicted =
+            parse_status_snapshot("u UU N... 100644 100644 100644 100644 a b c conflict\n");
+        assert!(conflicted.unmerged);
     }
 }

@@ -36,6 +36,19 @@ fn init_git_repo(dir: &std::path::Path) {
     }
 }
 
+fn git_output(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {
+    let output = StdCommand::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "git {args:?} failed");
+    output.stdout
+}
+
 #[test]
 fn status_shows_library_info() {
     let tmp = TempDir::new().unwrap();
@@ -110,6 +123,87 @@ fn status_json_output() {
         serde_json::from_slice(&output.stdout).expect("status --json should produce valid JSON");
     assert_eq!(json["configured"], true);
     assert!(json["directories"].is_array());
+}
+
+#[test]
+fn profile_and_clean_git_health() {
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+    init_git_repo(tmp.path());
+
+    let text = tome()
+        .args(["--config", config.to_str().unwrap(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(
+        text.contains("Profile: test"),
+        "missing selected profile: {text}"
+    );
+    assert!(
+        text.contains("Git: clean"),
+        "missing clean Git health: {text}"
+    );
+
+    let json = tome()
+        .args(["--config", config.to_str().unwrap(), "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json["profile"]["kind"], "selected");
+    assert_eq!(json["profile"]["name"], "test");
+    assert_eq!(json["git"]["kind"], "available");
+    assert_eq!(json["git"]["clean"], true);
+    assert_eq!(json["git"]["staged"]["total"], 0);
+    assert_eq!(json["git"]["unstaged"]["total"], 0);
+    assert_eq!(json["git"]["upstream"]["kind"], "unavailable");
+}
+
+#[test]
+fn status_reports_dirty_health_without_mutating_repository_state() {
+    let tmp = TempDir::new().unwrap();
+    let config = write_config(tmp.path(), "");
+    init_git_repo(tmp.path());
+    std::fs::write(tmp.path().join("staged"), "staged").unwrap();
+    git_output(tmp.path(), &["add", "staged"]);
+    std::fs::write(tmp.path().join("unstaged"), "unstaged").unwrap();
+
+    let before_status = git_output(tmp.path(), &["status", "--porcelain=v2"]);
+    let before_index = std::fs::read(tmp.path().join(".git/index")).unwrap();
+
+    let text = tome()
+        .args(["--config", config.to_str().unwrap(), "status"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(text.status.success());
+    let text = String::from_utf8_lossy(&text.stdout);
+    assert!(text.contains("Git: dirty (1 staged, 1 unstaged)"));
+    assert!(text.contains("Changes: staged 1 (1 added, 0 modified, 0 deleted)"));
+    assert!(text.contains("Remote: unavailable | Upstream: unavailable"));
+
+    let json = tome()
+        .args(["--config", config.to_str().unwrap(), "status", "--json"])
+        .output()
+        .unwrap();
+    assert!(json.status.success());
+    let json: serde_json::Value = serde_json::from_slice(&json.stdout).unwrap();
+    assert_eq!(json["git"]["clean"], false);
+    assert_eq!(json["git"]["staged"]["added"], 1);
+    assert_eq!(json["git"]["unstaged"]["added"], 1);
+    assert_eq!(json["git"]["upstream"]["kind"], "unavailable");
+
+    assert_eq!(
+        git_output(tmp.path(), &["status", "--porcelain=v2"]),
+        before_status
+    );
+    assert_eq!(
+        std::fs::read(tmp.path().join(".git/index")).unwrap(),
+        before_index
+    );
 }
 
 #[cfg(unix)]

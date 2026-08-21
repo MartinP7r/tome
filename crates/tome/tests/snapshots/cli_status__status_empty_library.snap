@@ -2,6 +2,9 @@
 source: crates/tome/tests/cli.rs
 expression: stdout
 ---
+Profile: test
+Git: unavailable (not a Git repository)
+
 Library: [TMPDIR]/library
   ✓ 0 skills consolidated
   Last sync: never

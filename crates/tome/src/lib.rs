@@ -753,13 +753,14 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 
     let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let (config, machine_prefs) = if matches!(
+    let (config, machine_prefs, selected_profile) = if matches!(
         &cli.command,
         Command::Add { .. } | Command::Config { .. } | Command::Lint { path: Some(_), .. }
     ) {
         (
             Config::load_or_default(effective_config.as_deref())?,
             machine::load(&machine_path)?,
+            None,
         )
     } else if cli.machine.is_some() {
         let machine_prefs = machine::load(&machine_path)?;
@@ -775,6 +776,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 &machine_prefs,
             )?,
             machine_prefs,
+            None,
         )
     } else {
         let config_path = effective_config
@@ -782,7 +784,7 @@ pub fn run(cli: Cli) -> Result<()> {
             .unwrap_or(config::default_config_path()?);
         let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
         let context = profiles::load_effective_context(&config_path, &settings_path)?;
-        (context.config, context.machine_prefs)
+        (context.config, context.machine_prefs, Some(context.profile))
     };
     // Note: both load paths already run validate() internally — no separate
     // config.validate()? call here.
@@ -844,7 +846,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 log.is_quiet(),
             )
         }
-        Command::Status { json } => cmd_status(&config, &paths, json),
+        Command::Status { json } => cmd_status(&config, &paths, selected_profile.as_ref(), json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
         Command::Browse => {
@@ -1004,8 +1006,13 @@ pub(crate) fn cmd_sync(
 }
 
 /// `tome status` — read-only summary of library, directories, and health.
-pub(crate) fn cmd_status(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
-    status::show(config, paths, json)
+pub(crate) fn cmd_status(
+    config: &Config,
+    paths: &TomePaths,
+    profile: Option<&DirectoryName>,
+    json: bool,
+) -> Result<()> {
+    status::show_with_profile(config, paths, profile, json)
 }
 
 /// `tome doctor` — diagnose and (optionally) repair library/symlink issues.
