@@ -311,7 +311,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
   - [x] 27.1-02-PLAN.md — Interactive, previewed legacy configuration migration (POOL-02)
   - [x] 27.1-03-PLAN.md — Accumulating pool, provenance catalog, and explicit conflict handling (POOL-03..05)
   - [x] 27.1-04-PLAN.md — Consent-driven safe Git pull/publish and owned-path staging (POOL-06..07)
-  - [ ] 27.1-05-PLAN.md — Profile and Git health in CLI status (POOL-08)
+  - [x] 27.1-05-PLAN.md — Profile and Git health in CLI status (POOL-08)
   - [ ] 27.1-06-PLAN.md — Desktop effective-context, status, and watcher parity (POOL-01, POOL-06, POOL-08)
 - [ ] **Phase 28: Configuration UI — beta cut** (CFG-01..05 + NF-04) — First-run wizard (greenfield/brownfield/legacy), directory editor with live validation, add-git-repo form, machine prefs editor with diff preview. All writes route through `Config::save_checked`. **v1.0-beta cut.**
   **Plans:** Superseded; re-plan after Phase 27.1.
@@ -411,7 +411,7 @@ Full archive: [milestones/v0.10-ROADMAP.md](milestones/v0.10-ROADMAP.md). Closes
 **Goal:** Make one Git-backed skill pool safely accumulate skills and provenance from machines with independent source and distribution topologies, while keeping runtime consent local and preventing silent cross-machine overwrites or removals.
 **Requirements**: TBD
 **Depends on:** Phase 27
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 
 Plans:
 
