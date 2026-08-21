@@ -6,7 +6,7 @@ current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
 status: executing
 stopped_at: Completed 27.1-05-PLAN.md
-last_updated: "2026-08-21T14:00:04.553Z"
+last_updated: "2026-08-21T14:00:50.465Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 27.1 execution started
 progress:
@@ -131,6 +131,7 @@ Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on th
 - **Frontend framework decision is load-bearing** (D-GUI-04). All UI phases (26–31) depend on it. Phase 25's spike must produce a defensible pick (React / Solid / Svelte) and lock it in writing. Mid-milestone framework swap is not acceptable.
 - **`crates/tome-desktop` as a workspace member** — adds Tauri + webview deps to the workspace. Verify cargo-dist's CLI artifact build does not start pulling Tauri deps unintentionally. Workspace-level feature flags or per-crate build matrices may be needed.
 - **CLI snapshot tests** — the v0.10–v0.16 hardening pass landed many `insta` snapshots of CLI output. Decomposing `lib.rs::run` into presenter + domain calls must preserve these snapshots byte-for-byte unless the change is explicitly intended.
+- POOL-08 from 27.1-05 PLAN.md is absent from REQUIREMENTS.md, so requirements.mark-complete could not record it.
 
 ### Quick Tasks Completed
 
