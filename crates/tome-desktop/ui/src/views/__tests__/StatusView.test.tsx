@@ -17,6 +17,8 @@ const status: StatusReport_Serialize = {
     disabled_directory_count: 0,
   },
   health: { count: 0, error: null },
+  profile: { kind: "unavailable" },
+  git: { kind: "unavailable", reason: "not a Git repository" },
 };
 
 vi.mock("../../hooks/useStatus", () => ({

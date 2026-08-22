@@ -25,6 +25,7 @@ const listenSpies = {
 
 const startSyncSpy = vi.fn();
 const cancelSyncSpy = vi.fn();
+const respondSyncGitConsentSpy = vi.fn();
 const getLockfileDiffSpy = vi.fn();
 
 vi.mock("../../bindings", () => ({
@@ -69,6 +70,7 @@ vi.mock("../../bindings", () => ({
   commands: {
     startSync: () => startSyncSpy(),
     cancelSync: () => cancelSyncSpy(),
+    respondSyncGitConsent: (requestId: string, decision: string) => respondSyncGitConsentSpy(requestId, decision),
     getLockfileDiff: () => getLockfileDiffSpy(),
   },
 }));
@@ -93,6 +95,9 @@ function Probe({ onMount }: { onMount?: (api: ReturnType<typeof useSync>) => voi
       <button type="button" onClick={() => void sync.start()}>
         Run sync
       </button>
+      <button type="button" onClick={() => void sync.respondGitConsent("decline")}>
+        Continue local-only
+      </button>
     </div>
   );
 }
@@ -107,6 +112,7 @@ describe("useSync — Pitfall 6 watcher-feedback discipline", () => {
     listenSpies.menuAction.mockReset();
     startSyncSpy.mockReset();
     cancelSyncSpy.mockReset();
+    respondSyncGitConsentSpy.mockReset();
     getLockfileDiffSpy.mockReset();
     // Plan 27-05: startSync now returns a SyncOutcomeWire on success
     // (clean: result=null, retry_from=null, partial_failures=[]).
@@ -238,5 +244,25 @@ describe("useSync — start handler", () => {
 
     expect(screen.getByTestId("outcome-kind").textContent).toBe("err");
     expect(screen.getByTestId("is-running").textContent).toBe("false");
+  });
+});
+
+describe("useSync — Git consent", () => {
+  it("forwards only the Rust-issued request ID and a local-only decline", async () => {
+    startSyncSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: {
+        kind: "git_consent_required",
+        data: { request_id: "opaque-1", stage: "pre_pull", remote_summary: "origin/main", owned_changes: [] },
+      },
+    });
+    respondSyncGitConsentSpy.mockResolvedValueOnce({
+      status: "ok",
+      data: { kind: "completed", data: { result: null, retry_from: null, partial_failures: [] } },
+    });
+    render(<SyncProvider><Probe /></SyncProvider>);
+    await act(async () => { screen.getByText("Run sync").click(); });
+    await act(async () => { screen.getByText("Continue local-only").click(); });
+    expect(respondSyncGitConsentSpy).toHaveBeenCalledWith("opaque-1", "decline");
   });
 });
