@@ -2,13 +2,13 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-current_phase: 27.1
-current_phase_name: multi-machine-shared-pool-configuration
-status: verifying
-stopped_at: Completed 27.1-06-PLAN.md
-last_updated: "2026-08-22T12:23:52.631Z"
-last_activity: 2026-08-19
-last_activity_desc: Phase 27.1 execution started
+current_phase: 28
+current_phase_name: configuration-ui-beta-cut
+status: planning
+stopped_at: Phase 27.1 verified; Phase 28 requires re-planning
+last_updated: "2026-08-22T17:32:21Z"
+last_activity: 2026-08-22
+last_activity_desc: Phase 27.1 verified at 8/8 POOL must-haves
 progress:
   total_phases: 5
   completed_phases: 4
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 27.1 — multi-machine-shared-pool-configuration
+**Current focus:** Phase 28 — configuration-ui-beta-cut
 
 ## Current Position
 
-Phase: 27.1 (multi-machine-shared-pool-configuration) — EXECUTING
-Plan: 6 of 6
-Status: Phase complete — ready for verification
-Last activity: 2026-08-19 — Phase 27.1 execution started
+Phase: 28 (configuration-ui-beta-cut) — PLANNING
+Plan: re-plan required after Phase 27.1
+Status: Phase 27.1 complete and verified; Phase 28 ready for specification/discussion
+Last activity: 2026-08-22 — Phase 27.1 verified at 8/8 POOL must-haves
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -40,7 +40,7 @@ Last activity: 2026-08-19 — Phase 27.1 execution started
 | 25 | Rust core extraction + Tauri integration spike | CORE-01..05 (5) | — |
 | 26 | Read-only views | VIEW-01..06 (6) + NF-01..03, NF-05 | **alpha** |
 | 27 | Sync + triage UI | SYNC-01..05 (5) | — |
-| 27.1 | Multi-machine shared pool configuration | TBD | — |
+| 27.1 | Multi-machine shared pool configuration | POOL-01..08 (8) | — |
 | 28 | Configuration UI | CFG-01..05 (5) + NF-04 | **beta** |
 | 29 | Mutating operations UI | OPS-01..04 (4) + NF-04 | — |
 | 30 | Backup UI | BAK-01..04 (4) + NF-04 | **rc** |

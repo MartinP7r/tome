@@ -1,5 +1,5 @@
 {
-  "model_profile": "quality",
+  "model_profile": "adaptive",
   "commit_docs": true,
   "parallelization": true,
   "search_gitignored": false,
@@ -38,5 +38,17 @@
   "model_policy": {
     "provider": "openai",
     "budget": "medium"
+  },
+  "effort": {
+    "default": "high",
+    "routing_tier_defaults": {
+      "light": "medium",
+      "standard": "high",
+      "heavy": "xhigh"
+    }
+  },
+  "model_overrides": {
+    "gsd-plan-checker": "openai/gpt-5.6-luna",
+    "gsd-verifier": "openai/gpt-5.6-terra"
   }
 }
