@@ -56,16 +56,21 @@ fn watcher_paths_in_tempdir() -> (WatcherPaths, TempDir) {
     let config_dir = tome_home.clone();
     let library_dir = tome_home.join("library");
     let machine_dir = tome_home.join("config");
+    let profiles_dir = config_dir.join("machines");
 
     // Every dir must exist BEFORE we start watching — Pitfall 5.
     std::fs::create_dir_all(&library_dir).expect("create library dir");
     std::fs::create_dir_all(&machine_dir).expect("create machine dir");
+    std::fs::create_dir_all(&profiles_dir).expect("create profiles dir");
 
     let paths = WatcherPaths {
         manifest_path: config_dir.join(".tome-manifest.json"),
         lockfile_path: config_dir.join("tome.lock"),
         library_dir,
         machine_path: machine_dir.join("machine.toml"),
+        pool_policy_path: config_dir.join("tome.toml"),
+        profiles_dir,
+        settings_path: machine_dir.join("settings.toml"),
     };
     (paths, tmp)
 }
@@ -164,4 +169,20 @@ fn external_write_to_manifest_fires_manifest_changed() {
          .tome-manifest.json (NF-05 contract — CLI sync should trigger \
          silent GUI refresh)",
     );
+}
+
+#[test]
+fn layered_configuration_writes_emit_typed_refresh_events() {
+    let (paths, _tmp) = watcher_paths_in_tempdir();
+    let pool = paths.pool_policy_path.clone();
+    let profile = paths.profiles_dir.join("laptop.toml");
+    let settings = paths.settings_path.clone();
+    let rx = spawn_recording(paths);
+
+    atomic_write(&pool, "library_dir = \"skills\"\n");
+    assert!(wait_for(&rx, WatcherEvent::PoolPolicy));
+    atomic_write(&profile, "disabled = []\n");
+    assert!(wait_for(&rx, WatcherEvent::Profiles));
+    atomic_write(&settings, "profile = \"laptop\"\n");
+    assert!(wait_for(&rx, WatcherEvent::LocalSettings));
 }
