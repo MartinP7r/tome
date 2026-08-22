@@ -58,7 +58,8 @@ fn git_stdout(dir: &Path, args: &[&str]) -> String {
         .output()
         .expect("run git");
     assert!(output.status.success());
-    String::from_utf8(output.stdout).expect("Git output is UTF-8")
+    String::from_utf8(output.stdout)
+        .expect("Git output is UTF-8")
         .trim()
         .to_owned()
 }
@@ -96,7 +97,13 @@ fn assert_idle(app: &tauri::App<tauri::test::MockRuntime>, pool: &Path) {
     let state = app.state::<SyncState>();
     assert!(state.cancel.lock().expect("cancel lock").is_none());
     assert!(state.consent.lock().expect("consent lock").is_none());
-    assert!(state.ready_session.lock().expect("ready session lock").is_none());
+    assert!(
+        state
+            .ready_session
+            .lock()
+            .expect("ready session lock")
+            .is_none()
+    );
     assert!(
         !pool.join(".tome-sync.lock").exists(),
         "completed continuation must release the pool lock",
@@ -158,10 +165,17 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
     .expect("source skill");
     std::fs::create_dir_all(home.join(".config/tome")).expect("settings dir");
 
-    git(root, &["init", "--bare", remote.to_str().expect("remote path")]);
     git(
         root,
-        &["clone", remote.to_str().expect("remote path"), seed.to_str().expect("seed path")],
+        &["init", "--bare", remote.to_str().expect("remote path")],
+    );
+    git(
+        root,
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            seed.to_str().expect("seed path"),
+        ],
     );
     git(&seed, &["config", "user.email", "test@example.com"]);
     git(&seed, &["config", "user.name", "Test User"]);
@@ -185,12 +199,20 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
 
     git(
         root,
-        &["clone", remote.to_str().expect("remote path"), pool.to_str().expect("pool path")],
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            pool.to_str().expect("pool path"),
+        ],
     );
     std::fs::create_dir_all(&library).expect("library dir");
     git(
         root,
-        &["clone", remote.to_str().expect("remote path"), writer.to_str().expect("writer path")],
+        &[
+            "clone",
+            remote.to_str().expect("remote path"),
+            writer.to_str().expect("writer path"),
+        ],
     );
     git(&writer, &["config", "user.email", "test@example.com"]);
     git(&writer, &["config", "user.name", "Test User"]);
@@ -205,8 +227,9 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
     .expect("local settings");
     let _env = EnvGuard::set(&home, &pool);
 
-    let event_builder = tauri_specta::Builder::<tauri::test::MockRuntime>::new()
-        .events(tauri_specta::collect_events![tome_desktop::sink::SyncProgress]);
+    let event_builder = tauri_specta::Builder::<tauri::test::MockRuntime>::new().events(
+        tauri_specta::collect_events![tome_desktop::sink::SyncProgress],
+    );
     let app = tauri::test::mock_builder()
         .manage(SyncState::default())
         .invoke_handler(tauri::generate_handler![
@@ -229,7 +252,10 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
         "test_respond_sync_git_consent",
         json!({ "requestId": "git-consent-not-the-request", "decision": "decline" }),
     );
-    assert!(mismatch.is_err(), "a forged ID must not consume the continuation");
+    assert!(
+        mismatch.is_err(),
+        "a forged ID must not consume the continuation"
+    );
 
     let post_sync = invoke(
         &webview,
@@ -238,7 +264,10 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
     )
     .expect("declining pre-pull continues locally");
     let post_sync_id = consent_request(&post_sync, "post_sync");
-    assert_eq!(git_stdout(&pool, &["rev-parse", "HEAD"]), local_before_decline);
+    assert_eq!(
+        git_stdout(&pool, &["rev-parse", "HEAD"]),
+        local_before_decline
+    );
 
     let declined = invoke(
         &webview,
@@ -258,7 +287,10 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
     )
     .expect("accepting pre-pull continues to publish preview");
     let post_sync_id = consent_request(&post_sync, "post_sync");
-    assert_ne!(git_stdout(&pool, &["rev-parse", "HEAD"]), local_before_decline);
+    assert_ne!(
+        git_stdout(&pool, &["rev-parse", "HEAD"]),
+        local_before_decline
+    );
 
     let accepted = invoke(
         &webview,
@@ -267,6 +299,9 @@ fn tauri_ipc_resumes_only_matching_git_consent_and_releases_state() {
     )
     .expect("accepting publication completes");
     assert_eq!(accepted["kind"], "completed");
-    assert_eq!(git_stdout(&pool, &["log", "-1", "--format=%s"]), "tome sync: update shared pool");
+    assert_eq!(
+        git_stdout(&pool, &["log", "-1", "--format=%s"]),
+        "tome sync: update shared pool"
+    );
     assert_idle(&app, &pool);
 }
