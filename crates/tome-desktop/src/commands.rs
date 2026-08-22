@@ -423,6 +423,16 @@ pub async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, SyncState>,
 ) -> Result<DesktopSyncOutcome, TomeError> {
+    start_sync_with_runtime(app, state).await
+}
+
+/// Runtime-generic command implementation used by the Tauri IPC integration
+/// fixture with Tauri's mock runtime.
+#[doc(hidden)]
+pub async fn start_sync_with_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, SyncState>,
+) -> Result<DesktopSyncOutcome, TomeError> {
     // Double-fire guard (T-27-01b-07). Take the mutex briefly, check the
     // slot, install a fresh token if idle. The guard is dropped before the
     // blocking call so the future doesn't hold a non-Send guard across an
@@ -584,6 +594,18 @@ pub async fn respond_sync_git_consent(
     request_id: String,
     decision: tome::repo_sync::GitConsentDecision,
 ) -> Result<DesktopSyncOutcome, TomeError> {
+    respond_sync_git_consent_with_runtime(app, state, request_id, decision).await
+}
+
+/// Runtime-generic consent implementation used by the Tauri IPC integration
+/// fixture with Tauri's mock runtime.
+#[doc(hidden)]
+pub async fn respond_sync_git_consent_with_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, SyncState>,
+    request_id: String,
+    decision: tome::repo_sync::GitConsentDecision,
+) -> Result<DesktopSyncOutcome, TomeError> {
     let pending = state
         .consent
         .lock()
@@ -621,7 +643,7 @@ pub async fn respond_sync_git_consent(
                 .ready_session
                 .lock()
                 .expect("SyncState mutex poisoned") = Some(session);
-            start_sync(app, state).await
+            start_sync_with_runtime(app, state).await
         }
         tome::repo_sync::GitConsentStage::PostSync => {
             drop(session);
