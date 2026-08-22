@@ -4,17 +4,17 @@ milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
 current_phase: 27.1
 current_phase_name: multi-machine-shared-pool-configuration
-status: executing
-stopped_at: Completed 27.1-05-PLAN.md
-last_updated: "2026-08-21T14:00:50.465Z"
+status: verifying
+stopped_at: Completed 27.1-06-PLAN.md
+last_updated: "2026-08-22T12:23:52.631Z"
 last_activity: 2026-08-19
 last_activity_desc: Phase 27.1 execution started
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 27
-  completed_plans: 26
-  percent: 60
+  completed_plans: 27
+  percent: 80
 ---
 
 # Project State
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone sectio
 
 Phase: 27.1 (multi-machine-shared-pool-configuration) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-19 — Phase 27.1 execution started
 
 **v1.0 phase shape (Phases 25–31):**
@@ -88,6 +88,7 @@ Historical decisions are archived in:
 - [Phase ?]: Pool publication stages sorted changed Tome-owned paths only and preserves a local commit when push fails.
 - [Phase ?]: Status projects repo_sync porcelain-v2 data into tagged profile, upstream, and Git-health types instead of parsing display text.
 - [Phase ?]: Unavailable repository, remote, upstream, Git command, and commit timestamp states remain explicit rather than fabricated.
+- [Phase ?]: Git consent request IDs and continuations remain Rust-owned; declines continue local-only without the declined operation.
 
 ### v1.0 design context (consume during phase planning)
 
@@ -145,8 +146,8 @@ Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on th
 
 ## Session Continuity
 
-Last session: 2026-08-21T14:00:04.536Z
-Stopped at: Completed 27.1-05-PLAN.md
+Last session: 2026-08-22T12:23:52.613Z
+Stopped at: Completed 27.1-06-PLAN.md
 Resume file: None
 
 ## Performance Metrics
@@ -158,3 +159,4 @@ Resume file: None
 | Phase 27.1 P03 | 58min | 2 tasks | 12 files |
 | Phase 27.1 P04 | 16min | 2 tasks | 6 files |
 | Phase 27.1 P05 | 28min | 2 tasks | 6 files |
+| Phase 27.1 P06 | 40min | 3 tasks | 13 files |
