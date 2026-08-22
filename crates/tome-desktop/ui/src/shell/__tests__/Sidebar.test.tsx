@@ -7,7 +7,13 @@
 // silent component change.
 
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+
+const listenSpies = {
+  poolPolicyChanged: vi.fn(),
+  profilesChanged: vi.fn(),
+  localSettingsChanged: vi.fn(),
+};
 
 // The Sidebar reads `useStatus` for the footer; stub the bindings so the
 // test doesn't try to invoke a real Tauri command. The status payload only
@@ -27,10 +33,34 @@ vi.mock("../../bindings", () => ({
     lockfileChanged: { listen: () => Promise.resolve(() => undefined) },
     libraryChanged: { listen: () => Promise.resolve(() => undefined) },
     machinePrefsChanged: { listen: () => Promise.resolve(() => undefined) },
+    poolPolicyChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.poolPolicyChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    profilesChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.profilesChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    localSettingsChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.localSettingsChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
   },
 }));
 
 import { Sidebar } from "../Sidebar";
+
+beforeEach(() => {
+  listenSpies.poolPolicyChanged.mockReset();
+  listenSpies.profilesChanged.mockReset();
+  listenSpies.localSettingsChanged.mockReset();
+});
 
 describe("Sidebar — Phase 27 plan 27-01b", () => {
   it("renders the four NavItems in order Status, Skills, Sync, Health", () => {

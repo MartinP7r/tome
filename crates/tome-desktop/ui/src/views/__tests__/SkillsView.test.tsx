@@ -15,7 +15,7 @@
 // extraction pattern (pure fn factored out for testability).
 
 import { render, screen } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { DiscoveredSkill } from "../../bindings";
 import { groupSkills, sortSkills, SkillsView } from "../SkillsView";
 
@@ -207,6 +207,12 @@ describe("groupSkills(mode='role')", () => {
 // real browser-driving Playwright runtime to toggle the Group menu).
 
 // Mock the bindings so the SkillsView mounts without IPC.
+const listenSpies = {
+  poolPolicyChanged: vi.fn(),
+  profilesChanged: vi.fn(),
+  localSettingsChanged: vi.fn(),
+};
+
 vi.mock("../../bindings", () => ({
   commands: {
     listSkills: () =>
@@ -229,8 +235,32 @@ vi.mock("../../bindings", () => ({
     lockfileChanged: { listen: () => Promise.resolve(() => undefined) },
     libraryChanged: { listen: () => Promise.resolve(() => undefined) },
     machinePrefsChanged: { listen: () => Promise.resolve(() => undefined) },
+    poolPolicyChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.poolPolicyChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    profilesChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.profilesChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    localSettingsChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.localSettingsChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
   },
 }));
+
+beforeEach(() => {
+  listenSpies.poolPolicyChanged.mockReset();
+  listenSpies.profilesChanged.mockReset();
+  listenSpies.localSettingsChanged.mockReset();
+});
 
 describe("SkillsView — render smoke", () => {
   it("mounts and renders the Skills listbox", async () => {
