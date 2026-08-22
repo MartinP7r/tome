@@ -59,13 +59,16 @@ export function useStatus(): UseStatusResult {
     fetchStatus(false);
   }, [fetchStatus]);
 
-  // Plan 26-06 event-subscription matrix — Status row depends on all 4
-  // watched roots. Each subscription is a separate hook call so cleanup is
-  // owned per-event (matches React useEffect mental model).
+  // Status depends on every persisted layer that contributes to the active
+  // effective context. Each subscription is separate so cleanup is owned per
+  // event (matches the React useEffect mental model).
   useTauriEvent(events.manifestChanged, refetch);
   useTauriEvent(events.lockfileChanged, refetch);
   useTauriEvent(events.libraryChanged, refetch);
   useTauriEvent(events.machinePrefsChanged, refetch);
+  useTauriEvent(events.poolPolicyChanged, refetch);
+  useTauriEvent(events.profilesChanged, refetch);
+  useTauriEvent(events.localSettingsChanged, refetch);
 
   return { status, err, updatedAt, refetch };
 }

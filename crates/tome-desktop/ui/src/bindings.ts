@@ -233,10 +233,13 @@ export const commands = {
 /** Events */
 export const events = {
 	libraryChanged: makeEvent<LibraryChanged>("library-changed"),
+	localSettingsChanged: makeEvent<LocalSettingsChanged>("local-settings-changed"),
 	lockfileChanged: makeEvent<LockfileChanged>("lockfile-changed"),
 	machinePrefsChanged: makeEvent<MachinePrefsChanged>("machine-prefs-changed"),
 	manifestChanged: makeEvent<ManifestChanged>("manifest-changed"),
 	menuAction: makeEvent<MenuAction>("menu-action"),
+	poolPolicyChanged: makeEvent<PoolPolicyChanged>("pool-policy-changed"),
+	profilesChanged: makeEvent<ProfilesChanged>("profiles-changed"),
 	syncProgress: makeEvent<SyncProgress>("sync-progress"),
 };
 
@@ -730,6 +733,9 @@ export type ListReport = {
 	warnings: string[],
 };
 
+/**  Local profile selection / runtime settings changed. */
+export type LocalSettingsChanged = null;
+
 /**
  *  The lockfile (`tome.lock`) was rewritten.
  * 
@@ -919,7 +925,13 @@ export type PartialFailureWire = {
 	error: TomeError,
 };
 
+/**  Shared pool policy (`tome.toml`) changed. */
+export type PoolPolicyChanged = null;
+
 export type ProfileState = { kind: "selected"; name: string } | { kind: "unavailable" };
+
+/**  A selected profile file was created, removed, or atomically replaced. */
+export type ProfilesChanged = null;
 
 /**
  *  Categorises the auto-repair available for a [`DiagnosticIssue`]

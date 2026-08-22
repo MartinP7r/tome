@@ -40,11 +40,15 @@ export function useSkills(): UseSkillsResult {
     refetch();
   }, [refetch]);
 
-  // Plan 26-06 event-subscription matrix — Skills depends on manifest +
-  // library + machine-prefs. Lockfile changes don't affect the list shape.
+  // Skills depend on their discovery roots plus every persisted layer that
+  // can change the selected profile's directory topology. Lockfile changes
+  // don't affect the list shape.
   useTauriEvent(events.manifestChanged, refetch);
   useTauriEvent(events.libraryChanged, refetch);
   useTauriEvent(events.machinePrefsChanged, refetch);
+  useTauriEvent(events.poolPolicyChanged, refetch);
+  useTauriEvent(events.profilesChanged, refetch);
+  useTauriEvent(events.localSettingsChanged, refetch);
 
   return { skills, warnings, err, refetch };
 }
