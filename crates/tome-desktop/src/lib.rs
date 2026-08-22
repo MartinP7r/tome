@@ -61,6 +61,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             // SyncOutcomeWire and adds retry_sync_from + retry_failed_items
             // for the terminal-state retry affordances.
             commands::start_sync,
+            commands::respond_sync_git_consent,
             commands::cancel_sync,
             commands::retry_sync_from,
             commands::retry_failed_items,

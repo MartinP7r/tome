@@ -120,7 +120,8 @@ pub(crate) mod reassign;
 pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
-pub(crate) mod repo_sync;
+/// Typed shared-pool Git coordination and desktop consent continuations.
+pub mod repo_sync;
 // `skill` is `pub` so `tome-desktop` can call `skill::collect_detail` and
 // consume `SkillDetail` + `SkillFrontmatterView` directly across the crate
 // boundary (Phase 26 plan 26-03 / VIEW-03 / D-05). The CLI/TUI keep using
@@ -898,7 +899,8 @@ pub fn run(cli: Cli) -> Result<()> {
     }
 }
 
-fn default_settings_path() -> PathBuf {
+/// Default local-only settings path used to select the active profile.
+pub fn default_settings_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".config/tome/settings.toml")

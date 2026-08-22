@@ -28,6 +28,14 @@
 use std::sync::Mutex;
 use tome::progress::CancelToken;
 
+/// A server-side continuation keyed by the opaque ID inside its request.
+/// The webview never receives this value and therefore cannot resume a
+/// different Git operation by changing a request payload.
+pub struct PendingGitConsent {
+    pub continuation: tome::repo_sync::PendingGitConsent,
+    pub completed_outcome: Option<crate::sync_outcome_wire::SyncOutcomeWire>,
+}
+
 /// Tauri managed app state shared between `start_sync` and `cancel_sync`.
 ///
 /// `cancel.lock().unwrap()` carries either:
@@ -41,6 +49,8 @@ use tome::progress::CancelToken;
 /// `Default` (and the `new()` ctor) start in the idle state.
 pub struct SyncState {
     pub cancel: Mutex<Option<CancelToken>>,
+    pub consent: Mutex<Option<PendingGitConsent>>,
+    pub ready_session: Mutex<Option<tome::repo_sync::RepoSync>>,
 }
 
 impl SyncState {
@@ -48,6 +58,8 @@ impl SyncState {
     pub fn new() -> Self {
         Self {
             cancel: Mutex::new(None),
+            consent: Mutex::new(None),
+            ready_session: Mutex::new(None),
         }
     }
 }
