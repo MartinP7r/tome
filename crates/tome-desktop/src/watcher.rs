@@ -147,9 +147,15 @@ pub fn spawn_watcher(app: tauri::AppHandle, paths: tome::TomePaths) -> Result<()
         WatcherEvent::MachinePrefs => {
             let _ = MachinePrefsChanged.emit(&app);
         }
-        WatcherEvent::PoolPolicy => { let _ = PoolPolicyChanged.emit(&app); }
-        WatcherEvent::Profiles => { let _ = ProfilesChanged.emit(&app); }
-        WatcherEvent::LocalSettings => { let _ = LocalSettingsChanged.emit(&app); }
+        WatcherEvent::PoolPolicy => {
+            let _ = PoolPolicyChanged.emit(&app);
+        }
+        WatcherEvent::Profiles => {
+            let _ = ProfilesChanged.emit(&app);
+        }
+        WatcherEvent::LocalSettings => {
+            let _ = LocalSettingsChanged.emit(&app);
+        }
     })
 }
 
@@ -244,7 +250,10 @@ where
         (lockfile_parent_canon.clone(), RecursiveMode::NonRecursive),
         (library_canon.clone(), RecursiveMode::Recursive),
         (machine_parent_canon.clone(), RecursiveMode::NonRecursive),
-        (pool_policy_parent_canon.clone(), RecursiveMode::NonRecursive),
+        (
+            pool_policy_parent_canon.clone(),
+            RecursiveMode::NonRecursive,
+        ),
         (settings_parent_canon.clone(), RecursiveMode::NonRecursive),
         (profiles_canon.clone(), RecursiveMode::Recursive),
     ];
@@ -306,9 +315,15 @@ where
             if saw_machine {
                 sink(WatcherEvent::MachinePrefs);
             }
-            if saw_pool_policy { sink(WatcherEvent::PoolPolicy); }
-            if saw_profiles { sink(WatcherEvent::Profiles); }
-            if saw_settings { sink(WatcherEvent::LocalSettings); }
+            if saw_pool_policy {
+                sink(WatcherEvent::PoolPolicy);
+            }
+            if saw_profiles {
+                sink(WatcherEvent::Profiles);
+            }
+            if saw_settings {
+                sink(WatcherEvent::LocalSettings);
+            }
         }
     });
 

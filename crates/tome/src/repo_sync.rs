@@ -62,7 +62,10 @@ impl GitConsentRequired {
 }
 
 fn next_request_id() -> String {
-    format!("git-consent-{:016x}", NEXT_CONSENT_REQUEST.fetch_add(1, Ordering::Relaxed))
+    format!(
+        "git-consent-{:016x}",
+        NEXT_CONSENT_REQUEST.fetch_add(1, Ordering::Relaxed)
+    )
 }
 
 /// A Rust-owned continuation waiting for one explicit Git decision.
@@ -186,13 +189,27 @@ impl RepoSync {
             .create_new(true)
             .write(true)
             .open(&lock_path)
-            .with_context(|| format!("another tome sync may be running: lock exists at {}", lock_path.display()))?;
+            .with_context(|| {
+                format!(
+                    "another tome sync may be running: lock exists at {}",
+                    lock_path.display()
+                )
+            })?;
         use std::io::Write;
-        if let Err(error) = writeln!(lock, "pid={} started_at={:?}", std::process::id(), std::time::SystemTime::now()) {
+        if let Err(error) = writeln!(
+            lock,
+            "pid={} started_at={:?}",
+            std::process::id(),
+            std::time::SystemTime::now()
+        ) {
             let _ = std::fs::remove_file(&lock_path);
-            return Err(error).with_context(|| format!("failed to write sync lock {}", lock_path.display()));
+            return Err(error)
+                .with_context(|| format!("failed to write sync lock {}", lock_path.display()));
         }
-        let session = Self { lock_path, repo_root: repository_root(config_dir)? };
+        let session = Self {
+            lock_path,
+            repo_root: repository_root(config_dir)?,
+        };
         session.pre_pull_for_desktop(policy, dry_run)
     }
 
@@ -243,7 +260,15 @@ impl RepoSync {
         if status.unsafe_reason().is_some() {
             return Ok(RepoSyncStart::Ready(self));
         }
-        let upstream = match git_stdout(repo_root, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]) {
+        let upstream = match git_stdout(
+            repo_root,
+            &[
+                "rev-parse",
+                "--abbrev-ref",
+                "--symbolic-full-name",
+                "@{upstream}",
+            ],
+        ) {
             Ok(upstream) => upstream,
             Err(_) => return Ok(RepoSyncStart::Ready(self)),
         };
@@ -255,7 +280,9 @@ impl RepoSync {
                 Ok(RepoSyncStart::Ready(self))
             }
             GitSyncPolicy::Ask => Ok(RepoSyncStart::ConsentRequired(PendingGitConsent {
-                required: GitConsentRequired::pre_pull(summary.lines().next().unwrap_or(&upstream).to_string()),
+                required: GitConsentRequired::pre_pull(
+                    summary.lines().next().unwrap_or(&upstream).to_string(),
+                ),
                 session: self,
                 operation: PendingGitOperation::Pull { upstream },
             })),
@@ -264,7 +291,9 @@ impl RepoSync {
     }
 
     fn perform_pull(&self, upstream: &str) -> Result<()> {
-        let Some(repo_root) = self.repo_root() else { return Ok(()); };
+        let Some(repo_root) = self.repo_root() else {
+            return Ok(());
+        };
         git_success(repo_root, &["fetch", "--prune"])?;
         let local = git_stdout(repo_root, &["rev-parse", "HEAD"])?;
         let remote = git_stdout(repo_root, &["rev-parse", upstream])?;
@@ -275,13 +304,20 @@ impl RepoSync {
     }
 
     fn commit_and_push(&self, changed: &[String]) -> Result<()> {
-        let Some(repo_root) = self.repo_root() else { return Ok(()); };
+        let Some(repo_root) = self.repo_root() else {
+            return Ok(());
+        };
         let mut add_args = vec!["add", "--"];
         add_args.extend(changed.iter().map(String::as_str));
         git_success(repo_root, &add_args)?;
-        git_success(repo_root, &["commit", "-m", "tome sync: update shared pool"])?;
+        git_success(
+            repo_root,
+            &["commit", "-m", "tome sync: update shared pool"],
+        )?;
         if let Err(error) = git_success(repo_root, &["push"]) {
-            eprintln!("warning: git push failed; retained the local Tome commit for a later push: {error:#}");
+            eprintln!(
+                "warning: git push failed; retained the local Tome commit for a later push: {error:#}"
+            );
         }
         Ok(())
     }
