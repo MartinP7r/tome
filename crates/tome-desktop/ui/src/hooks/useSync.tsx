@@ -42,6 +42,9 @@ import {
 import { commands, events } from "../bindings";
 import type {
   DirectoryName,
+  DesktopSyncOutcome,
+  GitConsentDecision,
+  GitConsentRequired,
   LockfileDiff,
   PartialFailureWire,
   SkillName,
@@ -186,6 +189,8 @@ export interface UseSyncResult {
    *  Map (partialFailures + failed kinds); supersedes `failureCount`'s
    *  ephemeral-only semantics. */
   unresolvedFailureCount: number;
+  /** Rust-issued consent request, retained only until its matching response. */
+  gitConsent: GitConsentRequired | null;
   /** Kick off a sync. Idempotent against double-fire — the Rust side
    *  returns ErrorCode::Conflict if a sync is already in flight; the
    *  hook surfaces that as the outcome (T-27-01b-07). */
@@ -202,6 +207,7 @@ export interface UseSyncResult {
   /** Phase 27 plan 27-05: retry the per-skill partial failures from a
    *  prior partial-success run. Wired to `[Retry failed items]`. */
   retryFailedItems: () => Promise<void>;
+  respondGitConsent: (decision: GitConsentDecision) => Promise<void>;
   /** Plan 27-02 — set the decision for a single skill. */
   onDecisionChange: (skill: SkillName, decision: TriageDecision) => void;
   /** Plan 27-02 — apply a bulk-action scope to a decision. */
@@ -242,6 +248,7 @@ function useSyncInternal(): UseSyncResult {
   );
   const [isRunning, setIsRunning] = useState(false);
   const [outcome, setOutcome] = useState<SyncTerminal | null>(null);
+  const [gitConsent, setGitConsent] = useState<GitConsentRequired | null>(null);
 
   // D-10 per-stage durations: track each stage's start timestamp so the
   // Finished handler can compute `durationMs`. Lives in a ref because it's
@@ -445,7 +452,7 @@ function useSyncInternal(): UseSyncResult {
   const finalizeOutcome = useCallback(
     (
       res:
-        | { status: "ok"; data: SyncOutcomeWire }
+        | { status: "ok"; data: DesktopSyncOutcome | SyncOutcomeWire }
         | { status: "error"; error: TomeError },
     ) => {
       isRunningRef.current = false;
@@ -478,8 +485,16 @@ function useSyncInternal(): UseSyncResult {
         return;
       }
 
-      // Inner success: SyncOutcomeWire shape.
-      const wire = res.data;
+      // A Rust-issued consent request is terminal until the user responds.
+      if ("kind" in res.data && res.data.kind === "git_consent_required") {
+        setGitConsent(res.data.data);
+        return;
+      }
+      // Legacy test fixtures supply a raw SyncOutcomeWire; production bindings
+      // always wrap it in DesktopSyncOutcome.completed.
+      const wire = "kind" in res.data && res.data.kind === "completed"
+        ? res.data.data
+        : (res.data as unknown as SyncOutcomeWire);
       if (wire.result !== null) {
         // Plan 27-05: structured stage-level failure. Surface retry_from
         // so SyncView's terminal-failed branch can render the
@@ -541,6 +556,7 @@ function useSyncInternal(): UseSyncResult {
     setStages(initialStages());
     stageStartAt.current.clear();
     setOutcome(null);
+    setGitConsent(null);
     setIsRunning(true);
     isRunningRef.current = true;
     cancelRequestedRef.current = false;
@@ -599,6 +615,15 @@ function useSyncInternal(): UseSyncResult {
     finalizeOutcome(res);
   }, [finalizeOutcome, stages]);
 
+  const respondGitConsent = useCallback(async (decision: GitConsentDecision): Promise<void> => {
+    if (gitConsent === null || isRunningRef.current) return;
+    setIsRunning(true);
+    isRunningRef.current = true;
+    const res = await commands.respondSyncGitConsent(gitConsent.request_id, decision);
+    setGitConsent(null);
+    finalizeOutcome(res);
+  }, [finalizeOutcome, gitConsent]);
+
   const cancel = useCallback(async (): Promise<void> => {
     // Plan 27-04: flip the local cancel-requested flag so the start()
     // promise's branch can classify the outcome as { kind: "cancelled" }
@@ -626,6 +651,7 @@ function useSyncInternal(): UseSyncResult {
     setStages(initialStages());
     stageStartAt.current.clear();
     setOutcome(null);
+    setGitConsent(null);
     cancelRequestedRef.current = false;
     // Plan 27-02: reset the triage state too so the post-Apply / post-
     // cancel idle view returns to a clean slate. The diff itself will be
@@ -708,11 +734,13 @@ function useSyncInternal(): UseSyncResult {
     pendingDiffCount,
     failureCount,
     unresolvedFailureCount,
+    gitConsent,
     start,
     cancel,
     dismiss,
     retryFromStage,
     retryFailedItems,
+    respondGitConsent,
     onDecisionChange,
     onBulkAction,
     selectTriageSkill,

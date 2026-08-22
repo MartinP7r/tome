@@ -83,6 +83,8 @@ export function SyncView() {
     dismiss,
     retryFromStage,
     retryFailedItems,
+    gitConsent,
+    respondGitConsent,
     diff,
     decisions,
     selectedTriageSkill,
@@ -243,9 +245,30 @@ export function SyncView() {
       </div>
     ) : null;
 
+  const consentSummary = gitConsent !== null ? (
+    <section role="alert" className={styles.cancelledSummary}>
+      <h1 className={styles.cancelledHeading}>
+        {gitConsent.stage === "pre_pull" ? "Pull shared changes?" : "Publish shared changes?"}
+      </h1>
+      <p className={styles.cancelledSubline}>
+        {gitConsent.stage === "pre_pull"
+          ? gitConsent.remote_summary
+          : gitConsent.owned_changes.join(", ")}
+      </p>
+      <div className={styles.cancelledActions}>
+        <Button variant="primary" onPress={() => { void respondGitConsent("accept"); }} ariaLabel={gitConsent.stage === "pre_pull" ? "Pull" : "Publish"}>
+          {gitConsent.stage === "pre_pull" ? "Pull" : "Publish"}
+        </Button>
+        <Button variant="secondary" onPress={() => { void respondGitConsent("decline"); }} ariaLabel={gitConsent.stage === "pre_pull" ? "Continue local-only" : "Keep local-only"}>
+          {gitConsent.stage === "pre_pull" ? "Continue local-only" : "Keep local-only"}
+        </Button>
+      </div>
+    </section>
+  ) : null;
+
   // ===== Render branches =====
 
-  if (!isRunning && terminalKind === null) {
+  if (!isRunning && gitConsent === null && terminalKind === null) {
     // -------- Idle hero (+ inline triage when changes pending) --------
     const lastSync = status?.last_sync ?? null;
     const headline =
@@ -337,7 +360,7 @@ export function SyncView() {
   // accepts a summary slot that the cancelled / failed branches use to
   // surface their verbatim copy (Run sync / Dismiss) above the rows.
   const summary =
-    cancelledSummary ?? failedSummary ?? partialSummary ?? null;
+    consentSummary ?? cancelledSummary ?? failedSummary ?? partialSummary ?? null;
 
   return (
     <section
