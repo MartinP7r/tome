@@ -44,7 +44,7 @@ serde_yaml = "0.9"
 # §"Package Legitimacy Audit". Approved by the user at the 27-03 Task 1
 # human-verify checkpoint. Pinned with `=` so a silent upgrade can't happen
 # without a planner review.
-similar = { version = "=3.1.1", default-features = false, features = ["text"] }
+similar = { version = "=3.2.0", default-features = false, features = ["text"] }
 
 # TUI
 ratatui = "0.30"
