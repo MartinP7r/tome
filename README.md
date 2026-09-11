@@ -13,7 +13,9 @@
   <img src="docs/gfx/mage.svg" alt="tome mascot" width="560" />
 </p>
 
-Sync AI coding skills across tools. Discover skills from Claude Code plugins, standalone directories, and custom locations — then distribute them to every AI coding tool that supports the SKILL.md format.
+Sync AI coding skills across tools. Import skills from native tool plugins,
+standalone directories, and shared Git repositories, then route portable skills
+to selected destinations by shared tags.
 
 > [!WARNING]
 > **Beta software.** tome is under active development and may contain bugs that could break your local skills setup or interfere with other tooling. Back up your skills directories (e.g., with git) before running `tome sync` for the first time. Use `--dry-run` to preview changes without modifying anything.
@@ -26,7 +28,10 @@ AI coding tools (Claude Code, Codex, Antigravity) each use SKILL.md packages to 
 - Standalone skills only exist for one tool
 - Switching tools means losing access to your skill library
 
-**tome** consolidates all skills into a single library and distributes them everywhere.
+**tome** consolidates all skills into a single library and controls which
+portable skills each destination receives. Native tool plugins remain
+tool-specific installation adapters; Tome owns the desired library state and
+cross-tool routing.
 
 ## Install
 
@@ -49,7 +54,7 @@ Re-run after upgrading tome — completion definitions are regenerated, not auto
 # Interactive setup — discovers sources, configures targets
 tome init
 
-# Sync skills to all configured targets
+# Sync the library and apply configured destination routes
 tome sync
 
 # Check what's configured
@@ -63,7 +68,7 @@ sync, diagnose, and recover a Tome library safely. `tome init` offers it during
 interactive setup, or add it directly:
 
 ```bash
-tome add MartinP7r/tome --subdir skills --role source
+tome add MartinP7r/tome --subdir skills
 tome sync
 ```
 
@@ -93,7 +98,12 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | ------------------ | -------------------------------------------------------- |
 | `tome init`             | Interactive wizard to configure directories               |
 | `tome sync`             | Reconcile, discover, consolidate, distribute, clean up    |
-| `tome add <url\|path>`   | Register a directory (git URL, GitHub `owner/repo` slug, `/tree/<ref>/<subdir>` URL, or local path; `--role` / `--subdir` / `--branch` / `--tag` / `--rev` flags) |
+| `tome add <url\|path>`   | Register a shared Git source or profile-local directory; Git sources have no `--to` or `--role` |
+| `tome tag add\|remove\|list` | Manage shared tags on library skills                  |
+| `tome route tag ...`     | Select tags for a profile or project destination        |
+| `tome route exclude ...` | Manage explicit per-destination skill exclusions         |
+| `tome profile create\|list\|select` | Manage committed machine profiles             |
+| `tome pool exclude\|restore` | Exclude a skill from the shared pool or restore it   |
 | `tome remove dir <name>` | Remove a directory (manifest entries become Unowned)      |
 | `tome remove skill <name>` | Delete an Unowned skill from the library                |
 | `tome reassign <skill> --to <dir>` | Re-anchor an Unowned skill to a directory       |
@@ -107,10 +117,13 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | `tome backup`           | Git-backed backup and restore for the skill library       |
 | `tome eject`            | Remove tome's symlinks from all targets (reversible)      |
 | `tome relocate`         | Move the skill library to a new location                  |
-| `tome migrate-library`  | Convert a v0.9-shape library to v0.10 real-directory copies |
 | `tome completions`      | Install shell completions (bash, zsh, fish, powershell)   |
 
-All commands support `--dry-run`, `--verbose`, `--quiet`, `--no-input`, `--config <path>`, and `--machine <path>`. Logging routes through `tracing`; set `TOME_LOG` (e.g. `TOME_LOG=tome::sync=debug`) for fine-grained control beyond the flags.
+Use `tome --version` for version output. Global options include `--dry-run`,
+`--verbose`, `--quiet`, `--no-input`, `--config <path>`, `--settings <path>`,
+and `--tome-home <path>`. There is no `--machine` option. Logging routes
+through `tracing`; set `TOME_LOG` (for example,
+`TOME_LOG=tome::sync=debug`) for fine-grained control beyond the flags.
 
 ## How It Works
 
@@ -143,67 +156,59 @@ graph LR
 1. **Reconcile** — Lockfile-authoritative drift detection for managed skills (Match / Drift / Vanished); applies updates via marketplace adapter when consent is granted
 2. **Discover** — Scan configured directories (role `managed`/`source`/`synced`) for `*/SKILL.md`
 3. **Consolidate** — Copy every skill — managed *and* local — into the library as a real directory (v0.10+ library-canonical model; managed are no longer symlinks). Deduplicates with first directory winning
-4. **Distribute** — Create symlinks in each `target`/`synced` directory (respects per-machine `disabled` + `disabled_directories` + per-directory filters)
+4. **Distribute** — Create symlinks for skills selected by each destination's tag route; any matching tag is sufficient and an explicit skill exclusion wins
 5. **Cleanup** — Three-bucket stale-skill report (removed-from-config / missing-from-disk / now-in-exclude-list); orphan transitions to Unowned preserve library content
 
 ## Configuration
 
-TOML at `~/.tome/tome.toml`:
+Tome resolves shared policy, a selected profile, an optional project layer, and
+local settings. Shared Git sources belong in `~/.tome/tome.toml`:
 
 ```toml
 library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
-[directories.claude-plugins]
-path = "~/.claude/plugins/cache"
-type = "claude-plugins"   # role defaults to "managed"
-
-[directories.local-skills]
-path = "~/.claude/skills"
-type = "directory"
-role = "synced"           # discover AND distribute here
-
 [directories.team-skills]
 path = "https://github.com/myorg/team-skills"
 type = "git"
-ref = "main"
+branch = "main"
+role = "source"
+```
+
+The selected `machines/<profile>.toml` contains machine-wide directories and
+their routes:
+
+```toml
+[directories.local-skills]
+path = "~/.claude/skills"
+type = "directory"
+role = "source"
 
 [directories.antigravity]
 path = "~/.gemini/antigravity/skills"
 type = "directory"
-role = "target"           # distribution only
+role = "target"
+
+[routes.antigravity]
+tags = ["portable", "gemini"]
+exclude = ["claude-only-skill"]
 ```
 
-Each directory declares a `role`: `managed` (read-only upstream), `source` (discover only), `target` (distribute only), or `synced` (both). The model is fully data-driven — add any new tool by adding a `[directories.<name>]` entry. See [docs/src/configuration.md](docs/src/configuration.md) for the full schema (including v0.6 migration from `[[sources]]`/`[targets.*]`).
+Tags are stored with each skill in `.tome-manifest.json`. A routed destination
+receives a skill when any selected tag matches; `exclude` overrides a match.
+Newly imported skills are untagged and remain library-only for tag-routed
+destinations until classified:
 
-## Per-Machine Preferences
-
-Control which skills are active on each machine via `~/.config/tome/machine.toml`:
-
-```toml
-# Skip these skills entirely on this machine
-disabled = ["noisy-skill", "work-only-skill"]
-
-# Don't distribute to these directories on this machine
-disabled_directories = ["openclaw"]
-
-# Per-directory filtering (mutually exclusive — disabled OR enabled per directory)
-[directory.antigravity]
-disabled = ["claude-only-skill"]
-
-[directory.work-laptop]
-enabled = ["work-skill-a", "work-skill-b"]   # allowlist
-
-# Per-machine path overrides (v0.9 — useful when the same tome.toml is shared across machines)
-[directory_overrides.local-skills]
-path = "/Users/me/dev/skills"   # replaces tome.toml's path on this machine
-
-# Per-machine consent for installing missing/drifted managed plugins (v0.10+).
-# Reconcile prompts on first run and persists the choice here. Override anytime.
-auto_install_plugins = "ask"   # one of: always | ask | never
+```bash
+tome tag add using-tome portable
+tome route tag add --to antigravity portable
+tome route exclude add --to antigravity claude-only-skill
 ```
 
-Disabled skills stay in the library but are skipped during distribution. `tome sync` reconciles managed-skill drift against the lockfile and offers interactive triage when new or changed skills are detected.
+From a project tree, Tome searches upward for `.tome.toml` and adds its
+project-only target directories and routes. Local profile selection and runtime
+consent live in `~/.config/tome/settings.toml`. See
+[docs/src/configuration.md](docs/src/configuration.md) for the complete schema.
 
 ## License
 

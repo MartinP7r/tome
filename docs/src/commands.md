@@ -4,12 +4,16 @@
 |---------|-------------|
 | `tome init` | Interactive wizard to configure directories |
 | `tome sync` | Reconcile, discover, consolidate, distribute, and clean up skills |
-| `tome add <url\|path>` | Register a Git skill repository or explicit local directory in `tome.toml` |
+| `tome add <url\|path>` | Register a shared Git source or a local directory in the selected profile |
+| `tome tag add\|remove\|list` | Manage shared tags on manifest skills |
+| `tome route tag add\|remove` | Manage tag selectors for a destination |
+| `tome route exclude add\|remove` | Manage explicit per-destination skill exclusions |
+| `tome profile create\|list\|select` | Manage committed machine profiles |
+| `tome pool exclude\|restore` | Exclude a skill from shared discovery or restore it |
 | `tome remove dir <name>` | Remove a directory entry (manifest entries transition to Unowned per LIB-04) |
-| `tome remove skill <name>` | Delete an Unowned skill from the library (manifest + library + distribution + lockfile + machine.toml cleanup) |
+| `tome remove skill <name>` | Delete an Unowned skill from the library, manifest, distributions, and lockfile |
 | `tome reassign <skill> --to <directory>` | Reassign a skill to a different directory (accepts Owned + Unowned input per UNOWN-01) |
 | `tome fork <skill> --to <local-directory>` | Fork a managed skill to a local directory for customization |
-| `tome migrate-library` | Convert a v0.9-shape library (managed skills as symlinks) to v0.10 real-directory copies (idempotent on re-run) |
 | `tome status` | Show library, directories, last-sync, and health summary |
 | `tome list` (alias: `ls`) | List all discovered skills with their directories (supports `--json`) |
 | `tome browse` | Interactively browse discovered skills with fuzzy search |
@@ -20,7 +24,7 @@
 | `tome eject` | Remove tome's symlinks from all distribution directories (reversible via `tome sync`) |
 | `tome relocate <path>` | Move the skill library to a new location |
 | `tome completions <shell>` | Install shell completions (bash, zsh, fish, powershell) |
-| `tome version` | Print version information |
+| `tome --version` | Print version information through Clap's standard version flag |
 
 ## Global Flags
 
@@ -28,7 +32,7 @@
 |------|-------|-------------|
 | `--config <path>` | | Path to config file (default: `~/.tome/tome.toml`) |
 | `--tome-home <path>` | | Override tome home directory (default: `~/.tome/`, or `TOME_HOME` env var) |
-| `--machine <path>` | | Path to machine preferences file (default: `~/.config/tome/machine.toml`) |
+| `--settings <path>` | | Path to local profile selection and runtime settings (default: `~/.config/tome/settings.toml`) |
 | `--dry-run` | | Preview changes without modifying filesystem |
 | `--no-input` | | Disable all interactive prompts (implies `--no-triage` for sync) |
 | `--verbose` | `-v` | Detailed output |
@@ -43,14 +47,14 @@ folder selection. This portable root determines configuration lookup, cached
 repositories, the lockfile, and the default library location. Existing
 configuration is detected in the selected folder before setup continues, and
 the same folder is used for saving configuration and the post-init sync. A
-custom library may live elsewhere; machine-local settings remain under
+custom library may live elsewhere; local settings remain under
 `~/.config/tome`.
 
 Interactive init also offers Tome's official `using-tome` agent skill, defaults
 to yes, and displays the equivalent command:
 
 ```bash
-tome add MartinP7r/tome --subdir skills --role source
+tome add MartinP7r/tome --subdir skills
 ```
 
 Accepting registers `MartinP7r/tome` as a Git/source directory with
@@ -60,7 +64,11 @@ repository.
 
 ### `tome sync`
 
-Runs the full pipeline: discover skills from configured directories, consolidate into the library, diff the lockfile to surface changes, distribute to targets, and clean up stale entries. When new or changed skills are detected, an interactive triage prompt lets you disable unwanted skills. Generates a `tome.lock` lockfile for reproducible snapshots.
+Runs the full pipeline: resolve repository, profile, project, and local-settings
+layers; discover and consolidate skills; diff the lockfile; distribute through
+destination tag routes; and clean up stale entries. Generates `tome.lock` for
+reproducible provenance snapshots. Use `tome tag` and `tome route` to classify
+and route newly imported skills.
 
 | Flag | Short | Description |
 |------|-------|-------------|
@@ -69,7 +77,10 @@ Runs the full pipeline: discover skills from configured directories, consolidate
 
 ### `tome add`
 
-Register a Git skill repository or explicit local directory in `tome.toml`.
+Register a Git skill repository in shared repository policy or an explicit
+local directory in the selected profile. Git sources are discovery-only and
+do not select destinations: `tome add` has no `--to` flag. Git inputs also
+reject `--role`; local paths continue to accept it.
 Git inputs accept either a full URL (`https://github.com/owner/repo`,
 `git@github.com:owner/repo.git`) or a bare GitHub slug (`owner/repo`), which is
 expanded to `https://github.com/owner/repo` (v0.8.2+). The clone is shallow and
@@ -122,7 +133,7 @@ If `tome sync` finds zero skills at a directory's root AND no `subdir` is config
 | `--tag <tag>` | Pin to a specific tag |
 | `--rev <sha>` | Pin to a specific commit SHA |
 | `--subdir <path>` | Restrict discovery to `<clone>/<path>/*/SKILL.md` (v0.13+, overrides URL-embedded subdir) |
-| `--role <role>` | Override the type-default role (v0.14+). Validated against `valid_roles()` for the chosen type. |
+| `--role <role>` | Override the type-default role for local paths only; rejected for Git inputs |
 
 `--branch`, `--tag`, `--rev` are mutually exclusive.
 
@@ -180,13 +191,59 @@ The success message now echoes the resolved role so you see what you got:
   → Source (skills discovered here, not distributed here)
 ```
 
+### `tome tag`
+
+Tags are shared library metadata stored in `.tome-manifest.json`:
+
+```bash
+tome tag add <skill> <tag>
+tome tag remove <skill> <tag>
+tome tag list [<skill>]
+```
+
+Tag mutation requires an existing manifest skill. New tags affect routing only
+after a destination selects them.
+
+### `tome route`
+
+Routes belong to the active profile or to the nearest project `.tome.toml` that
+owns the destination:
+
+```bash
+tome route tag add --to <destination> <tag>
+tome route tag remove --to <destination> <tag>
+tome route exclude add --to <destination> <skill>
+tome route exclude remove --to <destination> <skill>
+```
+
+Selected tags use OR matching. An explicit exclusion wins over a matching tag.
+Untagged skills stay library-only for destinations with configured routes.
+
+### `tome profile`
+
+`tome profile create <name>` creates `machines/<name>.toml`, `tome profile
+list` lists profiles, and `tome profile select <name>` records the active
+profile in local `settings.toml`.
+
+### `tome pool`
+
+`tome pool exclude <skill>` adds a shared discovery exclusion to repository
+policy. `tome pool restore <skill>` removes that exclusion. Pool conflict
+resolution also exposes `accept-source` and `retain-current`; there is no
+`tome remove pool` compatibility command.
+
 ### `tome remove`
 
 Split into two subcommands since v0.10 (Phase 14, D-API-2):
 
 #### `tome remove dir <name>`
 
-Remove a configured directory entry from `tome.toml`. Manifest entries owned by that directory transition to **Unowned** (per LIB-04) — library content is preserved on disk; only the `source_name` linkage is cleared. Aggregates partial-cleanup failures and exits non-zero with a `⚠ N operations failed` summary if any cleanup step fails. For git directories, the cached clone in `~/.tome/repos/<sha256>/` is removed.
+Remove a configured directory entry from its owning repository policy or
+selected profile. Manifest entries owned by that directory transition to
+**Unowned** (per LIB-04): library content is preserved and only the
+`source_name` linkage is cleared. Partial cleanup failures produce a non-zero
+summary. For Git directories, the cached clone in
+`~/.tome/repos/<sha256>/` is removed.
 
 | Flag | Description |
 |------|-------------|
@@ -195,7 +252,10 @@ Remove a configured directory entry from `tome.toml`. Manifest entries owned by 
 
 #### `tome remove skill <name>`
 
-Delete an **Unowned** skill from the library entirely — clears the manifest entry, removes the library directory, removes downstream distribution symlinks, removes the lockfile entry, and removes any `machine.toml` memberships. Refuses to operate on Owned skills with a hint to run `tome remove dir` first (per D-B2).
+Delete an **Unowned** skill from the library entirely: clear the manifest entry,
+remove the library directory, remove downstream distribution symlinks, and
+remove the lockfile entry. Refuses to operate on Owned skills with a hint to
+run `tome remove dir` first (per D-B2).
 
 | Flag | Description |
 |------|-------------|
@@ -222,17 +282,6 @@ Fork a managed (read-only) skill into a local directory so it can be edited. The
 | `--to <local-directory>` | Target local directory name (required) |
 | `--yes` | Skip confirmation prompt |
 
-### `tome migrate-library`
-
-One-shot migration: convert a **v0.9-shape library** (where managed skills lived as symlinks pointing into the package manager's cache) to the **v0.10 library-canonical model** (real-directory copies). Run once after upgrading from v0.9.x; idempotent on re-run.
-
-Shows a plan summary (skill count + per-skill disk estimate via `walkdir` + `metadata().len()`) before any conversion, then prompts for confirmation. Broken symlinks are preserved in place per Phase 11 D-04.
-
-| Flag | Description |
-|------|-------------|
-| `--yes` / `-y` | Skip the confirmation prompt (bypasses the UX-02 confirm gate) |
-| `--dry-run` | Render the plan; make no filesystem changes |
-
 ### `tome list`
 
 | Flag | Description |
@@ -241,7 +290,10 @@ Shows a plan summary (skill count + per-skill disk estimate via `walkdir` + `met
 
 ### `tome browse`
 
-Full-screen interactive skill browser using fuzzy search. Supports sorting, grouping by source, and per-skill actions (view source, copy path, disable/enable).
+Full-screen interactive skill browser using fuzzy search. Supports sorting,
+grouping by source, viewing source, and copying paths. Destination-ambiguous
+disable actions are unavailable; use `tome route exclude add --to
+<destination> <skill>` explicitly.
 
 ### `tome doctor`
 
@@ -251,7 +303,7 @@ Diagnose library state. When run interactively (no `--no-input`, no `--dry-run`)
 
 When `tome doctor` finds a directory in the library that has no matching manifest entry (an "orphan"), it offers four choices per orphan:
 
-- **`claim`** — Register the orphan in the manifest as an Unowned skill (v0.14+). Hashes the directory, writes a `SkillEntry::new_unowned`, and the entry distributes to your `target` / `synced` directories on the next `tome sync`. This is the proper fix when the orphan represents a real skill you want to keep (e.g., a directory you copied in by hand, or one whose source was removed but you want to preserve it).
+- **`claim`** — Register the orphan in the manifest as an Unowned skill (v0.14+). Hashes the directory and writes a `SkillEntry::new_unowned`. Assign tags and configure a destination route before expecting routed distribution on the next `tome sync`.
 - **`keep`** — Leave the directory on disk; `tome sync` will re-register it IF it discovers the orphan from a configured source. Useful when you know the orphan's source got temporarily disconnected and will come back. **Note:** for library-canonical orphans with no upstream source, this option is a no-op until you `claim` it or add a source that covers it.
 - **`delete`** — Remove the directory from disk permanently.
 - **`skip`** — Leave the orphan as-is; doctor will surface it again on the next run.
@@ -289,6 +341,10 @@ Validates SKILL.md frontmatter: missing/mismatched names, description length, no
 | Flag | Description |
 |------|-------------|
 | `--path` | Print config file path only |
+
+Normal commands resolve shared `tome.toml`, the selected
+`machines/<profile>.toml`, optional project `.tome.toml`, and local
+`settings.toml`. `tome config --path` prints the repository-policy path.
 
 ### `tome backup`
 

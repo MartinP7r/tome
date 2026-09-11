@@ -19,7 +19,7 @@ fn main() -> ExitCode {
 
     // Install tracing subscriber per Phase 18 OBS-01/OBS-02. Failure is
     // non-fatal — we fall back to no-subscriber (events drop silently) and
-    // warn on stderr. The typed-error downcasts below stay on raw eprintln!
+    // warn on stderr. The typed-error downcast below stays on raw eprintln!
     // per D-OUT-1's "main.rs error printer stays raw" carve-out — they must
     // print even if subscriber init failed.
     if let Err(e) = tome::tracing_init::install(cli.log_level()) {
@@ -29,16 +29,10 @@ fn main() -> ExitCode {
     match tome::run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            // HARD-04: typed exit-code mapping. Both branches currently emit
-            // ExitCode::FAILURE (1), but the downcast lets future Phase 16/17
-            // work differentiate exit codes per error class without churning
-            // every site.
+            // HARD-04: typed exit-code mapping. The downcast lets future work
+            // differentiate exit codes per error class without churning every site.
             if let Some(lint_failed) = e.downcast_ref::<tome::LintFailed>() {
                 eprintln!("error: {lint_failed}");
-                return ExitCode::FAILURE;
-            }
-            if let Some(migration_failed) = e.downcast_ref::<tome::MigrationPartialOrFailed>() {
-                eprintln!("error: {migration_failed}");
                 return ExitCode::FAILURE;
             }
             eprintln!("error: {e:#}");

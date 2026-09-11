@@ -229,8 +229,8 @@ pub struct SkillDetail {
     /// Whether the skill's source directory is managed by a package
     /// manager (true) or a local directory (false).
     pub managed: bool,
-    /// Whether the skill is currently in the **global** `disabled` set in
-    /// `machine.toml` on this machine.
+    /// Legacy Desktop compatibility field. Core detail collection reports
+    /// `false`; route eligibility is destination-specific.
     pub disabled: bool,
     /// Parsed frontmatter (specta-friendly projection).
     pub frontmatter: SkillFrontmatterView,
@@ -242,9 +242,8 @@ pub struct SkillDetail {
 /// Aggregate the right-pane payload for a single skill.
 ///
 /// Reads the library manifest (for the source path / content hash / sync
-/// timestamp / managed flag), the on-disk `SKILL.md` (for the frontmatter +
-/// body), and per-machine prefs (for the disabled flag). The body is
-/// always read from the library-canonical copy at
+/// timestamp / managed flag) and the on-disk `SKILL.md` (for the frontmatter
+/// and body). The body is always read from the library-canonical copy at
 /// `<library_dir>/<name>/SKILL.md` — that's the v0.10 contract.
 ///
 /// # Errors
@@ -257,7 +256,6 @@ pub struct SkillDetail {
 /// - `<library_dir>/<name>/SKILL.md` doesn't exist or can't be read;
 /// - the SKILL.md has malformed YAML frontmatter (rare — the library copy
 ///   is consolidated from a sync that already linted the source);
-/// - the machine prefs can't be loaded.
 #[allow(dead_code)]
 pub fn collect_detail(
     name: &crate::discover::SkillName,
@@ -301,22 +299,13 @@ pub fn collect_detail(
         body.push_str("\n\n[... truncated ...]");
     }
 
-    let machine_path = crate::machine::default_machine_path()
-        .context("failed to resolve default machine.toml path")?;
-    let prefs = crate::machine::load(&machine_path).with_context(|| {
-        format!(
-            "failed to load machine prefs from {}",
-            machine_path.display()
-        )
-    })?;
-
     Ok(SkillDetail {
         name: name.clone(),
         source_path,
         content_hash: entry.content_hash.clone(),
         last_sync: Some(entry.synced_at.clone()),
         managed: entry.managed,
-        disabled: prefs.is_disabled(name.as_str()),
+        disabled: false,
         frontmatter: SkillFrontmatterView::from_frontmatter(&frontmatter),
         body,
     })

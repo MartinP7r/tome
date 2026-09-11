@@ -44,6 +44,10 @@ fn classify_source(input: &str) -> AddSource {
     }
 }
 
+pub(crate) fn is_local_input(input: &str) -> bool {
+    matches!(classify_source(input), AddSource::Local(_))
+}
+
 /// Result of parsing a GitHub `/tree/<ref>/<subdir>` suffix off the input URL.
 ///
 /// Vercel-style URL targeting: a user can paste a GitHub tree URL
@@ -239,6 +243,8 @@ pub(crate) struct AddOptions<'a> {
     /// dogfooding pain that surfaced this phase).
     pub role: Option<DirectoryRole>,
     pub dry_run: bool,
+    /// Whether this invocation owns persistence of the supplied config.
+    pub persist_config: bool,
     pub config_path: &'a Path,
 }
 
@@ -328,7 +334,9 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
         );
     } else {
         config.directories.insert(dir_name, dir_config);
-        config.save_checked(opts.config_path)?;
+        if opts.persist_config {
+            config.save_checked(opts.config_path)?;
+        }
         println!(
             "{} directory '{}' (path: {}, role: {})",
             style("Added").green(),
@@ -346,6 +354,9 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
 }
 
 fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()> {
+    if opts.role.is_some() {
+        bail!("--role applies only to local directory inputs");
+    }
     // Strip the GitHub `/tree/<ref>/<subdir>` suffix first; its extracted
     // branch + subdir become defaults that explicit --branch / --subdir
     // flags can override.
@@ -439,24 +450,10 @@ fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()>
         (None, url_sub) => url_sub,
     };
 
-    // Phase 20 (v0.14): explicit --role flag wins over the type-default.
-    // Validate against valid_roles() to fail fast on incompatible combos
-    // (e.g. `--role target` for a git type — git is discovery-only).
-    if let Some(r) = opts.role {
-        let valid = DirectoryType::Git.valid_roles();
-        if !valid.contains(&r) {
-            let valid_str: Vec<String> = valid.iter().map(|r| r.kebab_case().to_string()).collect();
-            bail!(
-                "role '{}' is not valid for type 'git' — valid roles: {}",
-                r.kebab_case(),
-                valid_str.join(", ")
-            );
-        }
-    }
     let dir_config = DirectoryConfig {
         path: PathBuf::from(&resolved_url),
         directory_type: DirectoryType::Git,
-        role: opts.role,
+        role: Some(DirectoryRole::Source),
         git_ref,
         subdir: final_subdir,
         override_applied: false,
@@ -467,9 +464,7 @@ fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()>
     // value tome will actually use, not just "None". Closes the gap where
     // a synced-default surprise (writing into the source dir) had no
     // signal at add time.
-    let resolved_role = opts
-        .role
-        .unwrap_or_else(|| DirectoryType::Git.default_role());
+    let resolved_role = DirectoryRole::Source;
 
     if opts.dry_run {
         println!(
@@ -481,7 +476,9 @@ fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()>
         );
     } else {
         config.directories.insert(dir_name, dir_config);
-        config.save_checked(opts.config_path)?;
+        if opts.persist_config {
+            config.save_checked(opts.config_path)?;
+        }
         println!(
             "{} directory '{}' (git: {}, role: {})",
             style("Added").green(),
@@ -783,6 +780,7 @@ mod tests {
             subdir: None,
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path,
         }
     }
@@ -910,6 +908,7 @@ mod tests {
             subdir: None,
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         add(&mut config, opts).unwrap();
@@ -944,6 +943,7 @@ mod tests {
             subdir: Some("packages"),
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         add(&mut config, opts).unwrap();
@@ -976,6 +976,7 @@ mod tests {
             subdir: Some("packages"),
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         add(&mut config, opts).unwrap();
@@ -1008,6 +1009,7 @@ mod tests {
             subdir: None,
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         add(&mut config, opts).unwrap();
@@ -1022,7 +1024,7 @@ mod tests {
     // -- Phase 20 (v0.14): --role flag tests --
 
     #[test]
-    fn add_with_explicit_role_writes_role_to_config() {
+    fn add_git_rejects_explicit_role() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("tome.toml");
         let lib_dir = tmp.path().join("library");
@@ -1040,16 +1042,15 @@ mod tests {
             subdir: None,
             role: Some(DirectoryRole::Source),
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
-        add(&mut config, opts).unwrap();
-        let dir_name = DirectoryName::new("repo").unwrap();
-        let entry = config.directories.get(&dir_name).expect("directory added");
-        assert_eq!(entry.role, Some(DirectoryRole::Source));
+        let error = add(&mut config, opts).unwrap_err();
+        assert!(error.to_string().contains("--role"));
     }
 
     #[test]
-    fn add_with_no_role_leaves_role_none_for_type_default() {
+    fn add_git_source_persists_source_role_without_role_flag() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("tome.toml");
         let lib_dir = tmp.path().join("library");
@@ -1067,22 +1068,20 @@ mod tests {
             subdir: None,
             role: None,
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         add(&mut config, opts).unwrap();
         let dir_name = DirectoryName::new("repo").unwrap();
         let entry = config.directories.get(&dir_name).expect("directory added");
-        assert_eq!(
-            entry.role, None,
-            "no --role should leave role unset for type-default"
-        );
+        assert_eq!(entry.role, Some(DirectoryRole::Source));
         assert_eq!(entry.role(), DirectoryRole::Source);
     }
 
     #[test]
     fn add_with_invalid_role_for_git_type_bails() {
-        // Git directories can only be Source. --role target is invalid;
-        // expect a clear error naming the invalid role + the valid roles.
+        // Git directories are repository-owned discovery sources. Their role
+        // is fixed, so every explicit --role is rejected.
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("tome.toml");
         let lib_dir = tmp.path().join("library");
@@ -1100,17 +1099,14 @@ mod tests {
             subdir: None,
             role: Some(DirectoryRole::Target),
             dry_run: false,
+            persist_config: true,
             config_path: &config_path,
         };
         let err = add(&mut config, opts).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("target") && msg.contains("not valid"),
-            "error should name the invalid role + 'not valid'; got: {msg}"
-        );
-        assert!(
-            msg.contains("source"),
-            "error should list valid roles; got: {msg}"
+            msg.contains("--role applies only to local directory inputs"),
+            "error should explain that Git inputs reject --role; got: {msg}"
         );
     }
 

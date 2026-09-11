@@ -165,6 +165,64 @@ pub fn resolve_symlink_target(link_path: &Path, raw_target: &Path) -> PathBuf {
     }
 }
 
+/// Returns whether a symlink target resolves inside the library directory.
+///
+/// Existing paths use canonical filesystem resolution. Broken paths fall back
+/// to lexical normalization so `library/../external/skill` is not mistaken for
+/// an in-library target.
+pub(crate) fn points_into_library(target: &Path, library_dir: &Path) -> bool {
+    let normalized_library = normalize_path(library_dir);
+    let canonical_library =
+        std::fs::canonicalize(library_dir).unwrap_or_else(|_| normalized_library.clone());
+    let target = resolve_existing_ancestor(target);
+    target.starts_with(&normalized_library) || target.starts_with(&canonical_library)
+}
+
+/// Resolve the deepest existing ancestor and append any missing path suffix.
+///
+/// This follows intermediate symlinks even when a final component is missing.
+/// If no ancestor can be canonicalized, it falls back to lexical normalization.
+fn resolve_existing_ancestor(path: &Path) -> PathBuf {
+    let mut ancestor = path.to_path_buf();
+    let mut suffix = Vec::new();
+
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(&ancestor) {
+            return suffix
+                .iter()
+                .rev()
+                .fold(resolved, |path, component| path.join(component));
+        }
+
+        let Some(component) = ancestor.file_name() else {
+            return normalize_path(path);
+        };
+        suffix.push(component.to_os_string());
+        if !ancestor.pop() {
+            return normalize_path(path);
+        }
+    }
+}
+
+/// Normalize `.` and `..` components without resolving symlinks.
+fn normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if normalized.file_name().is_some() {
+                    normalized.pop();
+                } else if !normalized.has_root() {
+                    normalized.push(component);
+                }
+            }
+            _ => normalized.push(component),
+        }
+    }
+    normalized
+}
+
 /// Compare two paths for equivalence, using canonicalization when possible.
 ///
 /// Falls back to `resolve_symlink_target` when the symlink target doesn't exist
@@ -384,6 +442,25 @@ mod tests {
         unix_fs::symlink(&target_a, &link).unwrap();
 
         assert!(!symlink_points_to(&link, &target_b));
+    }
+
+    #[test]
+    fn points_into_library_follows_intermediate_symlink_for_missing_target() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let external = root.path().join("external");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        unix_fs::symlink(&external, library.join("redirect")).unwrap();
+
+        assert!(!points_into_library(
+            &library.join("redirect/missing-skill"),
+            &library,
+        ));
+        assert!(points_into_library(
+            &library.join("missing-skill"),
+            &library,
+        ));
     }
 
     #[test]

@@ -21,7 +21,6 @@ pub mod ui;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod ui;
 
-use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -33,15 +32,12 @@ use app::{App, SkillRow};
 
 /// Launch the interactive skill browser.
 ///
-/// `machine_prefs` + `machine_path` are threaded through to enable HARD-21
-/// Disable/Enable wiring. After every toggle in Detail mode, the App
-/// mutates `machine_prefs` in-memory and rewrites `machine_path` via the
-/// existing atomic temp+rename pattern (D-BROWSE-3 step 2).
+/// Detail-menu exclusion toggles are unavailable until they can select the
+/// destination required by `tome route exclude`.
 pub fn browse(
     skills: Vec<DiscoveredSkill>,
     manifest: &crate::manifest::Manifest,
     machine_prefs: MachinePrefs,
-    machine_path: PathBuf,
 ) -> Result<()> {
     let rows: Vec<SkillRow> = skills
         .into_iter()
@@ -63,7 +59,7 @@ pub fn browse(
         })
         .collect();
 
-    let mut app = App::new(rows).with_machine_prefs(machine_prefs, machine_path);
+    let mut app = App::new(rows).with_machine_prefs(machine_prefs);
     let mut terminal = ratatui::init();
 
     let result = run_loop(&mut terminal, &mut app);

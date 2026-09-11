@@ -26,21 +26,21 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | ----------------------------- | ---------------- | ----------------------- | ----------------------------------------------------------------------------------- |
 | **Local directory sources**   | ✅                | ✅                       | Both scan local paths for `SKILL.md` dirs                                           |
 | **Claude plugin sources**     | ✅                | ✅                       | Tome reads `installed_plugins.json`; Vercel reads `.claude-plugin/marketplace.json` |
-| **GitHub remote sources**     | 🔜 v0.6           | ✅                       | `skills add owner/repo`, shorthand syntax, branch specs                             |
-| **GitLab remote sources**     | 🔜 v0.6           | ✅                       | Full URL support                                                                    |
+| **GitHub remote sources**     | ✅                | ✅                       | Tome stores Git sources once in shared repository policy                            |
+| **GitLab remote sources**     | ✅                | ✅                       | Full URL support                                                                    |
 | **Well-known HTTP providers** | ❌                | ✅                       | RFC 8615 `/.well-known/skills/index.json` endpoints                                 |
 | **npm/node_modules sync**     | ❌                | ✅ (experimental)        | Crawls node_modules for skills                                                      |
 | **Symlink distribution**      | ✅                | ✅                       | Both use symlinks as primary distribution method                                    |
 | **MCP distribution**          | ❌ (removed)      | ❌                       | Was removed — all tools now scan SKILL.md dirs natively                              |
 | **Copy fallback**             | ❌                | ✅                       | Vercel falls back to copy when symlinks fail                                        |
 | **Lockfile**                  | ✅ `tome.lock`    | ✅ `.skill-lock.json` v3 | Both track content hashes and provenance                                            |
-| **Per-machine preferences**   | ✅ `machine.toml` | ❌                       | Tome can disable skills per machine                                                 |
+| **Persistent destination routing** | ✅ profile/project routes | ❌              | Tome OR-matches shared skill tags and supports explicit destination exclusions      |
 | **Multi-machine sync**        | ✅ `tome sync`    | ❌                       | Lockfile diffing with interactive triage                                            |
 | **Library consolidation**     | ✅                | ❌                       | Tome's two-tier model; Vercel installs directly                                     |
 | **Interactive browse**        | ✅ `tome browse`  | ❌                       | TUI with fuzzy search (ratatui + nucleo)                                            |
 | **Skill scaffolding**         | ❌                | ✅ `skills init`         | Generates SKILL.md template                                                         |
 | **Public search/registry**    | ❌                | ✅ `skills find`         | API-backed search at skills.sh with install counts                                  |
-| **Remote update checking**    | ❌                | ✅ `skills check`        | Compares GitHub tree SHAs for available updates                                     |
+| **Remote update checking**    | ✅ `tome sync`    | ✅ `skills check`        | Tome synchronizes repository-owned Git sources under local consent                  |
 | **Agent auto-detection**      | 🔜 (wizard only)  | ✅                       | Async detection of 50+ installed agents                                             |
 | **Format transforms**         | 🔜 v0.4           | ❌                       | Planned: SKILL.md ↔ .mdc ↔ .instructions.md                                         |
 | **Frontmatter validation**    | 🔜 v0.4           | Partial                 | Vercel parses name/description/metadata.internal                                    |
@@ -70,7 +70,9 @@ skills add ./local-path                  # local directory
 
 Branch/tag targeting via `/tree/<ref>` syntax. Subpath extraction lets users install a single skill from a multi-skill repo.
 
-**Tome status:** Planned for v0.6 (Git Sources). Vercel's UX — especially the shorthand syntax and subpath targeting — is worth studying when designing `tome add`.
+**Tome status:** Implemented. `tome add` accepts GitHub slugs, full URLs,
+`/tree/<ref>/<subdir>` shortcuts, explicit ref pins, and subdirectories. Git
+sources are shared repository policy and do not accept a destination `--to`.
 
 ### 3.2 Skill Scaffolding (`skills init`)
 
@@ -97,7 +99,9 @@ The registry at skills.sh acts as a public directory of community skills. This c
 
 `skills check` POSTs to a backend API with current lockfile state, compares GitHub tree SHAs to detect available updates. `skills update` then fetches and replaces.
 
-**Tome status:** `tome sync` exists but only diffs the local lockfile against the current discovery state. It doesn't check remote sources for newer versions. Once git sources land (v0.6), remote update checking should follow naturally.
+**Tome status:** `tome sync` can synchronize repository-owned Git sources and
+reconcile managed state. Local `git_sync = "always" | "ask" | "never"`
+controls shared-repository synchronization.
 
 ### 3.5 Well-Known Providers
 
@@ -144,35 +148,23 @@ Many share the universal `.agents/skills/` path. Tome's data-driven target confi
 
 **Notable exception — OpenClaw:** Unlike most tools that have a single skills path, OpenClaw has a two-level structure: a shared `.openclaw/skills/` directory across all agents *plus* per-agent `skills/` directories under each agent's workspace. This may require a multi-path target model or an OpenClaw-specific connector extension.
 
-**Design consideration — per-target skill selection:** Vercel's `--agent` flag filters which agents receive a skill at install time, but the assignment is **not persisted** — their lockfile has no per-skill agent tracking. `lastSelectedAgents` is just a UX hint for the next prompt. Changing which agents have a skill requires reinstalling. This is a significant limitation.
-
-Tome can do better by managing assignments entirely in `machine.toml` (no skill frontmatter changes needed). Proposed resolution model with layered precedence:
+**Persistent destination selection:** Vercel's `--agent` flag filters which
+agents receive a skill at install time, but the assignment is not persisted in
+its lockfile. Tome persists classification and routing separately: shared tags
+live in `.tome-manifest.json`, while the profile or project that owns a
+destination stores its route.
 
 ```toml
-# machine.toml
-
-# Global: applies to all targets unless overridden (existing behavior)
-[disabled]
-skills = ["noisy-skill"]
-
-# Per-target: disable additional skills for this target
-[targets.codex]
-disabled = ["claude-only-skill"]
-
-# Per-target allowlist: ONLY these skills go to this target
-[targets.openclaw-agent-x]
-enabled = ["specialized-skill"]
+# machines/work.toml or a project .tome.toml
+[routes.codex]
+tags = ["portable", "coding"]
+exclude = ["claude-only-skill"]
 ```
 
-**Resolution order:**
-1. Skill is **enabled by default** for all targets
-2. Global `disabled` removes it everywhere (existing `machine.toml` behavior)
-3. Per-target `disabled` removes it from specific targets only
-4. Per-target `enabled` (if present) acts as an allowlist — only listed skills reach that target
-
-This keeps the common case simple (everything goes everywhere) while supporting opt-out at two granularity levels. The `enabled` allowlist is only needed for niche cases like OpenClaw's per-agent workspaces. All managed in tome settings — no skill frontmatter modifications required.
-
-**Tome status:** Partially addressed in #248 (audit known targets against platform docs). The data-driven config means users can add any target manually, but wizard auto-discovery only covers 7 agents.
+Any selected tag can match; an explicit exclusion wins. Newly imported skills
+are untagged and remain library-only for routed destinations. This keeps source
+provenance independent from destination choice and avoids changing skill
+frontmatter.
 
 ### 3.7 npm/node_modules Sync
 
@@ -231,7 +223,7 @@ Vercel's `sanitizeName()` prevents directory traversal via skill names, and `isS
 | ---------------------- | ------------------------------------------------ | ------------------------------------------ |
 | **Data flow**          | Sources → Library → Targets                      | Remote → Agent directories                 |
 | **Canonical location** | Library dir (`~/.tome/skills/`)                  | Agent skills dirs (`.agents/skills/`)      |
-| **Multi-machine**      | Lockfile + per-machine prefs                     | Single-machine only                        |
+| **Multi-machine**      | Shared policy + profiles + manifest + lockfile   | Single-machine only                        |
 | **Offline support**    | Full (library is local)                          | Partial (needs network for remote sources) |
 | **Update model**       | Diff-based triage (`tome sync`)                | Replace-based (`skills update`)            |
 | **Cleanup**            | Automated stale removal with interactive confirm | Manual `skills remove`                     |
@@ -255,9 +247,13 @@ Prioritized by effort-to-value ratio, mapped to existing roadmap items where app
 
 ### Medium-Term (aligns with existing roadmap)
 
-4. **Per-target skill selection** — Extend `machine.toml` with per-target `disabled`/`enabled` lists. Layered resolution: global disabled → per-target disabled → per-target enabled allowlist. Enables OpenClaw per-agent workspaces and general skill-to-agent affinity. Vercel's `--agent` flag is install-time-only with no persistence — tome can do better. *(#253)*
+4. **Route-management ergonomics** — Build on the implemented profile/project
+   tag routes with better inspection and bulk operations. Vercel's `--agent`
+   flag remains install-time-only, while Tome persists routes.
 
-5. **Source parser for git remotes** — Study Vercel's shorthand syntax (`owner/repo`, `@skill-name`, `/tree/branch`) when designing `tome add`. *(Informs v0.6: Git Sources, #58)*
+5. **Source parser extensions** — Tome already supports GitHub shorthand and
+   `/tree/<ref>/<subdir>`; evaluate single-skill selectors and other provider
+   conventions only if users need them.
 
 6. **Remote update checking** — Extend `tome sync` to check remote sources, not just local lockfile diffs. *(After v0.6)*
 

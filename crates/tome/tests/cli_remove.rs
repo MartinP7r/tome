@@ -872,9 +872,6 @@ fn phase14_remove_skill_full_cleanup() {
     )
     .unwrap();
 
-    // Stage machine.toml `disabled` membership.
-    std::fs::write(&fix.machine_path, "disabled = [\"orphan-foo\"]\n").unwrap();
-
     fix.cmd()
         .args(["remove", "skill", "orphan-foo", "--yes"])
         .assert()
@@ -906,13 +903,6 @@ fn phase14_remove_skill_full_cleanup() {
     assert!(
         lockfile_after["skills"].get("orphan-foo").is_none(),
         "lockfile entry must be removed: {lockfile_after}"
-    );
-
-    // machine.toml disabled membership removed.
-    let machine_after = std::fs::read_to_string(&fix.machine_path).unwrap();
-    assert!(
-        !machine_after.contains("orphan-foo"),
-        "machine.toml disabled-set membership must be removed: {machine_after}"
     );
 }
 

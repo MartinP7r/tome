@@ -71,31 +71,33 @@ struct Fixture {
     tome_home: PathBuf,
     library_dir: PathBuf,
     config_path: PathBuf,
-    machine_path: PathBuf,
+    settings_path: PathBuf,
     dist_dir: PathBuf,
 }
 
 impl Fixture {
-    /// Empty library + a single distribution dir + an empty machine.toml.
+    /// Empty library + a single distribution dir + selected profile settings.
     fn new() -> Result<Self> {
         let tmp = TempDir::new()?;
         let root = tmp.path().to_path_buf();
         let tome_home = root.join("tome_home");
         let library_dir = tome_home.join("library");
         let config_path = tome_home.join("tome.toml");
-        let machine_path = root.join("machine.toml");
+        let settings_path = root.join("settings.toml");
         let dist_dir = root.join("dist");
 
         std::fs::create_dir_all(&library_dir)?;
         std::fs::create_dir_all(&dist_dir)?;
-        std::fs::write(&machine_path, "")?;
+        std::fs::create_dir_all(tome_home.join("machines"))?;
+        std::fs::write(tome_home.join("machines/test.toml"), "")?;
+        std::fs::write(&settings_path, "profile = \"test\"\n")?;
 
         Ok(Fixture {
             _tmp: tmp,
             tome_home,
             library_dir,
             config_path,
-            machine_path,
+            settings_path,
             dist_dir,
         })
     }
@@ -105,10 +107,8 @@ impl Fixture {
     /// don't need the adapter to fire (`build_claude_adapter` returns
     /// `Ok(None)` and the reconcile branch is skipped).
     fn write_local_only_config(&self, source_dir: &Path) -> Result<()> {
-        let toml = format!(
-            r#"library_dir = "{lib}"
-
-[directories.local-skills]
+        let profile = format!(
+            r#"[directories.local-skills]
 type = "directory"
 role = "source"
 path = "{src}"
@@ -118,11 +118,16 @@ type = "directory"
 role = "target"
 path = "{dist}"
 "#,
-            lib = self.library_dir.display(),
             src = source_dir.display(),
             dist = self.dist_dir.display(),
         );
+        let toml = format!(
+            r#"library_dir = "{lib}"
+"#,
+            lib = self.library_dir.display(),
+        );
         std::fs::write(&self.config_path, toml)?;
+        std::fs::write(self.tome_home.join("machines/test.toml"), profile)?;
         Ok(())
     }
 
@@ -132,10 +137,8 @@ path = "{dist}"
     fn write_claude_plugins_config(&self) -> Result<()> {
         let claude_path = self.tome_home.join("claude_pseudo");
         std::fs::create_dir_all(&claude_path)?;
-        let toml = format!(
-            r#"library_dir = "{lib}"
-
-[directories.cp]
+        let profile = format!(
+            r#"[directories.cp]
 type = "claude-plugins"
 role = "managed"
 path = "{path}"
@@ -145,11 +148,16 @@ type = "directory"
 role = "target"
 path = "{dist}"
 "#,
-            lib = self.library_dir.display(),
             path = claude_path.display(),
             dist = self.dist_dir.display(),
         );
+        let toml = format!(
+            r#"library_dir = "{lib}"
+"#,
+            lib = self.library_dir.display(),
+        );
         std::fs::write(&self.config_path, toml)?;
+        std::fs::write(self.tome_home.join("machines/test.toml"), profile)?;
         Ok(())
     }
 
@@ -161,8 +169,8 @@ path = "{dist}"
             .arg(&self.config_path)
             .arg("--tome-home")
             .arg(&self.tome_home)
-            .arg("--machine")
-            .arg(&self.machine_path)
+            .arg("--settings")
+            .arg(&self.settings_path)
             .arg("sync")
             .args(args)
             // Suppress ANSI codes so substring assertions are reliable.
@@ -184,12 +192,39 @@ path = "{dist}"
             .arg(&self.config_path)
             .arg("--tome-home")
             .arg(&self.tome_home)
-            .arg("--machine")
-            .arg(&self.machine_path)
+            .arg("--settings")
+            .arg(&self.settings_path)
             .arg("sync")
             .args(args);
         cmd
     }
+}
+
+#[test]
+fn sync_ignores_and_preserves_legacy_machine_toml() -> Result<()> {
+    let f = Fixture::new()?;
+    let src = f.tome_home.join("source");
+    std::fs::create_dir_all(&src)?;
+    write_skill(&src, "alpha", "alpha body")?;
+    f.write_local_only_config(&src)?;
+
+    let home = f.tome_home.join("fake-home");
+    let machine_path = home.join(".config/tome/machine.toml");
+    std::fs::create_dir_all(machine_path.parent().unwrap())?;
+    let legacy = "disabled = [\"alpha\"]\n";
+    std::fs::write(&machine_path, legacy)?;
+
+    f.run_sync(&["--no-input"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    assert!(
+        f.dist_dir.join("alpha").is_symlink(),
+        "legacy machine.toml must not affect route eligibility"
+    );
+    assert_eq!(std::fs::read_to_string(machine_path)?, legacy);
+    Ok(())
 }
 
 /// Write a minimal SKILL.md tree at `<dir>/<skill_name>/SKILL.md`.
@@ -276,9 +311,9 @@ fn sync_with_no_claude_plugins_dir_does_not_require_claude() -> Result<()> {
 }
 
 #[test]
-fn sync_preserves_auto_install_plugins_across_runs() -> Result<()> {
-    // RECON-02 persistence: write `auto_install_plugins = "always"` to
-    // machine.toml, run sync, verify the field is preserved (not stripped
+fn sync_preserves_managed_plugin_install_across_runs() -> Result<()> {
+    // RECON-02 persistence: write `managed_plugin_install = "always"` to
+    // settings.toml, run sync, verify the field is preserved (not stripped
     // by the save chain).
     let f = Fixture::new()?;
     let src = f.tome_home.join("source");
@@ -286,21 +321,24 @@ fn sync_preserves_auto_install_plugins_across_runs() -> Result<()> {
     write_skill(&src, "alpha", "alpha body")?;
     f.write_local_only_config(&src)?;
 
-    std::fs::write(&f.machine_path, "auto_install_plugins = \"always\"\n")?;
+    std::fs::write(
+        &f.settings_path,
+        "profile = \"test\"\nmanaged_plugin_install = \"always\"\n",
+    )?;
 
     f.run_sync(&["--no-input"]).assert().success();
 
-    // Re-read machine.toml and assert the consent value survived round-trip.
-    let machine_toml = std::fs::read_to_string(&f.machine_path)?;
+    // Re-read settings.toml and assert the consent value survived round-trip.
+    let settings_toml = std::fs::read_to_string(&f.settings_path)?;
     assert!(
-        machine_toml.contains("auto_install_plugins = \"always\""),
-        "auto_install_plugins should be preserved across syncs; got:\n{machine_toml}"
+        settings_toml.contains("managed_plugin_install = \"always\""),
+        "managed_plugin_install should be preserved across syncs; got:\n{settings_toml}"
     );
     Ok(())
 }
 
 #[test]
-fn sync_machine_toml_with_auto_install_never_parses_cleanly() -> Result<()> {
+fn sync_settings_with_managed_plugin_install_never_parses_cleanly() -> Result<()> {
     // RECON-02: `never` is a valid serialized value of the AutoInstall enum.
     let f = Fixture::new()?;
     let src = f.tome_home.join("source");
@@ -308,25 +346,32 @@ fn sync_machine_toml_with_auto_install_never_parses_cleanly() -> Result<()> {
     write_skill(&src, "alpha", "alpha body")?;
     f.write_local_only_config(&src)?;
 
-    std::fs::write(&f.machine_path, "auto_install_plugins = \"never\"\n")?;
+    std::fs::write(
+        &f.settings_path,
+        "profile = \"test\"\nmanaged_plugin_install = \"never\"\n",
+    )?;
 
     f.run_sync(&["--no-input"]).assert().success();
     Ok(())
 }
 
 #[test]
-fn sync_machine_toml_with_invalid_auto_install_errors() -> Result<()> {
-    // RECON-02: invalid enum value is rejected at machine.toml parse time.
+fn sync_settings_with_invalid_managed_plugin_install_errors() -> Result<()> {
+    // RECON-02: invalid enum value is rejected at settings.toml parse time.
     let f = Fixture::new()?;
     let src = f.tome_home.join("source");
     std::fs::create_dir_all(&src)?;
     write_skill(&src, "alpha", "alpha body")?;
     f.write_local_only_config(&src)?;
 
-    std::fs::write(&f.machine_path, "auto_install_plugins = \"sometimes\"\n")?;
+    std::fs::write(
+        &f.settings_path,
+        "profile = \"test\"\nmanaged_plugin_install = \"sometimes\"\n",
+    )?;
 
     f.run_sync(&["--no-input"]).assert().failure().stderr(
-        predicate::str::contains("auto_install_plugins").or(predicate::str::contains("sometimes")),
+        predicate::str::contains("managed_plugin_install")
+            .or(predicate::str::contains("sometimes")),
     );
     Ok(())
 }
@@ -380,23 +425,23 @@ fn sync_help_advertises_no_install_flag() -> Result<()> {
 }
 
 #[test]
-fn sync_dry_run_with_no_install_does_not_modify_machine_toml() -> Result<()> {
+fn sync_dry_run_with_no_install_does_not_modify_settings() -> Result<()> {
     // RECON-02 / D-09: `--no-install` is a single-run override; combined
-    // with `--dry-run` it should not touch the machine.toml file.
+    // with `--dry-run` it should not touch settings.toml.
     let f = Fixture::new()?;
     let src = f.tome_home.join("source");
     std::fs::create_dir_all(&src)?;
     write_skill(&src, "alpha", "alpha body")?;
     f.write_local_only_config(&src)?;
 
-    let machine_before = std::fs::read_to_string(&f.machine_path)?;
+    let settings_before = std::fs::read_to_string(&f.settings_path)?;
     f.run_sync(&["--no-input", "--no-install", "--dry-run"])
         .assert()
         .success();
-    let machine_after = std::fs::read_to_string(&f.machine_path)?;
+    let settings_after = std::fs::read_to_string(&f.settings_path)?;
     assert_eq!(
-        machine_before, machine_after,
-        "dry-run + no-install must not modify machine.toml"
+        settings_before, settings_after,
+        "dry-run + no-install must not modify settings.toml"
     );
     Ok(())
 }

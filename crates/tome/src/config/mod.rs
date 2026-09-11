@@ -9,10 +9,9 @@
 //!
 //! | File           | Hosts                                                            |
 //! |----------------|------------------------------------------------------------------|
-//! | `mod.rs`       | Public re-exports + `Config::load`/`load_or_default`/`save`/`save_checked`/`load_with_overrides` + tome-home/XDG-config helpers (`default_tome_home`, `default_config_path`, `resolve_config_dir`, `TomeHomeSource`, `resolve_tome_home_with_source`, `read_config_tome_home`, `write_xdg_tome_home`) + `defaults` |
+//! | `mod.rs`       | Public re-exports + `Config::load`/`load_or_default`/`save`/`save_checked` + tome-home/XDG-config helpers (`default_tome_home`, `default_config_path`, `resolve_config_dir`, `TomeHomeSource`, `resolve_tome_home_with_source`, `read_config_tome_home`, `write_xdg_tome_home`) + `defaults` |
 //! | `types.rs`     | `Config`, `DirectoryName`, `DirectoryConfig`, `DirectoryType`, `DirectoryRole`, `GitRef`, `BackupConfig` (data shapes + derive impls only) |
 //! | `validate.rs`  | `Config::validate` — role/type combos + Cases A/B/C overlap detection |
-//! | `overrides.rs` | `Config::apply_machine_overrides`, `warn_unknown_overrides`, `format_override_validation_error` (PORT-01..05 path overrides) |
 //!
 //! Tilde helpers (`expand_tilde`, `unexpand_tilde`) live in [`crate::paths`] —
 //! cross-cutting utilities, not config-specific. They are re-exported here
@@ -25,7 +24,6 @@ use std::path::{Path, PathBuf};
 
 use crate::errors::{DomainErrorKind, WithDomainKind};
 
-mod overrides;
 mod types;
 mod validate;
 
@@ -35,9 +33,6 @@ pub use crate::paths::expand_tilde;
 pub use types::{
     BackupConfig, Config, DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType, GitRef,
 };
-
-use crate::machine::MachinePrefs;
-use overrides::format_override_validation_error;
 
 impl Config {
     /// Construct the existing effective model from validated persisted layers.
@@ -163,111 +158,6 @@ impl Config {
         Ok(())
     }
 
-    /// Load config and apply per-machine path overrides in one shot.
-    ///
-    /// **Order (I2 invariant — must not change):**
-    ///   1. Read TOML from `path` (or build defaults if missing — same as `Config::load`)
-    ///   2. `expand_tildes()` on the raw config
-    ///   3. `warn_unknown_overrides(prefs)` — stderr typo guard (PORT-03)
-    ///   4. snapshot pre-override paths (for the PORT-04 wrapper)
-    ///   5. `apply_machine_overrides(prefs)` — rewrites paths per `[directory_overrides.<name>]`
-    ///   6. `validate()` — sees the merged result; if it fails AND the pre-override
-    ///      config DID validate AND ≥ 1 override was applied, the error is wrapped
-    ///      via `format_override_validation_error` so the user knows to edit
-    ///      `machine.toml`, not `tome.toml` (PORT-04). Otherwise the raw
-    ///      `validate()` error passes through.
-    ///
-    /// `machine_path` is the path to `machine.toml`; only used to build the
-    /// PORT-04 wrapper message ("To fix: edit `<machine_path>`"). The prefs
-    /// themselves come from `prefs`, not by re-reading the file.
-    ///
-    /// Used by `lib.rs::run()` for every non-Init command. `tome init` does NOT use
-    /// this path — the wizard runs against the bare `tome.toml` that the user is
-    /// about to write.
-    pub fn load_with_overrides(
-        path: &Path,
-        machine_path: &Path,
-        prefs: &MachinePrefs,
-    ) -> Result<Self> {
-        let mut config = if path.exists() {
-            let content = std::fs::read_to_string(path)
-                .with_context(|| format!("failed to read {}", path.display()))?;
-            toml::from_str(&content).map_err(|e| {
-                let mut msg = format!("failed to parse {}: {e}", path.display());
-                if content.contains("[[sources]]") || content.contains("[targets.") {
-                    msg.push_str("\nhint: tome v0.6 replaced [[sources]] and [targets.*] with [directories.*]. See CHANGELOG.md for migration instructions.");
-                }
-                anyhow::anyhow!("{msg}")
-            })?
-        } else {
-            Self::default()
-        };
-
-        config.expand_tildes()?;
-
-        // PORT-03: warn about typos before applying. Apply is a silent no-op
-        // for unknown targets (see `apply_machine_overrides` doc), so the user
-        // would otherwise lose their override silently.
-        config.warn_unknown_overrides(prefs, |w| eprintln!("warning: {w}"));
-
-        // PORT-04 setup: snapshot pre-override paths so we can both (a)
-        // discriminate "override-induced" failure from a pre-existing tome.toml
-        // problem and (b) show the user what changed in the wrapper message.
-        let pre_override_paths: BTreeMap<String, PathBuf> = config
-            .directories
-            .iter()
-            .map(|(name, dir)| (name.as_str().to_string(), dir.path.clone()))
-            .collect();
-
-        config.apply_machine_overrides(prefs)?;
-
-        if let Err(post_err) = config.validate() {
-            // Only wrap if the pre-override config WOULD have validated AND at
-            // least one override was applied. Otherwise blaming machine.toml
-            // would be wrong — the underlying tome.toml is what's broken.
-            let mut pre_override_config = config.clone();
-            for (name, dir) in pre_override_config.directories.iter_mut() {
-                if let Some(orig) = pre_override_paths.get(name.as_str()) {
-                    dir.path = orig.clone();
-                    dir.override_applied = false;
-                }
-            }
-            let pre_override_valid = pre_override_config.validate().is_ok();
-            let any_override_applied = config.directories.values().any(|d| d.override_applied);
-
-            if pre_override_valid && any_override_applied {
-                return Err(format_override_validation_error(
-                    &post_err,
-                    &pre_override_paths,
-                    &config,
-                    machine_path,
-                ));
-            }
-            return Err(post_err);
-        }
-        Ok(config)
-    }
-
-    /// CLI-aware variant of `load_with_overrides`. See `load_or_default` for the
-    /// missing-file vs. missing-parent-dir semantics.
-    pub fn load_or_default_with_overrides(
-        cli_path: Option<&Path>,
-        machine_path: &Path,
-        prefs: &MachinePrefs,
-    ) -> Result<Self> {
-        let path = match cli_path {
-            Some(p) => {
-                if !p.exists() {
-                    let parent_exists = p.parent().is_some_and(|d| d.exists());
-                    anyhow::ensure!(parent_exists, "config file not found: {}", p.display());
-                }
-                p.to_path_buf()
-            }
-            None => default_config_path()?,
-        };
-        Self::load_with_overrides(&path, machine_path, prefs)
-    }
-
     /// Save config, but first run the same expand + validate pipeline that
     /// `Config::load()` runs, followed by a TOML round-trip equality check
     /// (defense in depth — catches serde drift such as a field that
@@ -286,13 +176,6 @@ impl Config {
     /// IN: library_dir = "/var/lib/skills"      OUT: library_dir = "/var/lib/skills"
     /// ```
     ///
-    /// **PORT-02 invariant:** `apply_machine_overrides` mutates a load-time-only
-    /// copy of `Config`. `save_checked` operates on `&self` (the unmutated
-    /// config) — therefore override paths from `machine.toml` are NEVER
-    /// serialised back to `tome.toml`. The call-site contract in `lib.rs`
-    /// guarantees that the Config passed to `save_checked` is the pre-override
-    /// shape; this method does not re-implement that guarantee.
-    ///
     /// Returns `Err` without writing anything if any stage fails.
     ///
     /// Call this instead of `save()` from the wizard or any other code that
@@ -310,10 +193,7 @@ impl Config {
         //    inputs survive unchanged (idempotent); paths outside `$HOME`
         //    are kept absolute. We start from `self` (not `expanded`) so
         //    user-supplied tildes are preserved verbatim, not round-tripped
-        //    through expansion. This also keeps the PORT-02 invariant: any
-        //    overrides applied to `self.directories[*].path` would be the
-        //    caller's responsibility to undo before passing to save_checked
-        //    (lib.rs::sync save chain saves the pre-override Config).
+        //    through expansion.
         let mut for_save = self.clone();
         for_save.library_dir = crate::paths::unexpand_tilde(&for_save.library_dir);
         for dir in for_save.directories.values_mut() {
@@ -1082,94 +962,6 @@ skills_dir = "/tmp"
         assert!(
             on_disk.contains("path = \"~/.tome-test/skill-dir-rewrite\""),
             "expected directory path under $HOME rewritten to ~-shape, got:\n{on_disk}"
-        );
-    }
-
-    #[test]
-    fn save_checked_does_not_round_trip_override_paths_to_tome_toml() {
-        // PORT-02 invariant: override paths from machine.toml MUST NOT be
-        // serialised back into tome.toml on save. apply_machine_overrides
-        // mutates a load-time-only copy; save_checked operates on the
-        // unmutated config (or a clone that didn't go through apply).
-        //
-        // Setup: build a Config with a directory at the ORIGINAL path,
-        // simulate apply_machine_overrides by calling it directly with prefs
-        // that rewrite the path, save the (post-apply) config — and assert the
-        // ORIGINAL path is NOT in the saved file.
-        //
-        // NOTE: this test confirms the contract from BOTH angles:
-        //   - The *unmutated* config saved with original path: trivially true.
-        //   - The *mutated* (post-apply) config saved would write the override
-        //     path. The real lib.rs::run flow only ever saves a freshly-loaded
-        //     Config (without overrides applied) via save_checked. We pin that
-        //     contract here by noting that save_checked writes whatever path
-        //     is in `self.directories[*].path`, so callers must save the
-        //     pre-override config — the `lib.rs::sync` save chain already
-        //     does this (Phase 9 PORT-02).
-        let tmp = tempfile::TempDir::new().unwrap();
-        let cfg_path = tmp.path().join("tome.toml");
-        let lib_dir = tmp.path().join("library");
-        let original_dir_path = tmp.path().join("original-skills");
-
-        let mut config = Config {
-            library_dir: lib_dir,
-            directories: BTreeMap::from([(
-                DirectoryName::new("work").unwrap(),
-                DirectoryConfig {
-                    path: original_dir_path.clone(),
-                    directory_type: DirectoryType::Directory,
-                    role: Some(DirectoryRole::Source),
-                    git_ref: None,
-                    subdir: None,
-                    override_applied: false,
-                },
-            )]),
-            ..Default::default()
-        };
-
-        // Save the unmutated config — this is what lib.rs::sync save chain
-        // does (it has access to the pre-override Config).
-        config.save_checked(&cfg_path).unwrap();
-        let on_disk_pre = std::fs::read_to_string(&cfg_path).unwrap();
-        assert!(
-            on_disk_pre.contains(original_dir_path.to_str().unwrap()),
-            "saved file must contain original path, got:\n{on_disk_pre}"
-        );
-
-        // Now simulate the in-memory "post-apply" mutation: apply overrides
-        // that rewrite work.path to a different location. Saving this
-        // *mutated* config would write the override path — DON'T do that
-        // in production. Confirmed by the assertion below.
-        let override_path = tmp.path().join("override-skills");
-        let mut prefs = crate::machine::MachinePrefs::default();
-        prefs.directory_overrides.insert(
-            DirectoryName::new("work").unwrap(),
-            crate::machine::DirectoryOverride {
-                path: override_path.clone(),
-            },
-        );
-        config.apply_machine_overrides(&prefs).unwrap();
-        // After apply, in-memory config has the override path — saving NOW
-        // would round-trip it. The PORT-02 invariant in lib.rs is that
-        // save_checked is never called after apply_machine_overrides on the
-        // same config; we document/lock that contract here.
-        assert_eq!(
-            config.directories.get("work").unwrap().path,
-            override_path,
-            "apply_machine_overrides should have rewritten work.path"
-        );
-
-        // Re-read the originally-saved tome.toml: the override path is NOT
-        // in it (never was; we saved BEFORE apply).
-        let still_on_disk = std::fs::read_to_string(&cfg_path).unwrap();
-        assert!(
-            !still_on_disk.contains(override_path.to_str().unwrap()),
-            "tome.toml on disk MUST NOT contain override path from machine.toml \
-             (PORT-02 invariant), got:\n{still_on_disk}"
-        );
-        assert!(
-            still_on_disk.contains(original_dir_path.to_str().unwrap()),
-            "tome.toml on disk must still contain the original path, got:\n{still_on_disk}"
         );
     }
 

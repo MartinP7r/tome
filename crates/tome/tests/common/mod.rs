@@ -130,21 +130,12 @@ pub fn migrate_ordinary_fixture(config_path: &Path) {
     let (pool, topology) = fixture
         .split_once("\n\n[directories")
         .expect("ordinary fixture must contain directory topology");
-    std::fs::write(config_path, format!("{pool}\n")).unwrap();
+    // Keep the repository-level table as an explicit ordinary-mode marker.
+    std::fs::write(config_path, format!("{pool}\n\n[directories]\n")).unwrap();
     write_test_profile(
         config_path.parent().unwrap(),
         &format!("[directories{topology}"),
     );
-}
-
-/// Restore a deliberately legacy fixture for tests that explicitly pass
-/// `--machine` to exercise deprecated override behavior.
-pub fn restore_legacy_fixture(config_path: &Path) {
-    let profile_path = config_path.parent().unwrap().join("machines/test.toml");
-    let profile = std::fs::read_to_string(profile_path).unwrap();
-    let topology = profile.strip_prefix("[directories]\n").unwrap();
-    let pool = std::fs::read_to_string(config_path).unwrap();
-    std::fs::write(config_path, format!("{pool}\n{topology}")).unwrap();
 }
 
 /// Copy the selected test profile when a fixture relocates its pool config.
@@ -173,7 +164,6 @@ pub fn create_skill(dir: &std::path::Path, name: &str) {
 pub struct TestEnv {
     pub tmp: TempDir,
     pub config_path: PathBuf,
-    pub machine_path: Option<PathBuf>,
     pub library_dir: PathBuf,
     pub source_dirs: Vec<(String, PathBuf)>,
     pub target_dirs: Vec<(String, PathBuf)>,
@@ -184,8 +174,6 @@ pub struct TestEnvBuilder {
     targets: Vec<String>,
     skills: Vec<(String, String, Option<String>)>,
     managed_skills: Vec<(String, String, String, String)>,
-    disabled_skills: Vec<String>,
-    disabled_targets: Vec<String>,
     lockfile_content: Option<String>,
 }
 
@@ -196,8 +184,6 @@ impl TestEnvBuilder {
             targets: Vec::new(),
             skills: Vec::new(),
             managed_skills: Vec::new(),
-            disabled_skills: Vec::new(),
-            disabled_targets: Vec::new(),
             lockfile_content: None,
         }
     }
@@ -241,16 +227,6 @@ impl TestEnvBuilder {
             registry.to_string(),
             version.to_string(),
         ));
-        self
-    }
-
-    pub fn disable_skill(mut self, name: &str) -> Self {
-        self.disabled_skills.push(name.to_string());
-        self
-    }
-
-    pub fn disable_target(mut self, name: &str) -> Self {
-        self.disabled_targets.push(name.to_string());
         self
     }
 
@@ -348,35 +324,15 @@ impl TestEnvBuilder {
             target_dirs.push((name.clone(), target_dir));
         }
 
-        let mut profile_prefs = String::new();
-        if !self.disabled_skills.is_empty() {
-            let items: Vec<String> = self
-                .disabled_skills
-                .iter()
-                .map(|skill| format!("\"{skill}\""))
-                .collect();
-            profile_prefs.push_str(&format!("disabled = [{}]\n", items.join(", ")));
-        }
-        if !self.disabled_targets.is_empty() {
-            let items: Vec<String> = self
-                .disabled_targets
-                .iter()
-                .map(|directory| format!("\"{directory}\""))
-                .collect();
-            profile_prefs.push_str(&format!("disabled_directories = [{}]\n", items.join(", ")));
-        }
-
         // Write the shared pool and its selected committed profile.
         let config_path = tmp.path().join("config.toml");
         std::fs::write(&config_path, &config_toml).unwrap();
         std::fs::create_dir_all(tmp.path().join("machines")).unwrap();
         std::fs::write(
             tmp.path().join("machines/test.toml"),
-            format!("{profile_prefs}\n[directories]\n{profile_toml}"),
+            format!("[directories]\n{profile_toml}"),
         )
         .unwrap();
-        let machine_path = None;
-
         // Write lockfile if provided
         if let Some(lockfile) = &self.lockfile_content {
             std::fs::write(tmp.path().join("tome.lock"), lockfile).unwrap();
@@ -385,7 +341,6 @@ impl TestEnvBuilder {
         TestEnv {
             tmp,
             config_path,
-            machine_path,
             library_dir,
             source_dirs,
             target_dirs,
@@ -404,14 +359,6 @@ impl TestEnv {
         let mut cmd = tome();
         cmd.args(["--config", self.config_path.to_str().unwrap()]);
         cmd.env("NO_COLOR", "1");
-        cmd
-    }
-
-    pub fn cmd_with_machine(&self) -> Command {
-        let mut cmd = self.cmd();
-        if let Some(ref machine_path) = self.machine_path {
-            cmd.args(["--machine", machine_path.to_str().unwrap()]);
-        }
         cmd
     }
 
@@ -498,7 +445,6 @@ pub struct Phase14Fixture {
     pub tome_home: PathBuf,
     pub config_path: PathBuf,
     pub library_dir: PathBuf,
-    pub machine_path: PathBuf,
     /// Optional pre-staged target dir (for reassign / distribution-symlink tests).
     pub target_dir: Option<PathBuf>,
 }
@@ -508,7 +454,6 @@ impl Phase14Fixture {
         let mut cmd = tome();
         cmd.args(["--tome-home", self.tome_home.to_str().unwrap()]);
         cmd.args(["--config", self.config_path.to_str().unwrap()]);
-        cmd.args(["--machine", self.machine_path.to_str().unwrap()]);
         cmd.env("NO_COLOR", "1");
         cmd
     }
@@ -580,7 +525,8 @@ pub fn phase14_build_fixture(
     let library_dir = tome_home.join("library");
     std::fs::create_dir_all(&library_dir).unwrap();
 
-    let mut config_toml = format!("library_dir = \"{}\"\n\n", library_dir.display());
+    let config_toml = format!("library_dir = \"{}\"\n", library_dir.display());
+    let mut profile_toml = String::new();
 
     let mut first_target_dir: Option<PathBuf> = None;
     let mut dir_paths: std::collections::HashMap<String, PathBuf> =
@@ -592,7 +538,7 @@ pub fn phase14_build_fixture(
         if first_target_dir.is_none() && (*role == "target" || *role == "synced") {
             first_target_dir = Some(dir_path.clone());
         }
-        config_toml.push_str(&format!(
+        profile_toml.push_str(&format!(
             "[directories.{name}]\npath = \"{}\"\ntype = \"directory\"\nrole = \"{role}\"\n\n",
             dir_path.display()
         ));
@@ -627,6 +573,8 @@ pub fn phase14_build_fixture(
 
     let config_path = tome_home.join("tome.toml");
     std::fs::write(&config_path, &config_toml).unwrap();
+    std::fs::create_dir_all(tome_home.join("machines")).unwrap();
+    std::fs::write(tome_home.join("machines/test.toml"), profile_toml).unwrap();
 
     let manifest_path = tome_home.join(".tome-manifest.json");
     std::fs::write(
@@ -635,15 +583,11 @@ pub fn phase14_build_fixture(
     )
     .unwrap();
 
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(&machine_path, "").unwrap();
-
     Phase14Fixture {
         tmp,
         tome_home,
         config_path,
         library_dir,
-        machine_path,
         target_dir: first_target_dir,
     }
 }

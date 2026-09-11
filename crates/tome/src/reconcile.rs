@@ -26,10 +26,11 @@ use tracing::warn;
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
 use crate::lockfile::{self, Lockfile};
-use crate::machine::{self, AutoInstall, MachinePrefs};
+use crate::machine::{AutoInstall, MachinePrefs};
 use crate::manifest::{self, Manifest};
 use crate::marketplace::{InstallFailure, InstallFailureKind, InstallOp, MarketplaceAdapter};
 use crate::paths::TomePaths;
+use crate::profiles;
 
 /// Classification of a single managed lockfile entry against the live
 /// marketplace + library state. Drives the drift-apply loop (RECON-01).
@@ -174,8 +175,8 @@ pub struct ReconcileOpts {
 ///
 /// ## Save chain (Pitfall 5)
 ///
-/// - Consent change (`auto_install_plugins`) is persisted to `machine.toml`
-///   via `machine::save` IMMEDIATELY after the prompt resolves, so a Ctrl-C
+/// - Consent change (`managed_plugin_install`) is persisted to local settings
+///   IMMEDIATELY after the prompt resolves, so a Ctrl-C
 ///   between consent and sync-completion preserves the user's choice.
 /// - Lockfile is written to disk via `lockfile::save` ONCE at the end of
 ///   the apply loop (RESEARCH OQ-4 option a — D-22 literal reading). The
@@ -196,7 +197,7 @@ pub fn reconcile_lockfile(
     library_dir: &Path,
     adapter: &dyn MarketplaceAdapter,
     prefs: &mut MachinePrefs,
-    machine_path: &Path,
+    settings_path: &Path,
     paths: &TomePaths,
     opts: ReconcileOpts,
 ) -> Result<ReconcileReport> {
@@ -249,7 +250,7 @@ pub fn reconcile_lockfile(
     let consent = if needs_apply {
         resolve_consent(
             prefs,
-            machine_path,
+            settings_path,
             &opts,
             &drift_to_apply,
             &missing_to_apply,
@@ -432,7 +433,7 @@ enum ConsentDecision {
 
 fn resolve_consent(
     prefs: &mut MachinePrefs,
-    machine_path: &Path,
+    settings_path: &Path,
     opts: &ReconcileOpts,
     drift: &[Classified],
     missing: &[Classified],
@@ -452,7 +453,7 @@ fn resolve_consent(
             }
             // Show prompt (D-08).
             let choice = prompt_consent(drift, missing)?;
-            apply_consent_decision(prefs, choice, machine_path)?;
+            apply_consent_decision(prefs, choice, settings_path)?;
             match choice {
                 AutoInstall::Always => Ok(ConsentDecision::Apply),
                 AutoInstall::Ask => Ok(ConsentDecision::Apply), // Y for this run
@@ -470,10 +471,11 @@ fn resolve_consent(
 pub(crate) fn apply_consent_decision(
     prefs: &mut MachinePrefs,
     choice: AutoInstall,
-    machine_path: &Path,
+    settings_path: &Path,
 ) -> Result<()> {
     prefs.auto_install_plugins = Some(choice);
-    machine::save(prefs, machine_path).context("failed to persist auto_install_plugins consent")?;
+    profiles::save_managed_plugin_install(settings_path, choice)
+        .context("failed to persist managed_plugin_install consent")?;
     Ok(())
 }
 
@@ -1384,6 +1386,8 @@ mod tests {
             ..Default::default()
         };
         let machine_path = tmp.path().join("machine.toml");
+        let settings_path = tmp.path().join("settings.toml");
+        std::fs::write(&settings_path, "profile = \"work\"\n").unwrap();
 
         let opts = ReconcileOpts {
             no_install: true, // <-- skip apply
@@ -1875,17 +1879,20 @@ mod tests {
         // (factored out for exactly this reason).
         let tmp = TempDir::new().unwrap();
         let machine_path = tmp.path().join("machine.toml");
+        let settings_path = tmp.path().join("settings.toml");
+        std::fs::write(&settings_path, "profile = \"work\"\n").unwrap();
 
         let mut prefs = MachinePrefs::default();
         // No machine.toml exists yet.
         assert!(!machine_path.exists());
 
-        apply_consent_decision(&mut prefs, AutoInstall::Always, &machine_path).unwrap();
+        apply_consent_decision(&mut prefs, AutoInstall::Always, &settings_path).unwrap();
 
-        // BEFORE returning, machine.toml MUST be on disk with the choice.
-        assert!(machine_path.exists());
-        let loaded = machine::load(&machine_path).unwrap();
-        assert_eq!(loaded.auto_install_plugins, Some(AutoInstall::Always));
+        // BEFORE returning, settings.toml MUST persist the choice without
+        // creating or changing the legacy machine preferences file.
+        assert!(!machine_path.exists());
+        let loaded = profiles::load_settings(&settings_path).unwrap();
+        assert_eq!(loaded.managed_plugin_install, Some(AutoInstall::Always));
     }
 
     // ---------- Lockfile save tests (D-22 + RESEARCH OQ-4 option a) ----------

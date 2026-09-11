@@ -1,4 +1,4 @@
-.PHONY: build build-release check test lint fmt clean install docs docs-rust docs-serve release deny typos machete
+.PHONY: build build-release check test test-core test-desktop lint fmt clean install docs docs-rust docs-serve release deny typos machete
 
 build:
 	cargo build
@@ -45,8 +45,15 @@ endif
 check:
 	cargo check
 
-test:
-	cargo test
+test: test-core test-desktop
+
+# Fast default for CLI/core work; does not compile the Tauri desktop crate.
+test-core:
+	cargo test -p tome
+
+# Run when changing the paused Tauri desktop crate or shared public APIs.
+test-desktop:
+	cargo test -p tome-desktop
 
 lint:
 	cargo clippy --all-targets -- -D warnings

@@ -1,5 +1,6 @@
 ---
-source: crates/tome/tests/cli.rs
+source: crates/tome/tests/cli_status.rs
+assertion_line: 71
 expression: stdout
 ---
 Profile: test
@@ -13,5 +14,4 @@ Directories:
   (none configured)
 
 Lockfile: ✗ missing
-Machine: 0 skills disabled, 0 directories disabled
 Health: ✓ All good

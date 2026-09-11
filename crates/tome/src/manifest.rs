@@ -4,7 +4,7 @@
 //! directory each skill came from, its content hash, and when it was last synced. This enables idempotent
 //! copy-based consolidation: unchanged skills are skipped, modified skills are re-copied.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -17,6 +17,57 @@ use crate::discover::SkillName;
 use crate::validation::ContentHash;
 
 pub(crate) const MANIFEST_FILENAME: &str = ".tome-manifest.json";
+
+/// A validated tag attached to a library skill.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[cfg_attr(feature = "bindings", specta(transparent))]
+#[serde(transparent)]
+pub struct SkillTag(String);
+
+impl SkillTag {
+    /// Create a new tag from any string-like value.
+    pub fn new(tag: impl Into<String>) -> Result<Self> {
+        let tag = tag.into();
+        crate::validation::validate_identifier(&tag, "skill tag")?;
+        Ok(Self(tag))
+    }
+
+    /// Returns the tag text.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SkillTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl AsRef<str> for SkillTag {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for SkillTag {
+    type Error = anyhow::Error;
+
+    fn try_from(tag: String) -> Result<Self> {
+        Self::new(tag)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for SkillTag {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let tag = String::deserialize(deserializer)?;
+        SkillTag::new(tag).map_err(serde::de::Error::custom)
+    }
+}
 
 /// The library manifest, tracking all skills and their provenance.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -48,6 +99,25 @@ impl Manifest {
     /// Removes the entry for the given skill name.
     pub fn remove(&mut self, name: &str) {
         self.skills.remove(name);
+    }
+
+    /// Adds a tag to a skill entry, returning whether it was newly added.
+    pub fn add_tag(&mut self, name: &str, tag: SkillTag) -> bool {
+        self.skills
+            .get_mut(name)
+            .is_some_and(|entry| entry.tags.insert(tag))
+    }
+
+    /// Removes a tag from a skill entry, returning whether it was present.
+    pub fn remove_tag(&mut self, name: &str, tag: &SkillTag) -> bool {
+        self.skills
+            .get_mut(name)
+            .is_some_and(|entry| entry.tags.remove(tag))
+    }
+
+    /// Returns the tags for a skill entry, if it exists.
+    pub fn tags_for(&self, name: &str) -> Option<&BTreeSet<SkillTag>> {
+        self.skills.get(name).map(|entry| &entry.tags)
     }
 
     /// Returns an iterator over the skill names in the manifest.
@@ -187,6 +257,10 @@ pub struct SkillEntry {
     /// for backwards compatibility with pre-v0.2.1 manifests.
     #[serde(default)]
     pub managed: bool,
+    /// User-managed routing tags. Missing values deserialize as an empty set
+    /// for compatibility with manifests written before tags existed.
+    #[serde(default)]
+    pub tags: BTreeSet<SkillTag>,
 }
 
 /// Deserialize-only mirror that tolerates **both** the old flat `SkillEntry`
@@ -227,6 +301,8 @@ struct SkillEntryRepr {
     synced_at: String,
     #[serde(default)]
     managed: bool,
+    #[serde(default)]
+    tags: BTreeSet<SkillTag>,
 }
 
 impl From<SkillEntryRepr> for SkillEntry {
@@ -248,6 +324,7 @@ impl From<SkillEntryRepr> for SkillEntry {
             content_hash: r.content_hash,
             synced_at: r.synced_at,
             managed: r.managed,
+            tags: r.tags,
         }
     }
 }
@@ -269,6 +346,7 @@ impl SkillEntry {
             content_hash,
             synced_at: now_iso8601(),
             managed,
+            tags: BTreeSet::new(),
         }
     }
 
@@ -326,6 +404,7 @@ impl SkillEntry {
             content_hash,
             synced_at: now_iso8601(),
             managed,
+            tags: BTreeSet::new(),
         }
     }
 }
@@ -646,6 +725,7 @@ mod tests {
                 content_hash: hash.clone(),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: BTreeSet::new(),
             },
         );
 
@@ -653,6 +733,50 @@ mod tests {
         let loaded = load(tmp.path()).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded.get("my-skill").unwrap().content_hash, hash);
+    }
+
+    #[test]
+    fn skill_tag_rejects_invalid_identifiers() {
+        for tag in ["", "   ", "leading ", "trailing ", "path/tag", "path\\tag"] {
+            assert!(
+                SkillTag::new(tag).is_err(),
+                "tag {tag:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_manifest_json_loads_with_empty_tags() {
+        let valid_hash = "a".repeat(64);
+        let json = format!(
+            r#"{{"skills":{{"my-skill":{{"source_path":"/tmp/source/my-skill","source_name":"test","content_hash":"{valid_hash}","synced_at":"2024-01-01T00:00:00Z","managed":false}}}}}}"#
+        );
+
+        let manifest: Manifest = serde_json::from_str(&json).unwrap();
+        assert!(manifest.tags_for("my-skill").unwrap().is_empty());
+    }
+
+    #[test]
+    fn manifest_adds_and_removes_tags() {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("my-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/tmp/source/my-skill"),
+                DirectoryName::new("test").unwrap(),
+                test_hash("my-skill"),
+                false,
+            ),
+        );
+        let tag = SkillTag::new("reference").unwrap();
+
+        assert!(manifest.add_tag("my-skill", tag.clone()));
+        assert_eq!(
+            manifest.tags_for("my-skill"),
+            Some(&[tag.clone()].into_iter().collect())
+        );
+        assert!(manifest.remove_tag("my-skill", &tag));
+        assert!(manifest.tags_for("my-skill").unwrap().is_empty());
     }
 
     #[test]

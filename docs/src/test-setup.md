@@ -453,8 +453,14 @@ Defined in the workspace `Cargo.toml` and used via `[dev-dependencies]`:
 ## How to Run Tests
 
 ```bash
-# All tests (unit + integration)
-make test              # or: cargo test
+# CLI/core tests only (default for changes under crates/tome/)
+make test-core          # or: cargo test -p tome
+
+# Desktop tests only (run for crates/tome-desktop/ or shared API changes)
+make test-desktop       # or: cargo test -p tome-desktop
+
+# All workspace tests
+make test
 
 # Just one crate
 cargo test -p tome
