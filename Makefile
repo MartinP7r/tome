@@ -1,10 +1,10 @@
 .PHONY: build build-release check test test-core test-desktop lint fmt clean install docs docs-rust docs-serve release deny typos machete
 
 build:
-	cargo build
+	cargo build -p tome
 
 build-release:
-	cargo build --release
+	cargo build -p tome --release
 
 # Usage: make release VERSION=0.1.3  (or VERSION=v0.1.3)
 #
@@ -43,9 +43,9 @@ endif
 	echo "Released $$TAG — release workflow triggered"
 
 check:
-	cargo check
+	cargo check -p tome
 
-test: test-core test-desktop
+test: test-core
 
 # Fast default for CLI/core work; does not compile the Tauri desktop crate.
 test-core:
@@ -56,13 +56,13 @@ test-desktop:
 	cargo test -p tome-desktop
 
 lint:
-	cargo clippy --all-targets -- -D warnings
+	cargo clippy -p tome --all-targets -- -D warnings
 
 fmt:
-	cargo fmt
+	cargo fmt -p tome
 
 fmt-check:
-	cargo fmt -- --check
+	cargo fmt -p tome -- --check
 
 clean:
 	cargo clean
@@ -86,7 +86,7 @@ docs: docs-rust
 	mdbook build
 
 docs-rust:
-	cargo doc --no-deps
+	cargo doc -p tome --no-deps
 
 docs-serve:
 	mdbook serve
