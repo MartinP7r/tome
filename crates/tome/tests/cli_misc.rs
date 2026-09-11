@@ -25,7 +25,15 @@ fn help_shows_usage() {
         .success()
         .stdout(predicate::str::contains(
             "Sync AI coding skills across tools",
-        ));
+        ))
+        .stdout(predicate::str::contains("migrate-library").not())
+        .stdout(predicate::str::contains("\n  version ").not());
+
+    tome()
+        .args(["remove", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("\n  pool ").not());
 }
 
 #[test]
@@ -38,12 +46,8 @@ fn version_shows_version() {
 }
 
 #[test]
-fn version_subcommand_shows_version() {
-    tome()
-        .arg("version")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains(env!("CARGO_PKG_VERSION")));
+fn version_subcommand_is_rejected() {
+    tome().arg("version").assert().code(2);
 }
 
 #[test]

@@ -50,13 +50,13 @@ use tome::{MachinePrefs, SyncOptions, TomePaths, sync};
 // ---------------------------------------------------------------------------
 
 /// Build a 3-skill source + 1-synced-target fixture rooted under `tmp`.
-/// Returns the `Config`, `TomePaths`, machine_path, and a fresh
+/// Returns the `Config`, `TomePaths`, settings path, and a fresh
 /// `MachinePrefs`. The three skills are named `alpha`, `beta`, `gamma`
 /// so the discover ordering is deterministic.
 struct Fixture {
     config: Config,
     paths: TomePaths,
-    machine_path: std::path::PathBuf,
+    settings_path: std::path::PathBuf,
     machine_prefs: MachinePrefs,
     _tmp: TempDir,
 }
@@ -110,19 +110,22 @@ role = "synced"
     let config = Config::load(&config_path).expect("load tome.toml");
 
     let paths = TomePaths::new(tome_home.clone(), library_dir).expect("build paths");
-    let machine_path = tome_home.join("machine.toml");
+    let settings_path = tome_home.join("settings.toml");
     let machine_prefs = MachinePrefs::default();
 
     Fixture {
         config,
         paths,
-        machine_path,
+        settings_path,
         machine_prefs,
         _tmp: tmp,
     }
 }
 
-fn opts<'a>(machine_path: &'a std::path::Path, machine_prefs: &'a MachinePrefs) -> SyncOptions<'a> {
+fn opts<'a>(
+    settings_path: &'a std::path::Path,
+    machine_prefs: &'a MachinePrefs,
+) -> SyncOptions<'a> {
     SyncOptions {
         dry_run: false,
         force: false,
@@ -133,8 +136,10 @@ fn opts<'a>(machine_path: &'a std::path::Path, machine_prefs: &'a MachinePrefs) 
         // `quiet: true` so the test's stdout stays clean and `present_changes`
         // is never reached (it bails on `quiet` per lib.rs line 2117).
         quiet: true,
-        machine_path,
+        machine_path: settings_path,
         machine_prefs,
+        routing: tome::RoutingPolicy::default(),
+        settings_path,
         start_stage: None,
     }
 }
@@ -213,7 +218,7 @@ fn pre_flipped_cancel_at_reconcile_boundary_writes_nothing() {
     let result = sync(
         &fx.config,
         &fx.paths,
-        opts(&fx.machine_path, &fx.machine_prefs),
+        opts(&fx.settings_path, &fx.machine_prefs),
         &sink,
         &cancel,
     );
@@ -277,7 +282,7 @@ fn mid_flight_cancel_during_consolidate_leaves_disk_state_unchanged() {
     let result = sync(
         &fx.config,
         &fx.paths,
-        opts(&fx.machine_path, &fx.machine_prefs),
+        opts(&fx.settings_path, &fx.machine_prefs),
         &sink,
         &cancel,
     );
@@ -350,7 +355,7 @@ fn mid_flight_cancel_during_distribute_leaves_library_state_consistent() {
     let result = sync(
         &fx.config,
         &fx.paths,
-        opts(&fx.machine_path, &fx.machine_prefs),
+        opts(&fx.settings_path, &fx.machine_prefs),
         &sink,
         &cancel,
     );
@@ -405,7 +410,7 @@ fn no_cancel_clean_run_writes_manifest_and_lockfile() {
     sync(
         &fx.config,
         &fx.paths,
-        opts(&fx.machine_path, &fx.machine_prefs),
+        opts(&fx.settings_path, &fx.machine_prefs),
         &sink,
         &cancel,
     )

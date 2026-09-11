@@ -101,10 +101,6 @@ pub struct Cli {
     #[arg(short, long, global = true, conflicts_with = "verbose")]
     quiet: bool,
 
-    /// Path to machine preferences file (default: ~/.config/tome/machine.toml)
-    #[arg(long, global = true)]
-    pub machine: Option<PathBuf>,
-
     /// Path to local profile selection and runtime settings.
     #[arg(long, global = true)]
     pub settings: Option<PathBuf>,
@@ -202,6 +198,18 @@ pub enum Command {
         role: Option<crate::config::DirectoryRole>,
     },
 
+    /// Manage user-defined tags on skills in the library manifest.
+    Tag {
+        #[command(subcommand)]
+        sub: TagCommand,
+    },
+
+    /// Manage tag and skill exclusion routes for destinations.
+    Route {
+        #[command(subcommand)]
+        sub: RouteCommand,
+    },
+
     /// Interactive wizard to configure directories
     #[command(
         after_help = "Examples:\n  tome init\n  tome init --dry-run\n  tome init --no-input\n  tome init --dry-run --no-input"
@@ -227,8 +235,8 @@ pub enum Command {
         no_triage: bool,
         /// Skip auto-install/update of missing or drifted managed plugins this run.
         ///
-        /// Doesn't change the persisted `auto_install_plugins` setting in
-        /// `machine.toml`. Mirrors Cargo's `--frozen` / `--locked`.
+        /// Doesn't change the persisted `managed_plugin_install` local setting.
+        /// Mirrors Cargo's `--frozen` / `--locked`.
         #[arg(long)]
         no_install: bool,
         /// Override local Git synchronization consent for this invocation only.
@@ -276,33 +284,6 @@ pub enum Command {
         /// Output format
         #[arg(long, value_enum, default_value = "text")]
         format: LintFormat,
-    },
-
-    /// One-shot migration: convert a v0.9-shape library (managed skills as
-    /// symlinks) to v0.10 shape (real directory copies). Run once after
-    /// upgrading from v0.9.x. Idempotent on re-run.
-    ///
-    /// Commit your library (or back it up) BEFORE running — there is no
-    /// path back to v0.9 shape.
-    #[command(
-        after_help = "Examples:\n  tome migrate-library --dry-run\n  tome migrate-library\n  tome migrate-library --yes\n\nThis is a one-shot command for migrating from tome v0.9.x to v0.10. \
-                       On v0.10 fresh installs it has nothing to do."
-    )]
-    MigrateLibrary {
-        /// Preview changes without modifying filesystem
-        #[arg(long)]
-        dry_run: bool,
-        /// Skip the confirmation prompt and proceed directly. Mirrors
-        /// `tome remove skill --yes` (Phase 14 D-B3). Required when running
-        /// under `--no-input` to confirm the destructive conversion.
-        #[arg(long, short)]
-        yes: bool,
-    },
-
-    /// Interactively migrate legacy configuration into a named profile.
-    Migrate {
-        #[command(subcommand)]
-        sub: MigrateCommand,
     },
 
     /// Interactively browse discovered skills
@@ -384,9 +365,6 @@ pub enum Command {
         print: bool,
     },
 
-    /// Print version information
-    Version,
-
     /// Show configuration
     #[command(after_help = "Examples:\n  tome config\n  tome config --path")]
     Config {
@@ -421,9 +399,50 @@ pub enum ProfileCommand {
 }
 
 #[derive(Debug, Subcommand)]
-pub enum MigrateCommand {
-    /// Preview and migrate the legacy portable configuration into a profile.
-    Profiles,
+pub enum TagCommand {
+    Add { skill: String, tag: String },
+    Remove { skill: String, tag: String },
+    List { skill: Option<String> },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RouteCommand {
+    Tag {
+        #[command(subcommand)]
+        sub: RouteTagCommand,
+    },
+    Exclude {
+        #[command(subcommand)]
+        sub: RouteExcludeCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RouteTagCommand {
+    Add {
+        #[arg(long)]
+        to: String,
+        tag: String,
+    },
+    Remove {
+        #[arg(long)]
+        to: String,
+        tag: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum RouteExcludeCommand {
+    Add {
+        #[arg(long)]
+        to: String,
+        skill: String,
+    },
+    Remove {
+        #[arg(long)]
+        to: String,
+        skill: String,
+    },
 }
 
 /// Variant of `tome remove` — directory removal vs unowned-skill deletion.
@@ -444,21 +463,13 @@ pub enum RemoveKind {
         force: bool,
     },
     /// Delete an Unowned skill from the library — manifest entry, library
-    /// directory, distribution symlinks, lockfile entry, and machine.toml
-    /// membership all cleaned. Owned skills are refused with a hint to
-    /// run `tome remove dir` first (D-B2).
+    /// directory, distribution symlinks, and lockfile entry. Owned skills are
+    /// refused with a hint to run `tome remove dir` first (D-B2).
     Skill {
         /// Skill name to forget (must currently be Unowned)
         #[arg(value_name = "NAME")]
         name: String,
         /// Skip confirmation prompt
-        #[arg(long, short)]
-        yes: bool,
-    },
-    /// Remove a pooled skill globally and exclude it from all future imports.
-    Pool {
-        #[arg(value_name = "NAME")]
-        name: String,
         #[arg(long, short)]
         yes: bool,
     },
@@ -512,7 +523,51 @@ pub enum BackupCommand {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
+    use clap::{Parser, error::ErrorKind};
+
+    #[test]
+    fn obsolete_commands_are_rejected() {
+        for args in [
+            &["tome", "migrate-library"][..],
+            &["tome", "version"][..],
+            &["tome", "remove", "pool", "obsolete-skill"][..],
+        ] {
+            assert!(
+                Cli::try_parse_from(args).is_err(),
+                "obsolete command must be rejected: {}",
+                args.join(" ")
+            );
+        }
+    }
+
+    #[test]
+    fn version_flag_remains_owned_by_clap() {
+        for flag in ["--version", "-V"] {
+            let error = Cli::try_parse_from(["tome", flag])
+                .err()
+                .expect("version flags should exit during Clap parsing");
+            assert_eq!(error.kind(), ErrorKind::DisplayVersion);
+        }
+    }
+
+    #[test]
+    fn pool_exclude_and_restore_still_parse() {
+        let exclude = Cli::try_parse_from(["tome", "pool", "exclude", "shared-skill"]).unwrap();
+        assert!(matches!(
+            exclude.command,
+            Command::Pool {
+                sub: PoolCommand::Exclude { ref name }
+            } if name == "shared-skill"
+        ));
+
+        let restore = Cli::try_parse_from(["tome", "pool", "restore", "shared-skill"]).unwrap();
+        assert!(matches!(
+            restore.command,
+            Command::Pool {
+                sub: PoolCommand::Restore { ref name }
+            } if name == "shared-skill"
+        ));
+    }
 
     #[test]
     fn parse_remove_dir_with_force() {
@@ -648,54 +703,5 @@ mod tests {
         assert_eq!(LogLevel::Quiet.directive(), "warn");
         assert_eq!(LogLevel::Normal.directive(), "info");
         assert_eq!(LogLevel::Verbose.directive(), "debug");
-    }
-
-    // -- UX-02 / Plan 16-02 Task 2 — `tome migrate-library --yes` parsing --
-
-    #[test]
-    fn migrate_library_parses_yes_flag() {
-        let cli = Cli::try_parse_from(["tome", "migrate-library", "--yes"]).unwrap();
-        match cli.command {
-            Command::MigrateLibrary { dry_run, yes } => {
-                assert!(yes, "--yes must parse as yes: true");
-                assert!(!dry_run);
-            }
-            _ => panic!("expected MigrateLibrary"),
-        }
-    }
-
-    #[test]
-    fn migrate_library_short_y_alias() {
-        let cli = Cli::try_parse_from(["tome", "migrate-library", "-y"]).unwrap();
-        match cli.command {
-            Command::MigrateLibrary { yes, .. } => {
-                assert!(yes, "-y short alias must set yes: true")
-            }
-            _ => panic!("expected MigrateLibrary"),
-        }
-    }
-
-    #[test]
-    fn migrate_library_yes_default_false() {
-        let cli = Cli::try_parse_from(["tome", "migrate-library"]).unwrap();
-        match cli.command {
-            Command::MigrateLibrary { yes, dry_run } => {
-                assert!(!yes, "yes must default to false when --yes is absent");
-                assert!(!dry_run);
-            }
-            _ => panic!("expected MigrateLibrary"),
-        }
-    }
-
-    #[test]
-    fn migrate_library_dry_run_and_yes_compose() {
-        let cli = Cli::try_parse_from(["tome", "migrate-library", "--dry-run", "--yes"]).unwrap();
-        match cli.command {
-            Command::MigrateLibrary { dry_run, yes } => {
-                assert!(dry_run);
-                assert!(yes);
-            }
-            _ => panic!("expected MigrateLibrary"),
-        }
     }
 }

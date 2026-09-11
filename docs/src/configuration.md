@@ -1,135 +1,200 @@
 # Configuration
 
-tome reads two TOML files:
+Tome resolves four configuration layers. Shared policy and profiles are meant
+to be version-controlled together; project configuration is scoped to one
+project tree; local settings stay on the current machine.
 
-- `~/.tome/tome.toml` — the **portable** config (intended to be shared via dotfiles across machines).
-- `~/.config/tome/machine.toml` — **machine-local** preferences and path overrides (do *not* share this).
+| Layer | Default path | Owns |
+|---|---|---|
+| Repository policy | `~/.tome/tome.toml` | Library path, shared Git sources, shared exclusions, backup policy, conflict pins |
+| Selected profile | `~/.tome/machines/<profile>.toml` | Machine-wide local sources, destinations, and destination routes |
+| Project | Nearest ancestor `.tome.toml` | Additive project-only destinations and routes |
+| Local settings | `~/.config/tome/settings.toml` | Selected profile and runtime consent |
 
-The split is intentional: the portable config describes the abstract topology (which directories tome cares about, what role each plays), while `machine.toml` describes how that topology maps onto *this* machine's filesystem.
+Released CLI commands do not read or write `machine.toml`, and there is no
+global `--machine` option. Use `--config`, `--settings`, or `--tome-home` when
+the default locations are unsuitable.
 
-## `tome.toml` — Portable Config
+## Repository Policy
+
+The shared `tome.toml` is the repository policy:
 
 ```toml
 library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
+[directories.team-skills]
+path = "https://github.com/myorg/team-skills"
+type = "git"
+role = "source"
+branch = "main"
+subdir = "skills"
+```
+
+Only Git discovery sources belong in its `[directories.<name>]` map. A Git
+source may use one of `branch`, `tag`, or `rev`, plus an optional `subdir`.
+`tome add <git-url>` writes this layer. It registers provenance only: Git adds
+have no `--to` routing option and reject `--role` because their role is always
+`source`.
+
+Top-level repository-policy fields:
+
+| Field | Description |
+|---|---|
+| `library_dir` | Path to the canonical skill library; supports `~` expansion |
+| `exclude` | Shared skill names omitted from discovery; manage with `tome pool exclude` and `tome pool restore` |
+| `backup` | Shared backup configuration |
+| `source_pins` | Persisted conflict choices for duplicate skill sources |
+| `directories` | Shared Git sources only |
+
+## Machine Profiles
+
+Profiles are committed as `machines/<profile>.toml`. Select the active profile
+with `tome profile select <name>`; `tome profile create` and
+`tome profile list` manage the available files.
+
+```toml
 [directories.claude-plugins]
 path = "~/.claude/plugins/cache"
 type = "claude-plugins"
+role = "managed"
 
 [directories.local-skills]
 path = "~/.claude/skills"
 type = "directory"
-role = "synced"
+role = "source"
 
-[directories.team-skills]
-path = "https://github.com/myorg/team-skills"
-type = "git"
-branch = "main"
-
-[directories.antigravity]
-path = "~/.gemini/antigravity/skills"
+[directories.codex]
+path = "~/.codex/skills"
 type = "directory"
 role = "target"
+
+[routes.codex]
+tags = ["portable", "coding"]
+exclude = ["claude-only-skill"]
 ```
 
-> **Migrating from v0.5 or earlier?** The `[[sources]]` and `[targets.*]` sections were replaced with a single `[directories.<name>]` map in v0.6. tome will refuse to load old-format configs and print a migration hint. There is no automated migration tool — copy each `[[sources]]` entry to a `[directories.<name>]` entry with `role = "source"` (or `"managed"` for `claude-plugins`), and each `[targets.<name>]` entry to a `[directories.<name>]` entry with `role = "target"`.
-
-### Top-level fields
-
-| Field | Description |
-|-------|-------------|
-| `library_dir` | Path to the consolidated skill library. Supports `~` expansion. |
-| `exclude` | List of skill names to skip during discovery. |
-
-### `[directories.<name>]` — entries
-
-A `<name>` is a kebab-case identifier. Each entry combines a `type` (how skills are discovered) with a `role` (whether it's a source, a target, or both).
-
-| Field | Required | Description |
-|-------|----------|-------------|
-| `path` | Yes | Filesystem path (or git URL when `type = "git"`). Tilde-expanded. |
-| `type` | No (defaults to `"directory"`) | One of `claude-plugins`, `directory`, `git`. |
-| `role` | No (each `type` has a default) | One of `managed`, `synced`, `source`, `target`. |
-| `branch` / `tag` / `rev` | No (`git` only, mutually exclusive) | Pin a git directory to a branch, tag, or commit SHA. |
-| `subdir` | No (`git` only) | If the repo nests skills under a subdirectory. |
-
-### Directory `type`
+Ordinary directory sources are profile-specific because their paths and tool
+roles depend on the machine. Each entry combines a type and role:
 
 | Type | Description |
-|------|-------------|
-| `claude-plugins` | Reads `installed_plugins.json` from the Claude Code plugin cache. Supports v1 (flat array) and v2 (namespaced object) formats. Always `role = "managed"`. |
-| `directory` | Flat scan for `*/SKILL.md` directories. Default. |
-| `git` | Shallow-clones a remote repo into `~/.tome/repos/<sha256>/` and treats the clone as a `directory` source. Always `role = "source"`. |
+|---|---|
+| `claude-plugins` | Reads Claude Code's `installed_plugins.json`; role is `managed` |
+| `directory` | Scans a normal directory for `*/SKILL.md` |
+| `git` | Reserved for repository policy; shallow-cloned into `~/.tome/repos/<sha256>/` |
 
-### Directory `role`
+| Role | Discovery | Distribution |
+|---|---:|---:|
+| `managed` | Yes, read-only upstream | No |
+| `source` | Yes | No |
+| `target` | No | Yes |
+| `synced` | Yes | Yes |
 
-| Role | Discovery | Distribution | Typical use |
-|------|-----------|--------------|-------------|
-| `managed` | ✓ (read-only) | — | Plugin cache (e.g. Claude Code) |
-| `synced` | ✓ | ✓ | A directory that is both a skill source AND a tool that consumes them (e.g. `~/.claude/skills`) |
-| `source` | ✓ | — | A skill repo or local skill directory |
-| `target` | — | ✓ | A tool that only receives skills (e.g. Codex, Antigravity) |
+Use `tome add <path> [--role <role>]` to add an explicit local path to the
+selected profile.
 
-`tome init` picks a sensible default role from the type, but you can override it per directory.
+## Shared Skill Tags
 
-The directory model is fully data-driven: any new tool can be supported by adding a `[directories.<name>]` entry — no code changes required. The `tome init` wizard auto-discovers common tool locations via the built-in `KNOWN_DIRECTORIES` registry.
+Tags classify individual library skills independently of their source. They
+are stored in each `.tome-manifest.json` skill entry and survive content
+updates from the same source. New skills have an empty tag set.
 
-## `machine.toml` — Machine-Local Preferences
-
-```toml
-# Skip these skills entirely on this machine
-disabled = ["noisy-skill", "work-only-skill"]
-
-# Don't distribute to these directories on this machine
-disabled_directories = ["openclaw"]
-
-# Per-directory skill filtering (mutually exclusive: pick disabled OR enabled per directory)
-[directory.antigravity]
-disabled = ["claude-only-skill"]
-
-[directory.work-laptop]
-enabled = ["work-skill-a", "work-skill-b"]  # allowlist — ONLY these are distributed
-
-# Per-machine path overrides for `tome.toml::directories.<name>.path` (PORT-01..05, v0.9)
-[directory_overrides.local-skills]
-path = "/Users/alice-corp/.claude/skills"
-
-[directory_overrides.team-skills]
-path = "/opt/shared/team-skills"
-
-# Per-machine consent for installing missing/drifted managed plugins (RECON-02, v0.10+).
-# `tome sync` prompts on first encounter and persists the answer here.
-auto_install_plugins = "ask"   # one of: always | ask | never
+```bash
+tome tag add rust-cli coding
+tome tag add rust-cli portable
+tome tag list rust-cli
+tome tag remove rust-cli coding
 ```
 
-| Field | Description |
-|-------|-------------|
-| `disabled` | List of skill names to skip during distribution (no symlinks created in any target). |
-| `disabled_directories` | List of directory names to skip entirely on this machine. |
-| `[directory.<name>].disabled` | Skills to exclude from a single directory (blocklist). |
-| `[directory.<name>].enabled` | Allowlist — ONLY these skills are distributed to this directory. Mutually exclusive with `disabled` per directory (MACH-04). |
-| `[directory_overrides.<name>].path` | Replaces `directories.<name>.path` on this machine. Useful when the same `tome.toml` is shared across machines with different home layouts. Unknown override names emit a typo-target stderr warning. |
-| `auto_install_plugins` | Per-machine consent for the v0.10+ reconcile flow. `"always"` applies install/update operations silently; `"ask"` prompts each time; `"never"` blocks all install operations (`tome sync --no-install` is the same as `"never"` for a single run). Defaults to first-time-prompt when absent. Persisted by `tome sync` when the user answers the prompt. |
+The lockfile remains provenance-only; tags are not copied into `tome.lock`.
 
-Override application happens at config load (after tilde expansion, before `Config::validate`), so all downstream code sees the canonical post-override paths. Any validation failure caused by an override is wrapped with an error attributing the problem to `machine.toml` rather than the portable `tome.toml`.
+## Destination Routes
 
-`tome status` and `tome doctor` annotate `(override)` next to any path that came from `machine.toml`, so you can tell at a glance which paths are portable and which are machine-local.
+A `[routes.<destination>]` table belongs to the same profile or project file as
+the destination. Its `tags` field is an OR selector: a skill is eligible when
+at least one manifest tag intersects the selected tags. `exclude` lists skills
+that must not reach this destination even when a tag matches.
 
-The `--machine <path>` global flag overrides the default machine preferences path.
+```toml
+[routes.codex]
+tags = ["portable", "coding"]
+exclude = ["claude-only-skill"]
+```
 
-## Lockfile
+```bash
+tome route tag add --to codex portable
+tome route tag remove --to codex coding
+tome route exclude add --to codex claude-only-skill
+tome route exclude remove --to codex claude-only-skill
+```
 
-`tome sync` generates a `tome.lock` file in the tome home directory (`~/.tome/tome.lock`). This lockfile captures a reproducible snapshot of all skills — their names, content hashes, sources, and provenance metadata. Each sync diffs the new lockfile against the previous one and surfaces changes interactively.
+Untagged skills remain in the library but are not linked into destinations
+that have a route. A destination without a route retains unrestricted legacy
+distribution behavior, so define a route for every destination that should use
+tag-based selection.
 
-The lockfile is designed to be committed to version control alongside the library, enabling multi-machine workflows where `tome sync` on a new machine can detect what changed since the last sync.
+Route commands validate that the destination exists in the active profile or
+nearest project layer. A route tag must already be assigned to a manifest
+skill, and an excluded skill must exist in the manifest. Checked writes are
+atomic.
+
+## Project Configuration
+
+Starting at the current working directory, Tome searches upward for the
+nearest `.tome.toml`. The project layer is additive and may contain only target
+directories and routes owned by those project destinations:
+
+```toml
+[directories.project-codex]
+path = ".codex/skills"
+type = "directory"
+role = "target"
+
+[routes.project-codex]
+tags = ["project", "portable"]
+exclude = ["global-only-skill"]
+```
+
+Project configuration cannot define sources, select a profile, replace a
+profile destination, or route to an unknown destination. Invalid project TOML
+fails the command; Tome does not silently fall back to profile-only behavior.
+Running `tome route ...` inside the project tree updates the project file when
+that file owns the named destination.
+
+## Local Settings
+
+`~/.config/tome/settings.toml` selects the active profile and stores local
+runtime consent:
+
+```toml
+profile = "work"
+git_sync = "ask"
+managed_plugin_install = "ask"
+backup_runtime = "ask"
+```
+
+| Field | Values | Description |
+|---|---|---|
+| `profile` | Profile name | Selects `machines/<profile>.toml` |
+| `git_sync` | `always`, `ask`, `never` | Controls synchronization of the shared Tome repository |
+| `managed_plugin_install` | `always`, `ask`, `never` | Controls native adapter install/update actions |
+| `backup_runtime` | `always`, `ask`, `never` | Controls local backup runtime behavior |
+
+Native plugin systems remain tool-specific installation adapters. Tome tracks
+the desired skill and plugin state, invokes an adapter when consent allows,
+and owns routing of portable library copies to other tools.
+
+## Lockfile and Manifest
+
+`tome sync` writes `tome.lock`, a reproducible provenance snapshot containing
+skill names, content hashes, sources, and upstream metadata. The shared
+`.tome-manifest.json` tracks the current library entry, including its tags.
+
+Both files support a multi-machine repository workflow. `tome.lock` drives
+managed-plugin reconciliation; the manifest's tags drive destination routing.
 
 ## Library `.gitignore`
 
-`tome sync` automatically generates a `.gitignore` in the library directory:
-
-- **Managed skills** (symlinked from package managers) are gitignored — they are recreated by `tome sync`
-- **Local skills** (copied into the library) are tracked in version control
-- **Temporary files** (`tome.lock.tmp`) are always ignored
-
-This allows the library directory to serve as a git repository for portable skill management while keeping transient entries out of version control.
+`tome sync` maintains the library `.gitignore` for transient files such as
+temporary lockfile writes. The canonical library contains real directory copies
+for both managed and local skills.

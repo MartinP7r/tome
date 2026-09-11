@@ -83,7 +83,7 @@ pub fn load_context() -> anyhow::Result<(Config, TomePaths)> {
 fn load_desktop_context() -> anyhow::Result<(tome::profiles::EffectiveContext, TomePaths)> {
     let config_path = tome::config::default_config_path()?;
     let settings_path = tome::default_settings_path();
-    let context = tome::profiles::load_effective_context(&config_path, &settings_path)?;
+    let context = tome::profiles::load_effective_context(&config_path, &settings_path, None)?;
     let tome_home = tome::config::default_tome_home()?;
     let paths = TomePaths::new(tome_home, context.config.library_dir().to_path_buf())?;
     Ok((context, paths))
@@ -134,14 +134,8 @@ pub fn get_skill_detail(
     tome::skill::collect_detail(&name, &config, &paths).map_err(TomeError::from)
 }
 
-/// Toggle a skill's membership in the global `disabled` set in `machine.toml`
-/// (Phase 26 plan 26-03 / D-06 — the lone Phase 26 mutation).
-///
-/// Routes through the shared [`tome::actions::set_skill_disabled`] helper, so
-/// the GUI and the browse TUI hit the same atomic temp+rename. The Phase-26
-/// file watcher (plan 26-06) fires `MachinePrefsChanged` for the resulting
-/// write — own-process writes are observed verbatim, no manual refresh
-/// signal needed.
+/// Retained paused-Desktop API that rejects the legacy global toggle because
+/// it cannot select the destination required by `tome route exclude`.
 #[tauri::command]
 #[specta::specta]
 pub fn set_skill_disabled(
@@ -339,12 +333,12 @@ fn preview_decisions(
     tome::preview_save(&proposed, machine_path)
 }
 
-/// Internal: load the current machine.toml, apply decisions, commit via
-/// the canonical atomic `save_machine_prefs` (temp+rename).
-fn apply_decisions(decisions: &[TriageDecision], machine_path: &Path) -> anyhow::Result<()> {
-    let mut proposed = tome::load_machine_prefs(machine_path)?;
-    apply_decisions_to_prefs(&mut proposed, decisions);
-    tome::save_machine_prefs(&proposed, machine_path)
+/// Reject committing legacy triage decisions because they have no route
+/// destination. Parameters remain for paused Desktop API compatibility.
+fn apply_decisions(_decisions: &[TriageDecision], _machine_path: &Path) -> anyhow::Result<()> {
+    anyhow::bail!(
+        "legacy skill exclusion controls are unsupported because they cannot choose a route destination; use `tome route exclude`"
+    )
 }
 
 /// Compute the machine.toml line-diff for a list of pending triage
@@ -374,27 +368,15 @@ pub fn preview_machine_toml(
     preview_decisions(&decisions, &machine_path).map_err(TomeError::from)
 }
 
-/// Commit a list of pending triage decisions to `machine.toml` (Phase 27
-/// plan 27-03 / SYNC-03).
-///
-/// Writes via the canonical [`tome::machine::save`] (atomic temp+rename),
-/// which fires the Phase-26 watcher's `MachinePrefsChanged` event for free —
-/// the React `useSkills` / `useSkillDetail` hooks observe the change and
-/// refetch automatically (no manual refresh signal needed).
-///
-/// Path resolution is server-side via [`tome::default_machine_path`];
-/// the React side never passes a path. The double-confirmation contract
-/// (T-27-03-06 / SC#3 "no silent writes") is enforced at the UI layer —
-/// this command MUST be reached only through the explicit `[Apply]` button
-/// inside the `PreviewPopover`.
+/// Retained paused-Desktop IPC command that rejects triage decisions because
+/// they cannot select a route destination.
 #[tauri::command]
 #[specta::specta]
 pub fn apply_machine_toml(
     _app: tauri::AppHandle,
     decisions: Vec<TriageDecision>,
 ) -> Result<(), TomeError> {
-    let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
-    apply_decisions(&decisions, &machine_path).map_err(TomeError::from)
+    apply_decisions(&decisions, Path::new("")).map_err(TomeError::from)
 }
 
 /// Run the full sync pipeline from the GUI (Phase 27 plan 27-01b / SYNC-01,
@@ -507,7 +489,9 @@ pub async fn start_sync_with_runtime<R: tauri::Runtime>(
     let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
     let config = context.config;
     let machine_prefs = context.machine_prefs;
+    let routing = context.routing;
     let policy = context.git_sync;
+    let settings_path = tome::default_settings_path();
 
     // Build the GUI's event-emitting sink. `AppHandle` is Clone + Send + Sync
     // (RESEARCH Pitfall 5), so it's sound to ship into the worker thread.
@@ -535,6 +519,8 @@ pub async fn start_sync_with_runtime<R: tauri::Runtime>(
             quiet: true,
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
+            routing,
+            settings_path: &settings_path,
             start_stage: None,
         };
         // Plan 27-05: sync_with_outcome wraps sync() with a stage tracker
@@ -688,13 +674,18 @@ pub async fn retry_sync_from(
     };
 
     let setup = (|| -> anyhow::Result<_> {
-        let (config, paths) = load_context()?;
+        let (context, paths) = load_desktop_context()?;
         let machine_path = tome::default_machine_path()?;
-        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
-        Ok((config, paths, machine_path, machine_prefs))
+        Ok((
+            context.config,
+            paths,
+            machine_path,
+            context.machine_prefs,
+            context.routing,
+        ))
     })();
 
-    let (config, paths, machine_path, machine_prefs) = match setup {
+    let (config, paths, machine_path, machine_prefs, routing) = match setup {
         Ok(parts) => parts,
         Err(e) => {
             *state.cancel.lock().expect("SyncState mutex poisoned") = None;
@@ -715,6 +706,8 @@ pub async fn retry_sync_from(
             quiet: true,
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
+            routing,
+            settings_path: &tome::default_settings_path(),
             start_stage: Some(stage),
         };
         tome::sync_with_outcome(&config, &paths, opts, &sink, &cancel)
@@ -768,13 +761,18 @@ pub async fn retry_failed_items(
     };
 
     let setup = (|| -> anyhow::Result<_> {
-        let (config, paths) = load_context()?;
+        let (context, paths) = load_desktop_context()?;
         let machine_path = tome::default_machine_path()?;
-        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
-        Ok((config, paths, machine_path, machine_prefs))
+        Ok((
+            context.config,
+            paths,
+            machine_path,
+            context.machine_prefs,
+            context.routing,
+        ))
     })();
 
-    let (config, paths, machine_path, machine_prefs) = match setup {
+    let (config, paths, machine_path, machine_prefs, routing) = match setup {
         Ok(parts) => parts,
         Err(e) => {
             *state.cancel.lock().expect("SyncState mutex poisoned") = None;
@@ -810,6 +808,8 @@ pub async fn retry_failed_items(
             quiet: true,
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
+            routing,
+            settings_path: &tome::default_settings_path(),
             start_stage: None,
         };
         tome::retry_partial_failures(&config, &paths, opts, &domain_failures, &sink, &cancel)
@@ -898,109 +898,26 @@ mod machine_toml_apply_tests {
         let _ = tome::DiffLineKind::Unchanged; // smoke-test re-export resolves
     }
 
-    /// apply: writes the proposed machine.toml via atomic save; the file
-    /// contains the new disabled skill on disk after the call returns.
+    /// Applying legacy triage decisions returns the route-exclusion guidance
+    /// and does not create a machine file.
     #[test]
-    fn apply_writes_machine_toml() {
+    fn apply_rejects_without_writing_machine_toml() {
         let tmp = tempfile::TempDir::new().unwrap();
         let machine_path = tmp.path().join("machine.toml");
-
-        // Start with an empty machine.toml.
-        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
 
         let decisions = vec![TriageDecision {
             skill: skill("foo"),
             decision: TriageDecisionKind::Disable,
         }];
 
-        apply_decisions(&decisions, &machine_path).unwrap();
-
-        // Round-trip the file: the new prefs must hold `foo` in `disabled`.
-        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
+        let error = apply_decisions(&decisions, &machine_path).unwrap_err();
         assert!(
-            reloaded.is_disabled("foo"),
-            "apply must persist the Disable decision to disk"
-        );
-    }
-
-    /// apply preserves unrelated pre-existing entries — the apply path adds
-    /// the chosen Disable decisions to whatever is already on disk, not
-    /// replaces wholesale.
-    #[test]
-    fn apply_preserves_existing_entries() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let machine_path = tmp.path().join("machine.toml");
-
-        // Pre-seed the file with `existing` already disabled.
-        let mut existing = tome::MachinePrefs::default();
-        existing.disable(skill("existing"));
-        tome::save_machine_prefs(&existing, &machine_path).unwrap();
-
-        let decisions = vec![TriageDecision {
-            skill: skill("new-one"),
-            decision: TriageDecisionKind::Disable,
-        }];
-        apply_decisions(&decisions, &machine_path).unwrap();
-
-        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
-        assert!(
-            reloaded.is_disabled("existing"),
-            "apply must preserve pre-existing disabled entries"
+            error.to_string().contains("tome route exclude"),
+            "legacy triage must direct users to route exclusion: {error:#}"
         );
         assert!(
-            reloaded.is_disabled("new-one"),
-            "apply must add the new Disable decision"
-        );
-    }
-
-    /// apply is idempotent: calling it twice with the same decisions yields
-    /// the same file content byte-for-byte.
-    #[test]
-    fn apply_is_idempotent() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let machine_path = tmp.path().join("machine.toml");
-        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
-
-        let decisions = vec![TriageDecision {
-            skill: skill("foo"),
-            decision: TriageDecisionKind::Disable,
-        }];
-
-        apply_decisions(&decisions, &machine_path).unwrap();
-        let first = std::fs::read(&machine_path).unwrap();
-        apply_decisions(&decisions, &machine_path).unwrap();
-        let second = std::fs::read(&machine_path).unwrap();
-        assert_eq!(
-            first, second,
-            "two applies of the same decision set must yield byte-identical machine.toml"
-        );
-    }
-
-    /// `Keep` decisions are no-ops — they don't add anything to the
-    /// disabled set. apply with a Keep-only decision list leaves the file
-    /// unchanged.
-    #[test]
-    fn keep_decision_is_noop() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let machine_path = tmp.path().join("machine.toml");
-        tome::save_machine_prefs(&tome::MachinePrefs::default(), &machine_path).unwrap();
-        let before = std::fs::read(&machine_path).unwrap();
-
-        let decisions = vec![TriageDecision {
-            skill: skill("foo"),
-            decision: TriageDecisionKind::Keep,
-        }];
-        apply_decisions(&decisions, &machine_path).unwrap();
-
-        let after = std::fs::read(&machine_path).unwrap();
-        assert_eq!(
-            before, after,
-            "Keep-only decisions must not change machine.toml"
-        );
-        let reloaded = tome::load_machine_prefs(&machine_path).unwrap();
-        assert!(
-            !reloaded.is_disabled("foo"),
-            "Keep must NOT mark a skill as disabled"
+            !machine_path.exists(),
+            "legacy triage must not create machine.toml"
         );
     }
 }

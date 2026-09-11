@@ -601,7 +601,17 @@ impl StatusSnapshot {
 }
 
 fn repository_root(config_dir: &Path) -> Result<Option<PathBuf>> {
-    let output = git(config_dir, &["rev-parse", "--show-toplevel"])?;
+    let output = match git(config_dir, &["rev-parse", "--show-toplevel"]) {
+        Ok(output) => output,
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|source| source.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(None);
+        }
+        Err(error) => return Err(error),
+    };
     if !output.status.success() {
         return Ok(None);
     }

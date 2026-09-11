@@ -278,10 +278,8 @@ fn snapshot_detail_pane_after_disable_toggle() {
     );
     row.source_directory = Some(DirectoryName::new("bar").unwrap());
 
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let machine_path = tmp.path().join("machine.toml");
     let app = App::for_snapshot(vec![row], Theme::dark(), None);
-    let mut app = app.with_machine_prefs(MachinePrefs::default(), machine_path);
+    let mut app = app.with_machine_prefs(MachinePrefs::default());
     // Enter detail mode (materializes the action list with `Disable`
     // in slot 2 since machine_prefs has nothing disabled yet). Then
     // route through `execute_action_for_snapshot` to mirror the

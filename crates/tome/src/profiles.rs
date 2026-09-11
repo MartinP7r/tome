@@ -6,9 +6,11 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::config::{BackupConfig, Config, DirectoryConfig, DirectoryName};
+use crate::config::{BackupConfig, Config, DirectoryConfig, DirectoryName, DirectoryRole};
 use crate::discover::SkillName;
 use crate::machine::{AutoInstall, DirectoryPrefs, MachinePrefs};
+use crate::project;
+use crate::routing::{RouteMutation, RoutingPolicy};
 
 /// Local consent for synchronising the shared pool repository.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, clap::ValueEnum)]
@@ -42,6 +44,8 @@ struct PoolPolicy {
     backup: BackupConfig,
     #[serde(default)]
     source_pins: BTreeMap<SkillName, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    directories: BTreeMap<DirectoryName, DirectoryConfig>,
 }
 
 /// Shared choices used by pool reconciliation. Persisted only in pool policy.
@@ -94,6 +98,8 @@ pub struct MachineProfile {
     disabled_directories: BTreeSet<DirectoryName>,
     #[serde(default)]
     directory: BTreeMap<DirectoryName, DirectoryPrefs>,
+    #[serde(default)]
+    routes: RoutingPolicy,
 }
 
 /// Local, uncommitted settings selecting a profile and runtime policies.
@@ -119,12 +125,14 @@ pub struct EffectiveContext {
     pub git_sync: GitSyncPolicy,
     pub managed_plugin_install: Option<AutoInstall>,
     pub backup_runtime: BackupRuntimePolicy,
+    pub routing: RoutingPolicy,
 }
 
 /// Load the selected local profile and project it into the existing effective models.
 pub fn load_effective_context(
     config_path: &Path,
     settings_path: &Path,
+    cwd: Option<&Path>,
 ) -> Result<EffectiveContext> {
     let settings = load_settings(settings_path)?;
     let profile_name = settings
@@ -155,12 +163,44 @@ pub fn load_effective_context(
     let profile: MachineProfile = toml::from_str(&profile_text)
         .with_context(|| format!("failed to parse {}", profile_path.display()))?;
 
-    let mut config = Config::from_layers(
-        pool.library_dir,
-        pool.exclude,
-        pool.backup,
-        profile.directories,
-    );
+    for (name, directory) in &pool.directories {
+        anyhow::ensure!(
+            directory.directory_type == crate::config::DirectoryType::Git
+                && directory.role() == crate::config::DirectoryRole::Source,
+            "pool directory '{name}' must be a Git source"
+        );
+    }
+    let project = cwd.map(project::find_project_config).transpose()?.flatten();
+    let mut directories = pool.directories;
+    for (name, directory) in profile.directories {
+        anyhow::ensure!(
+            directories.insert(name.clone(), directory).is_none(),
+            "duplicate directory name '{name}' across configuration layers"
+        );
+    }
+    let mut routing = profile.routes;
+    if let Some((_, project)) = project {
+        project::validate(&project)?;
+        for (name, directory) in project.directories {
+            anyhow::ensure!(
+                directories.insert(name.clone(), directory).is_none(),
+                "duplicate directory name '{name}' across configuration layers"
+            );
+        }
+        for (name, route) in project.routes.routes {
+            anyhow::ensure!(
+                routing.routes.insert(name.clone(), route).is_none(),
+                "duplicate route destination '{name}' across configuration layers"
+            );
+        }
+    }
+    for destination in routing.routes.keys() {
+        anyhow::ensure!(
+            directories.contains_key(destination),
+            "route destination '{destination}' is not configured"
+        );
+    }
+    let mut config = Config::from_layers(pool.library_dir, pool.exclude, pool.backup, directories);
     config.expand_tildes()?;
     config.validate()?;
     let prefs = MachinePrefs::from_profile(
@@ -176,6 +216,7 @@ pub fn load_effective_context(
         git_sync: settings.git_sync,
         managed_plugin_install: settings.managed_plugin_install,
         backup_runtime: settings.backup_runtime,
+        routing,
     })
 }
 
@@ -200,6 +241,13 @@ pub fn save_settings(settings: &LocalSettings, path: &Path) -> Result<()> {
         "round-trip mismatch while serializing local settings"
     );
     atomic_write(path, &content)
+}
+
+/// Persist only managed-plugin consent in local settings.
+pub fn save_managed_plugin_install(path: &Path, value: AutoInstall) -> Result<()> {
+    let mut settings = load_settings(path)?;
+    settings.managed_plugin_install = Some(value);
+    save_settings(&settings, path)
 }
 
 /// Create an empty committed machine profile without local runtime policy.
@@ -262,8 +310,124 @@ pub fn select_profile(settings_path: &Path, config_path: &Path, name: &str) -> R
     save_settings(&settings, settings_path)
 }
 
+/// Apply a routing mutation if the selected profile owns the destination.
+pub(crate) fn mutate_profile_route(
+    config_path: &Path,
+    settings_path: &Path,
+    destination: DirectoryName,
+    mutation: RouteMutation,
+) -> Result<bool> {
+    let settings = load_settings(settings_path)?;
+    let profile_name = settings
+        .profile
+        .as_deref()
+        .context(profile_recovery_message())
+        .and_then(|name| DirectoryName::new(name.to_owned()).context(profile_recovery_message()))?;
+    let path = profile_path(config_path, &profile_name)?;
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut profile: MachineProfile =
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
+    let Some(directory) = profile.directories.get(&destination) else {
+        return Ok(false);
+    };
+    anyhow::ensure!(
+        directory.role() == DirectoryRole::Target,
+        "route destination '{destination}' must be a target directory"
+    );
+    anyhow::ensure!(
+        profile.routes.apply(destination.clone(), mutation),
+        "route selector is not configured for destination '{destination}'"
+    );
+    save_profile(&profile, &path)?;
+    Ok(true)
+}
+
+/// Validate whether the selected profile owns a route destination.
+pub(crate) fn validates_profile_route_mutation(
+    config_path: &Path,
+    settings_path: &Path,
+    destination: &DirectoryName,
+    mutation: RouteMutation,
+) -> Result<bool> {
+    let settings = load_settings(settings_path)?;
+    let profile_name = settings
+        .profile
+        .as_deref()
+        .context(profile_recovery_message())
+        .and_then(|name| DirectoryName::new(name.to_owned()).context(profile_recovery_message()))?;
+    let path = profile_path(config_path, &profile_name)?;
+    let text = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut profile: MachineProfile =
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
+    let Some(directory) = profile.directories.get(destination) else {
+        return Ok(false);
+    };
+    anyhow::ensure!(
+        directory.role() == DirectoryRole::Target,
+        "route destination '{destination}' must be a target directory"
+    );
+    anyhow::ensure!(
+        profile.routes.apply(destination.clone(), mutation),
+        "route selector is not configured for destination '{destination}'"
+    );
+    Ok(true)
+}
+
+/// Add a local directory to the selected profile rather than shared pool policy.
+pub(crate) fn add_profile_directory(
+    config_path: &Path,
+    settings_path: &Path,
+    name: DirectoryName,
+    directory: DirectoryConfig,
+) -> Result<()> {
+    let settings = load_settings(settings_path)?;
+    let profile_name = settings
+        .profile
+        .as_deref()
+        .context(profile_recovery_message())
+        .and_then(|name| DirectoryName::new(name.to_owned()).context(profile_recovery_message()))?;
+    let path = profile_path(config_path, &profile_name)?;
+    let mut profile = if path.exists() {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?
+    } else {
+        MachineProfile::default()
+    };
+    anyhow::ensure!(
+        profile
+            .directories
+            .insert(name.clone(), directory)
+            .is_none(),
+        "directory '{name}' already exists in selected profile"
+    );
+    save_profile(&profile, &path)
+}
+
 pub fn profile_recovery_message() -> &'static str {
     "Available profiles are in <config-dir>/machines. Run `tome profile select <name>` or `tome init`."
+}
+
+/// Returns whether a config still contains pre-layered directory topology.
+pub(crate) fn is_legacy_flat_config(path: &Path) -> Result<bool> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let value: toml::Value =
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
+    Ok(value
+        .get("directories")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|directories| {
+            directories.values().any(|directory| {
+                let Some(directory) = directory.as_table() else {
+                    return true;
+                };
+                directory.get("type").and_then(toml::Value::as_str) != Some("git")
+                    || directory.get("role").and_then(toml::Value::as_str) != Some("source")
+            })
+        }))
 }
 
 fn atomic_write(path: &Path, content: &str) -> Result<()> {
@@ -288,7 +452,12 @@ fn profile_path(config_path: &Path, name: &DirectoryName) -> Result<PathBuf> {
 }
 
 fn save_profile(profile: &MachineProfile, path: &Path) -> Result<()> {
-    let content = toml::to_string_pretty(profile).context("failed to serialize machine profile")?;
+    let mut for_save = profile.clone();
+    for directory in for_save.directories.values_mut() {
+        directory.path = crate::paths::unexpand_tilde(&directory.path);
+    }
+    let content =
+        toml::to_string_pretty(&for_save).context("failed to serialize machine profile")?;
     let reparsed: MachineProfile = toml::from_str(&content)
         .context("round-trip: generated machine profile did not reparse")?;
     anyhow::ensure!(
@@ -304,6 +473,7 @@ fn save_profile(profile: &MachineProfile, path: &Path) -> Result<()> {
 /// Kept here because the persisted layer fields are deliberately private to this
 /// module; callers must not be able to accidentally put local consent in a
 /// committed profile.
+#[allow(dead_code)]
 pub(crate) fn migration_layers(
     legacy: &Config,
     prefs: &MachinePrefs,
@@ -313,12 +483,14 @@ pub(crate) fn migration_layers(
         exclude: legacy.exclude.clone(),
         backup: legacy.backup.clone(),
         source_pins: BTreeMap::new(),
+        directories: BTreeMap::new(),
     };
     let profile = MachineProfile {
         directories: legacy.directories.clone(),
         disabled: prefs.disabled.clone(),
         disabled_directories: prefs.disabled_directories.clone(),
         directory: prefs.directory.clone(),
+        routes: RoutingPolicy::default(),
     };
     let settings = LocalSettings {
         profile: None,
@@ -333,6 +505,7 @@ pub(crate) fn migration_layers(
         })
 }
 
+#[allow(dead_code)]
 pub(crate) fn migration_settings(profile: &DirectoryName, prefs: &MachinePrefs) -> Result<String> {
     checked_toml(
         &LocalSettings {
@@ -345,6 +518,7 @@ pub(crate) fn migration_settings(profile: &DirectoryName, prefs: &MachinePrefs) 
     )
 }
 
+#[allow(dead_code)]
 pub(crate) fn atomic_write_bytes(path: &Path, content: &str) -> Result<()> {
     atomic_write(path, content)
 }
@@ -376,6 +550,7 @@ mod tests {
         let err = load_effective_context(
             &tmp.path().join("tome.toml"),
             &tmp.path().join("settings.toml"),
+            None,
         )
         .unwrap_err();
         assert!(err.to_string().contains("profile select"));
@@ -410,8 +585,8 @@ mod tests {
         )
         .unwrap();
 
-        let first = load_effective_context(&config_path, &settings_path).unwrap();
-        let second = load_effective_context(&config_path, &settings_path).unwrap();
+        let first = load_effective_context(&config_path, &settings_path, None).unwrap();
+        let second = load_effective_context(&config_path, &settings_path, None).unwrap();
         assert_eq!(format!("{first:?}"), format!("{second:?}"));
     }
 }

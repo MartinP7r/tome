@@ -103,11 +103,10 @@ pub(crate) mod machine;
 // `tome::list` was lifted in plan 26-02.
 pub mod manifest;
 pub mod marketplace;
-pub(crate) mod migration_profiles;
-pub(crate) mod migration_v010;
 pub(crate) mod paths;
 pub(crate) mod pool;
 pub mod profiles;
+mod project;
 // `progress` is `pub` because its trait + event vocabulary
 // (`ProgressSink`/`ProgressEvent`/`SyncStage`/`CancelToken`) is the domain
 // half of the "structure at the edge" pattern (D-09/D-11): the GUI's
@@ -122,6 +121,7 @@ pub(crate) mod relocate;
 pub(crate) mod remove;
 /// Typed shared-pool Git coordination and desktop consent continuations.
 pub mod repo_sync;
+mod routing;
 // `skill` is `pub` so `tome-desktop` can call `skill::collect_detail` and
 // consume `SkillDetail` + `SkillFrontmatterView` directly across the crate
 // boundary (Phase 26 plan 26-03 / VIEW-03 / D-05). The CLI/TUI keep using
@@ -158,25 +158,28 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
-use cli::{Cli, Command, MigrateCommand, PoolCommand, ProfileCommand};
+use cli::{
+    Cli, Command, PoolCommand, ProfileCommand, RouteCommand, RouteExcludeCommand, RouteTagCommand,
+    TagCommand,
+};
 use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
 pub use paths::TomePaths;
 use progress::{CancelToken, NullSink, ProgressEvent, ProgressSink, SyncStage};
 
+pub use manifest::SkillTag;
 /// Re-exported for integration tests so the synthetic-fixture builder in
 /// `tests/cli.rs` can hash directories with the exact same algorithm the
 /// production manifest uses (avoids a duplicated SHA-256 helper that could
 /// drift). Production code should still call `manifest::hash_directory`
 /// directly via the crate path.
 pub use manifest::hash_directory;
+pub use routing::RoutingPolicy;
 
-/// HARD-04: surface lint-failure and migrate-failure typed errors so the
-/// thin `main.rs` binary can downcast and map them to exit code 1 without
-/// the library calling `process::exit` itself.
+/// HARD-04: surface lint failures so the thin `main.rs` binary can downcast
+/// and map them to exit code 1 without the library calling `process::exit`.
 pub use lint::LintFailed;
-pub use migration_v010::MigrationPartialOrFailed;
 
 /// CORE-05 / D-14: the typed `DomainErrorKind` sentinels (and the transparent
 /// `DomainTagged` wrapper that carries one through the anyhow cause chain) the
@@ -398,15 +401,6 @@ impl ProgressSink for IndicatifSink {
     }
 }
 
-/// Resolve the machine preferences path from an optional CLI flag,
-/// falling back to the default `~/.config/tome/machine.toml`.
-fn resolve_machine_path(cli_machine: Option<&Path>) -> Result<std::path::PathBuf> {
-    match cli_machine {
-        Some(p) => Ok(p.to_path_buf()),
-        None => machine::default_machine_path(),
-    }
-}
-
 /// Derive the tome home directory.
 ///
 /// Resolution order:
@@ -473,11 +467,6 @@ fn prepare_post_init_sync(tome_home: PathBuf, config: &Config) -> Result<(Config
 
 /// Run the CLI with parsed arguments.
 pub fn run(cli: Cli) -> Result<()> {
-    if matches!(cli.command, Command::Version) {
-        println!("tome {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
     let effective_config = resolve_config_path(cli.tome_home.as_deref(), cli.config.as_deref())?;
 
     if matches!(cli.command, Command::Init) {
@@ -599,13 +588,8 @@ pub fn run(cli: Cli) -> Result<()> {
             // so the on-disk TOML stays portable; here we resolve them for the
             // post-init sync call.
             let (expanded, paths) = prepare_post_init_sync(tome_home, &config)?;
-            // Load machine prefs once at the top of the post-Init sync path
-            // (mirrors the canonical `run()` load order). Init does NOT use
-            // `Config::load_with_overrides` because the wizard runs against
-            // the bare tome.toml that the user is about to write — overrides
-            // would mask schema errors the wizard wants to surface.
-            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-            let machine_prefs = machine::load(&machine_path)?;
+            let machine_prefs = machine::MachinePrefs::default();
+            let settings_path = default_settings_path();
             let verbose = cli.log_level().is_verbose();
             let quiet = cli.log_level().is_quiet();
             // Same front-end selection as cmd_sync (D-11): IndicatifSink for
@@ -630,8 +614,10 @@ pub fn run(cli: Cli) -> Result<()> {
                     no_install: false,
                     verbose,
                     quiet,
-                    machine_path: &machine_path,
+                    machine_path: &settings_path,
                     machine_prefs: &machine_prefs,
+                    routing: routing::RoutingPolicy::default(),
+                    settings_path: &settings_path,
                     start_stage: None,
                 },
                 sink,
@@ -664,57 +650,24 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
-    if let Command::Migrate {
-        sub: MigrateCommand::Profiles,
-    } = &cli.command
-    {
-        let config_path = effective_config
-            .clone()
-            .unwrap_or(config::default_config_path()?);
-        let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
-        migration_profiles::recover(&config_path)?;
-        migration_profiles::require_interactive(cli.no_input, cli.dry_run)?;
-        anyhow::ensure!(
-            cli.machine.is_none(),
-            "tome migrate profiles does not accept --machine; migrate the active legacy machine.toml"
-        );
-        let name: String = dialoguer::Input::new()
-            .with_prompt("New profile name")
-            .interact_text()?;
-        let plan = migration_profiles::plan(&config_path, &machine_path, &settings_path, &name)?;
-        migration_profiles::render_plan_to(&plan, &mut std::io::stderr().lock())?;
-        if migration_profiles::confirm()? {
-            migration_profiles::execute(&plan, None)?;
-        }
-        return Ok(());
-    }
-
-    // A journal is always resolved before normal loading. A legacy installation
-    // is never interpreted as a partial profile layout.
     let config_path_for_recovery = effective_config
         .clone()
         .unwrap_or(config::default_config_path()?);
-    migration_profiles::recover(&config_path_for_recovery)?;
-    let legacy_machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    if cli.machine.is_none()
-        && migration_profiles::legacy_layout(&config_path_for_recovery, &legacy_machine_path)?
+    if config_path_for_recovery.is_file()
+        && profiles::is_legacy_flat_config(&config_path_for_recovery)?
+        && !matches!(&cli.command, Command::Add { .. } | Command::Tag { .. })
     {
         anyhow::bail!(
-            "legacy configuration detected. Run `tome migrate profiles` from a terminal to preview and migrate it."
+            "legacy flat configuration detected. Required layered files: tome.toml, machines/<profile>.toml, and settings.toml."
         );
     }
 
-    // Load per-machine preferences first — they may rewrite directory paths via
-    // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
-    // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
-    if cli.machine.is_none()
-        && let Command::Sync {
-            force,
-            no_triage,
-            no_install,
-            git_sync,
-        } = &cli.command
+    if let Command::Sync {
+        force,
+        no_triage,
+        no_install,
+        git_sync,
+    } = &cli.command
     {
         let config_path = effective_config
             .clone()
@@ -729,7 +682,8 @@ pub fn run(cli: Cli) -> Result<()> {
             .context("config path has no parent directory")?;
         let repo_session =
             repo_sync::RepoSync::begin(config_dir, policy, cli.no_input, cli.dry_run)?;
-        let context = profiles::load_effective_context(&config_path, &settings_path)?;
+        let cwd = std::env::current_dir()?;
+        let context = profiles::load_effective_context(&config_path, &settings_path, Some(&cwd))?;
         let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
         let paths = TomePaths::new(tome_home, context.config.library_dir.clone())?;
         let log = cli.log_level();
@@ -739,8 +693,9 @@ pub fn run(cli: Cli) -> Result<()> {
             *no_install,
             &context.config,
             &paths,
-            &resolve_machine_path(cli.machine.as_deref())?,
             &context.machine_prefs,
+            context.routing,
+            &settings_path,
             cli.dry_run,
             cli.no_input,
             log.is_verbose(),
@@ -753,39 +708,32 @@ pub fn run(cli: Cli) -> Result<()> {
         return result;
     }
 
-    let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let (config, machine_prefs, selected_profile) = if matches!(
+    let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+    let (config, machine_prefs, selected_profile, routing) = if matches!(
         &cli.command,
-        Command::Add { .. } | Command::Config { .. } | Command::Lint { path: Some(_), .. }
+        Command::Add { .. }
+            | Command::Tag { .. }
+            | Command::Config { .. }
+            | Command::Lint { path: Some(_), .. }
     ) {
         (
             Config::load_or_default(effective_config.as_deref())?,
-            machine::load(&machine_path)?,
+            machine::MachinePrefs::default(),
             None,
-        )
-    } else if cli.machine.is_some() {
-        let machine_prefs = machine::load(&machine_path)?;
-        if !machine_prefs.directory_overrides.is_empty() {
-            eprintln!(
-                "warning: directory_overrides is deprecated; migrate it into a named profile"
-            );
-        }
-        (
-            Config::load_or_default_with_overrides(
-                effective_config.as_deref(),
-                &machine_path,
-                &machine_prefs,
-            )?,
-            machine_prefs,
-            None,
+            routing::RoutingPolicy::default(),
         )
     } else {
         let config_path = effective_config
             .clone()
             .unwrap_or(config::default_config_path()?);
-        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
-        let context = profiles::load_effective_context(&config_path, &settings_path)?;
-        (context.config, context.machine_prefs, Some(context.profile))
+        let cwd = std::env::current_dir()?;
+        let context = profiles::load_effective_context(&config_path, &settings_path, Some(&cwd))?;
+        (
+            context.config,
+            context.machine_prefs,
+            Some(context.profile),
+            context.routing,
+        )
     };
     // Note: both load paths already run validate() internally — no separate
     // config.validate()? call here.
@@ -794,12 +742,10 @@ pub fn run(cli: Cli) -> Result<()> {
 
     // HARD-02: dispatch via per-subcommand `cmd_<name>` helpers defined later
     // in this file. Each match arm is a one-line call into the helper, keeping
-    // `run` itself a thin router. Init and Version are dispatched via
-    // early-returns above, so the corresponding arms here are unreachable
-    // contract guards.
+    // `run` itself a thin router. Init is dispatched via an early return above,
+    // so its corresponding arm here is an unreachable contract guard.
     match cli.command {
         Command::Init => unreachable_early_return("Command::Init"),
-        Command::Version => unreachable_early_return("Command::Version"),
         Command::Add {
             input,
             name,
@@ -823,8 +769,15 @@ pub fn run(cli: Cli) -> Result<()> {
                 role,
                 config,
                 &config_path,
+                &settings_path,
                 cli.dry_run,
             )
+        }
+        Command::Tag { sub } => cmd_tag(sub, &paths, cli.dry_run),
+        Command::Route { sub } => {
+            let default_config_path = paths.config_path();
+            let config_path = effective_config.as_deref().unwrap_or(&default_config_path);
+            cmd_route(sub, config_path, &settings_path, &paths, cli.dry_run)
         }
         Command::Sync {
             force,
@@ -839,8 +792,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 no_install,
                 &config,
                 &paths,
-                &machine_path,
                 &machine_prefs,
+                routing,
+                &settings_path,
                 cli.dry_run,
                 cli.no_input,
                 log.is_verbose(),
@@ -850,28 +804,8 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Status { json } => cmd_status(&config, &paths, selected_profile.as_ref(), json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
-        Command::Browse => {
-            // HARD-21: thread per-machine prefs into browse so the
-            // Detail-mode Disable/Enable toggle can persist via
-            // machine.toml atomic save (D-BROWSE-3 step 2).
-            let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-            let machine_prefs = machine::load(&machine_path)?;
-            cmd_browse(
-                &config,
-                &paths,
-                cli.log_level().is_quiet(),
-                machine_prefs,
-                machine_path,
-            )
-        }
-        Command::Remove { kind } => cmd_remove(
-            kind,
-            config,
-            &paths,
-            cli.machine.as_deref(),
-            cli.dry_run,
-            cli.no_input,
-        ),
+        Command::Browse => cmd_browse(&config, &paths, cli.log_level().is_quiet(), machine_prefs),
+        Command::Remove { kind } => cmd_remove(kind, config, &paths, cli.dry_run, cli.no_input),
         Command::Pool { sub } => cmd_pool(sub, &paths),
         Command::Reassign { skill, to, force } => {
             cmd_reassign(skill, to, force, &config, &paths, cli.dry_run)
@@ -879,10 +813,6 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Fork { skill, to, force } => {
             cmd_fork(skill, to, force, &config, &paths, cli.dry_run, cli.no_input)
         }
-        Command::MigrateLibrary { dry_run, yes } => {
-            cmd_migrate_library(&paths, dry_run || cli.dry_run, yes, cli.no_input)
-        }
-        Command::Migrate { .. } => unreachable_early_return("Command::Migrate"),
         Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
         Command::Relocate { new_path } => cmd_relocate(
             new_path,
@@ -937,9 +867,12 @@ pub(crate) fn cmd_add(
     role: Option<config::DirectoryRole>,
     config: Config,
     config_path: &Path,
+    settings_path: &Path,
     dry_run: bool,
 ) -> Result<()> {
     let mut config = config;
+    let existing_directories = config.directories().keys().cloned().collect::<Vec<_>>();
+    let local = add::is_local_input(&input);
     add::add(
         &mut config,
         add::AddOptions {
@@ -951,10 +884,162 @@ pub(crate) fn cmd_add(
             subdir: subdir.as_deref(),
             role,
             dry_run,
+            persist_config: !local,
             config_path,
         },
     )?;
+    if local && !dry_run {
+        let (name, directory) = config
+            .directories()
+            .iter()
+            .find(|(name, _)| !existing_directories.contains(name))
+            .map(|(name, directory)| (name.clone(), directory.clone()))
+            .context("local directory was not added to the selected profile")?;
+        profiles::add_profile_directory(config_path, settings_path, name, directory)?;
+    }
     Ok(())
+}
+
+/// `tome tag` — persist user-managed tags in the library manifest.
+fn cmd_tag(sub: TagCommand, paths: &TomePaths, dry_run: bool) -> Result<()> {
+    match sub {
+        TagCommand::List { skill } => {
+            let manifest = manifest::load(paths.config_dir())?;
+            if let Some(skill) = skill {
+                let tags = manifest
+                    .tags_for(&skill)
+                    .with_context(|| format!("skill '{skill}' is not in the manifest"))?;
+                for tag in tags {
+                    println!("{tag}");
+                }
+            } else {
+                for (skill, entry) in manifest.iter() {
+                    let tags = entry
+                        .tags
+                        .iter()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    println!("{skill}\t{tags}");
+                }
+            }
+            Ok(())
+        }
+        TagCommand::Add { skill, tag } => {
+            let mut manifest = manifest::load(paths.config_dir())?;
+            anyhow::ensure!(
+                manifest.contains_key(&skill),
+                "skill '{skill}' is not in the manifest"
+            );
+            let tag = manifest::SkillTag::new(tag)?;
+            if dry_run {
+                println!("Would add tag '{tag}' to '{skill}'.");
+                return Ok(());
+            }
+            if manifest.add_tag(&skill, tag.clone()) {
+                manifest::save(&manifest, paths.config_dir())?;
+                println!("Added tag '{tag}' to '{skill}'.");
+            }
+            Ok(())
+        }
+        TagCommand::Remove { skill, tag } => {
+            let mut manifest = manifest::load(paths.config_dir())?;
+            anyhow::ensure!(
+                manifest.contains_key(&skill),
+                "skill '{skill}' is not in the manifest"
+            );
+            let tag = manifest::SkillTag::new(tag)?;
+            anyhow::ensure!(
+                manifest.remove_tag(&skill, &tag),
+                "tag '{tag}' is not assigned to skill '{skill}'"
+            );
+            if dry_run {
+                println!("Would remove tag '{tag}' from '{skill}'.");
+                return Ok(());
+            }
+            manifest::save(&manifest, paths.config_dir())?;
+            println!("Removed tag '{tag}' from '{skill}'.");
+            Ok(())
+        }
+    }
+}
+
+/// `tome route` — mutate the profile or nearest project that owns a destination.
+fn cmd_route(
+    sub: RouteCommand,
+    config_path: &Path,
+    settings_path: &Path,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
+    let (destination, mutation) = match sub {
+        RouteCommand::Tag { sub } => match sub {
+            RouteTagCommand::Add { to, tag } => (
+                to,
+                routing::RouteMutation::AddTag(manifest::SkillTag::new(tag)?),
+            ),
+            RouteTagCommand::Remove { to, tag } => (
+                to,
+                routing::RouteMutation::RemoveTag(manifest::SkillTag::new(tag)?),
+            ),
+        },
+        RouteCommand::Exclude { sub } => match sub {
+            RouteExcludeCommand::Add { to, skill } => (
+                to,
+                routing::RouteMutation::AddExclude(discover::SkillName::new(skill)?),
+            ),
+            RouteExcludeCommand::Remove { to, skill } => (
+                to,
+                routing::RouteMutation::RemoveExclude(discover::SkillName::new(skill)?),
+            ),
+        },
+    };
+    let destination = DirectoryName::new(destination)?;
+    let manifest = manifest::load(paths.config_dir())?;
+    match &mutation {
+        routing::RouteMutation::AddTag(tag) | routing::RouteMutation::RemoveTag(tag) => {
+            anyhow::ensure!(
+                manifest.iter().any(|(_, entry)| entry.tags.contains(tag)),
+                "tag '{tag}' is not assigned to any manifest skill"
+            );
+        }
+        routing::RouteMutation::AddExclude(skill)
+        | routing::RouteMutation::RemoveExclude(skill) => {
+            anyhow::ensure!(
+                manifest.contains_key(skill.as_str()),
+                "skill '{skill}' is not in the manifest"
+            );
+        }
+    }
+    let cwd = std::env::current_dir()?;
+    if dry_run {
+        if project::validates_project_route_mutation(&cwd, &destination, mutation.clone())?
+            || profiles::validates_profile_route_mutation(
+                config_path,
+                settings_path,
+                &destination,
+                mutation,
+            )?
+        {
+            println!("Would update route for destination '{destination}'.");
+            return Ok(());
+        }
+        anyhow::bail!(
+            "route destination '{destination}' is not configured in this profile or project"
+        )
+    }
+    if project::mutate_project_route(&cwd, destination.clone(), mutation.clone())?
+        || profiles::mutate_profile_route(
+            config_path,
+            settings_path,
+            destination.clone(),
+            mutation,
+        )?
+    {
+        println!("Updated route for destination '{destination}'.");
+        return Ok(());
+    }
+    anyhow::bail!("route destination '{destination}' is not configured in this profile or project")
 }
 
 /// `tome sync` — run the full discover → consolidate → distribute → cleanup pipeline.
@@ -965,8 +1050,9 @@ pub(crate) fn cmd_sync(
     no_install: bool,
     config: &Config,
     paths: &TomePaths,
-    machine_path: &Path,
     machine_prefs: &machine::MachinePrefs,
+    routing: routing::RoutingPolicy,
+    settings_path: &Path,
     dry_run: bool,
     no_input: bool,
     verbose: bool,
@@ -998,8 +1084,10 @@ pub(crate) fn cmd_sync(
             no_install,
             verbose,
             quiet,
-            machine_path,
+            machine_path: settings_path,
             machine_prefs,
+            routing,
+            settings_path,
             start_stage: None,
         },
         sink,
@@ -1066,7 +1154,6 @@ pub(crate) fn cmd_browse(
     paths: &TomePaths,
     quiet: bool,
     machine_prefs: machine::MachinePrefs,
-    machine_path: std::path::PathBuf,
 ) -> Result<()> {
     let mut warnings = Vec::new();
     let skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
@@ -1080,7 +1167,7 @@ pub(crate) fn cmd_browse(
         return Ok(());
     }
     let manifest = manifest::load(paths.config_dir())?;
-    browse::browse(skills, &manifest, machine_prefs, machine_path)?;
+    browse::browse(skills, &manifest, machine_prefs)?;
     Ok(())
 }
 
@@ -1089,7 +1176,6 @@ pub(crate) fn cmd_remove(
     kind: cli::RemoveKind,
     config: Config,
     paths: &TomePaths,
-    cli_machine: Option<&Path>,
     dry_run: bool,
     no_input: bool,
 ) -> Result<()> {
@@ -1098,47 +1184,9 @@ pub(crate) fn cmd_remove(
             cmd_remove_dir(name, force, config, paths, dry_run, no_input)
         }
         cli::RemoveKind::Skill { name, yes } => {
-            cmd_remove_skill(name, yes, &config, paths, cli_machine, dry_run, no_input)
+            cmd_remove_skill(name, yes, &config, paths, dry_run, no_input)
         }
-        cli::RemoveKind::Pool { name, yes } => cmd_remove_pool(name, yes, paths, dry_run),
     }
-}
-
-fn cmd_remove_pool(name: String, yes: bool, paths: &TomePaths, dry_run: bool) -> Result<()> {
-    let skill = discover::SkillName::new(name)?;
-    anyhow::ensure!(yes || dry_run, "tome remove pool requires --yes");
-    if dry_run {
-        println!("Dry run — would exclude and remove pool skill '{skill}'.");
-        return Ok(());
-    }
-    // The exclusion is the durable first write. A later interruption cannot
-    // permit another profile to re-import the removed candidate.
-    let mut settings = profiles::load_pool_settings(&paths.config_path())?;
-    settings.exclude.insert(skill.clone());
-    profiles::save_pool_settings(&paths.config_path(), &settings)?;
-    let marker = pool::removal_marker(paths.config_dir(), &skill);
-    std::fs::write(&marker, skill.as_str())
-        .with_context(|| format!("failed to write pool removal marker {}", marker.display()))?;
-
-    let library_path = paths.library_dir().join(skill.as_str());
-    if library_path.is_dir() {
-        std::fs::remove_dir_all(&library_path)
-            .with_context(|| format!("failed to remove {}", library_path.display()))?;
-    } else if library_path.is_symlink() {
-        std::fs::remove_file(&library_path)
-            .with_context(|| format!("failed to remove {}", library_path.display()))?;
-    }
-    let mut manifest = manifest::load(paths.config_dir())?;
-    manifest.remove(skill.as_str());
-    manifest::save(&manifest, paths.config_dir())?;
-    if let Some(mut catalog) = lockfile::load(paths.config_dir())? {
-        catalog.skills.remove(&skill);
-        lockfile::save(&catalog, paths.config_dir())?;
-    }
-    std::fs::remove_file(&marker)
-        .with_context(|| format!("failed to complete pool removal {}", marker.display()))?;
-    println!("✓ Removed pool skill '{skill}' and added a shared exclusion.");
-    Ok(())
 }
 
 fn cmd_pool(sub: PoolCommand, paths: &TomePaths) -> Result<()> {
@@ -1285,33 +1333,19 @@ fn cmd_remove_dir(
 }
 
 /// `tome remove skill <name>` — delete an Unowned skill from the library
-/// (manifest entry, library directory, distribution symlinks, lockfile entry,
-/// machine.toml memberships) per Phase 14 D-B1.
+/// (manifest entry, library directory, distribution symlinks, and lockfile entry).
 fn cmd_remove_skill(
     name: String,
     yes: bool,
     config: &Config,
     paths: &TomePaths,
-    cli_machine: Option<&Path>,
     dry_run: bool,
     no_input: bool,
 ) -> Result<()> {
-    // Load all the pieces skill_plan needs to compute the cleanup
-    // scope (D-B1): manifest entry, lockfile entry, and machine
-    // prefs memberships.
     let manifest = manifest::load(paths.config_dir())?;
     let lockfile = lockfile::load(paths.config_dir())?;
-    let machine_path = resolve_machine_path(cli_machine)?;
-    let machine_prefs = machine::load(&machine_path)?;
 
-    let plan = remove::skill_plan(
-        &name,
-        config,
-        paths,
-        &manifest,
-        lockfile.as_ref(),
-        &machine_prefs,
-    )?;
+    let plan = remove::skill_plan(&name, config, paths, &manifest, lockfile.as_ref())?;
     remove::skill_render_plan(&plan);
 
     if dry_run {
@@ -1340,18 +1374,11 @@ fn cmd_remove_skill(
 
     let mut manifest = manifest;
     let mut lockfile = lockfile;
-    let mut machine_prefs = machine_prefs;
-    let result = remove::skill_execute(
-        &plan,
-        &mut manifest,
-        &mut lockfile,
-        &mut machine_prefs,
-        false,
-    )?;
+    let result = remove::skill_execute(&plan, &mut manifest, &mut lockfile, false)?;
 
     // SAFE-01 grouped partial-failure summary BEFORE any save call.
-    // skill_execute deliberately leaves manifest/lockfile/machine_prefs
-    // unchanged on partial failure (matches the dir-flavour I2/I3
+    // skill_execute deliberately leaves manifest/lockfile unchanged on partial
+    // failure (matches the dir-flavour I2/I3
     // retention semantic), so returning here without saving keeps
     // disk state consistent with in-memory state for retry.
     if !result.failures.is_empty() {
@@ -1381,17 +1408,15 @@ fn cmd_remove_skill(
         ));
     }
 
-    // D-B1 atomic-save chain: manifest + lockfile + machine.toml
-    // (each uses temp+rename internally).
+    // D-B1 atomic-save chain: manifest + lockfile (each uses temp+rename).
     manifest::save(&manifest, paths.config_dir())?;
     if let Some(lf) = &lockfile {
         lockfile::save(lf, paths.config_dir())?;
     }
-    machine::save(&machine_prefs, &machine_path)?;
 
     // Success banner. Reports each step that actually cleaned
     // something so the user sees the full scope of the operation
-    // (library, symlinks, lockfile, machine.toml). Counters that
+    // (library, symlinks, lockfile). Counters that
     // were no-ops (e.g. skill had no lockfile entry) are omitted.
     let mut parts: Vec<String> = Vec::new();
     if result.library_removed {
@@ -1402,15 +1427,6 @@ fn cmd_remove_skill(
     }
     if result.lockfile_entry_removed {
         parts.push("lockfile entry".to_string());
-    }
-    if result.machine_disabled_removed {
-        parts.push("machine.toml disabled".to_string());
-    }
-    if result.per_directory_cleanups > 0 {
-        parts.push(format!(
-            "{} per-directory entries",
-            result.per_directory_cleanups
-        ));
     }
     let summary = if parts.is_empty() {
         "manifest entry only (nothing else to clean)".to_string()
@@ -1541,81 +1557,6 @@ pub(crate) fn cmd_fork(
             style(&skill).cyan(),
             style(&to).cyan(),
         );
-    }
-    Ok(())
-}
-
-/// `tome migrate-library` — one-shot v0.9 → v0.10 library migration.
-///
-/// Per D-05: any skip or failure means non-zero exit.
-/// Per UX-02 D-UX02-1/-2: drives plan → render_plan_to → confirm gate →
-/// execute → render_result_to. The confirm gate is bypassed under
-/// `--dry-run` (no destructive action runs) or `--yes`. Under
-/// `--no-input` AND not `--dry-run`, missing `--yes` bails with a
-/// Conflict/Why/Suggestion error; `--dry-run --no-input` is fine without
-/// `--yes` because the dry run never reaches the gate.
-pub(crate) fn cmd_migrate_library(
-    paths: &TomePaths,
-    dry_run: bool,
-    yes: bool,
-    no_input: bool,
-) -> Result<()> {
-    if dry_run {
-        eprintln!(
-            "{}",
-            console::style("[dry-run] No changes will be made")
-                .yellow()
-                .bold()
-        );
-    }
-
-    let manifest = manifest::load(paths.config_dir())?;
-    let plan = migration_v010::plan(paths.library_dir(), &manifest)?;
-    // HARD-15 stderr discipline: render directly to a locked stderr handle.
-    // Best-effort write — failure to render is non-fatal for the migration,
-    // but we route the I/O failure through `tracing::warn!` instead of
-    // dropping it silently so a broken stderr (broken pipe, /dev/full) is
-    // diagnosable in `--verbose` / `TOME_LOG=warn` runs. Without this, the
-    // user could land in the confirmation prompt below having seen no plan,
-    // and silently approve an unknown migration.
-    {
-        let mut stderr = std::io::stderr().lock();
-        if let Err(e) = migration_v010::render_plan_to(&plan, &mut stderr) {
-            tracing::warn!("could not write migration plan to stderr: {e}");
-        }
-    }
-
-    // Empty plan — render_plan_to already printed the already-in-v0.10-shape
-    // message; nothing to confirm or execute.
-    if plan.entries.is_empty() {
-        return Ok(());
-    }
-
-    if !dry_run {
-        // UX-02 confirm-or-abort. PromptMode encodes the three valid arms
-        // (Forced / NoInputRequiresYes / Interactive); `yes` always wins
-        // over `no_input` so the impossible state is unrepresentable.
-        let mode = migration_v010::PromptMode::from_flags(yes, no_input);
-        if !migration_v010::prompt_confirmation(mode)? {
-            return Ok(());
-        }
-    }
-
-    let result = migration_v010::execute(&plan, dry_run)?;
-    {
-        let mut stderr = std::io::stderr().lock();
-        if let Err(e) = migration_v010::render_result_to(&result, dry_run, &mut stderr) {
-            tracing::warn!("could not write migration result to stderr: {e}");
-        }
-    }
-
-    // HARD-04 sibling: bubble through anyhow rather than `process::exit(1)`.
-    // `main.rs` downcasts `MigrationPartialOrFailed` and exits with code 1.
-    if result.is_partial_or_failed() {
-        anyhow::bail!(migration_v010::MigrationPartialOrFailed {
-            skipped_broken_source: result.skipped_broken_source,
-            failed: result.failed,
-        });
     }
     Ok(())
 }
@@ -1812,19 +1753,6 @@ fn join_synced_at_from_manifest(
     }
 }
 
-/// Warn about `disabled_directories` entries in machine.toml that don't match any
-/// configured directory name. Helps catch typos and stale entries.
-fn warn_unknown_disabled_directories(machine_prefs: &machine::MachinePrefs, config: &Config) {
-    for name in &machine_prefs.disabled_directories {
-        if !config.directories.contains_key(name.as_str()) {
-            eprintln!(
-                "warning: disabled directory '{}' in machine.toml does not match any configured directory",
-                name
-            );
-        }
-    }
-}
-
 /// Options for the sync pipeline.
 ///
 /// Made `pub` in plan 27-01b (Wave 2 of Phase 27): the Tauri `start_sync`
@@ -1840,14 +1768,12 @@ pub struct SyncOptions<'a> {
     pub no_install: bool,
     pub verbose: bool,
     pub quiet: bool,
-    /// Path where `machine.toml` should be saved after triage. Loaded once
-    /// at `run()` entry alongside `machine_prefs` so the override-apply step
-    /// in `Config::load_with_overrides` and the disabled-skill filtering
-    /// inside `sync()` see identical prefs.
+    /// Legacy Desktop compatibility field. Core sync does not read or write it.
     pub machine_path: &'a Path,
-    /// Per-machine preferences already loaded by the caller. `sync()` clones
-    /// these locally so triage can mutate without affecting the caller's copy.
+    /// In-memory projection of the selected profile's distribution filters.
     pub machine_prefs: &'a machine::MachinePrefs,
+    pub routing: routing::RoutingPolicy,
+    pub settings_path: &'a Path,
     /// Phase 27 plan 27-05 (SYNC-05): when `Some(stage)`, skip every
     /// pipeline stage strictly before `stage`. Used by the GUI's
     /// `retry_sync_from(stage)` command to resume after a stage failure.
@@ -2153,8 +2079,10 @@ pub fn sync(
         no_install,
         verbose,
         quiet,
-        machine_path,
+        machine_path: _,
         machine_prefs: prefs_in,
+        routing,
+        settings_path,
         // Phase 27 plan 27-05: today `start_stage` is an advisory tag the
         // GUI sets via its retry commands; the inner pipeline still runs
         // the full sequence (stages produce data later stages need —
@@ -2207,10 +2135,6 @@ pub fn sync(
         }
     }
 
-    // Per-machine preferences (disabled skills and targets) are loaded once
-    // in `run()` so the override-apply step in `Config::load_with_overrides`
-    // and the disabled-skill filtering below see identical prefs. We clone
-    // here so triage (below) can mutate locally without affecting the caller.
     let mut machine_prefs = prefs_in.clone();
 
     // Load existing lockfile for diffing and reconciliation
@@ -2253,7 +2177,7 @@ pub fn sync(
                 paths.library_dir(),
                 &claude_adapter,
                 &mut machine_prefs,
-                machine_path,
+                settings_path,
                 paths,
                 reconcile::ReconcileOpts {
                     dry_run,
@@ -2410,22 +2334,6 @@ pub fn sync(
 
     debug!("Found {} skills", skills.len());
 
-    // v0.10 D-02: refuse to sync against a v0.9-shape library. Detection is an
-    // isolated check; the entire migration_v010 module deletes cleanly with
-    // this check in v0.11+.
-    {
-        let manifest_for_detection = manifest::load(paths.config_dir())?;
-        if migration_v010::detect_v09_shape(paths.library_dir(), &manifest_for_detection) {
-            anyhow::bail!(
-                "library is in v0.9 shape (one or more managed skills are stored as symlinks).\n\
-                 \n\
-                 Why: v0.10 stores managed skills as real directory copies (LIB-01).\n\
-                 Run `tome migrate-library` to convert the library, then re-run this command.\n\
-                 Pass `--dry-run` first to preview changes without touching the filesystem."
-            );
-        }
-    }
-
     // Stage boundary: cancellation checked before consolidate begins (D-12).
     if cancel.is_cancelled() {
         anyhow::bail!("sync cancelled");
@@ -2454,15 +2362,6 @@ pub fn sync(
             let d = update::diff(old, &pre_cleanup_lockfile);
             if !d.is_empty() {
                 println!("{}", style("Library changes detected:").bold());
-                let newly_disabled = update::present_changes(&d, &mut machine_prefs, quiet)?;
-                if !newly_disabled.is_empty() && !dry_run {
-                    machine::save(&machine_prefs, machine_path)?;
-                    println!(
-                        "  {} skill(s) disabled in {}",
-                        newly_disabled.len(),
-                        machine_path.display()
-                    );
-                }
             } else {
                 println!("{}", style("No changes since last sync.").dim());
             }
@@ -2472,11 +2371,6 @@ pub fn sync(
                 style("No previous lockfile — performing initial sync.").dim()
             );
         }
-    }
-
-    // Warn about disabled_directories that don't match any configured directory
-    if !quiet {
-        warn_unknown_disabled_directories(&machine_prefs, config);
     }
 
     // 4. Cleanup stale library entries (before distribute so counts are accurate)
@@ -2558,6 +2452,7 @@ pub fn sync(
                 dir_config,
                 &manifest,
                 &machine_prefs,
+                &routing,
                 &config.directories,
                 dry_run,
                 force,
@@ -2604,11 +2499,13 @@ pub fn sync(
             // Also clean up symlinks for disabled skills (global + per-directory).
             // The returned Vec<ExcludedSkill> seeds Bucket C of the unified
             // three-bucket cleanup renderer (UX-01 D-UX01-1 / D-UX01-2).
-            let (n, dir_excluded, dir_failures) = cleanup_disabled_from_target(
+            let (n, dir_excluded, dir_failures) = cleanup_routed_from_target(
                 skills_dir,
                 paths.library_dir(),
                 name,
                 &machine_prefs,
+                &manifest,
+                &routing,
                 dry_run,
             )?;
             removed += n;
@@ -2861,11 +2758,36 @@ pub fn retry_partial_failures(
 /// 1. Account for the symlinks removed (used in `removed_from_targets`).
 /// 2. Drain `excluded_skills` into `cleanup::render_cleanup_buckets`
 ///    Bucket C for the unified user-facing summary.
+#[allow(dead_code)] // retained as the machine-preference-only test helper.
 fn cleanup_disabled_from_target(
     target_dir: &Path,
     library_dir: &Path,
     dir_name: &config::DirectoryName,
     machine_prefs: &machine::MachinePrefs,
+    dry_run: bool,
+) -> Result<(
+    usize,
+    Vec<cleanup::ExcludedSkill>,
+    Vec<cleanup::DistributionCleanupFailure>,
+)> {
+    cleanup_routed_from_target(
+        target_dir,
+        library_dir,
+        dir_name,
+        machine_prefs,
+        &manifest::Manifest::default(),
+        &routing::RoutingPolicy::default(),
+        dry_run,
+    )
+}
+
+fn cleanup_routed_from_target(
+    target_dir: &Path,
+    library_dir: &Path,
+    dir_name: &config::DirectoryName,
+    machine_prefs: &machine::MachinePrefs,
+    manifest: &manifest::Manifest,
+    routing: &routing::RoutingPolicy,
     dry_run: bool,
 ) -> Result<(
     usize,
@@ -2878,15 +2800,6 @@ fn cleanup_disabled_from_target(
     if !target_dir.is_dir() {
         return Ok((0, excluded, failures));
     }
-
-    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        warn!(
-            "could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
-            library_dir.display(),
-            e
-        );
-        library_dir.to_path_buf()
-    });
 
     let mut removed = 0;
     let entries = std::fs::read_dir(target_dir)
@@ -2901,14 +2814,19 @@ fn cleanup_disabled_from_target(
         }
 
         let name_owned = entry.file_name().to_string_lossy().into_owned();
+        let Ok(skill) = discover::SkillName::new(name_owned.clone()) else {
+            continue;
+        };
         let is_global = machine_prefs.is_disabled(&name_owned);
         let is_allowed = machine_prefs.is_skill_allowed(&name_owned, dir_name.as_str());
+        let tags = manifest.tags_for(&name_owned).cloned().unwrap_or_default();
+        let is_routed = routing.allows(dir_name, &skill, &tags);
 
         // `is_skill_allowed` returns false for both global AND per-directory
         // exclusion. We split the cases for reporting — global takes
         // precedence in the bucket-C surface even though the underlying
         // removal logic is the same.
-        if is_global || !is_allowed {
+        if is_global || !is_allowed || !is_routed {
             // Only remove if symlink points into the tome library. Per-symlink
             // I/O failures aggregate into `failures` instead of bailing the
             // loop so one stale ENOENT/EACCES does not erase the user-facing
@@ -2928,9 +2846,7 @@ fn cleanup_disabled_from_target(
                 }
             };
             let target = paths::resolve_symlink_target(&path, &raw_target);
-            let points_into_library =
-                target.starts_with(library_dir) || target.starts_with(&canonical_library);
-            if !points_into_library {
+            if !paths::points_into_library(&target, library_dir) {
                 continue;
             }
 
@@ -3408,6 +3324,8 @@ mod tests {
                 quiet: true, // suppress stdout chrome in the test harness
                 machine_path: &machine_path,
                 machine_prefs: &machine_prefs,
+                routing: routing::RoutingPolicy::default(),
+                settings_path: &machine_path,
                 start_stage: None,
             },
             &sink,
@@ -3559,6 +3477,59 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_routing_removes_unrouted_library_symlink_but_preserves_foreign_link() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let external = TempDir::new().unwrap();
+        let skill_dir = library.path().join("stale-skill");
+        let foreign_dir = external.path().join("foreign-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::create_dir_all(&foreign_dir).unwrap();
+        unix_fs::symlink(&skill_dir, target.path().join("stale-skill")).unwrap();
+        unix_fs::symlink(&foreign_dir, target.path().join("foreign-skill")).unwrap();
+
+        let mut manifest = manifest::Manifest::default();
+        manifest.insert(
+            SkillName::new("stale-skill").unwrap(),
+            manifest::SkillEntry {
+                source_path: skill_dir,
+                ownership: manifest::SkillOwnership::Owned {
+                    source: config::DirectoryName::new("source").unwrap(),
+                },
+                content_hash: validation::test_hash("abc"),
+                synced_at: "2024-01-01T00:00:00Z".to_string(),
+                managed: false,
+                tags: [manifest::SkillTag::new("reference").unwrap()]
+                    .into_iter()
+                    .collect(),
+            },
+        );
+        let routing: routing::RoutingPolicy =
+            toml::from_str("[test-dir]\ntags = [\"rust\"]\n").unwrap();
+
+        let (removed, excluded, failures) = cleanup_routed_from_target(
+            target.path(),
+            library.path(),
+            &test_dir_name(),
+            &machine::MachinePrefs::default(),
+            &manifest,
+            &routing,
+            false,
+        )
+        .unwrap();
+
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
+        assert_eq!(removed, 1);
+        assert!(!target.path().join("stale-skill").exists());
+        assert!(target.path().join("foreign-skill").is_symlink());
+        assert_eq!(excluded.len(), 1);
+        assert_eq!(excluded[0].name.as_str(), "stale-skill");
+    }
+
+    #[test]
     fn cleanup_disabled_preserves_external_symlink() {
         let library = TempDir::new().unwrap();
         let target = TempDir::new().unwrap();
@@ -3589,6 +3560,39 @@ mod tests {
             excluded.is_empty(),
             "external symlink should not produce a Bucket C entry"
         );
+    }
+
+    #[test]
+    fn cleanup_disabled_preserves_lexically_nested_external_symlink() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        let external_skill = root.path().join("external/disabled-skill");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&external_skill).unwrap();
+
+        // The raw target lexically begins with `library`, but resolves outside it.
+        unix_fs::symlink(
+            library.join("../external/disabled-skill"),
+            target.join("disabled-skill"),
+        )
+        .unwrap();
+
+        let mut prefs = machine::MachinePrefs::default();
+        prefs.disable(SkillName::new("disabled-skill").unwrap());
+
+        let (removed, excluded, failures) =
+            cleanup_disabled_from_target(&target, &library, &test_dir_name(), &prefs, false)
+                .unwrap();
+
+        assert!(
+            failures.is_empty(),
+            "no I/O failures expected: {failures:?}"
+        );
+        assert_eq!(removed, 0, "foreign link must not be removed");
+        assert!(target.join("disabled-skill").is_symlink());
+        assert!(excluded.is_empty());
     }
 
     #[test]
@@ -3800,6 +3804,27 @@ mod tests {
             assert_eq!(f.operation, cleanup::DistributionCleanupOp::Remove);
             assert_eq!(f.directory.as_str(), "test-dir");
         }
+    }
+
+    #[test]
+    fn cleanup_skips_invalid_target_symlink_filenames() {
+        let library = TempDir::new().unwrap();
+        let target = TempDir::new().unwrap();
+        let skill_dir = library.path().join("valid-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        let invalid_link = target.path().join("invalid ");
+        unix_fs::symlink(&skill_dir, &invalid_link).unwrap();
+
+        let result = cleanup_disabled_from_target(
+            target.path(),
+            library.path(),
+            &test_dir_name(),
+            &machine::MachinePrefs::default(),
+            false,
+        );
+
+        assert!(result.is_ok());
+        assert!(invalid_link.exists());
     }
 
     // -- apply_edit_decisions tests (Phase 14 / D-C1 transition site 3) --

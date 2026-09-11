@@ -12,7 +12,7 @@ use crate::cleanup;
 use crate::config::{Config, DirectoryName};
 use crate::discover::SkillName;
 use crate::manifest;
-use crate::paths::{TomePaths, resolve_symlink_target};
+use crate::paths::{TomePaths, points_into_library, resolve_symlink_target};
 
 // -- Data structs --
 
@@ -1614,17 +1614,6 @@ fn check_distribution_dir(
         return Ok(issues);
     }
 
-    // Canonicalize library_dir so starts_with works when library_dir contains
-    // a symlink component (e.g., /var -> /private/var on macOS).
-    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        eprintln!(
-            "warning: could not canonicalize library path {}: {}",
-            library_dir.display(),
-            e
-        );
-        library_dir.to_path_buf()
-    });
-
     let entries = std::fs::read_dir(skills_dir)
         .with_context(|| format!("failed to read target dir {}", skills_dir.display()))?;
 
@@ -1637,8 +1626,7 @@ fn check_distribution_dir(
             let raw_target = std::fs::read_link(&path)
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
-            let points_into_library =
-                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+            let points_into_library = points_into_library(&target, library_dir);
             if points_into_library && !target.exists() {
                 let issue = DiagnosticIssue::directory_repairable(
                     IssueSeverity::Error,
@@ -1933,6 +1921,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -2040,6 +2029,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -2066,6 +2056,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -2130,6 +2121,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, tome_home).unwrap();
@@ -2286,6 +2278,44 @@ mod tests {
             "external symlink must surface as one ForeignSymlink Warning, got: {result:?}"
         );
         assert_eq!(foreign[0].severity, IssueSeverity::Warning);
+    }
+
+    #[test]
+    fn doctor_preserves_broken_foreign_symlink_through_library_redirect() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        let external = root.path().join("external");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        unix_fs::symlink(&external, library.join("redirect")).unwrap();
+
+        let link = target.join("foreign-link");
+        unix_fs::symlink(library.join("redirect/missing-skill"), &link).unwrap();
+
+        let issues = check_distribution_dir("target", &target, &library).unwrap();
+        assert!(
+            issues
+                .iter()
+                .all(|issue| { issue.repair_kind != Some(RepairKind::RemoveStaleTargetSymlink) })
+        );
+
+        let report = DoctorReport {
+            configured: true,
+            library_issues: Vec::new(),
+            directory_issues: vec![DirectoryDiagnostic {
+                name: "target".to_string(),
+                issues,
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let paths = TomePaths::new(root.path().to_path_buf(), library).unwrap();
+        dispatch_repairs(&report, &Config::default(), &paths).unwrap();
+
+        assert!(link.is_symlink());
     }
 
     // -- Phase 24: real-dir → symlink repair --
@@ -2495,6 +2525,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, tome_home.path()).unwrap();
@@ -2535,6 +2566,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, tome_home.path()).unwrap();
@@ -2566,6 +2598,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -2598,6 +2631,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -2777,6 +2811,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -3505,6 +3540,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -3657,6 +3693,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
@@ -3727,6 +3764,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         // Manual: bad-yaml skill with a real directory.
@@ -3743,6 +3781,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("xyz"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, tome_home.path()).unwrap();
@@ -3785,6 +3824,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, lib.path()).unwrap();
