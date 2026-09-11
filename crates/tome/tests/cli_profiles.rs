@@ -185,11 +185,12 @@ fn empty_profile_bypass_environment_variable_has_no_effect() {
 #[test]
 fn legacy_layout_is_refused_with_migration_guidance() {
     let (tmp, config, settings) = fixture();
-    let machine = tmp.path().join("machine.toml");
+    let legacy_machine = tmp.path().join(".config/tome/machine.toml");
     std::fs::write(&config, format!("library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", tmp.path().join("library").display(), tmp.path().join("source").display())).unwrap();
-    std::fs::write(&machine, "").unwrap();
-    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
+    std::fs::create_dir_all(legacy_machine.parent().unwrap()).unwrap();
+    std::fs::write(&legacy_machine, "").unwrap();
     cargo_bin_cmd!("tome")
+        .env("HOME", tmp.path())
         .args([
             "--config",
             config.to_str().unwrap(),
