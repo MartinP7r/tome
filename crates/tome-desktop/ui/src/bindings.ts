@@ -33,14 +33,8 @@ export const commands = {
 	 */
 	getSkillDetail: (name: SkillName) => typedError<SkillDetail, TomeError>(__TAURI_INVOKE("get_skill_detail", { name })),
 	/**
-	 *  Toggle a skill's membership in the global `disabled` set in `machine.toml`
-	 *  (Phase 26 plan 26-03 / D-06 — the lone Phase 26 mutation).
-	 * 
-	 *  Routes through the shared [`tome::actions::set_skill_disabled`] helper, so
-	 *  the GUI and the browse TUI hit the same atomic temp+rename. The Phase-26
-	 *  file watcher (plan 26-06) fires `MachinePrefsChanged` for the resulting
-	 *  write — own-process writes are observed verbatim, no manual refresh
-	 *  signal needed.
+	 *  Retained paused-Desktop API that rejects the legacy global toggle because
+	 *  it cannot select the destination required by `tome route exclude`.
 	 */
 	setSkillDisabled: (name: SkillName, disabled: boolean) => typedError<null, TomeError>(__TAURI_INVOKE("set_skill_disabled", { name, disabled })),
 	/**
@@ -213,19 +207,8 @@ export const commands = {
 	 */
 	previewMachineToml: (decisions: TriageDecision[]) => typedError<MachineTomlPreview, TomeError>(__TAURI_INVOKE("preview_machine_toml", { decisions })),
 	/**
-	 *  Commit a list of pending triage decisions to `machine.toml` (Phase 27
-	 *  plan 27-03 / SYNC-03).
-	 * 
-	 *  Writes via the canonical [`tome::machine::save`] (atomic temp+rename),
-	 *  which fires the Phase-26 watcher's `MachinePrefsChanged` event for free —
-	 *  the React `useSkills` / `useSkillDetail` hooks observe the change and
-	 *  refetch automatically (no manual refresh signal needed).
-	 * 
-	 *  Path resolution is server-side via [`tome::default_machine_path`];
-	 *  the React side never passes a path. The double-confirmation contract
-	 *  (T-27-03-06 / SC#3 "no silent writes") is enforced at the UI layer —
-	 *  this command MUST be reached only through the explicit `[Apply]` button
-	 *  inside the `PreviewPopover`.
+	 *  Retained paused-Desktop IPC command that rejects triage decisions because
+	 *  they cannot select a route destination.
 	 */
 	applyMachineToml: (decisions: TriageDecision[]) => typedError<null, TomeError>(__TAURI_INVOKE("apply_machine_toml", { decisions })),
 };
@@ -793,26 +776,6 @@ export type LockfileState =
 export type MachinePrefsChanged = null;
 
 /**
- *  Per-machine prefs summary shown in the Status view (VIEW-01).
- * 
- *  Surfaces the integer counts the Status view's `MACHINE` row renders
- *  ("N skills disabled"). Counts only — the full skill / directory lists
- *  stay in `machine.toml`.
- */
-export type MachinePrefsSummary = {
-	/**
-	 *  `MachinePrefs.disabled.len()` — count of skills globally disabled
-	 *  on this machine.
-	 */
-	disabled_count: number,
-	/**
-	 *  `MachinePrefs.disabled_directories.len()` — count of directories
-	 *  disabled on this machine.
-	 */
-	disabled_directory_count: number,
-};
-
-/**
  *  Structured Myers line-diff between the on-disk `machine.toml` and the
  *  canonical `toml::to_string_pretty(proposed)` serialization.
  * 
@@ -1015,8 +978,8 @@ export type SkillDetail = {
 	 */
 	managed: boolean,
 	/**
-	 *  Whether the skill is currently in the **global** `disabled` set in
-	 *  `machine.toml` on this machine.
+	 *  Legacy Desktop compatibility field. Core detail collection reports
+	 *  `false`; route eligibility is destination-specific.
 	 */
 	disabled: boolean,
 	/**  Parsed frontmatter (specta-friendly projection). */
@@ -1182,11 +1145,6 @@ export type StatusReport_Deserialize = {
 	 *  JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
 	 */
 	lockfile: LockfileState,
-	/**
-	 *  Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
-	 *  `MACHINE` row ("N skills disabled").
-	 */
-	machine_prefs_summary: MachinePrefsSummary,
 	/**  Number of health issues, or an error message. */
 	health: CountOrError_Deserialize,
 	profile: ProfileState,
@@ -1225,11 +1183,6 @@ export type StatusReport_Serialize = {
 	 *  JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
 	 */
 	lockfile: LockfileState,
-	/**
-	 *  Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
-	 *  `MACHINE` row ("N skills disabled").
-	 */
-	machine_prefs_summary: MachinePrefsSummary,
 	/**  Number of health issues, or an error message. */
 	health: CountOrError_Serialize,
 	profile: ProfileState,
