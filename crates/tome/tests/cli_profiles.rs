@@ -19,10 +19,6 @@ fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     (tmp, config, settings)
 }
 
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 #[test]
 fn profile_selection() {
     let (_tmp, config, settings) = fixture();
