@@ -19,6 +19,10 @@ fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     (tmp, config, settings)
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 #[test]
 fn profile_selection() {
     let (_tmp, config, settings) = fixture();
@@ -184,6 +188,7 @@ fn legacy_layout_is_refused_with_migration_guidance() {
     let machine = tmp.path().join("machine.toml");
     std::fs::write(&config, format!("library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", tmp.path().join("library").display(), tmp.path().join("source").display())).unwrap();
     std::fs::write(&machine, "").unwrap();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
     cargo_bin_cmd!("tome")
         .args([
             "--config",
@@ -214,8 +219,9 @@ fn migrate_profiles_happy_path() {
     .unwrap();
     std::fs::write(&legacy_machine, "disabled = []\n").unwrap();
 
-    Command::new("script")
-        .args([
+    let mut command = Command::new("script");
+    if cfg!(target_os = "macos") {
+        command.args([
             "-q",
             "/dev/null",
             cargo_bin_cmd!("tome").get_program().to_str().unwrap(),
@@ -225,7 +231,18 @@ fn migrate_profiles_happy_path() {
             settings.to_str().unwrap(),
             "migrate",
             "profiles",
-        ])
+        ]);
+    } else {
+        let invocation = format!(
+            "{} --config {} --settings {} migrate profiles",
+            shell_quote(cargo_bin_cmd!("tome").get_program().to_str().unwrap()),
+            shell_quote(config.to_str().unwrap()),
+            shell_quote(settings.to_str().unwrap()),
+        );
+        command.args(["-q", "-e", "-c", &invocation, "/dev/null"]);
+    }
+
+    command
         .env("HOME", tmp.path())
         .write_stdin("work\ny\n")
         .assert()
