@@ -13,6 +13,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use anyhow::Context;
+
 use tome::MachineTomlPreview;
 use tome::SkillName;
 use tome::TomePaths;
@@ -21,8 +23,8 @@ use tome::progress::{CancelToken, SyncStage};
 
 use crate::error::{ErrorCode, TomeError};
 use crate::sink::TauriEventSink;
-use crate::sync_outcome_wire::{PartialFailureWire, SyncOutcomeWire};
-use crate::sync_state::SyncState;
+use crate::sync_outcome_wire::{DesktopSyncOutcome, PartialFailureWire, SyncOutcomeWire};
+use crate::sync_state::{PendingGitConsent, SyncState};
 use crate::sync_types::{LockfileDiff, lockfile_diff_projection};
 
 /// A single triage decision sent from the GUI's Sync route to the Rust
@@ -71,11 +73,20 @@ pub enum TriageDecisionKind {
 /// `pub` since plan 26-06 — `main.rs::setup` calls it to derive the
 /// `TomePaths` it hands to the file watcher (`watcher::spawn_watcher`).
 pub fn load_context() -> anyhow::Result<(Config, TomePaths)> {
+    let (context, paths) = load_desktop_context()?;
+    Ok((context.config, paths))
+}
+
+/// Load the exact profile-layered context used by flag-free CLI commands.
+/// This stays at the Rust boundary so webview input cannot select profiles or
+/// supply local paths.
+fn load_desktop_context() -> anyhow::Result<(tome::profiles::EffectiveContext, TomePaths)> {
     let config_path = tome::config::default_config_path()?;
-    let config = Config::load_or_default(Some(&config_path))?;
+    let settings_path = tome::default_settings_path();
+    let context = tome::profiles::load_effective_context(&config_path, &settings_path)?;
     let tome_home = tome::config::default_tome_home()?;
-    let paths = TomePaths::new(tome_home, config.library_dir().to_path_buf())?;
-    Ok((config, paths))
+    let paths = TomePaths::new(tome_home, context.config.library_dir().to_path_buf())?;
+    Ok((context, paths))
 }
 
 /// Return a read-only status snapshot of the tome system.
@@ -411,14 +422,30 @@ pub fn apply_machine_toml(
 pub async fn start_sync(
     app: tauri::AppHandle,
     state: tauri::State<'_, SyncState>,
-) -> Result<SyncOutcomeWire, TomeError> {
+) -> Result<DesktopSyncOutcome, TomeError> {
+    start_sync_with_runtime(app, state).await
+}
+
+/// Runtime-generic command implementation used by the Tauri IPC integration
+/// fixture with Tauri's mock runtime.
+#[doc(hidden)]
+pub async fn start_sync_with_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, SyncState>,
+) -> Result<DesktopSyncOutcome, TomeError> {
     // Double-fire guard (T-27-01b-07). Take the mutex briefly, check the
     // slot, install a fresh token if idle. The guard is dropped before the
     // blocking call so the future doesn't hold a non-Send guard across an
     // `.await` (defensive — std::sync::MutexGuard is !Send by default).
     let cancel = {
         let mut slot = state.cancel.lock().expect("SyncState mutex poisoned");
-        if slot.is_some() {
+        if slot.is_some()
+            || state
+                .consent
+                .lock()
+                .expect("SyncState mutex poisoned")
+                .is_some()
+        {
             return Err(TomeError {
                 code: ErrorCode::Conflict,
                 message: "sync already in progress".into(),
@@ -434,14 +461,34 @@ pub async fn start_sync(
     // surface as immediate IPC errors (the React side renders them via the
     // result branch of `useSync.start`) without spinning a worker thread.
     let setup = (|| -> anyhow::Result<_> {
-        let (config, paths) = load_context()?;
-        let machine_path = tome::default_machine_path()?;
-        let machine_prefs = tome::load_machine_prefs(&machine_path)?;
-        Ok((config, paths, machine_path, machine_prefs))
+        if let Some(session) = state
+            .ready_session
+            .lock()
+            .expect("SyncState mutex poisoned")
+            .take()
+        {
+            return Ok(tome::repo_sync::RepoSyncStart::Ready(session));
+        }
+        let config_path = tome::config::default_config_path()?;
+        let settings_path = tome::default_settings_path();
+        let policy = tome::profiles::load_settings(&settings_path)?.git_sync;
+        let config_dir = config_path
+            .parent()
+            .context("config path has no parent directory")?;
+        tome::repo_sync::RepoSync::begin_for_desktop(config_dir, policy, false)
     })();
 
-    let (config, paths, machine_path, machine_prefs) = match setup {
-        Ok(parts) => parts,
+    let repo_session = match setup {
+        Ok(tome::repo_sync::RepoSyncStart::Ready(session)) => session,
+        Ok(tome::repo_sync::RepoSyncStart::ConsentRequired(continuation)) => {
+            let required = continuation.required().clone();
+            *state.consent.lock().expect("SyncState mutex poisoned") = Some(PendingGitConsent {
+                continuation,
+                completed_outcome: None,
+            });
+            *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+            return Ok(DesktopSyncOutcome::GitConsentRequired(required));
+        }
         Err(e) => {
             // Setup failed before the run even started — clear the slot
             // so a subsequent retry can proceed.
@@ -449,6 +496,18 @@ pub async fn start_sync(
             return Err(TomeError::from(e));
         }
     };
+
+    let (context, paths) = match load_desktop_context() {
+        Ok(parts) => parts,
+        Err(e) => {
+            *state.cancel.lock().expect("SyncState mutex poisoned") = None;
+            return Err(TomeError::from(e));
+        }
+    };
+    let machine_path = tome::default_machine_path().map_err(TomeError::from)?;
+    let config = context.config;
+    let machine_prefs = context.machine_prefs;
+    let policy = context.git_sync;
 
     // Build the GUI's event-emitting sink. `AppHandle` is Clone + Send + Sync
     // (RESEARCH Pitfall 5), so it's sound to ship into the worker thread.
@@ -481,7 +540,8 @@ pub async fn start_sync(
         // Plan 27-05: sync_with_outcome wraps sync() with a stage tracker
         // so the returned SyncOutcome carries the failed_stage + (future)
         // partial_failures for the React side's StageStepper renderer.
-        tome::sync_with_outcome(&config, &paths, opts, &sink, &cancel)
+        let outcome = tome::sync_with_outcome(&config, &paths, opts, &sink, &cancel);
+        (outcome, repo_session, paths, policy)
     });
 
     let join_result = join_handle.await;
@@ -492,10 +552,105 @@ pub async fn start_sync(
     *state.cancel.lock().expect("SyncState mutex poisoned") = None;
 
     match join_result {
-        Ok(outcome) => Ok(SyncOutcomeWire::from(outcome)),
+        Ok((outcome, session, paths, policy)) => {
+            let wire = SyncOutcomeWire::from(outcome);
+            if wire.result.is_some() {
+                return Ok(DesktopSyncOutcome::Completed(wire));
+            }
+            match session
+                .publish_for_desktop(&paths, policy)
+                .map_err(TomeError::from)?
+            {
+                tome::repo_sync::RepoSyncStart::Ready(_session) => {
+                    Ok(DesktopSyncOutcome::Completed(wire))
+                }
+                tome::repo_sync::RepoSyncStart::ConsentRequired(continuation) => {
+                    let required = continuation.required().clone();
+                    *state.consent.lock().expect("SyncState mutex poisoned") =
+                        Some(PendingGitConsent {
+                            continuation,
+                            completed_outcome: Some(wire),
+                        });
+                    Ok(DesktopSyncOutcome::GitConsentRequired(required))
+                }
+            }
+        }
         Err(join_err) => Err(TomeError::from(anyhow::anyhow!(
             "sync task did not complete: {join_err}"
         ))),
+    }
+}
+
+/// Resume one server-issued Git consent continuation.
+///
+/// A response is accepted only when its opaque ID matches the pending Rust
+/// continuation. A decline never calls pull, commit, or push; it continues the
+/// already locked local-only path instead.
+#[tauri::command]
+#[specta::specta]
+pub async fn respond_sync_git_consent(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, SyncState>,
+    request_id: String,
+    decision: tome::repo_sync::GitConsentDecision,
+) -> Result<DesktopSyncOutcome, TomeError> {
+    respond_sync_git_consent_with_runtime(app, state, request_id, decision).await
+}
+
+/// Runtime-generic consent implementation used by the Tauri IPC integration
+/// fixture with Tauri's mock runtime.
+#[doc(hidden)]
+pub async fn respond_sync_git_consent_with_runtime<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    state: tauri::State<'_, SyncState>,
+    request_id: String,
+    decision: tome::repo_sync::GitConsentDecision,
+) -> Result<DesktopSyncOutcome, TomeError> {
+    let pending = state
+        .consent
+        .lock()
+        .expect("SyncState mutex poisoned")
+        .take()
+        .ok_or_else(|| TomeError {
+            code: ErrorCode::Conflict,
+            message: "no Git consent request is pending".into(),
+            context: vec![],
+        })?;
+    if pending.continuation.required().request_id != request_id {
+        *state.consent.lock().expect("SyncState mutex poisoned") = Some(pending);
+        return Err(TomeError {
+            code: ErrorCode::Conflict,
+            message: "Git consent request does not match the pending continuation".into(),
+            context: vec![],
+        });
+    }
+    let stage = pending.continuation.required().stage;
+    let completed_outcome = pending.completed_outcome;
+    let resumed = pending
+        .continuation
+        .resume(decision)
+        .map_err(TomeError::from)?;
+    let tome::repo_sync::RepoSyncStart::Ready(session) = resumed else {
+        return Err(TomeError {
+            code: ErrorCode::Internal,
+            message: "Git continuation unexpectedly requested another decision".into(),
+            context: vec![],
+        });
+    };
+    match stage {
+        tome::repo_sync::GitConsentStage::PrePull => {
+            *state
+                .ready_session
+                .lock()
+                .expect("SyncState mutex poisoned") = Some(session);
+            start_sync_with_runtime(app, state).await
+        }
+        tome::repo_sync::GitConsentStage::PostSync => {
+            drop(session);
+            Ok(DesktopSyncOutcome::Completed(
+                completed_outcome.expect("post-sync consent stores its completed outcome"),
+            ))
+        }
     }
 }
 

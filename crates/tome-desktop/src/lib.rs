@@ -61,6 +61,7 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             // SyncOutcomeWire and adds retry_sync_from + retry_failed_items
             // for the terminal-state retry affordances.
             commands::start_sync,
+            commands::respond_sync_git_consent,
             commands::cancel_sync,
             commands::retry_sync_from,
             commands::retry_failed_items,
@@ -81,6 +82,9 @@ pub fn make_builder() -> Builder<tauri::Wry> {
             watcher::LockfileChanged,
             watcher::LibraryChanged,
             watcher::MachinePrefsChanged,
+            watcher::PoolPolicyChanged,
+            watcher::ProfilesChanged,
+            watcher::LocalSettingsChanged,
             // Phase 26 plan 26-07 (NF-03). The native macOS menu bar
             // is gated `#[cfg(target_os = "macos")]` inside `menu.rs`,
             // but the `MenuAction` enum stays compiled everywhere so

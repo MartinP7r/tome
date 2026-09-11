@@ -12,7 +12,7 @@
 //!    size").
 
 use anyhow::{Context, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -26,7 +26,8 @@ pub struct SkillFrontmatter {
     pub license: Option<String>,
     pub compatibility: Option<String>,
     pub metadata: Option<BTreeMap<String, serde_yaml::Value>>,
-    pub allowed_tools: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_allowed_tools")]
+    pub allowed_tools: Option<Vec<String>>,
     // Claude Code extensions
     pub user_invocable: Option<bool>,
     pub argument_hint: Option<String>,
@@ -35,6 +36,25 @@ pub struct SkillFrontmatter {
     // Capture unknown/non-standard fields
     #[serde(flatten)]
     pub extra: BTreeMap<String, serde_yaml::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum AllowedTools {
+    Scalar(String),
+    Sequence(Vec<String>),
+}
+
+fn deserialize_allowed_tools<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<AllowedTools>::deserialize(deserializer).map(|value| {
+        value.map(|tools| match tools {
+            AllowedTools::Scalar(tool) => vec![tool],
+            AllowedTools::Sequence(tools) => tools,
+        })
+    })
 }
 
 /// Extract frontmatter YAML block from SKILL.md content.
@@ -119,7 +139,7 @@ pub struct SkillFrontmatterView {
     pub description: Option<String>,
     pub license: Option<String>,
     pub compatibility: Option<String>,
-    pub allowed_tools: Option<String>,
+    pub allowed_tools: Option<Vec<String>>,
     /// Claude Code extension — `user-invocable: false` flag.
     pub user_invocable: Option<bool>,
     pub argument_hint: Option<String>,
@@ -349,6 +369,27 @@ mod tests {
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.user_invocable, Some(false));
         assert_eq!(fm.context.as_deref(), Some("fork"));
+    }
+
+    #[test]
+    fn parse_allowed_tools_as_sequence() {
+        let content = "---\nallowed-tools:\n  - Read\n  - Write\n  - Bash(git:*)\n---\nbody";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(
+            fm.allowed_tools,
+            Some(vec![
+                "Read".to_string(),
+                "Write".to_string(),
+                "Bash(git:*)".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn parse_allowed_tools_as_scalar() {
+        let content = "---\nallowed-tools: Read, Write\n---\nbody";
+        let (fm, _) = parse(content).unwrap();
+        assert_eq!(fm.allowed_tools, Some(vec!["Read, Write".to_string()]));
     }
 
     #[test]

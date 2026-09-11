@@ -17,6 +17,9 @@ const listenSpies = {
   lockfileChanged: vi.fn(),
   libraryChanged: vi.fn(),
   machinePrefsChanged: vi.fn(),
+  poolPolicyChanged: vi.fn(),
+  profilesChanged: vi.fn(),
+  localSettingsChanged: vi.fn(),
   menuAction: vi.fn(),
 };
 
@@ -59,6 +62,24 @@ vi.mock("../../bindings", () => ({
         return Promise.resolve(() => undefined);
       },
     },
+    poolPolicyChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.poolPolicyChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    profilesChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.profilesChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
+    localSettingsChanged: {
+      listen: (cb: () => void) => {
+        listenSpies.localSettingsChanged(cb);
+        return Promise.resolve(() => undefined);
+      },
+    },
     menuAction: {
       listen: (cb: () => void) => {
         listenSpies.menuAction(cb);
@@ -85,6 +106,9 @@ beforeEach(() => {
   listenSpies.lockfileChanged.mockReset();
   listenSpies.libraryChanged.mockReset();
   listenSpies.machinePrefsChanged.mockReset();
+  listenSpies.poolPolicyChanged.mockReset();
+  listenSpies.profilesChanged.mockReset();
+  listenSpies.localSettingsChanged.mockReset();
   listenSpies.menuAction.mockReset();
   startSyncSpy.mockReset();
   cancelSyncSpy.mockReset();

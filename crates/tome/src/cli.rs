@@ -105,6 +105,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub machine: Option<PathBuf>,
 
+    /// Path to local profile selection and runtime settings.
+    #[arg(long, global = true)]
+    pub settings: Option<PathBuf>,
+
     /// Disable all interactive prompts — takes the default at every prompt.
     ///
     /// For `tome init`, this also skips the optional git-init-for-backup step
@@ -227,6 +231,9 @@ pub enum Command {
         /// `machine.toml`. Mirrors Cargo's `--frozen` / `--locked`.
         #[arg(long)]
         no_install: bool,
+        /// Override local Git synchronization consent for this invocation only.
+        #[arg(long, value_enum)]
+        git_sync: Option<crate::profiles::GitSyncPolicy>,
     },
 
     /// Show library, directories, last-sync, and health summary
@@ -292,6 +299,12 @@ pub enum Command {
         yes: bool,
     },
 
+    /// Interactively migrate legacy configuration into a named profile.
+    Migrate {
+        #[command(subcommand)]
+        sub: MigrateCommand,
+    },
+
     /// Interactively browse discovered skills
     #[command(after_help = "Examples:\n  tome browse")]
     Browse,
@@ -308,6 +321,11 @@ pub enum Command {
     Remove {
         #[command(subcommand)]
         kind: RemoveKind,
+    },
+    /// Resolve shared pool exclusions and source choices.
+    Pool {
+        #[command(subcommand)]
+        sub: PoolCommand,
     },
 
     /// Reassign a skill to a different directory. Accepts both Owned skills
@@ -385,6 +403,27 @@ pub enum Command {
         #[command(subcommand)]
         sub: BackupCommand,
     },
+    /// Create, list, or select committed machine profiles.
+    Profile {
+        #[command(subcommand)]
+        sub: ProfileCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProfileCommand {
+    /// Create an empty committed machine profile.
+    Create { name: String },
+    /// List committed machine profiles.
+    List,
+    /// Select the profile used by normal commands on this machine.
+    Select { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum MigrateCommand {
+    /// Preview and migrate the legacy portable configuration into a profile.
+    Profiles,
 }
 
 /// Variant of `tome remove` — directory removal vs unowned-skill deletion.
@@ -416,6 +455,25 @@ pub enum RemoveKind {
         #[arg(long, short)]
         yes: bool,
     },
+    /// Remove a pooled skill globally and exclude it from all future imports.
+    Pool {
+        #[arg(value_name = "NAME")]
+        name: String,
+        #[arg(long, short)]
+        yes: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PoolCommand {
+    /// Restore a deliberately removed skill by clearing its shared exclusion.
+    Restore { name: String },
+    /// Persist a source choice for a conflicted skill.
+    AcceptSource { name: String, identity: String },
+    /// Preserve the current pool candidate when conflicting sources are seen.
+    RetainCurrent { name: String, identity: String },
+    /// Exclude a conflicted skill from every profile.
+    Exclude { name: String },
 }
 
 #[derive(Debug, Subcommand)]

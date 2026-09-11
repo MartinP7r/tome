@@ -54,12 +54,15 @@ export function useDoctorReport(): UseDoctorReportResult {
     refetch();
   }, [refetch]);
 
-  // Plan 26-06 event-subscription matrix — manifest + library + lockfile.
-  // machine-prefs NOT subscribed (per-machine disabled state doesn't affect
-  // doctor findings).
+  // Doctor findings use the active effective context, so refresh when a pool
+  // policy, profile, or local selection changes. Machine prefs remain omitted:
+  // per-machine disabled state does not affect the finding shape.
   useTauriEvent(events.manifestChanged, refetch);
   useTauriEvent(events.libraryChanged, refetch);
   useTauriEvent(events.lockfileChanged, refetch);
+  useTauriEvent(events.poolPolicyChanged, refetch);
+  useTauriEvent(events.profilesChanged, refetch);
+  useTauriEvent(events.localSettingsChanged, refetch);
 
   return { report, err, refetch };
 }

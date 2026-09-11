@@ -1636,46 +1636,19 @@ mod tests {
 
     #[test]
     fn status_message_set_by_view_source_and_cleared_by_any_key() {
-        // Lifecycle contract for DetailAction::ViewSource — symmetric to the
-        // CopyPath test above but exercises the `open`/`xdg-open` dispatch
-        // path. We accept any of the three severities because:
-        //   - Success/Warning depends on whether the opener succeeds or
-        //     fails on this host (open/xdg-open presence, path validity,
-        //     display server).
-        //   - Pending is the transient state set BEFORE `.status()` blocks
-        //     (POLISH-01) — in `execute_action` (no redraw closure), the
-        //     `handle_view_source` dispatch overwrites it before returning,
-        //     but the exhaustive arm guards against future refactors that
-        //     might leave the message as Pending.
+        // Lifecycle contract for a ViewSource status message. Opener result
+        // mapping is covered synthetically below; invoking ViewSource here
+        // would run `open`/`xdg-open` and cause an OS side effect during tests.
         let (mut app, _tmp) = make_app(3);
 
-        app.execute_action(DetailAction::ViewSource);
+        app.status_message = Some(StatusMessage::Success("Opened: /tmp/skill".into()));
 
         let msg = app
             .status_message
             .as_ref()
             .cloned()
-            .expect("status_message must be Some after ViewSource action");
-        match msg.severity() {
-            StatusSeverity::Success => assert_eq!(
-                msg.glyph(),
-                '✓',
-                "Success severity must produce ✓ glyph; got: {}",
-                msg.glyph()
-            ),
-            StatusSeverity::Warning => assert_eq!(
-                msg.glyph(),
-                '⚠',
-                "Warning severity must produce ⚠ glyph; got: {}",
-                msg.glyph()
-            ),
-            StatusSeverity::Pending => assert_eq!(
-                msg.glyph(),
-                '⏳',
-                "Pending severity must produce ⏳ glyph; got: {}",
-                msg.glyph()
-            ),
-        }
+            .expect("status_message must be Some before a key is handled");
+        assert_eq!(msg.body(), "Opened: /tmp/skill");
 
         app.handle_key(
             KeyEvent::new(KeyCode::Char('h'), KeyModifiers::NONE),

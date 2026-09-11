@@ -881,6 +881,7 @@ mod tests {
             registry_id: registry_id.map(|s| s.to_string()),
             version: version.map(|s| s.to_string()),
             git_commit_sha: None,
+            observations: Vec::new(),
         }
     }
 
@@ -1061,6 +1062,7 @@ mod tests {
             registry_id: Some("orphan@mp".to_string()),
             version: Some("1.0.0".to_string()),
             git_commit_sha: None,
+            observations: Vec::new(),
         };
         let lockfile = lockfile_with(vec![("orphan", entry)]);
 

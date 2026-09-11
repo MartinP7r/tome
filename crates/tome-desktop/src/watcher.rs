@@ -55,6 +55,18 @@ pub struct LibraryChanged;
 #[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
 pub struct MachinePrefsChanged;
 
+/// Shared pool policy (`tome.toml`) changed.
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+pub struct PoolPolicyChanged;
+
+/// A selected profile file was created, removed, or atomically replaced.
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+pub struct ProfilesChanged;
+
+/// Local profile selection / runtime settings changed.
+#[derive(Clone, Debug, serde::Serialize, specta::Type, tauri_specta::Event)]
+pub struct LocalSettingsChanged;
+
 /// Watcher event kind — the testable enum the FSEvents → Tauri-emit bridge
 /// switches on. The production code path translates each variant to the
 /// corresponding [`tauri_specta::Event::emit`] call; the integration test in
@@ -70,6 +82,9 @@ pub enum WatcherEvent {
     Library,
     /// `machine.toml` was rewritten.
     MachinePrefs,
+    PoolPolicy,
+    Profiles,
+    LocalSettings,
 }
 
 /// Configuration bundle for the watcher — the four watched roots plus the
@@ -82,6 +97,9 @@ pub struct WatcherPaths {
     pub lockfile_path: PathBuf,
     pub library_dir: PathBuf,
     pub machine_path: PathBuf,
+    pub pool_policy_path: PathBuf,
+    pub profiles_dir: PathBuf,
+    pub settings_path: PathBuf,
 }
 
 impl WatcherPaths {
@@ -93,6 +111,9 @@ impl WatcherPaths {
             library_dir: paths.library_dir().to_path_buf(),
             machine_path: tome::default_machine_path()
                 .context("failed to resolve default machine.toml path")?,
+            pool_policy_path: paths.config_path(),
+            profiles_dir: paths.config_dir().join("machines"),
+            settings_path: tome::default_settings_path(),
         })
     }
 }
@@ -126,6 +147,15 @@ pub fn spawn_watcher(app: tauri::AppHandle, paths: tome::TomePaths) -> Result<()
         WatcherEvent::MachinePrefs => {
             let _ = MachinePrefsChanged.emit(&app);
         }
+        WatcherEvent::PoolPolicy => {
+            let _ = PoolPolicyChanged.emit(&app);
+        }
+        WatcherEvent::Profiles => {
+            let _ = ProfilesChanged.emit(&app);
+        }
+        WatcherEvent::LocalSettings => {
+            let _ = LocalSettingsChanged.emit(&app);
+        }
     })
 }
 
@@ -156,6 +186,9 @@ where
         lockfile_path,
         library_dir,
         machine_path,
+        pool_policy_path,
+        profiles_dir,
+        settings_path,
     } = paths;
 
     // FSEvents on macOS reports events with canonicalized paths (e.g.
@@ -180,10 +213,15 @@ where
     let manifest_parent_canon = canon_parent(&manifest_path);
     let lockfile_parent_canon = canon_parent(&lockfile_path);
     let machine_parent_canon = canon_parent(&machine_path);
+    let pool_policy_parent_canon = canon_parent(&pool_policy_path);
+    let settings_parent_canon = canon_parent(&settings_path);
     let library_canon = std::fs::canonicalize(&library_dir).unwrap_or_else(|_| library_dir.clone());
     let manifest_canon = rebuild_file(&manifest_path, &manifest_parent_canon);
     let lockfile_canon = rebuild_file(&lockfile_path, &lockfile_parent_canon);
     let machine_canon = rebuild_file(&machine_path, &machine_parent_canon);
+    let pool_policy_canon = rebuild_file(&pool_policy_path, &pool_policy_parent_canon);
+    let settings_canon = rebuild_file(&settings_path, &settings_parent_canon);
+    let profiles_canon = std::fs::canonicalize(&profiles_dir).unwrap_or(profiles_dir.clone());
 
     let (tx, rx) = std::sync::mpsc::channel();
     let mut debouncer = new_debouncer(
@@ -212,6 +250,12 @@ where
         (lockfile_parent_canon.clone(), RecursiveMode::NonRecursive),
         (library_canon.clone(), RecursiveMode::Recursive),
         (machine_parent_canon.clone(), RecursiveMode::NonRecursive),
+        (
+            pool_policy_parent_canon.clone(),
+            RecursiveMode::NonRecursive,
+        ),
+        (settings_parent_canon.clone(), RecursiveMode::NonRecursive),
+        (profiles_canon.clone(), RecursiveMode::Recursive),
     ];
     for (path, mode) in &watch_targets {
         if path.exists()
@@ -231,6 +275,9 @@ where
             let mut saw_lockfile = false;
             let mut saw_library = false;
             let mut saw_machine = false;
+            let mut saw_pool_policy = false;
+            let mut saw_profiles = false;
+            let mut saw_settings = false;
             for ev in events {
                 for path in &ev.paths {
                     if path == &manifest_canon {
@@ -241,6 +288,15 @@ where
                     }
                     if path == &machine_canon {
                         saw_machine = true;
+                    }
+                    if path == &pool_policy_canon {
+                        saw_pool_policy = true;
+                    }
+                    if path == &settings_canon {
+                        saw_settings = true;
+                    }
+                    if path.starts_with(&profiles_canon) {
+                        saw_profiles = true;
                     }
                     if path.starts_with(&library_canon) {
                         saw_library = true;
@@ -258,6 +314,15 @@ where
             }
             if saw_machine {
                 sink(WatcherEvent::MachinePrefs);
+            }
+            if saw_pool_policy {
+                sink(WatcherEvent::PoolPolicy);
+            }
+            if saw_profiles {
+                sink(WatcherEvent::Profiles);
+            }
+            if saw_settings {
+                sink(WatcherEvent::LocalSettings);
             }
         }
     });

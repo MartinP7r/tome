@@ -130,18 +130,18 @@ fn event_to_sync_progress(event: ProgressEvent) -> SyncProgress {
 }
 
 /// A [`ProgressSink`] that emits [`SyncProgress`] events into the webview.
-pub struct TauriEventSink {
-    app: tauri::AppHandle,
+pub struct TauriEventSink<R: tauri::Runtime = tauri::Wry> {
+    app: tauri::AppHandle<R>,
 }
 
-impl TauriEventSink {
+impl<R: tauri::Runtime> TauriEventSink<R> {
     /// Wrap an `AppHandle` (clone it from the command's `app` argument).
-    pub fn new(app: tauri::AppHandle) -> Self {
+    pub fn new(app: tauri::AppHandle<R>) -> Self {
         Self { app }
     }
 }
 
-impl ProgressSink for TauriEventSink {
+impl<R: tauri::Runtime> ProgressSink for TauriEventSink<R> {
     fn emit(&self, event: ProgressEvent) {
         // Bridge each domain event to a typed SyncProgress via the pure
         // conversion (testable in isolation). The stage is carried directly

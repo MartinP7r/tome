@@ -70,6 +70,16 @@ pub struct SyncOutcomeWire {
     pub partial_failures: Vec<PartialFailureWire>,
 }
 
+/// Terminal response for desktop sync commands. Rust is the sole authority for
+/// whether a run completed or needs a particular Git decision; JavaScript only
+/// renders the payload and forwards the opaque request ID.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "snake_case", tag = "kind", content = "data")]
+pub enum DesktopSyncOutcome {
+    Completed(SyncOutcomeWire),
+    GitConsentRequired(tome::repo_sync::GitConsentRequired),
+}
+
 /// IPC wire-shape mirror of [`tome::PartialFailure`] (Phase 27 plan 27-05).
 ///
 /// Same fields; the `message`/`context` already carry the projected error

@@ -185,6 +185,7 @@ mod tests {
             registry_id: None,
             version: None,
             git_commit_sha: None,
+            observations: Vec::new(),
         }
     }
 
@@ -196,6 +197,7 @@ mod tests {
             registry_id: Some(registry_id.to_string()),
             version: Some("1.0.0".to_string()),
             git_commit_sha: None,
+            observations: Vec::new(),
         }
     }
 

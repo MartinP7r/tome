@@ -103,8 +103,11 @@ pub(crate) mod machine;
 // `tome::list` was lifted in plan 26-02.
 pub mod manifest;
 pub mod marketplace;
+pub(crate) mod migration_profiles;
 pub(crate) mod migration_v010;
 pub(crate) mod paths;
+pub(crate) mod pool;
+pub mod profiles;
 // `progress` is `pub` because its trait + event vocabulary
 // (`ProgressSink`/`ProgressEvent`/`SyncStage`/`CancelToken`) is the domain
 // half of the "structure at the edge" pattern (D-09/D-11): the GUI's
@@ -117,6 +120,8 @@ pub(crate) mod reassign;
 pub(crate) mod reconcile;
 pub(crate) mod relocate;
 pub(crate) mod remove;
+/// Typed shared-pool Git coordination and desktop consent continuations.
+pub mod repo_sync;
 // `skill` is `pub` so `tome-desktop` can call `skill::collect_detail` and
 // consume `SkillDetail` + `SkillFrontmatterView` directly across the crate
 // boundary (Phase 26 plan 26-03 / VIEW-03 / D-05). The CLI/TUI keep using
@@ -143,10 +148,9 @@ pub mod update;
 pub(crate) mod validation;
 pub(crate) mod wizard;
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
-use std::process::Command as GitCommand;
 
 use anyhow::{Context, Result};
 use console::style;
@@ -154,7 +158,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use tracing::{debug, info, info_span, warn};
 
 use cleanup::CleanupResult;
-use cli::{Cli, Command};
+use cli::{Cli, Command, MigrateCommand, PoolCommand, ProfileCommand};
 use config::{Config, DirectoryName, DirectoryType};
 use distribute::DistributeResult;
 use library::ConsolidateResult;
@@ -637,20 +641,151 @@ pub fn run(cli: Cli) -> Result<()> {
         return Ok(());
     }
 
+    if let Command::Profile { sub } = &cli.command {
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        match sub {
+            ProfileCommand::Create { name } => {
+                profiles::create_profile(&config_path, name)?;
+                println!("✓ Created profile '{name}'");
+            }
+            ProfileCommand::List => {
+                for name in profiles::list_profiles(&config_path)? {
+                    println!("{name}");
+                }
+            }
+            ProfileCommand::Select { name } => {
+                let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+                profiles::select_profile(&settings_path, &config_path, name)?;
+                println!("✓ Selected profile '{name}'");
+            }
+        }
+        return Ok(());
+    }
+
+    if let Command::Migrate {
+        sub: MigrateCommand::Profiles,
+    } = &cli.command
+    {
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        migration_profiles::recover(&config_path)?;
+        migration_profiles::require_interactive(cli.no_input, cli.dry_run)?;
+        anyhow::ensure!(
+            cli.machine.is_none(),
+            "tome migrate profiles does not accept --machine; migrate the active legacy machine.toml"
+        );
+        let name: String = dialoguer::Input::new()
+            .with_prompt("New profile name")
+            .interact_text()?;
+        let plan = migration_profiles::plan(&config_path, &machine_path, &settings_path, &name)?;
+        migration_profiles::render_plan_to(&plan, &mut std::io::stderr().lock())?;
+        if migration_profiles::confirm()? {
+            migration_profiles::execute(&plan, None)?;
+        }
+        return Ok(());
+    }
+
+    // A journal is always resolved before normal loading. A legacy installation
+    // is never interpreted as a partial profile layout.
+    let config_path_for_recovery = effective_config
+        .clone()
+        .unwrap_or(config::default_config_path()?);
+    migration_profiles::recover(&config_path_for_recovery)?;
+    let legacy_machine_path = resolve_machine_path(cli.machine.as_deref())?;
+    if cli.machine.is_none()
+        && migration_profiles::legacy_layout(&config_path_for_recovery, &legacy_machine_path)?
+    {
+        anyhow::bail!(
+            "legacy configuration detected. Run `tome migrate profiles` from a terminal to preview and migrate it."
+        );
+    }
+
     // Load per-machine preferences first — they may rewrite directory paths via
     // `[directory_overrides.<name>]` entries, which `Config::load_with_overrides`
     // applies between `expand_tildes()` and `validate()` (PORT-02 / I2 invariant).
-    let machine_path = resolve_machine_path(cli.machine.as_deref())?;
-    let machine_prefs = machine::load(&machine_path)?;
+    if cli.machine.is_none()
+        && let Command::Sync {
+            force,
+            no_triage,
+            no_install,
+            git_sync,
+        } = &cli.command
+    {
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        // Only local settings and the one-run override are read before a
+        // consented pull. Pool policy and the selected profile must reflect
+        // the post-pull checkout and are loaded exactly once below.
+        let policy = git_sync.unwrap_or(profiles::load_settings(&settings_path)?.git_sync);
+        let config_dir = config_path
+            .parent()
+            .context("config path has no parent directory")?;
+        let repo_session =
+            repo_sync::RepoSync::begin(config_dir, policy, cli.no_input, cli.dry_run)?;
+        let context = profiles::load_effective_context(&config_path, &settings_path)?;
+        let tome_home = resolve_tome_home(cli.tome_home.as_deref(), cli.config.as_deref())?;
+        let paths = TomePaths::new(tome_home, context.config.library_dir.clone())?;
+        let log = cli.log_level();
+        let result = cmd_sync(
+            *force,
+            *no_triage,
+            *no_install,
+            &context.config,
+            &paths,
+            &resolve_machine_path(cli.machine.as_deref())?,
+            &context.machine_prefs,
+            cli.dry_run,
+            cli.no_input,
+            log.is_verbose(),
+            log.is_quiet(),
+        );
+        if result.is_ok() && !cli.dry_run {
+            repo_session.publish(&paths, policy, cli.no_input)?;
+        }
+        drop(repo_session);
+        return result;
+    }
 
-    let config = if matches!(&cli.command, Command::Add { .. }) {
-        Config::load_or_default(effective_config.as_deref())?
+    let machine_path = resolve_machine_path(cli.machine.as_deref())?;
+    let (config, machine_prefs, selected_profile) = if matches!(
+        &cli.command,
+        Command::Add { .. } | Command::Config { .. } | Command::Lint { path: Some(_), .. }
+    ) {
+        (
+            Config::load_or_default(effective_config.as_deref())?,
+            machine::load(&machine_path)?,
+            None,
+        )
+    } else if cli.machine.is_some() {
+        let machine_prefs = machine::load(&machine_path)?;
+        if !machine_prefs.directory_overrides.is_empty() {
+            eprintln!(
+                "warning: directory_overrides is deprecated; migrate it into a named profile"
+            );
+        }
+        (
+            Config::load_or_default_with_overrides(
+                effective_config.as_deref(),
+                &machine_path,
+                &machine_prefs,
+            )?,
+            machine_prefs,
+            None,
+        )
     } else {
-        Config::load_or_default_with_overrides(
-            effective_config.as_deref(),
-            &machine_path,
-            &machine_prefs,
-        )?
+        let config_path = effective_config
+            .clone()
+            .unwrap_or(config::default_config_path()?);
+        let settings_path = cli.settings.clone().unwrap_or_else(default_settings_path);
+        let context = profiles::load_effective_context(&config_path, &settings_path)?;
+        (context.config, context.machine_prefs, Some(context.profile))
     };
     // Note: both load paths already run validate() internally — no separate
     // config.validate()? call here.
@@ -695,6 +830,7 @@ pub fn run(cli: Cli) -> Result<()> {
             force,
             no_triage,
             no_install,
+            ..
         } => {
             let log = cli.log_level();
             cmd_sync(
@@ -711,7 +847,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 log.is_quiet(),
             )
         }
-        Command::Status { json } => cmd_status(&config, &paths, json),
+        Command::Status { json } => cmd_status(&config, &paths, selected_profile.as_ref(), json),
         Command::Doctor { json } => cmd_doctor(&config, &paths, cli.dry_run, cli.no_input, json),
         Command::Lint { path, format } => cmd_lint(path, format, &paths),
         Command::Browse => {
@@ -736,6 +872,7 @@ pub fn run(cli: Cli) -> Result<()> {
             cli.dry_run,
             cli.no_input,
         ),
+        Command::Pool { sub } => cmd_pool(sub, &paths),
         Command::Reassign { skill, to, force } => {
             cmd_reassign(skill, to, force, &config, &paths, cli.dry_run)
         }
@@ -745,6 +882,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::MigrateLibrary { dry_run, yes } => {
             cmd_migrate_library(&paths, dry_run || cli.dry_run, yes, cli.no_input)
         }
+        Command::Migrate { .. } => unreachable_early_return("Command::Migrate"),
         Command::Eject => cmd_eject(&config, &paths, cli.dry_run),
         Command::Relocate { new_path } => cmd_relocate(
             new_path,
@@ -757,7 +895,15 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::List { json } => cmd_list(&config, cli.log_level().is_quiet(), json),
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
+        Command::Profile { .. } => unreachable_early_return("Command::Profile"),
     }
+}
+
+/// Default local-only settings path used to select the active profile.
+pub fn default_settings_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".config/tome/settings.toml")
 }
 
 /// Guard for command variants whose handling is dispatched via an early
@@ -862,8 +1008,13 @@ pub(crate) fn cmd_sync(
 }
 
 /// `tome status` — read-only summary of library, directories, and health.
-pub(crate) fn cmd_status(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
-    status::show(config, paths, json)
+pub(crate) fn cmd_status(
+    config: &Config,
+    paths: &TomePaths,
+    profile: Option<&DirectoryName>,
+    json: bool,
+) -> Result<()> {
+    status::show_with_profile(config, paths, profile, json)
 }
 
 /// `tome doctor` — diagnose and (optionally) repair library/symlink issues.
@@ -949,7 +1100,72 @@ pub(crate) fn cmd_remove(
         cli::RemoveKind::Skill { name, yes } => {
             cmd_remove_skill(name, yes, &config, paths, cli_machine, dry_run, no_input)
         }
+        cli::RemoveKind::Pool { name, yes } => cmd_remove_pool(name, yes, paths, dry_run),
     }
+}
+
+fn cmd_remove_pool(name: String, yes: bool, paths: &TomePaths, dry_run: bool) -> Result<()> {
+    let skill = discover::SkillName::new(name)?;
+    anyhow::ensure!(yes || dry_run, "tome remove pool requires --yes");
+    if dry_run {
+        println!("Dry run — would exclude and remove pool skill '{skill}'.");
+        return Ok(());
+    }
+    // The exclusion is the durable first write. A later interruption cannot
+    // permit another profile to re-import the removed candidate.
+    let mut settings = profiles::load_pool_settings(&paths.config_path())?;
+    settings.exclude.insert(skill.clone());
+    profiles::save_pool_settings(&paths.config_path(), &settings)?;
+    let marker = pool::removal_marker(paths.config_dir(), &skill);
+    std::fs::write(&marker, skill.as_str())
+        .with_context(|| format!("failed to write pool removal marker {}", marker.display()))?;
+
+    let library_path = paths.library_dir().join(skill.as_str());
+    if library_path.is_dir() {
+        std::fs::remove_dir_all(&library_path)
+            .with_context(|| format!("failed to remove {}", library_path.display()))?;
+    } else if library_path.is_symlink() {
+        std::fs::remove_file(&library_path)
+            .with_context(|| format!("failed to remove {}", library_path.display()))?;
+    }
+    let mut manifest = manifest::load(paths.config_dir())?;
+    manifest.remove(skill.as_str());
+    manifest::save(&manifest, paths.config_dir())?;
+    if let Some(mut catalog) = lockfile::load(paths.config_dir())? {
+        catalog.skills.remove(&skill);
+        lockfile::save(&catalog, paths.config_dir())?;
+    }
+    std::fs::remove_file(&marker)
+        .with_context(|| format!("failed to complete pool removal {}", marker.display()))?;
+    println!("✓ Removed pool skill '{skill}' and added a shared exclusion.");
+    Ok(())
+}
+
+fn cmd_pool(sub: PoolCommand, paths: &TomePaths) -> Result<()> {
+    let mut settings = profiles::load_pool_settings(&paths.config_path())?;
+    match sub {
+        PoolCommand::Restore { name } => {
+            let skill = discover::SkillName::new(name)?;
+            settings.exclude.remove(&skill);
+            let marker = pool::removal_marker(paths.config_dir(), &skill);
+            if marker.exists() {
+                anyhow::bail!("pool removal for '{skill}' needs recovery before restore");
+            }
+            println!("✓ Restored pool import eligibility for '{skill}'.");
+        }
+        PoolCommand::AcceptSource { name, identity }
+        | PoolCommand::RetainCurrent { name, identity } => {
+            settings
+                .source_pins
+                .insert(discover::SkillName::new(name)?, identity);
+            println!("✓ Saved shared source pin.");
+        }
+        PoolCommand::Exclude { name } => {
+            settings.exclude.insert(discover::SkillName::new(name)?);
+            println!("✓ Saved shared pool exclusion.");
+        }
+    }
+    profiles::save_pool_settings(&paths.config_path(), &settings)
 }
 
 /// `tome remove dir <name>` — remove a directory entry from `tome.toml` and
@@ -1964,25 +2180,15 @@ pub fn sync(
     // it after the reconcile block (below) populates it.
     let mut reconcile_install_failures: Vec<marketplace::InstallFailure> = Vec::new();
 
+    // A prior exclusion-first removal may have been interrupted after its
+    // durable policy write. Recover before discovery so excluded candidates
+    // can never be re-imported through a partial cleanup window.
+    if !dry_run {
+        pool::recover_pending_removals(paths)?;
+    }
+
     // Cache git state to avoid repeated subprocess calls
     let has_backup_repo = backup::has_repo(paths.tome_home());
-    let has_remote = has_backup_repo && backup::has_remote(paths.tome_home());
-
-    // Pull from remote before anything else (if configured)
-    if !dry_run && has_remote {
-        match backup::pull(paths.tome_home()) {
-            Ok(true) => {
-                if !quiet {
-                    println!(
-                        "  {} Pulled changes from remote",
-                        console::style("↓").cyan()
-                    );
-                }
-            }
-            Ok(false) => {} // up to date
-            Err(e) => warn!("remote pull failed: {e}"),
-        }
-    }
 
     // Pre-sync auto-snapshot if configured
     if !dry_run && config.backup.enabled && config.backup.auto_snapshot && has_backup_repo {
@@ -2104,7 +2310,7 @@ pub fn sync(
     if cancel.is_cancelled() {
         anyhow::bail!("sync cancelled");
     }
-    let skills = {
+    let (skills, pool_catalog, shared_pool_mode) = {
         let _span = info_span!("discover").entered();
         // D-09/D-11: the Discover stage drives the "Discovering skills..."
         // spinner. Git resolution below emits GitCloneProgress events that
@@ -2123,7 +2329,7 @@ pub fn sync(
 
         // 1. Discover
         let mut warnings = Vec::new();
-        let mut discovered = discover::discover_all(config, &resolved, &mut warnings)?;
+        let mut discovered = discover::discover_all_candidates(config, &resolved, &mut warnings)?;
 
         // D-16: join in the manifest's per-skill `synced_at` timestamp.
         // Extracted into `join_synced_at_from_manifest` so the join logic is
@@ -2142,15 +2348,65 @@ pub fn sync(
             warn!("{}", w);
         }
 
-        discovered
-    };
-
-    if skills.is_empty() {
-        if !quiet {
-            println!("No skills found. Run `tome init` to configure sources.");
+        let shared_pool_mode = std::fs::read_to_string(paths.config_path())
+            .map(|text| !text.contains("[directories"))
+            .unwrap_or(false);
+        if !shared_pool_mode {
+            discovered = discover::discover_all(config, &resolved, &mut warnings)?;
         }
-        return Ok(());
-    }
+        let directory_types = config
+            .directories()
+            .iter()
+            .map(|(name, directory)| (name.clone(), directory.directory_type.clone()))
+            .collect();
+        let candidates = pool::collect(discovered, &directory_types, "active")?;
+        let settings = if paths.config_path().is_file() {
+            profiles::load_pool_settings(&paths.config_path())?
+        } else {
+            profiles::PoolSettings::default()
+        };
+        let existing = if shared_pool_mode {
+            old_lockfile
+                .as_ref()
+                .map(|lockfile| &lockfile.skills)
+                .cloned()
+                .unwrap_or_default()
+        } else {
+            BTreeMap::new()
+        };
+        let (selected, entries, conflicts) = pool::reconcile(
+            &existing,
+            &candidates,
+            &settings.source_pins,
+            &settings.exclude,
+            "active",
+        );
+        if !conflicts.is_empty() {
+            for conflict in conflicts {
+                eprintln!(
+                    "conflict: skill '{}' has different content:",
+                    conflict.skill
+                );
+                for candidate in conflict.candidates {
+                    eprintln!(
+                        "  identity={} hash={} location={}",
+                        candidate.identity,
+                        candidate.hash,
+                        candidate.location.display()
+                    );
+                }
+            }
+            anyhow::bail!("pool reconciliation halted: resolve the conflicting source explicitly");
+        }
+        (
+            selected,
+            lockfile::Lockfile {
+                version: 2,
+                skills: entries,
+            },
+            shared_pool_mode,
+        )
+    };
 
     debug!("Found {} skills", skills.len());
 
@@ -2188,7 +2444,11 @@ pub fn sync(
     };
 
     // 3. Diff lockfile and triage changes (pre-cleanup snapshot for diffing)
-    let pre_cleanup_lockfile = lockfile::generate(&manifest, &skills);
+    let pre_cleanup_lockfile = if shared_pool_mode {
+        pool_catalog.clone()
+    } else {
+        lockfile::generate(&manifest, &skills)
+    };
     if !no_triage && !quiet {
         if let Some(ref old) = old_lockfile {
             let d = update::diff(old, &pre_cleanup_lockfile);
@@ -2214,9 +2474,6 @@ pub fn sync(
         }
     }
 
-    let discovered_names: HashSet<String> =
-        skills.iter().map(|s| s.name.as_str().to_string()).collect();
-
     // Warn about disabled_directories that don't match any configured directory
     if !quiet {
         warn_unknown_disabled_directories(&machine_prefs, config);
@@ -2231,18 +2488,30 @@ pub fn sync(
     //    by the single `cleanup` step span at the end of the pipeline; the
     //    library-cleanup portion happens outside of any step span (small,
     //    fast, and naming-collision-free under the OBS-03 grep contract).
-    let cleanup_result = cleanup::cleanup_library(
-        paths.library_dir(),
-        &discovered_names,
-        &mut manifest,
-        config,
-        dry_run,
-        quiet,
-        no_input,
-    )?;
+    let cleanup_result = if shared_pool_mode {
+        cleanup::cleanup_pool_library()
+    } else {
+        let discovered_names = skills
+            .iter()
+            .map(|skill| skill.name.as_str().to_string())
+            .collect();
+        cleanup::cleanup_library(
+            paths.library_dir(),
+            &discovered_names,
+            &mut manifest,
+            config,
+            dry_run,
+            quiet,
+            no_input,
+        )?
+    };
 
     // Regenerate lockfile after cleanup so it reflects removals
-    let new_lockfile = lockfile::generate(&manifest, &skills);
+    let new_lockfile = if shared_pool_mode {
+        pool_catalog
+    } else {
+        lockfile::generate(&manifest, &skills)
+    };
 
     // Stage boundary: cancellation checked before distribute begins (D-12).
     if cancel.is_cancelled() {
@@ -2440,30 +2709,6 @@ pub fn sync(
                 "{} issue(s) detected after sync — run `tome doctor` for details",
                 doctor_report.total_issues()
             );
-        }
-    }
-
-    // Offer git commit if tome home is a git repo with changes
-    let committed = if !dry_run && !quiet {
-        offer_git_commit(
-            paths.tome_home(),
-            report.consolidate.created,
-            report.consolidate.updated,
-            report.cleanup.removed_from_library,
-        )?
-    } else {
-        false
-    };
-
-    // Push to remote after commit (only if something was committed)
-    if committed && has_remote {
-        match backup::push(paths.tome_home()) {
-            Ok(()) => {
-                if !quiet {
-                    println!("  {} Pushed to remote", console::style("↑").cyan());
-                }
-            }
-            Err(e) => warn!("remote push failed: {e}"),
         }
     }
 
@@ -2927,91 +3172,7 @@ fn generate_tome_home_gitignore(tome_home: &Path) -> Result<()> {
     Ok(())
 }
 
-/// If tome home is a git repo with uncommitted changes, prompt the user to commit.
-///
-/// Returns `true` if a commit was created, `false` otherwise.
-fn offer_git_commit(
-    tome_home: &Path,
-    created: usize,
-    updated: usize,
-    removed: usize,
-) -> Result<bool> {
-    if !tome_home.join(".git").exists() || !std::io::stdin().is_terminal() {
-        return Ok(false);
-    }
-
-    let output = match GitCommand::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(tome_home)
-        .output()
-    {
-        Ok(o) => o,
-        Err(e) => {
-            eprintln!("warning: could not run git status: {e}");
-            return Ok(false);
-        }
-    };
-
-    if !output.status.success() {
-        eprintln!(
-            "warning: git status returned non-zero exit code {:?}",
-            output.status.code()
-        );
-        return Ok(false);
-    }
-    if output.stdout.is_empty() {
-        return Ok(false);
-    }
-
-    let msg = sync_commit_message(created, updated, removed);
-
-    let confirm = dialoguer::Confirm::new()
-        .with_prompt(format!("Commit changes? ({})", msg))
-        .default(true)
-        .interact_opt()?;
-
-    if confirm != Some(true) {
-        return Ok(false);
-    }
-
-    // Stage all tracked files — .gitignore handles exclusions.
-    // The repo is at tome_home (~/.tome/) and covers skills, config, and lockfile.
-    let add_output = GitCommand::new("git")
-        .args(["add", "-A"])
-        .current_dir(tome_home)
-        .output()?;
-    if !add_output.status.success() {
-        eprintln!(
-            "warning: git add failed (exit code {:?})",
-            add_output.status.code()
-        );
-        let stderr = String::from_utf8_lossy(&add_output.stderr);
-        if !stderr.trim().is_empty() {
-            eprintln!("  git said: {}", stderr.trim());
-        }
-        return Ok(false);
-    }
-
-    let commit_output = GitCommand::new("git")
-        .args(["commit", "-m", &msg])
-        .current_dir(tome_home)
-        .output()?;
-    if !commit_output.status.success() {
-        eprintln!(
-            "warning: git commit failed (exit code {:?})",
-            commit_output.status.code()
-        );
-        let stderr = String::from_utf8_lossy(&commit_output.stderr);
-        if !stderr.trim().is_empty() {
-            eprintln!("  git said: {}", stderr.trim());
-        }
-        return Ok(false);
-    }
-
-    Ok(true)
-}
-
-/// Build a commit message summarizing sync changes.
+#[cfg(test)]
 fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String {
     let mut parts = Vec::new();
     if created > 0 {
@@ -3024,9 +3185,10 @@ fn sync_commit_message(created: usize, updated: usize, removed: usize) -> String
         parts.push(format!("{removed} removed"));
     }
     if parts.is_empty() {
-        return "tome sync".to_string();
+        "tome sync".to_string()
+    } else {
+        format!("tome sync: {}", parts.join(", "))
     }
-    format!("tome sync: {}", parts.join(", "))
 }
 
 /// Print shell completions to stdout.

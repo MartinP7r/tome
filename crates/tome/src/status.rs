@@ -5,7 +5,7 @@ use console::style;
 use std::path::{Path, PathBuf};
 use tabled::settings::{Modify, Style, object::Rows};
 
-use crate::config::Config;
+use crate::config::{Config, DirectoryName};
 use crate::lockfile;
 use crate::machine;
 use crate::manifest;
@@ -151,6 +151,54 @@ pub struct MachinePrefsSummary {
     pub disabled_directory_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProfileState {
+    Selected { name: String },
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+pub struct GitChangeSummary {
+    pub total: usize,
+    pub added: usize,
+    pub modified: usize,
+    pub deleted: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UpstreamState {
+    Available {
+        ahead: usize,
+        behind: usize,
+        diverged: bool,
+    },
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[cfg_attr(feature = "bindings", derive(specta::Type))]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum GitHealth {
+    Available {
+        clean: bool,
+        staged: GitChangeSummary,
+        unstaged: GitChangeSummary,
+        upstream: UpstreamState,
+        remote_available: bool,
+        detached: bool,
+        operation_in_progress: Option<String>,
+        latest_commit_age_seconds: Option<u64>,
+    },
+    Unavailable {
+        reason: String,
+    },
+}
+
 /// Status of a single configured directory.
 ///
 /// **JSON shape change (v0.11+):** `role` is now the typed
@@ -216,12 +264,22 @@ pub struct StatusReport {
     pub machine_prefs_summary: MachinePrefsSummary,
     /// Number of health issues, or an error message.
     pub health: CountOrError,
+    pub profile: ProfileState,
+    pub git: GitHealth,
 }
 
 // -- Data gathering (pure computation, no I/O) --
 
 /// Gather status data without producing any output.
 pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
+    gather_with_profile(config, paths, None)
+}
+
+pub(crate) fn gather_with_profile(
+    config: &Config,
+    paths: &TomePaths,
+    profile: Option<&DirectoryName>,
+) -> Result<StatusReport> {
     let configured = paths.library_dir().is_dir() || !config.directories.is_empty();
 
     // Git directory paths are URLs. Reuse the clone cache created by sync without
@@ -316,6 +374,54 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         },
     };
 
+    let profile = profile.map_or(ProfileState::Unavailable, |name| ProfileState::Selected {
+        name: name.as_str().to_string(),
+    });
+    let git = match crate::repo_sync::inspect_status(paths.config_dir()) {
+        Ok(Some(snapshot)) => {
+            let staged = GitChangeSummary {
+                total: snapshot.staged.total,
+                added: snapshot.staged.added,
+                modified: snapshot.staged.modified,
+                deleted: snapshot.staged.deleted,
+            };
+            let unstaged = GitChangeSummary {
+                total: snapshot.unstaged.total,
+                added: snapshot.unstaged.added,
+                modified: snapshot.unstaged.modified,
+                deleted: snapshot.unstaged.deleted,
+            };
+            let upstream = if snapshot.upstream_available {
+                UpstreamState::Available {
+                    ahead: snapshot.ahead,
+                    behind: snapshot.behind,
+                    diverged: snapshot.ahead > 0 && snapshot.behind > 0,
+                }
+            } else {
+                UpstreamState::Unavailable
+            };
+            GitHealth::Available {
+                clean: staged.total == 0
+                    && unstaged.total == 0
+                    && !snapshot.unmerged
+                    && snapshot.operation_in_progress.is_none(),
+                staged,
+                unstaged,
+                upstream,
+                remote_available: snapshot.remote_available,
+                detached: snapshot.detached,
+                operation_in_progress: snapshot.operation_in_progress,
+                latest_commit_age_seconds: snapshot.latest_commit_age_seconds,
+            }
+        }
+        Ok(None) => GitHealth::Unavailable {
+            reason: "not a Git repository".to_string(),
+        },
+        Err(error) => GitHealth::Unavailable {
+            reason: error.to_string(),
+        },
+    };
+
     Ok(StatusReport {
         configured,
         tome_home: paths.tome_home().to_path_buf(),
@@ -327,6 +433,8 @@ pub fn gather(config: &Config, paths: &TomePaths) -> Result<StatusReport> {
         lockfile,
         machine_prefs_summary,
         health: health.into(),
+        profile,
+        git,
     })
 }
 
@@ -383,7 +491,16 @@ fn format_unowned_section(unowned: &[crate::summary::SkillSummary]) -> Option<St
 
 /// Display the current status of the tome system.
 pub fn show(config: &Config, paths: &TomePaths, json: bool) -> Result<()> {
-    let report = gather(config, paths)?;
+    show_with_profile(config, paths, None, json)
+}
+
+pub(crate) fn show_with_profile(
+    config: &Config,
+    paths: &TomePaths,
+    profile: Option<&DirectoryName>,
+    json: bool,
+) -> Result<()> {
+    let report = gather_with_profile(config, paths, profile)?;
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -397,6 +514,74 @@ fn render_status(report: &StatusReport) {
         println!("Not configured yet. Run `tome init` to get started.");
         return;
     }
+
+    match &report.profile {
+        ProfileState::Selected { name } => println!("{} {name}", style("Profile:").bold()),
+        ProfileState::Unavailable => println!("{} unavailable", style("Profile:").bold()),
+    }
+    match &report.git {
+        GitHealth::Available {
+            clean,
+            staged,
+            unstaged,
+            upstream,
+            remote_available,
+            detached,
+            operation_in_progress,
+            latest_commit_age_seconds,
+        } => {
+            let state = if *clean {
+                "clean".to_string()
+            } else {
+                format!(
+                    "dirty ({} staged, {} unstaged)",
+                    staged.total, unstaged.total
+                )
+            };
+            println!("{} {}", style("Git:").bold(), style(state).yellow());
+            println!(
+                "  Changes: staged {} ({} added, {} modified, {} deleted); unstaged {} ({} added, {} modified, {} deleted)",
+                staged.total,
+                staged.added,
+                staged.modified,
+                staged.deleted,
+                unstaged.total,
+                unstaged.added,
+                unstaged.modified,
+                unstaged.deleted,
+            );
+            let upstream = match upstream {
+                UpstreamState::Available {
+                    ahead,
+                    behind,
+                    diverged,
+                } => format!("available (ahead {ahead}, behind {behind}, diverged {diverged})"),
+                UpstreamState::Unavailable => "unavailable".to_string(),
+            };
+            println!(
+                "  Remote: {} | Upstream: {upstream}",
+                if *remote_available {
+                    "available"
+                } else {
+                    "unavailable"
+                }
+            );
+            println!(
+                "  Branch: {} | Operation: {} | Latest commit: {}",
+                if *detached { "detached" } else { "attached" },
+                operation_in_progress.as_deref().unwrap_or("none"),
+                latest_commit_age_seconds
+                    .map(|age| format!("{age}s ago"))
+                    .unwrap_or_else(|| "unavailable".to_string()),
+            );
+        }
+        GitHealth::Unavailable { reason } => println!(
+            "{} {}",
+            style("Git:").bold(),
+            style(format!("unavailable ({reason})")).yellow()
+        ),
+    }
+    println!();
 
     // Library
     println!(
@@ -1216,6 +1401,10 @@ mod tests {
                 count: Some(0),
                 error: None,
             },
+            profile: ProfileState::Unavailable,
+            git: GitHealth::Unavailable {
+                reason: "not a Git repository".to_string(),
+            },
         };
         let json = serde_json::to_string(&report).unwrap();
         assert!(
@@ -1260,6 +1449,10 @@ mod tests {
             health: CountOrError {
                 count: Some(0),
                 error: None,
+            },
+            profile: ProfileState::Unavailable,
+            git: GitHealth::Unavailable {
+                reason: "not a Git repository".to_string(),
             },
         };
         let value = serde_json::to_value(&report).unwrap();
@@ -1384,6 +1577,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile {
@@ -1431,6 +1625,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile {
@@ -1472,6 +1667,7 @@ mod tests {
                     registry_id: None,
                     version: None,
                     git_commit_sha: None,
+                    observations: Vec::new(),
                 },
             );
         }

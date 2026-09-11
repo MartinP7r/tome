@@ -263,6 +263,7 @@ mod tests {
             registry_id: None,
             version: None,
             git_commit_sha: None,
+            observations: Vec::new(),
         }
     }
 
@@ -280,6 +281,7 @@ mod tests {
             registry_id: Some(registry.to_string()),
             version: Some(version.to_string()),
             git_commit_sha: Some(sha.to_string()),
+            observations: Vec::new(),
         }
     }
 
@@ -387,6 +389,7 @@ mod tests {
             registry_id: None,
             version: None,
             git_commit_sha: None,
+            observations: Vec::new(),
         };
         let old = lockfile_with(vec![("gone", removed_entry)]);
         let new = lockfile_with(vec![]);

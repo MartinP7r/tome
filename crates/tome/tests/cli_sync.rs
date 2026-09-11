@@ -250,6 +250,7 @@ role = "target"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     tome()
         .args(["--config", config_path.to_str().unwrap(), "sync"])
@@ -291,6 +292,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     // First sync — both skills should appear in library
     tome()
@@ -341,6 +343,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     // Initial sync
     tome()
@@ -389,6 +392,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     // First sync
     tome()
@@ -457,6 +461,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     // Sync should migrate the symlink to a real directory
     tome()
@@ -497,6 +502,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     // Without a TTY, the git commit prompt should be silently skipped
     tome()
@@ -544,6 +550,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     tome()
         .args([
@@ -594,6 +601,7 @@ role = "source"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     tome()
         .args(["--config", config_path.to_str().unwrap(), "--quiet", "sync"])
@@ -795,6 +803,7 @@ fn sync_respects_machine_disabled() {
     // Create machine.toml that disables "drop-skill"
     let machine_path = tmp.path().join("machine.toml");
     std::fs::write(&machine_path, "disabled = [\"drop-skill\"]\n").unwrap();
+    restore_legacy_fixture(&config);
 
     // Re-sync with --machine — disabled skill's symlink should be removed
     tome()
@@ -856,6 +865,7 @@ fn sync_triage_disable_removes_symlink() {
     let machine_path = tmp.path().join("machine.toml");
     std::fs::write(&machine_path, "disabled = [\"disabled-skill\"]\n").unwrap();
     let machine_str = machine_path.to_str().unwrap();
+    restore_legacy_fixture(&config);
 
     // Re-run update with --machine — should clean up disabled skill's symlink
     tome()
@@ -906,6 +916,7 @@ fn sync_respects_machine_disabled_targets() {
         "disabled_directories = [\"test-target\", \"nonexistent-target\"]\n",
     )
     .unwrap();
+    restore_legacy_fixture(&config);
 
     tome()
         .args([
@@ -973,6 +984,7 @@ role = "target"
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     tome()
         .args(["--config", config_path.to_str().unwrap(), "sync"])
@@ -1015,6 +1027,7 @@ fn sync_warns_unknown_disabled_targets() {
         "disabled_directories = [\"nonexistent-target\"]\n",
     )
     .unwrap();
+    restore_legacy_fixture(&config);
 
     tome()
         .args([
@@ -1428,6 +1441,7 @@ fn edge_config_library_dir_is_file() {
         ),
     )
     .unwrap();
+    migrate_ordinary_fixture(&config_path);
 
     let output = tome()
         .args(["--config", config_path.to_str().unwrap(), "sync"])

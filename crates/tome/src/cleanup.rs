@@ -328,6 +328,7 @@ pub(crate) fn render_distribution_cleanup_failures(
 /// When stdin is a TTY and `quiet` is false, prompts the user before deleting
 /// Case 2 entries. Case 1 transitions are silent (info-level eprintln) — no
 /// confirmation needed because library content is preserved.
+#[allow(dead_code)] // retained for direct legacy cleanup callers and unit coverage
 pub fn cleanup_library(
     library_dir: &Path,
     discovered_names: &HashSet<String>,
@@ -357,10 +358,9 @@ pub fn cleanup_library(
         .keys()
         .filter(|name| !discovered_names.contains(name.as_str()))
         .filter(|name| {
-            // Skip already-Unowned entries — they're preserved by definition.
             manifest
                 .get(name.as_str())
-                .map(|e| e.source_name().is_some())
+                .map(|entry| entry.source_name().is_some())
                 .unwrap_or(false)
         })
         .cloned()
@@ -515,6 +515,13 @@ pub fn cleanup_library(
     }
 
     Ok(result)
+}
+
+/// Shared-pool cleanup deliberately does not infer deletion from discovery.
+/// Explicit exclusion-first pool removal is the only operation allowed to
+/// delete accumulated content.
+pub(crate) fn cleanup_pool_library() -> CleanupResult {
+    CleanupResult::default()
 }
 
 /// Remove stale symlinks from a target directory.

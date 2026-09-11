@@ -53,6 +53,7 @@ fn doctor_without_config_shows_init_prompt() {
         format!("library_dir = \"{}\"", nonexistent_library.display()),
     )
     .unwrap();
+    write_test_profile(tmp.path(), "");
 
     tome()
         .args([

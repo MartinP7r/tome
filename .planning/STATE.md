@@ -2,16 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: tome Desktop (Tauri GUI)
-status: executing
-stopped_at: Phase 27 planned (7 plans, 5 waves) — verification passed
-last_updated: "2026-06-30T09:19:54.403Z"
-last_activity: 2026-06-30 -- Completed quick task 260630-pgl
+current_phase: 28
+current_phase_name: configuration-ui-beta-cut
+status: planning
+stopped_at: Phase 27.1 verified; Phase 28 requires re-planning
+last_updated: "2026-08-22T17:32:21Z"
+last_activity: 2026-08-22
+last_activity_desc: Phase 27.1 verified at 8/8 POOL must-haves
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 21
-  completed_plans: 14
-  percent: 50
+  total_phases: 5
+  completed_phases: 4
+  total_plans: 27
+  completed_plans: 27
+  percent: 80
 ---
 
 # Project State
@@ -21,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-05-23 with v1.0 Current Milestone section)
 
 **Core value:** Every AI coding tool on a developer's machine shares the same skill library without manual copying or per-tool configuration. v1.0 makes that library *visible* — directories, skills, sync state, and conflicts are observed and managed from a desktop app rather than a terminal.
-**Current focus:** Phase 27 — sync-triage-ui
+**Current focus:** Phase 28 — configuration-ui-beta-cut
 
 ## Current Position
 
-Phase: 27 (sync-triage-ui) — EXECUTING
-Plan: 1 of 7
-Status: Executing Phase 27
-Last activity: 2026-06-30 -- Completed quick task 260630-pgl
+Phase: 28 (configuration-ui-beta-cut) — PLANNING
+Plan: re-plan required after Phase 27.1
+Status: Phase 27.1 complete and verified; Phase 28 ready for specification/discussion
+Last activity: 2026-08-22 — Phase 27.1 verified at 8/8 POOL must-haves
 
 **v1.0 phase shape (Phases 25–31):**
 
@@ -37,6 +40,7 @@ Last activity: 2026-06-30 -- Completed quick task 260630-pgl
 | 25 | Rust core extraction + Tauri integration spike | CORE-01..05 (5) | — |
 | 26 | Read-only views | VIEW-01..06 (6) + NF-01..03, NF-05 | **alpha** |
 | 27 | Sync + triage UI | SYNC-01..05 (5) | — |
+| 27.1 | Multi-machine shared pool configuration | POOL-01..08 (8) | — |
 | 28 | Configuration UI | CFG-01..05 (5) + NF-04 | **beta** |
 | 29 | Mutating operations UI | OPS-01..04 (4) + NF-04 | — |
 | 30 | Backup UI | BAK-01..04 (4) + NF-04 | **rc** |
@@ -74,6 +78,17 @@ Historical decisions are archived in:
 - [Phase 25]: 25-04: stood up crates/tome-desktop (Tauri 2, path dep on tome+bindings, specta trio pinned =2.0.0-rc.25). get_status command returns real StatusReport; TauriEventSink bridges typed ProgressEvent→SyncProgress (typed SyncStage, saturating casts); make_builder() is the single command/event registry shared by main.rs + gen-bindings; committed bindings.ts is an INTENTIONAL Wave-3 partial snapshot (Result<StatusReport,String>, pre-TomeError — 25-05 regenerates). Exported bindings from gen-bindings bin not build.rs (D-07 corrected); Builder::dangerously_cast_bigints_to_number() to export usize counts as TS number (no library type change); CI bindings-freshness gate + macOS desktop-build job on macos-latest; [package.metadata.dist] dist=false excludes tome-desktop from cargo-dist (release CLI-only, release.yml untouched) (CORE-02/03/04, D-06/D-07)
 - [Phase 25]: 25-05: TomeError IPC-boundary classification (CORE-05). RESEARCH .with_context(|| DomainErrorKind) is NOT downcastable through anyhow — replaced with a transparent DomainTagged wrapper (Display delegates to underlying top, source() skips it) so the {e:#} chain is byte-for-byte unchanged while chain().find_map(downcast_ref) recovers the kind. Boundary classifies DomainTagged + bare DomainErrorKind, else Internal; ErrorCode has ALL+const _ guard + exhaustive From<&DomainErrorKind>. Sentinels at Config::validate (Validation/Conflict), bad --config (NotFound), git clone/update (Git). bindings.ts regenerated with TomeError+ErrorCode (supersedes 25-04 Wave-3 snapshot; freshness clean).
 - [Phase 25]: 25-06: v1.0 frontend framework = React (D-GUI-04, irreversible from Phase 26). Built 3-way StatusReport spike (React/Solid/Svelte) scored 1-5 x4 criteria; React+Svelte tied 16, React wins the two compounding criteria (bindings.ts ergonomics + ecosystem fit for NF-01 virtualization/NF-02 a11y/NF-03 HIG). Bundle gzip: Solid 6.20kB / Svelte 15.85kB / React 62.29kB. Winner collapsed into crates/tome-desktop/ui/ (one canonical bindings.ts, relative ./bindings import); losers deleted. ADR: .planning/research/v1.0-frontend-framework-decision.md
+- [Phase ?]: Profile create, list, and select operate on committed machines/<name>.toml files; selection refuses a nonexistent profile.
+- [Phase ?]: An explicit --machine path retains legacy directory_overrides loading and emits a deprecation warning.
+- [Phase ?]: Migration recovery restores exact legacy bytes unless all three journaled targets validate as the complete new layout.
+- [Phase ?]: Legacy directory overrides are applied before migrated profile serialization, preserving override syntax only in backups.
+- [Phase ?]: Selected-profile pool sync owns reconciliation; explicit legacy machine paths retain compatibility behavior.
+- [Phase ?]: Pool removal persists a shared exclusion before its recovery marker and derived cleanup.
+- [Phase ?]: Selected-profile sync reads only local Git consent before optional fast-forward pull, then loads the effective context once from the pulled checkout.
+- [Phase ?]: Pool publication stages sorted changed Tome-owned paths only and preserves a local commit when push fails.
+- [Phase ?]: Status projects repo_sync porcelain-v2 data into tagged profile, upstream, and Git-health types instead of parsing display text.
+- [Phase ?]: Unavailable repository, remote, upstream, Git command, and commit timestamp states remain explicit rather than fabricated.
+- [Phase ?]: Git consent request IDs and continuations remain Rust-owned; declines continue local-only without the declined operation.
 
 ### v1.0 design context (consume during phase planning)
 
@@ -91,19 +106,21 @@ Historical decisions are archived in:
 25 (Rust core extraction + Tauri integration spike)
  ├── 26 (Read-only views) ── alpha cut
  │    └── 27 (Sync + triage UI)
- │         └── 28 (Configuration UI) ── beta cut
- │              └── 29 (Mutating operations UI)
- │                   └── 30 (Backup UI) ── rc cut
- │                        └── 31 (Distribution) ── v1.0 ship
+ │         └── 27.1 (Multi-machine shared pool configuration)
+ │              └── 28 (Configuration UI) ── beta cut
+ │                   └── 29 (Mutating operations UI)
+ │                        └── 30 (Backup UI) ── rc cut
+ │                             └── 31 (Distribution) ── v1.0 ship
  └── (NF-01..05 verified at cut boundaries — alpha + beta + rc + final)
 ```
 
-Phases 26–31 form a strict linear chain; each depends on the previous. NF gates (perf, a11y, HIG, safety, concurrency) are verified at the indicated cuts, not as their own phase.
+Phases 26–27, 27.1, and 28–31 form a strict linear chain; each depends on the previous. NF gates (perf, a11y, HIG, safety, concurrency) are verified at the indicated cuts, not as their own phase.
 
 ### Pending Todos / Carry-over
 
 - **Structured todos:** 2 pending items in `.planning/todos/pending/`; latest capture is
   `2026-07-15-define-agent-skills-for-tome.md` ("Define agent skills for tome").
+
 - **Linux UAT (carry-over from v0.8):** 2 pending items in `.planning/phases/08-*/08-HUMAN-UAT.md` (clipboard runtime + xdg-open runtime tests). Pending Linux desktop hardware. Carried over for the sixth+ consecutive milestone — formally deferred to **v2 (post-v1.0)** when Linux GUI build hardware lands.
 - **#542 Owned/Unowned enum migration** — deferred from v0.12 whole-codebase review; absorbed into Phase 25 CORE-01 scope.
 - **#548 role-transition cleanup gap** — surfaced during v0.13 dogfooding (when a directory's role transitions synced→source, ~171 stale tome symlinks linger). Standalone follow-up; not v1.0-blocking but should land before the alpha cut so dogfooding sessions don't repeat the manual cleanup.
@@ -115,6 +132,7 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 - **Frontend framework decision is load-bearing** (D-GUI-04). All UI phases (26–31) depend on it. Phase 25's spike must produce a defensible pick (React / Solid / Svelte) and lock it in writing. Mid-milestone framework swap is not acceptable.
 - **`crates/tome-desktop` as a workspace member** — adds Tauri + webview deps to the workspace. Verify cargo-dist's CLI artifact build does not start pulling Tauri deps unintentionally. Workspace-level feature flags or per-crate build matrices may be needed.
 - **CLI snapshot tests** — the v0.10–v0.16 hardening pass landed many `insta` snapshots of CLI output. Decomposing `lib.rs::run` into presenter + domain calls must preserve these snapshots byte-for-byte unless the change is explicitly intended.
+- POOL-08 from 27.1-05 PLAN.md is absent from REQUIREMENTS.md, so requirements.mark-complete could not record it.
 
 ### Quick Tasks Completed
 
@@ -122,8 +140,23 @@ Phases 26–31 form a strict linear chain; each depends on the previous. NF gate
 |---|-------------|------|--------|-----------|
 | 260630-pgl | Remove duplicate CI job definitions that invalidate ci.yml | 2026-06-30 | f80e47d | [260630-pgl-remove-duplicate-ci-job-definitions-that](./quick/260630-pgl-remove-duplicate-ci-job-definitions-that/) |
 
+### Roadmap Evolution
+
+- Phase 27.1 inserted after Phase 27: Multi-machine shared pool configuration (URGENT)
+
 ## Session Continuity
 
-Last session: 2026-06-05T12:16:58.288Z
-Stopped at: Phase 27 planned (7 plans, 5 waves) — verification passed
-Resume file: .planning/phases/27-sync-triage-ui/27-01a-PLAN.md
+Last session: 2026-08-22T12:23:52.613Z
+Stopped at: Completed 27.1-06-PLAN.md
+Resume file: None
+
+## Performance Metrics
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 27.1 P01 | 38m | 2 tasks | 6 files |
+| Phase 27.1 P02 | 47m | 2 tasks | 6 files |
+| Phase 27.1 P03 | 58min | 2 tasks | 12 files |
+| Phase 27.1 P04 | 16min | 2 tasks | 6 files |
+| Phase 27.1 P05 | 28min | 2 tasks | 6 files |
+| Phase 27.1 P06 | 40min | 3 tasks | 13 files |

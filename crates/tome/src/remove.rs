@@ -1329,6 +1329,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let mut lockfile = Some(Lockfile { version: 1, skills });
@@ -1690,6 +1691,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let mut lockfile = Some(Lockfile { version: 1, skills });

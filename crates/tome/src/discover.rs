@@ -3,7 +3,7 @@
 //! exclusion filtering.
 
 use anyhow::{Context, Result};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -251,9 +251,32 @@ pub fn discover_all(
     resolved_paths: &BTreeMap<DirectoryName, (PathBuf, Option<String>)>,
     warnings: &mut Vec<String>,
 ) -> Result<Vec<DiscoveredSkill>> {
-    let mut seen: HashMap<String, usize> = HashMap::new();
+    let all = discover_all_candidates(config, resolved_paths, warnings)?;
+    let mut seen: BTreeMap<String, DirectoryName> = BTreeMap::new();
+    let mut skills = Vec::new();
+    for skill in all {
+        let name = skill.name.as_str().to_owned();
+        if let Some(winner) = seen.get(&name) {
+            warnings.push(format!(
+                "skill '{}' found in both '{}' and '{}', using '{}'",
+                name, winner, skill.source_name, winner
+            ));
+        } else {
+            seen.insert(name, skill.source_name.clone());
+            skills.push(skill);
+        }
+    }
+    Ok(skills)
+}
+
+/// Discover every eligible candidate. Unlike [`discover_all`], this function
+/// never chooses a duplicate winner and is used by shared-pool reconciliation.
+pub(crate) fn discover_all_candidates(
+    config: &Config,
+    resolved_paths: &BTreeMap<DirectoryName, (PathBuf, Option<String>)>,
+    warnings: &mut Vec<String>,
+) -> Result<Vec<DiscoveredSkill>> {
     let mut skills: Vec<DiscoveredSkill> = Vec::new();
-    let mut conflicts: Vec<(String, DirectoryName, DirectoryName)> = Vec::new();
 
     for (dir_name, dir_config) in config.discovery_dirs() {
         // For git directories, use the resolved local path instead of the URL
@@ -354,26 +377,8 @@ pub fn discover_all(
                 }
             }
 
-            let name_str = skill.name.as_str().to_string();
-            if let Some(&existing_idx) = seen.get(&name_str) {
-                let existing = &skills[existing_idx];
-                conflicts.push((
-                    name_str,
-                    existing.source_name.clone(),
-                    skill.source_name.clone(),
-                ));
-            } else {
-                seen.insert(name_str, skills.len());
-                skills.push(skill);
-            }
+            skills.push(skill);
         }
-    }
-
-    for (name, winner, loser) in &conflicts {
-        warnings.push(format!(
-            "skill '{}' found in both '{}' and '{}', using '{}'",
-            name, winner, loser, winner
-        ));
     }
 
     Ok(skills)

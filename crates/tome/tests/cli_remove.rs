@@ -13,13 +13,10 @@ fn remove_test_env(tmp: &TempDir, directories_toml: &str) -> PathBuf {
     let config_path = tmp.path().join("tome.toml");
     std::fs::write(
         &config_path,
-        format!(
-            "library_dir = \"{}\"\n{}",
-            library_dir.display(),
-            directories_toml,
-        ),
+        format!("library_dir = \"{}\"\n", library_dir.display()),
     )
     .unwrap();
+    write_test_profile(tmp.path(), directories_toml);
     config_path
 }
 
@@ -212,7 +209,7 @@ fn test_remove_dry_run() {
         library_dir.join("my-skill").exists(),
         "library skill should still exist after dry run"
     );
-    let config_content = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    let config_content = std::fs::read_to_string(tmp.path().join("machines/test.toml")).unwrap();
     assert!(
         config_content.contains("[directories.local]"),
         "config should still contain the directory after dry run"
@@ -532,7 +529,7 @@ fn remove_retry_succeeds_after_failure_resolved() {
     );
 
     // Step 1.5 — assert config entry preserved (I2 retention).
-    let config_after_fail = std::fs::read_to_string(tmp.path().join("tome.toml")).unwrap();
+    let config_after_fail = std::fs::read_to_string(tmp.path().join("machines/test.toml")).unwrap();
     assert!(
         config_after_fail.contains("[directories.local]"),
         "config entry for 'local' must be preserved on partial failure; got: {config_after_fail}"

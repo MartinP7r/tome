@@ -80,6 +80,11 @@ rand = "0.10"
 [target.'cfg(target_os = "macos")'.build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+# The Tauri-supported mock runtime drives command IPC in
+# `desktop_git_consent_ipc`; production builds keep this test-only feature off.
+tauri = { version = "2.11", features = ["test"] }
+
 # Explicit test target — Cargo's auto-discovery doesn't traverse
 # `tests/perf/`, so we declare the perf-bench fixture generator by hand.
 # Keeping it under `tests/perf/` (rather than `tests/`) groups the perf

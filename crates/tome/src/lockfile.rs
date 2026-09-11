@@ -74,6 +74,116 @@ pub struct LockEntry {
     /// Git commit SHA for exact version pinning. Present for managed plugins.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub git_commit_sha: Option<String>,
+    /// Authoritative, ordered source observations. Legacy entries deserialize
+    /// with an empty history and are upgraded on the next successful pool sync.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<Observation>,
+}
+
+/// One stable-origin observation in the shared provenance catalog.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Observation {
+    pub source_kind: String,
+    pub stable_identity: String,
+    pub normalized_locator: String,
+    pub original_content_hash: ContentHash,
+    pub current_content_hash: ContentHash,
+    pub imported_at: String,
+    pub last_observed_at: String,
+    pub observing_profile: String,
+    /// Legacy operational directory name; stable identity remains authoritative.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_name: Option<DirectoryName>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit_sha: Option<String>,
+    /// Local paths are diagnostic only and never used as identity.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub observed_local_path: Option<PathBuf>,
+}
+
+impl Observation {
+    pub(crate) fn from_candidate(candidate: &crate::pool::Candidate, profile: &str) -> Self {
+        let provenance = candidate.skill.origin.provenance();
+        let source_kind = if provenance.is_some() {
+            "managed"
+        } else {
+            "local"
+        }
+        .to_string();
+        let now = crate::manifest::now_iso8601();
+        Self {
+            source_kind,
+            stable_identity: candidate.identity.clone(),
+            normalized_locator: candidate.locator.clone(),
+            original_content_hash: candidate.hash.clone(),
+            current_content_hash: candidate.hash.clone(),
+            imported_at: now.clone(),
+            last_observed_at: now,
+            observing_profile: profile.to_string(),
+            source_name: Some(candidate.skill.source_name.clone()),
+            version: provenance.and_then(|p| p.version.clone()),
+            git_commit_sha: provenance.and_then(|p| p.git_commit_sha.clone()),
+            observed_local_path: Some(candidate.skill.path.clone()),
+        }
+    }
+}
+
+impl LockEntry {
+    pub(crate) fn from_observation(observation: Observation) -> Self {
+        Self {
+            source_name: observation.source_name.clone(),
+            previous_source: None,
+            content_hash: observation.current_content_hash.clone(),
+            registry_id: observation
+                .stable_identity
+                .strip_prefix("registry:")
+                .map(str::to_owned),
+            version: observation.version.clone(),
+            git_commit_sha: observation.git_commit_sha.clone(),
+            observations: vec![observation],
+        }
+    }
+
+    pub(crate) fn has_identity(&self, identity: &str) -> bool {
+        self.observations
+            .iter()
+            .any(|o| o.stable_identity == identity)
+    }
+
+    /// Preserve first facts and deduplicate identical repeated observations;
+    /// same source identity may update its current facts.
+    pub(crate) fn observe(&mut self, observation: Observation) {
+        if let Some(existing) = self
+            .observations
+            .iter_mut()
+            .find(|item| item.stable_identity == observation.stable_identity)
+        {
+            if existing.current_content_hash == observation.current_content_hash
+                && existing.version == observation.version
+                && existing.git_commit_sha == observation.git_commit_sha
+                && existing.observing_profile == observation.observing_profile
+                && existing.observed_local_path == observation.observed_local_path
+            {
+                return;
+            }
+            existing.current_content_hash = observation.current_content_hash.clone();
+            existing.last_observed_at = observation.last_observed_at.clone();
+            existing.observing_profile = observation.observing_profile.clone();
+            existing.version = observation.version.clone();
+            existing.git_commit_sha = observation.git_commit_sha.clone();
+            existing.observed_local_path = observation.observed_local_path.clone();
+            self.source_name = observation.source_name.clone();
+        } else {
+            self.observations.push(observation.clone());
+            self.observations
+                .sort_by(|a, b| a.stable_identity.cmp(&b.stable_identity));
+        }
+        self.content_hash = observation.current_content_hash;
+        self.version = observation.version;
+        self.git_commit_sha = observation.git_commit_sha;
+    }
 }
 
 /// Generate a **prospective** lockfile by re-hashing every discovered skill
@@ -121,6 +231,7 @@ pub fn generate_prospective(skills: &[DiscoveredSkill]) -> anyhow::Result<Lockfi
                 registry_id,
                 version,
                 git_commit_sha,
+                observations: Vec::new(),
             },
         );
     }
@@ -168,6 +279,7 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
                 registry_id,
                 version,
                 git_commit_sha,
+                observations: Vec::new(),
             },
         );
     }
@@ -498,6 +610,7 @@ mod tests {
                     registry_id: None,
                     version: None,
                     git_commit_sha: None,
+                    observations: Vec::new(),
                 },
             )]),
         };
@@ -728,6 +841,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: sha.map(|s| s.to_string()),
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile { version: 1, skills };
@@ -1044,6 +1158,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         skills.insert(
@@ -1055,6 +1170,7 @@ mod tests {
                 registry_id: None,
                 version: None,
                 git_commit_sha: None,
+                observations: Vec::new(),
             },
         );
         let lf = Lockfile { version: 1, skills };
