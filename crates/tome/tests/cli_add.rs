@@ -231,9 +231,11 @@ fn test_add_custom_name() {
 }
 
 #[test]
-fn test_add_refuses_legacy_layout_before_duplicate_detection() {
+fn test_add_reports_duplicate_when_legacy_machine_prefs_are_missing() {
     let tmp = TempDir::new().unwrap();
+    let home = tmp.path().join("home");
     let config_path = tmp.path().join("tome.toml");
+    std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         &config_path,
         "[directories.my-skills]\npath = \"https://github.com/user/my-skills.git\"\ntype = \"git\"\n",
@@ -248,10 +250,12 @@ fn test_add_refuses_legacy_layout_before_duplicate_detection() {
             "add",
             "https://github.com/user/my-skills.git",
         ])
+        .env("HOME", &home)
+        .env_remove("TOME_HOME")
         .env("NO_COLOR", "1")
         .assert()
         .failure()
-        .stderr(predicate::str::contains("tome migrate profiles"));
+        .stderr(predicate::str::contains("already exists"));
 }
 
 #[test]
