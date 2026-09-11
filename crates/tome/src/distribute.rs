@@ -10,7 +10,8 @@ use crate::change_cause::ChangeCause;
 use crate::config::{DirectoryConfig, DirectoryName, DirectoryType};
 use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
-use crate::paths::symlink_points_to;
+use crate::paths::{points_into_library, resolve_symlink_target, symlink_points_to};
+use crate::routing::RoutingPolicy;
 
 /// Whether `target` is the personal skills directory of the same tool whose
 /// package manager owns `source`.
@@ -69,6 +70,7 @@ fn distribute_to_directory(
         dir_config,
         manifest,
         machine_prefs,
+        &RoutingPolicy::default(),
         &BTreeMap::new(),
         dry_run,
         force,
@@ -104,6 +106,7 @@ pub fn distribute_to_directory_with_sources(
     dir_config: &DirectoryConfig,
     manifest: &Manifest,
     machine_prefs: &MachinePrefs,
+    routing: &RoutingPolicy,
     all_directories: &BTreeMap<DirectoryName, DirectoryConfig>,
     dry_run: bool,
     force: bool,
@@ -149,6 +152,15 @@ pub fn distribute_to_directory_with_sources(
             continue;
         }
 
+        let skill = crate::discover::SkillName::new(skill_name_str.to_string())?;
+        let tags = manifest
+            .tags_for(skill_name_str.as_ref())
+            .cloned()
+            .unwrap_or_default();
+        if !routing.allows(dir_name, &skill, &tags) {
+            result.disabled += 1;
+            continue;
+        }
         // Skip skills not allowed for this directory (global disabled + per-directory filtering)
         if !machine_prefs.is_skill_allowed(&skill_name_str, dir_name.as_str()) {
             result.disabled += 1;
@@ -290,17 +302,9 @@ pub fn distribute_to_directory_with_sources(
 
 /// HARD-09 / D-DIST-1: classify whether `link_path` is a symlink whose
 /// target resolves OUTSIDE `library_dir`. Returns false when the link
-/// is missing, can't be read, or points anywhere under (or equal to)
-/// the library directory under either its raw or canonicalised spelling.
-///
-/// Canonicalization handles symlinks-in-the-middle of the prefix path
-/// (e.g. /var → /private/var on macOS), so a link target physically
-/// inside the library is not mis-classified as foreign just because
-/// the user's library_dir was given as the symlinked spelling.
-///
-/// Stale-but-in-library links (target missing, but the lexical path is
-/// rooted under library_dir) are NOT classified as foreign — the
-/// existing in-library staleness path handles them.
+/// is missing, can't be read, or resolves inside the library. The shared
+/// containment check preserves broken in-library links but rejects lexical
+/// escapes such as `library/../external/skill`.
 ///
 /// Doctor (D-DIST-2) reuses this predicate to surface ForeignSymlink
 /// diagnostics without depending on a sync run.
@@ -317,43 +321,7 @@ pub(crate) fn is_foreign_symlink(link_path: &Path, library_dir: &Path) -> bool {
         Err(_) => return false,
     };
 
-    // Build a lexical target. For absolute symlink targets that's just
-    // the raw target; for relative targets it's resolved against the
-    // link's parent.
-    let lexical_target = if raw_target.is_absolute() {
-        raw_target.clone()
-    } else {
-        link_path
-            .parent()
-            .map(|p| p.join(&raw_target))
-            .unwrap_or_else(|| raw_target.clone())
-    };
-
-    // We accept FOUR potential prefixes for "in-library" before
-    // classifying as foreign — any match means not-foreign:
-    //   1. raw library_dir vs lexical target (both un-resolved)
-    //   2. canonicalised library_dir vs lexical target
-    //   3. raw library_dir vs canonicalised target (link followed)
-    //   4. canonicalised library_dir vs canonicalised target
-    //
-    // The pair-matrix avoids false-foreign reports when one side
-    // canonicalises through symlinks (e.g. /var → /private/var) and
-    // the other doesn't, AND when the link target is missing
-    // (canonicalize fails, lexical is the only signal).
-    let canonical_library = std::fs::canonicalize(library_dir).ok();
-    let canonical_target = std::fs::canonicalize(link_path).ok();
-
-    let prefixes = [Some(library_dir.to_path_buf()), canonical_library];
-    let candidates = [Some(lexical_target), canonical_target];
-
-    for prefix in prefixes.iter().flatten() {
-        for candidate in candidates.iter().flatten() {
-            if candidate.starts_with(prefix) {
-                return false;
-            }
-        }
-    }
-    true
+    !points_into_library(&resolve_symlink_target(link_path, &raw_target), library_dir)
 }
 
 #[cfg(test)]
@@ -386,6 +354,68 @@ mod tests {
             subdir: None,
             override_applied: false,
         }
+    }
+
+    fn manifest_with_tags(skills: &[(&str, &[&str])]) -> Manifest {
+        let mut manifest = Manifest::default();
+        for (name, tags) in skills {
+            manifest.insert(
+                crate::discover::SkillName::new(*name).unwrap(),
+                SkillEntry {
+                    source_path: std::path::PathBuf::from(format!("/source/{name}")),
+                    ownership: crate::manifest::SkillOwnership::Owned {
+                        source: DirectoryName::new("source").unwrap(),
+                    },
+                    content_hash: crate::validation::test_hash("abc"),
+                    synced_at: "2024-01-01T00:00:00Z".to_string(),
+                    managed: false,
+                    tags: tags
+                        .iter()
+                        .map(|tag| crate::manifest::SkillTag::new(*tag).unwrap())
+                        .collect(),
+                },
+            );
+        }
+        manifest
+    }
+
+    #[test]
+    fn distribute_routes_tagged_skills_with_route_exclusions() {
+        let library = TempDir::new().unwrap();
+        let target_dir = TempDir::new().unwrap();
+        setup_library(
+            library.path(),
+            &["matched", "mismatched", "untagged", "excluded"],
+        );
+        let manifest = manifest_with_tags(&[
+            ("matched", &["reference"]),
+            ("mismatched", &["rust"]),
+            ("untagged", &[]),
+            ("excluded", &["reference"]),
+        ]);
+        let directory = DirectoryName::new("target").unwrap();
+        let routing: RoutingPolicy =
+            toml::from_str("[target]\ntags = [\"reference\"]\nexclude = [\"excluded\"]\n").unwrap();
+
+        let result = distribute_to_directory_with_sources(
+            library.path(),
+            &directory,
+            &make_dir_config(target_dir.path().to_path_buf()),
+            &manifest,
+            &MachinePrefs::default(),
+            &routing,
+            &BTreeMap::new(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 1);
+        assert_eq!(result.disabled, 3);
+        assert!(target_dir.path().join("matched").is_symlink());
+        assert!(!target_dir.path().join("mismatched").exists());
+        assert!(!target_dir.path().join("untagged").exists());
+        assert!(!target_dir.path().join("excluded").exists());
     }
 
     #[test]
@@ -702,6 +732,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -744,6 +775,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest
@@ -785,6 +817,7 @@ mod tests {
             &target_config,
             &manifest,
             &MachinePrefs::default(),
+            &RoutingPolicy::default(),
             &dirs,
             false,
             false,
@@ -830,6 +863,7 @@ mod tests {
             &target_config,
             &manifest,
             &MachinePrefs::default(),
+            &RoutingPolicy::default(),
             &dirs,
             false,
             false,
@@ -867,6 +901,7 @@ mod tests {
             &make_dir_config(skills.clone()),
             &manifest,
             &MachinePrefs::default(),
+            &RoutingPolicy::default(),
             &dirs,
             false,
             false,
@@ -925,6 +960,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -1005,6 +1041,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -1111,6 +1148,79 @@ mod tests {
         // Foreign symlink unchanged on disk.
         let actual = std::fs::read_link(target_dir.path().join("skill-a")).unwrap();
         assert_eq!(actual, other_skill);
+    }
+
+    #[test]
+    fn distribute_preserves_lexically_nested_foreign_symlink_for_routed_skill() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        setup_library(&library, &["skill-a"]);
+
+        let foreign_target = library.join("../external/missing-skill");
+        let target_link = target.join("skill-a");
+        unix_fs::symlink(&foreign_target, &target_link).unwrap();
+
+        let directory = DirectoryName::new("target").unwrap();
+        let manifest = manifest_with_tags(&[("skill-a", &["reference"])]);
+        let routing: RoutingPolicy = toml::from_str("[target]\ntags = [\"reference\"]\n").unwrap();
+
+        let result = distribute_to_directory_with_sources(
+            &library,
+            &directory,
+            &make_dir_config(target.clone()),
+            &manifest,
+            &MachinePrefs::default(),
+            &routing,
+            &BTreeMap::new(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(std::fs::read_link(&target_link).unwrap(), foreign_target);
+    }
+
+    #[test]
+    fn distribute_preserves_broken_foreign_symlink_through_library_redirect() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        let external = root.path().join("external");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        unix_fs::symlink(&external, library.join("redirect")).unwrap();
+        setup_library(&library, &["skill-a"]);
+
+        let foreign_target = library.join("redirect/missing-skill");
+        let target_link = target.join("skill-a");
+        unix_fs::symlink(&foreign_target, &target_link).unwrap();
+
+        let directory = DirectoryName::new("target").unwrap();
+        let manifest = manifest_with_tags(&[("skill-a", &["reference"])]);
+        let routing: RoutingPolicy = toml::from_str("[target]\ntags = [\"reference\"]\n").unwrap();
+
+        let result = distribute_to_directory_with_sources(
+            &library,
+            &directory,
+            &make_dir_config(target.clone()),
+            &manifest,
+            &MachinePrefs::default(),
+            &routing,
+            &BTreeMap::new(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.skipped, 1);
+        assert_eq!(std::fs::read_link(&target_link).unwrap(), foreign_target);
     }
 
     /// D-DIST-1 force opt-out: with force=true the foreign symlink IS

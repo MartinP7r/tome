@@ -7,7 +7,6 @@ use tabled::settings::{Modify, Style, object::Rows};
 
 use crate::config::{Config, DirectoryName};
 use crate::lockfile;
-use crate::machine;
 use crate::manifest;
 use crate::paths::TomePaths;
 
@@ -135,22 +134,6 @@ const _: () = {
     assert!(LockfileState::ALL.len() == 3);
 };
 
-/// Per-machine prefs summary shown in the Status view (VIEW-01).
-///
-/// Surfaces the integer counts the Status view's `MACHINE` row renders
-/// ("N skills disabled"). Counts only — the full skill / directory lists
-/// stay in `machine.toml`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[cfg_attr(feature = "bindings", derive(specta::Type))]
-pub struct MachinePrefsSummary {
-    /// `MachinePrefs.disabled.len()` — count of skills globally disabled
-    /// on this machine.
-    pub disabled_count: usize,
-    /// `MachinePrefs.disabled_directories.len()` — count of directories
-    /// disabled on this machine.
-    pub disabled_directory_count: usize,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[cfg_attr(feature = "bindings", derive(specta::Type))]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -259,9 +242,6 @@ pub struct StatusReport {
     /// Surfaces in the Status view's `LOCKFILE` row paired with `StatusDot`.
     /// JSON shape: `{ "kind": "in_sync" | "out_of_sync" | "missing", ... }`.
     pub lockfile: LockfileState,
-    /// Per-machine prefs summary (VIEW-01). Surfaces in the Status view's
-    /// `MACHINE` row ("N skills disabled").
-    pub machine_prefs_summary: MachinePrefsSummary,
     /// Number of health issues, or an error message.
     pub health: CountOrError,
     pub profile: ProfileState,
@@ -351,28 +331,7 @@ pub(crate) fn gather_with_profile(
             Err(_) => (Vec::new(), None),
         };
 
-    // VIEW-01: lockfile classification + machine-prefs summary. Both degrade
-    // gracefully — IO/parse errors on the lockfile fall through to `Missing`
-    // (the same outcome a missing file produces), and machine-prefs read
-    // errors fall through to `Default::default()` so the Status view always
-    // renders the row.
     let lockfile = LockfileState::classify(paths).unwrap_or(LockfileState::Missing);
-    let machine_prefs_summary = match machine::default_machine_path() {
-        Ok(p) => match machine::load(&p) {
-            Ok(prefs) => MachinePrefsSummary {
-                disabled_count: prefs.disabled.len(),
-                disabled_directory_count: prefs.disabled_directories.len(),
-            },
-            Err(_) => MachinePrefsSummary {
-                disabled_count: 0,
-                disabled_directory_count: 0,
-            },
-        },
-        Err(_) => MachinePrefsSummary {
-            disabled_count: 0,
-            disabled_directory_count: 0,
-        },
-    };
 
     let profile = profile.map_or(ProfileState::Unavailable, |name| ProfileState::Selected {
         name: name.as_str().to_string(),
@@ -431,7 +390,6 @@ pub(crate) fn gather_with_profile(
         directories,
         unowned,
         lockfile,
-        machine_prefs_summary,
         health: health.into(),
         profile,
         git,
@@ -670,7 +628,7 @@ fn render_status(report: &StatusReport) {
         println!();
     }
 
-    // Lockfile state + machine-prefs summary (VIEW-01).
+    // Lockfile state (VIEW-01).
     let lockfile_str = match &report.lockfile {
         LockfileState::InSync => format!("{} {}", style("✓").green(), style("in sync").green()),
         LockfileState::OutOfSync { drift_count } => format!(
@@ -681,12 +639,6 @@ fn render_status(report: &StatusReport) {
         LockfileState::Missing => format!("{} {}", style("✗").red(), style("missing").red()),
     };
     println!("{} {}", style("Lockfile:").bold(), lockfile_str);
-    println!(
-        "{} {} skills disabled, {} directories disabled",
-        style("Machine:").bold(),
-        style(report.machine_prefs_summary.disabled_count).cyan(),
-        style(report.machine_prefs_summary.disabled_directory_count).cyan(),
-    );
 
     // Health
     let health = match (&report.health.count, &report.health.error) {
@@ -1094,6 +1046,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, tome_home.path()).unwrap();
@@ -1135,6 +1088,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, dir.path()).unwrap();
@@ -1170,6 +1124,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
         manifest::save(&m, dir.path()).unwrap();
@@ -1393,10 +1348,6 @@ mod tests {
             directories: Vec::new(),
             unowned: Vec::new(),
             lockfile: LockfileState::Missing,
-            machine_prefs_summary: MachinePrefsSummary {
-                disabled_count: 0,
-                disabled_directory_count: 0,
-            },
             health: CountOrError {
                 count: Some(0),
                 error: None,
@@ -1442,10 +1393,6 @@ mod tests {
             directories: Vec::new(),
             unowned: vec![summary],
             lockfile: LockfileState::Missing,
-            machine_prefs_summary: MachinePrefsSummary {
-                disabled_count: 0,
-                disabled_directory_count: 0,
-            },
             health: CountOrError {
                 count: Some(0),
                 error: None,
@@ -1703,16 +1650,5 @@ mod tests {
         // that scrambles ALL is obvious; the compile-time `const _` block
         // pins the length.
         assert_eq!(LockfileState::ALL, ["in_sync", "out_of_sync", "missing"]);
-    }
-
-    #[test]
-    fn machine_prefs_summary_serializes_with_count_fields() {
-        let summary = MachinePrefsSummary {
-            disabled_count: 7,
-            disabled_directory_count: 2,
-        };
-        let json = serde_json::to_value(&summary).unwrap();
-        assert_eq!(json["disabled_count"], 7);
-        assert_eq!(json["disabled_directory_count"], 2);
     }
 }

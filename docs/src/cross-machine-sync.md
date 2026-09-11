@@ -1,259 +1,193 @@
 # Cross-machine sync
 
-tome's library is designed to be a portable, version-controlled artifact —
-you commit `~/.tome/` to your dotfiles and clone it onto every machine you
-work on. This page walks the workflow end-to-end: setting up the
-source-of-truth machine, bootstrapping a fresh machine, and what happens
-when things drift.
+Tome's shared repository holds the canonical library, repository policy,
+machine profiles, manifest, and lockfile. Each machine keeps only profile
+selection and runtime consent in local `settings.toml`.
 
-> **Why this matters.** Pre-v0.10, tome's library was a thin layer of
-> symlinks pointing into machine-specific marketplace caches; cloning the
-> library onto a fresh machine was meaningless because the symlink targets
-> didn't exist. v0.10 makes the library a real-directory copy of every
-> skill, with `tome.lock` recording exactly what versions are installed.
-> Now the library is portable. See
-> [Architecture — Library-canonical model](architecture.md#library-canonical-model)
-> for the underlying mechanic.
+## Shared and Local State
 
-## Walkthrough — Machine A (source of truth)
+Commit these shared files together:
 
-Machine A is the machine you use to curate your skill library. You run
-`tome init` here, install plugins, edit local skills, and commit the
-result.
+| Path | Purpose |
+|---|---|
+| `tome.toml` | Repository policy, library path, shared Git sources, exclusions, and source pins |
+| `machines/<profile>.toml` | Machine-wide directory topology and destination routes |
+| `skills/` | Canonical real-directory copies of managed and local skills |
+| `.tome-manifest.json` | Current provenance, content hashes, and shared skill tags |
+| `tome.lock` | Reproducible provenance snapshot for managed reconciliation |
+
+Do not commit `~/.config/tome/settings.toml` with the shared repository. It
+selects the active profile and stores local consent:
+
+```toml
+profile = "personal-macos"
+git_sync = "ask"
+managed_plugin_install = "ask"
+backup_runtime = "ask"
+```
+
+Released CLI commands do not use `machine.toml`; there is no `--machine`
+option.
+
+## Configure the First Machine
+
+Create repository policy and a profile, then select it locally:
 
 ```bash
-# 1. Set up tome on Machine A.
 tome init
+tome profile create personal-macos
+tome profile select personal-macos
+```
 
-# 2. Curate your library — install Claude plugins, add git directories,
-#    enable/disable skills via `tome browse`.
-claude plugin install foo@bar
+Add Git repositories as shared sources. Git registration has no destination
+selection and no `--to` flag:
+
+```bash
 tome add https://github.com/my-org/my-skills.git
-tome sync
-
-# 3. Commit ~/.tome/ to your dotfiles (or whatever portable storage you
-#    use). The library content is real-directory copies; the manifest
-#    and tome.lock pin exactly what's installed.
-cd ~/.tome
-git init
-git add .
-git commit -m "Initial tome library"
-git remote add origin git@github.com:you/your-dotfiles.git
-git push -u origin main
+tome add MartinP7r/tome --subdir skills
 ```
 
-What's in `~/.tome/` after this:
-
-- `tome.toml` — your portable directory configuration (sources,
-  distribution targets, exclude lists)
-- `library/` — real-directory copies of every skill (managed and local)
-- `.tome-manifest.json` — content hashes and provenance for every library
-  entry
-- `tome.lock` — Cargo.lock-shaped: pinned versions and content hashes for
-  managed skills
-
-Machine-specific preferences (`~/.config/tome/machine.toml`) are
-deliberately NOT in `~/.tome/` — they're per-machine by design. Things
-like `disabled` skills, `auto_install_plugins` consent, and
-`[directory_overrides.<name>]` belong there. See
-[Configuration — `machine.toml` Machine-Local Preferences](configuration.md#machinetoml--machine-local-preferences)
-for the full schema.
-
-## Walkthrough — Machine B (fresh machine)
-
-Machine B is a fresh machine that's never seen your library. You install
-tome and Claude Code, clone your dotfiles, and run `tome sync`.
+Add explicit local paths to the selected profile:
 
 ```bash
-# 1. Install tome (Homebrew or cargo).
-brew install martinp7r/tap/tome
-# or: cargo install tome
+tome add ~/.claude/skills --role source
+tome add ~/.pfw/skills --role managed
+```
 
-# 2. Install Claude Code (required if your library has Claude plugins).
-#    See https://claude.com/product/claude-code for instructions.
+Define profile destinations in `machines/personal-macos.toml`, then route tags
+to them:
 
-# 3. Clone your dotfiles into ~/.tome (or wherever the portable artifact lives).
-git clone git@github.com:you/your-dotfiles.git ~/.tome
+```toml
+[directories.codex]
+path = "~/.codex/skills"
+type = "directory"
+role = "target"
 
-# 4. First sync. tome reads tome.lock and reconciles what's actually
-#    installed against what should be installed.
+[routes.codex]
+tags = ["portable", "coding"]
+exclude = ["claude-only-skill"]
+```
+
+Sync once to import skills, classify them, and sync again to distribute:
+
+```bash
+tome sync
+tome tag add using-tome portable
+tome tag add rust-cli coding
+tome route tag add --to codex portable
 tome sync
 ```
 
-On the first sync, tome detects drift (your machine has zero plugins
-installed; the lockfile expects N) and prompts:
+Tags are shared manifest state. Source provenance does not decide routing. A
+routed destination receives a skill when any selected tag matches, unless that
+skill appears in the destination's explicit exclusion list. New upstream skills
+arrive untagged and stay library-only for routed destinations until classified.
 
-```
-Tome detected N missing or out-of-date managed plugins. Install/update them now?
-> Yes (always — install on every sync)
-  Yes (ask me again next time)
-  No (never ask again on this machine)
-```
-
-Your choice persists in `machine.toml::auto_install_plugins` as one of
-`Always | Ask | Never`. Pick `Always` on a personal machine
-(auto-install on every sync); pick `Never` on a locked-down workstation
-where you want to inspect drift before applying; pick `Ask` to skip this
-run only and be prompted again next time.
-
-Once you confirm, tome shells out to
-`claude plugin install <plugin>@<marketplace>` for every missing plugin,
-re-discovers the skill content, verifies the resulting `content_hash`
-matches `tome.lock`, and then distributes the skills to your configured
-target directories (`~/.claude/skills`, `~/.codex/skills`, etc.). You're
-set up.
-
-## Reference — `tome.lock` semantics
-
-`tome.lock` is the cross-machine state contract. It's the equivalent of
-`Cargo.lock` for your skill library: a snapshot of every installed
-version plus content hash that tome can use to bring a fresh machine into
-the same state.
-
-Each managed-skill entry records:
-
-- `name` — the skill name
-- `version` — the actual installed version (display-only; see drift basis
-  below)
-- `content_hash` — SHA-256 of the skill directory contents
-- `source_name` — the directory in `tome.toml` that owns the skill
-  (`Option<DirectoryName>` — `None` for Unowned skills)
-- `previous_source` — the previous owner if the skill has been
-  re-anchored (closes the Phase 13 fork-in-place gap)
-- `registry_id`, `git_commit_sha` — provenance metadata when applicable
-
-**Drift basis: `content_hash`, NOT version.** When `tome sync` reconciles
-the lockfile against actually-installed plugins, drift is computed from
-`content_hash(library/<skill>) != lockfile.content_hash`. The version
-string is display-only in the diff output (e.g.
-`plugin X: 5.0.5 → 5.0.7`). Because Claude CLI doesn't accept
-`--version` on `claude plugin install`, true version pinning is upstream
-future work — see
-[Architecture — Lockfile-authoritative reconciliation](architecture.md#lockfile-authoritative-reconciliation).
-
-## Reference — `auto_install_plugins` consent
-
-`~/.config/tome/machine.toml`:
-
-```toml
-auto_install_plugins = "always"  # auto-install on every sync (CI / personal)
-auto_install_plugins = "never"   # warn-only; never modify; require manual install
-auto_install_plugins = "ask"     # re-prompt on every sync that detects drift
-```
-
-The unset case (field absent / `None`) is treated as a first-time
-prompt — tome asks once per `tome sync` invocation that detects drift
-and persists your choice. Pick `always` once and tome remembers; pick
-`never` and you'll see drift warnings on every sync but tome won't touch
-installed plugins.
-
-`--no-install` is a global flag that overrides the persisted choice for
-the current invocation. Use this when you want to inspect drift on a
-machine where `auto_install_plugins = "always"` is set:
+Commit the shared repository after reviewing the result:
 
 ```bash
-tome sync --no-install
+git add tome.toml machines skills .tome-manifest.json tome.lock
+git commit -m "Update Tome library"
+git push
 ```
 
-Mirrors Cargo's `--frozen` / `--locked` semantics — temporary, doesn't
-change the persisted setting.
+## Bootstrap Another Machine
 
-## Reference — `directory_overrides` for path remapping
+Install Tome, clone the shared repository into the location used as Tome home,
+and select a profile in local settings:
 
-Different machines have different home layouts. macOS keeps Claude
-plugins at `~/Library/Application Support/Claude/plugins/cache`; Linux
-keeps them at `~/.claude/plugins/cache`. Your portable `tome.toml` can
-only express one path; `machine.toml::[directory_overrides.<name>]`
-provides the machine-specific remap (PORT-01..05).
+```bash
+brew install MartinP7r/tap/tome
+git clone git@github.com:you/your-tome-repository.git ~/.tome
+tome profile select work-linux
+tome status
+tome sync --dry-run --no-install
+tome sync
+```
 
-`~/.config/tome/machine.toml` on Linux:
+The selected `machines/work-linux.toml` can use Linux-specific paths while
+sharing the same repository-owned Git sources, library tags, and lockfile. Use
+separate committed profiles when machines need different paths or destinations.
+
+`git_sync` controls whether Tome synchronizes the shared repository:
+
+| Value | Behavior |
+|---|---|
+| `always` | Pull shared state before sync and publish successful changes |
+| `ask` | Request consent before repository synchronization |
+| `never` | Leave Git operations to the user |
+
+For one sync, `tome sync --git-sync <always|ask|never>` overrides the local
+setting without changing it.
+
+## Project Destinations
+
+A project may commit `.tome.toml` at its root to add destinations used only
+inside that project tree:
 
 ```toml
-[directory_overrides.claude-plugins]
-path = "~/.claude/plugins/cache"
+[directories.project-codex]
+path = ".codex/skills"
+type = "directory"
+role = "target"
+
+[routes.project-codex]
+tags = ["project", "portable"]
+exclude = ["global-only-skill"]
 ```
 
-`~/.config/tome/machine.toml` on macOS would override the same name to a
-different path.
+Tome searches upward from the command's working directory and uses the nearest
+`.tome.toml`. This layer is additive: it cannot add sources, replace profile
+destinations, or select a profile. Invalid project configuration fails instead
+of falling back silently.
 
-Override application happens at config load (after tilde expansion,
-before validation), so all downstream code sees the canonical
-post-override path. Unknown override directory names emit a
-typo-target stderr warning. Override-induced validation failures are
-wrapped with a distinct error attributing them to `machine.toml` rather
-than `tome.toml`.
+## Native Plugin Reconciliation
 
-`tome status` and `tome doctor` annotate any directory whose path was
-rewritten by an override with `(override)` so you can tell at a glance
-which paths come from the portable config and which come from the
-machine-local layer.
+Native plugins remain installed and updated through each tool's own adapter.
+Tome owns the desired state represented by the shared library and lockfile, but
+does not turn those plugins into a cross-tool plugin format. Portable skills
+copied into the library can be routed to other `SKILL.md` destinations.
 
-See [Configuration](configuration.md) for the full schema.
+`managed_plugin_install` controls adapter actions:
 
-## Reference — what happens when `claude` is missing on Machine B
-
-The `ClaudeMarketplaceAdapter` shells out to the `claude` binary. If
-`claude` isn't on `PATH` and your `tome.toml` has any
-`[directories.<name>]` with `type = "claude-plugins"`, `tome sync`
-produces a clear actionable error naming the binary:
-
-```
-error: claude CLI not found on PATH — install Claude Code, or remove
-[directories.<name>] entries with type = "claude-plugins" from tome.toml
+```toml
+managed_plugin_install = "always" # apply without prompting
+managed_plugin_install = "ask"    # ask when reconciliation needs an action
+managed_plugin_install = "never"  # report drift without installing
 ```
 
-Install Claude Code from <https://claude.com/product/claude-code> and
-re-run `tome sync`. If your library only has git-source skills and no
-Claude plugins, missing `claude` won't break sync — you'd only see this
-error if the lockfile contains entries the Claude adapter would need to
-install. A library that's purely git-sourced and local-source is fully
-portable to a machine without Claude installed.
+`tome sync --no-install` forces no adapter installs for one invocation and
+does not alter local settings.
 
-Vanished plugins (the marketplace removed a plugin you had installed)
-surface as a stderr warning
-(`plugin X vanished from marketplace Y; using preserved library copy`)
-and `tome sync` continues. Distribution still happens from the preserved
+## Lockfile Semantics
+
+Each `tome.lock` entry records the skill name, content hash, source, previous
+source, version, registry identity, and Git commit when available. The lockfile
+is provenance-only; shared routing tags live in `.tome-manifest.json`.
+
+Reconciliation compares content hashes rather than treating a display version
+as a complete pin. If a native adapter is unavailable, Tome reports the
+adapter error. A vanished plugin can continue using its preserved canonical
 library copy.
 
-Adapter `install`/`update` failures aggregate into a
-`⚠ N install operations failed` summary; library distribution still
-completes for skills whose adapter calls succeeded; sync exits non-zero
-on partial install failure.
+## Routing Changes Across Machines
 
-## Reference — migrating a v0.9 library on Machine B
+Tag changes are shared immediately through the manifest. Route changes are
+shared through the profile or project file that owns the destination. On the
+next sync, Tome creates newly eligible links and removes stale Tome-owned links
+that no longer match. Foreign symlinks remain untouched.
 
-If your dotfiles repo predates v0.10, the library was stored as
-machine-specific symlinks. v0.10's first `tome sync` against such a
-library refuses with a Conflict / Why / Suggestion error pointing at the
-migration command:
+Use explicit exclusions for one destination:
 
 ```bash
-tome migrate-library --dry-run    # preview the conversion
-tome migrate-library              # run it (confirmation prompt; default no)
+tome route exclude add --to codex claude-only-skill
+tome route exclude remove --to codex claude-only-skill
 ```
 
-The dry-run shows a summary table — count of symlinks to convert,
-approximate additional disk usage, per-skill SKILL / SOURCE / SIZE /
-STATUS columns — and the live run prompts via `dialoguer::Confirm`
-defaulting to no. Pressing anything other than `y` aborts cleanly with
-no filesystem mutation. See the
-[v0.10 release notes](https://github.com/MartinP7r/tome/blob/main/CHANGELOG.md)
-for the full migration walkthrough.
-
-For CI or non-interactive automation, use `--yes` (mirrors
-`tome remove skill --yes`):
+Use shared pool exclusions only when a skill should not enter the library at
+all:
 
 ```bash
-tome migrate-library --yes
+tome pool exclude unwanted-skill
+tome pool restore unwanted-skill
 ```
-
-Under `--no-input` without `--yes`, migration bails with a
-Conflict / Why / Suggestion error — destructive operations require
-explicit consent in non-interactive mode.
-
-Broken managed symlinks (target gone) are SKIPPED and preserved in
-place so you can recover manually. Idempotent on re-run; subsequent
-syncs proceed normally.
-
-The conversion is one-way — there is no `--undo-migrate`. Commit your
-library directory to git (or back it up some other way) BEFORE running.

@@ -5,6 +5,300 @@ mod common;
 use common::*;
 
 #[test]
+fn tag_commands_mutate_only_existing_manifest_entries() {
+    let env = TestEnvBuilder::new()
+        .source("source", "directory")
+        .skill("reference-skill", "source")
+        .build();
+    env.cmd().args(["sync", "--no-input"]).assert().success();
+
+    env.cmd()
+        .args(["tag", "add", "reference-skill", "reference"])
+        .assert()
+        .success();
+    let manifest = std::fs::read_to_string(env.manifest_path()).unwrap();
+    assert!(manifest.contains("\"reference\""), "{manifest}");
+
+    env.cmd()
+        .args(["tag", "list", "reference-skill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reference"));
+
+    env.cmd()
+        .args(["tag", "list"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reference-skill"));
+
+    let before = manifest;
+    env.cmd()
+        .args(["tag", "remove", "reference-skill", "missing"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing"));
+    assert_eq!(
+        std::fs::read_to_string(env.manifest_path()).unwrap(),
+        before
+    );
+
+    env.cmd()
+        .args(["tag", "add", "missing-skill", "reference"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("missing-skill"));
+    assert_eq!(
+        std::fs::read_to_string(env.manifest_path()).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn route_commands_write_to_the_destination_owner_and_reject_unknown_destinations() {
+    let env = TestEnvBuilder::new()
+        .source("source", "directory")
+        .target("profile-target")
+        .skill("reference-skill", "source")
+        .build();
+    env.cmd().args(["sync", "--no-input"]).assert().success();
+    env.cmd()
+        .args(["tag", "add", "reference-skill", "reference"])
+        .assert()
+        .success();
+
+    env.cmd()
+        .args(["route", "tag", "add", "--to", "profile-target", "reference"])
+        .assert()
+        .success();
+    let profile_path = env.config_path.parent().unwrap().join("machines/test.toml");
+    let profile = std::fs::read_to_string(&profile_path).unwrap();
+    assert!(profile.contains("[routes.profile-target]"), "{profile}");
+    assert!(profile.contains("tags = [\"reference\"]"), "{profile}");
+
+    env.cmd()
+        .args(["tag", "add", "reference-skill", "missing"])
+        .assert()
+        .success();
+    let before_profile = profile.clone();
+    env.cmd()
+        .args([
+            "route",
+            "tag",
+            "remove",
+            "--to",
+            "profile-target",
+            "missing",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("route selector"));
+    assert_eq!(
+        std::fs::read_to_string(&profile_path).unwrap(),
+        before_profile
+    );
+
+    let project_dir = env.tmp.path().join("project");
+    let project_target = project_dir.join("target");
+    std::fs::create_dir_all(&project_target).unwrap();
+    std::fs::write(
+        project_dir.join(".tome.toml"),
+        format!(
+            "[directories.project-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            project_target.display()
+        ),
+    )
+    .unwrap();
+
+    env.cmd()
+        .current_dir(&project_dir)
+        .args([
+            "route",
+            "exclude",
+            "add",
+            "--to",
+            "project-target",
+            "reference-skill",
+        ])
+        .assert()
+        .success();
+    let project_path = project_dir.join(".tome.toml");
+    let project = std::fs::read_to_string(&project_path).unwrap();
+    assert!(project.contains("[routes.project-target]"), "{project}");
+    assert!(
+        project.contains("exclude = [\"reference-skill\"]"),
+        "{project}"
+    );
+
+    let before_profile = std::fs::read_to_string(&profile_path).unwrap();
+    let before_project = project;
+    env.cmd()
+        .current_dir(env.tmp.path())
+        .args(["route", "tag", "add", "--to", "project-target", "reference"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("project-target"));
+    assert_eq!(
+        std::fs::read_to_string(profile_path).unwrap(),
+        before_profile
+    );
+    assert_eq!(
+        std::fs::read_to_string(project_path).unwrap(),
+        before_project
+    );
+}
+
+#[test]
+fn dry_run_tag_and_route_mutations_validate_without_writing() {
+    let env = TestEnvBuilder::new()
+        .source("source", "directory")
+        .target("profile-target")
+        .skill("reference-skill", "source")
+        .build();
+    env.cmd().args(["sync", "--no-input"]).assert().success();
+    env.cmd()
+        .args(["tag", "add", "reference-skill", "reference"])
+        .assert()
+        .success();
+
+    let manifest_before = std::fs::read_to_string(env.manifest_path()).unwrap();
+    env.cmd()
+        .args(["--dry-run", "tag", "add", "reference-skill", "reference"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would"));
+    assert_eq!(
+        std::fs::read_to_string(env.manifest_path()).unwrap(),
+        manifest_before
+    );
+
+    let profile_path = env.config_path.parent().unwrap().join("machines/test.toml");
+    let profile_before = std::fs::read_to_string(&profile_path).unwrap();
+    env.cmd()
+        .args([
+            "--dry-run",
+            "route",
+            "tag",
+            "add",
+            "--to",
+            "profile-target",
+            "reference",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Would"));
+    assert_eq!(
+        std::fs::read_to_string(&profile_path).unwrap(),
+        profile_before
+    );
+
+    env.cmd()
+        .args([
+            "--dry-run",
+            "route",
+            "tag",
+            "remove",
+            "--to",
+            "profile-target",
+            "reference",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("route selector"));
+    assert_eq!(
+        std::fs::read_to_string(profile_path).unwrap(),
+        profile_before
+    );
+}
+
+#[test]
+fn route_rejects_manifest_unknown_tags_and_skills_without_writing() {
+    let env = TestEnvBuilder::new()
+        .source("source", "directory")
+        .target("profile-target")
+        .skill("reference-skill", "source")
+        .build();
+    env.cmd().args(["sync", "--no-input"]).assert().success();
+    env.cmd()
+        .args(["tag", "add", "reference-skill", "reference"])
+        .assert()
+        .success();
+
+    let profile_path = env.config_path.parent().unwrap().join("machines/test.toml");
+    let profile_before = std::fs::read_to_string(&profile_path).unwrap();
+    for args in [
+        vec![
+            "route",
+            "tag",
+            "add",
+            "--to",
+            "profile-target",
+            "unknown-tag",
+        ],
+        vec![
+            "route",
+            "exclude",
+            "add",
+            "--to",
+            "profile-target",
+            "unknown-skill",
+        ],
+    ] {
+        env.cmd()
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("manifest"));
+        assert_eq!(
+            std::fs::read_to_string(&profile_path).unwrap(),
+            profile_before
+        );
+    }
+
+    let project_dir = env.tmp.path().join("project");
+    let project_target = project_dir.join("target");
+    std::fs::create_dir_all(&project_target).unwrap();
+    let project_path = project_dir.join(".tome.toml");
+    std::fs::write(
+        &project_path,
+        format!(
+            "[directories.project-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            project_target.display()
+        ),
+    )
+    .unwrap();
+    let project_before = std::fs::read_to_string(&project_path).unwrap();
+    for args in [
+        vec![
+            "route",
+            "tag",
+            "add",
+            "--to",
+            "project-target",
+            "unknown-tag",
+        ],
+        vec![
+            "route",
+            "exclude",
+            "add",
+            "--to",
+            "project-target",
+            "unknown-skill",
+        ],
+    ] {
+        env.cmd()
+            .current_dir(&project_dir)
+            .args(args)
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("manifest"));
+        assert_eq!(
+            std::fs::read_to_string(&project_path).unwrap(),
+            project_before
+        );
+    }
+}
+
+#[test]
 fn config_path_prints_default_path() {
     let tmp = TempDir::new().unwrap();
     tome()

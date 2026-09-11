@@ -181,6 +181,7 @@ impl MachinePrefs {
     /// `PerDirBlocklist`). Returns true if the set changed (insert on
     /// `Disable`, remove on `Enable`). Honors MACH-04 by construction:
     /// only the `disabled` field is touched; `enabled` is never set here.
+    #[cfg(test)]
     pub(crate) fn toggle_per_dir_blocklist(
         &mut self,
         dir: &DirectoryName,
@@ -201,6 +202,7 @@ impl MachinePrefs {
     ///
     /// Used by `browse::App::apply_toggle` (HARD-21 D-BROWSE-1, scope =
     /// `PerDirAllowlist`). Honors MACH-04 by construction.
+    #[cfg(test)]
     pub(crate) fn toggle_per_dir_allowlist(
         &mut self,
         dir: &DirectoryName,
@@ -213,16 +215,6 @@ impl MachinePrefs {
             allowlist.remove(skill.as_str())
         } else {
             allowlist.insert(skill)
-        }
-    }
-
-    /// Mutate the global `disabled` blocklist. `disable=true` adds,
-    /// `disable=false` removes.
-    pub(crate) fn toggle_global_disabled(&mut self, skill: SkillName, disable: bool) -> bool {
-        if disable {
-            self.disabled.insert(skill)
-        } else {
-            self.disabled.remove(skill.as_str())
         }
     }
 

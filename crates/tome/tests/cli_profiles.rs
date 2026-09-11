@@ -1,6 +1,6 @@
-use assert_cmd::Command;
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::TempDir;
+use predicates::prelude::PredicateBooleanExt;
 
 fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     let tmp = TempDir::new().unwrap();
@@ -17,10 +17,6 @@ fn fixture() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
     .unwrap();
     std::fs::write(tmp.path().join("machines/work.toml"), "").unwrap();
     (tmp, config, settings)
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
 }
 
 #[test]
@@ -48,6 +44,113 @@ fn profile_selection() {
         ])
         .assert()
         .success();
+}
+
+#[test]
+fn sync_uses_the_selected_profile_routing_policy() {
+    let (tmp, config, settings) = fixture();
+    let source = tmp.path().join("source");
+    let target = tmp.path().join("target");
+    std::fs::create_dir_all(source.join("untagged")).unwrap();
+    std::fs::write(source.join("untagged/SKILL.md"), "# untagged").unwrap();
+    std::fs::write(
+        tmp.path().join("machines/work.toml"),
+        format!(
+            "[directories.source]\npath = \"{}\"\nrole = \"source\"\n\n[directories.target]\npath = \"{}\"\nrole = \"target\"\n\n[routes.target]\ntags = [\"reference\"]\n",
+            source.display(),
+            target.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
+
+    cargo_bin_cmd!("tome")
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "sync",
+            "--no-input",
+            "--no-install",
+        ])
+        .assert()
+        .success();
+
+    assert!(!target.join("untagged").exists());
+}
+
+#[test]
+fn status_reports_selected_profile_and_project_destinations() {
+    let (tmp, config, settings) = fixture();
+    let profile_target = tmp.path().join("profile-target");
+    let project_target = tmp.path().join("project-target");
+    std::fs::write(
+        tmp.path().join("machines/work.toml"),
+        format!(
+            "[directories.profile-target]\npath = \"{}\"\nrole = \"target\"\n",
+            profile_target.display()
+        ),
+    )
+    .unwrap();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
+    std::fs::write(
+        tmp.path().join(".tome.toml"),
+        format!(
+            "[directories.project-target]\npath = \"{}\"\nrole = \"target\"\n",
+            project_target.display()
+        ),
+    )
+    .unwrap();
+
+    let output = cargo_bin_cmd!("tome")
+        .current_dir(tmp.path())
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "status",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["profile"]["name"], "work");
+    let names = report["directories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|directory| directory["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"profile-target"));
+    assert!(names.contains(&"project-target"));
+}
+
+#[test]
+fn invalid_project_config_fails_status_without_profile_fallback() {
+    let (tmp, config, settings) = fixture();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
+    std::fs::write(
+        tmp.path().join(".tome.toml"),
+        "[routes.missing]\ntags = [\"reference\"]\n",
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("tome")
+        .current_dir(tmp.path())
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "status",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("missing"));
 }
 
 #[test]
@@ -107,28 +210,11 @@ fn profile_create_list_and_select_are_validated() {
 }
 
 #[test]
-fn legacy_directory_overrides_remain_compatible_with_a_warning() {
+fn released_cli_rejects_machine_flag() {
     let (tmp, config, settings) = fixture();
-    let source = tmp.path().join("legacy-source");
-    let target = tmp.path().join("legacy-target");
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
     let machine = tmp.path().join("machine.toml");
-    std::fs::write(
-        &config,
-        format!(
-            "library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
-            tmp.path().join("library").display(),
-            source.display(),
-        ),
-    )
-    .unwrap();
-    std::fs::write(
-        &machine,
-        format!(
-            "[directory_overrides.source]\npath = \"{}\"\n",
-            target.display()
-        ),
-    )
-    .unwrap();
+    std::fs::write(&machine, "disabled = [\"anything\"]\n").unwrap();
 
     cargo_bin_cmd!("tome")
         .args([
@@ -141,10 +227,8 @@ fn legacy_directory_overrides_remain_compatible_with_a_warning() {
             "status",
         ])
         .assert()
-        .success()
-        .stderr(predicates::str::contains(
-            "directory_overrides is deprecated",
-        ));
+        .failure()
+        .stderr(predicates::str::contains("unexpected argument '--machine'"));
 }
 
 #[test]
@@ -183,7 +267,7 @@ fn empty_profile_bypass_environment_variable_has_no_effect() {
 }
 
 #[test]
-fn legacy_layout_is_refused_with_migration_guidance() {
+fn legacy_layout_names_required_layered_files_without_migration_guidance() {
     let (tmp, config, settings) = fixture();
     let legacy_machine = tmp.path().join(".config/tome/machine.toml");
     std::fs::write(&config, format!("library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n", tmp.path().join("library").display(), tmp.path().join("source").display())).unwrap();
@@ -200,59 +284,32 @@ fn legacy_layout_is_refused_with_migration_guidance() {
         ])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("tome migrate profiles"));
+        .stderr(predicates::str::contains("machines/<profile>.toml"))
+        .stderr(predicates::str::contains("settings.toml"))
+        .stderr(predicates::str::contains("tome migrate profiles").not());
 }
 
 #[test]
-fn migrate_profiles_happy_path() {
+fn pool_git_source_is_not_rejected_as_a_legacy_layout() {
     let (tmp, config, settings) = fixture();
-    std::fs::remove_file(tmp.path().join("machines/work.toml")).unwrap();
-    let legacy_machine = tmp.path().join(".config/tome/machine.toml");
-    std::fs::create_dir_all(legacy_machine.parent().unwrap()).unwrap();
     std::fs::write(
         &config,
         format!(
-            "library_dir = \"{}\"\n\n[directories.source]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
+            "library_dir = \"{}\"\n\n[directories.pool]\npath = \"https://example.test/skills.git\"\ntype = \"git\"\nrole = \"source\"\n",
             tmp.path().join("library").display(),
-            tmp.path().join("source").display()
         ),
     )
     .unwrap();
-    std::fs::write(&legacy_machine, "disabled = []\n").unwrap();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
 
-    let mut command = Command::new("script");
-    if cfg!(target_os = "macos") {
-        command.args([
-            "-q",
-            "/dev/null",
-            cargo_bin_cmd!("tome").get_program().to_str().unwrap(),
+    cargo_bin_cmd!("tome")
+        .args([
             "--config",
             config.to_str().unwrap(),
             "--settings",
             settings.to_str().unwrap(),
-            "migrate",
-            "profiles",
-        ]);
-    } else {
-        let invocation = format!(
-            "{} --config {} --settings {} migrate profiles",
-            shell_quote(cargo_bin_cmd!("tome").get_program().to_str().unwrap()),
-            shell_quote(config.to_str().unwrap()),
-            shell_quote(settings.to_str().unwrap()),
-        );
-        command.args(["-q", "-e", "-c", &invocation, "/dev/null"]);
-    }
-
-    command
-        .env("HOME", tmp.path())
-        .write_stdin("work\ny\n")
+            "status",
+        ])
         .assert()
         .success();
-
-    let migrated_pool = std::fs::read_to_string(&config).unwrap();
-    assert!(migrated_pool.contains("library_dir"));
-    assert!(!migrated_pool.contains("directories"));
-    assert!(tmp.path().join("machines/work.toml").is_file());
-    assert!(settings.is_file());
-    assert!(!legacy_machine.exists());
 }

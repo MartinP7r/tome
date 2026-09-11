@@ -15,10 +15,9 @@
 //!   IS still in `config.directories` but the source file vanished. Library
 //!   copy is removed (today's behaviour).
 //! - **Bucket C (now-in-exclude-list):** Library skills whose distribution
-//!   symlinks were just removed because the skill was added to
-//!   `machine.toml::disabled` (global) or `directories.<name>.disabled`
-//!   (per-directory). Library content is preserved; only distribution
-//!   symlinks change.
+//!   symlinks were just removed because the effective profile or destination
+//!   route excludes the skill. Library content is preserved; only
+//!   distribution symlinks change.
 //!
 //! Buckets A and B are detected here in `cleanup_library` and surfaced via
 //! `CleanupResult::bucket_a_removed_from_config` and
@@ -34,23 +33,20 @@ use anyhow::{Context, Result};
 use std::collections::HashSet;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
-use tracing::warn;
 
 use crate::config::DirectoryName;
 use crate::discover::SkillName;
 use crate::manifest::Manifest;
-use crate::paths::resolve_symlink_target;
+use crate::paths::{points_into_library, resolve_symlink_target};
 
 /// One library skill whose distribution symlink was removed because the
-/// skill is now in `machine.toml::disabled` (global) or
-/// `directories.<dir>.disabled` (per-directory). Surfaced in the unified
-/// cleanup output as Bucket C (UX-01 D-UX01-1).
+/// skill is excluded by the effective profile or destination route. Surfaced
+/// in the unified cleanup output as Bucket C (UX-01 D-UX01-1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExcludedSkill {
     pub name: SkillName,
-    /// `None` = excluded globally via `machine.toml::disabled`.
-    /// `Some(dir)` = excluded for a specific directory via
-    /// `directories.<dir>.disabled`.
+    /// `None` = excluded by the selected profile's global projection.
+    /// `Some(dir)` = excluded for a specific destination.
     pub directory: Option<DirectoryName>,
 }
 
@@ -247,7 +243,7 @@ pub(crate) fn render_cleanup_buckets(
                 None => {
                     writeln!(
                         writer,
-                        "  {} {} — remove `{}` from `machine.toml::disabled` to re-distribute",
+                        "  {} {} — update the selected profile or use `tome route exclude remove --to <destination> {}`",
                         excluded.name,
                         console::style("(excluded globally)").dim(),
                         excluded.name,
@@ -256,11 +252,11 @@ pub(crate) fn render_cleanup_buckets(
                 Some(dir) => {
                     writeln!(
                         writer,
-                        "  {} {} — remove `{}` from `machine.toml::directories.{}.disabled` to re-distribute",
+                        "  {} {} — run `tome route exclude remove --to {} {}` to re-distribute",
                         excluded.name,
                         console::style(format!("(excluded for: {})", dir)).dim(),
-                        excluded.name,
                         dir,
+                        excluded.name,
                     )?;
                 }
             }
@@ -532,18 +528,6 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
 
     let mut removed = 0;
 
-    // Canonicalize library_dir so that starts_with works when library_dir itself
-    // contains a symlink component (e.g., /var -> /private/var on macOS).
-    // We keep both forms so we can match symlinks created with either path variant.
-    let canonical_library = std::fs::canonicalize(library_dir).unwrap_or_else(|e| {
-        warn!(
-            "could not canonicalize library path {}: {} — symlinks using canonical paths may not be cleaned up",
-            library_dir.display(),
-            e
-        );
-        library_dir.to_path_buf()
-    });
-
     let entries = std::fs::read_dir(target_dir)
         .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
 
@@ -557,10 +541,7 @@ pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> R
                 .with_context(|| format!("failed to read symlink {}", path.display()))?;
             let target = resolve_symlink_target(&path, &raw_target);
 
-            // Match against both the original and canonical library path so we correctly
-            // handle macOS /var -> /private/var symlinks and similar platform quirks.
-            let points_into_library =
-                target.starts_with(library_dir) || target.starts_with(&canonical_library);
+            let points_into_library = points_into_library(&target, library_dir);
 
             // Remove if it points into the library dir but the library entry is gone
             if points_into_library && !target.exists() {
@@ -629,6 +610,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -682,6 +664,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -721,6 +704,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -828,6 +812,48 @@ mod tests {
     }
 
     #[test]
+    fn cleanup_target_preserves_broken_lexically_nested_external_symlink() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+
+        // The target is broken and lexically begins with `library`, but its
+        // normalized path is outside the library.
+        unix_fs::symlink(
+            library.join("../external/missing-skill"),
+            target.join("foreign-link"),
+        )
+        .unwrap();
+
+        let removed = cleanup_target(&target, &library, false).unwrap();
+
+        assert_eq!(removed, 0, "foreign link must not be removed");
+        assert!(target.join("foreign-link").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_target_preserves_broken_foreign_symlink_through_library_redirect() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        let external = root.path().join("external");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&external).unwrap();
+        unix_fs::symlink(&external, library.join("redirect")).unwrap();
+
+        let target_link = target.join("foreign-link");
+        unix_fs::symlink(library.join("redirect/missing-skill"), &target_link).unwrap();
+
+        let removed = cleanup_target(&target, &library, false).unwrap();
+
+        assert_eq!(removed, 0, "foreign link must not be removed");
+        assert!(target_link.is_symlink());
+    }
+
+    #[test]
     fn cleanup_dry_run_preserves_managed_symlink() {
         let library = TempDir::new().unwrap();
 
@@ -887,6 +913,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("abc"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: true,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -1280,14 +1307,8 @@ mod tests {
             rendered.contains("excluded for: my-dir"),
             "Bucket C per-directory annotation must name the directory:\n{rendered}"
         );
-        assert!(
-            rendered.contains("machine.toml::disabled"),
-            "Bucket C global hint must point at machine.toml::disabled:\n{rendered}"
-        );
-        assert!(
-            rendered.contains("machine.toml::directories.my-dir.disabled"),
-            "Bucket C per-directory hint must name the per-dir path:\n{rendered}"
-        );
+        assert!(rendered.contains("tome route exclude remove"), "{rendered}");
+        assert!(rendered.contains("--to my-dir corge"), "{rendered}");
     }
 
     #[test]

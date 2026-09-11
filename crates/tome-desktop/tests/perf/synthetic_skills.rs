@@ -38,6 +38,7 @@
 
 #![cfg(test)] // belt + braces — integration tests are already cfg(test).
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -121,12 +122,13 @@ fn setup_perf_fixture() -> anyhow::Result<()> {
         let content_hash = tome::hash_directory(&skill_dir)?;
 
         let skill_name = SkillName::new(&name_str)?;
-        let entry = SkillEntry::new(
+        let mut entry = SkillEntry::new(
             skill_dir.clone(),
             dir_name.clone(),
             content_hash,
             /* managed */ false,
         );
+        entry.tags = BTreeSet::new();
         manifest.insert(skill_name, entry);
 
         perf_rows.push(serde_json::json!({

@@ -112,7 +112,7 @@ fn conflicting_candidates_do_not_mutate_pool() {
 }
 
 #[test]
-fn pool_remove_excludes_before_cleanup_and_restore_allows_import() {
+fn pool_exclude_prevents_import_and_restore_allows_import() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
     let library = root.join("library");
@@ -136,22 +136,18 @@ fn pool_remove_excludes_before_cleanup_and_restore_allows_import() {
     .unwrap();
     let settings = root.join("settings.toml");
     std::fs::write(&settings, "profile = \"test\"\ngit_sync = \"never\"\n").unwrap();
-    run(&config, &settings).assert().success();
-
-    let mut remove = cargo_bin_cmd!("tome");
-    remove.args([
+    let mut exclude = cargo_bin_cmd!("tome");
+    exclude.args([
         "--config",
         config.to_str().unwrap(),
         "--settings",
         settings.to_str().unwrap(),
         "--no-input",
-        "remove",
         "pool",
+        "exclude",
         "removed-skill",
-        "--yes",
     ]);
-    remove.assert().success();
-    assert!(!library.join("removed-skill").exists());
+    exclude.assert().success();
     assert!(
         std::fs::read_to_string(&config)
             .unwrap()

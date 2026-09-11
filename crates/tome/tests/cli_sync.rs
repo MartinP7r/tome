@@ -1,3 +1,4 @@
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::TempDir;
 use predicates::prelude::*;
 use std::process::Command as StdCommand;
@@ -263,6 +264,85 @@ role = "target"
     assert!(!library_dir.join("my-skill").is_symlink());
     // Target has a symlink pointing to the library entry
     assert!(target_dir.join("my-skill").is_symlink());
+}
+
+#[test]
+fn sync_routes_tagged_source_skills_to_distinct_destinations() {
+    let tmp = TempDir::new().unwrap();
+    let source = tmp.path().join("source");
+    let reference_target = tmp.path().join("reference-target");
+    let rust_target = tmp.path().join("rust-target");
+    let library = tmp.path().join("library");
+    let config = tmp.path().join("config.toml");
+    let settings = tmp.path().join("settings.toml");
+
+    create_skill(&source, "reference-skill");
+    create_skill(&source, "rust-skill");
+    create_skill(&source, "untagged-skill");
+    std::fs::create_dir_all(tmp.path().join("machines")).unwrap();
+    std::fs::write(
+        &config,
+        format!("library_dir = \"{}\"\n", library.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("machines/work.toml"),
+        format!(
+            "[directories.source]\npath = \"{}\"\nrole = \"source\"\n\n[directories.reference]\npath = \"{}\"\nrole = \"target\"\n\n[directories.rust]\npath = \"{}\"\nrole = \"target\"\n\n[routes.reference]\ntags = [\"reference\"]\n\n[routes.rust]\ntags = [\"rust\"]\n",
+            source.display(),
+            reference_target.display(),
+            rust_target.display(),
+        ),
+    )
+    .unwrap();
+    std::fs::write(&settings, "profile = \"work\"\n").unwrap();
+
+    cargo_bin_cmd!("tome")
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "sync",
+            "--no-input",
+            "--no-install",
+        ])
+        .assert()
+        .success();
+
+    let manifest_path = tmp.path().join(".tome-manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+    manifest["skills"]["reference-skill"]["tags"] = serde_json::json!(["reference"]);
+    manifest["skills"]["rust-skill"]["tags"] = serde_json::json!(["rust"]);
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    cargo_bin_cmd!("tome")
+        .args([
+            "--config",
+            config.to_str().unwrap(),
+            "--settings",
+            settings.to_str().unwrap(),
+            "sync",
+            "--no-input",
+            "--no-install",
+        ])
+        .assert()
+        .success();
+
+    assert!(library.join("reference-skill").is_dir());
+    assert!(library.join("rust-skill").is_dir());
+    assert!(library.join("untagged-skill").is_dir());
+    assert!(reference_target.join("reference-skill").is_symlink());
+    assert!(!reference_target.join("rust-skill").exists());
+    assert!(!reference_target.join("untagged-skill").exists());
+    assert!(rust_target.join("rust-skill").is_symlink());
+    assert!(!rust_target.join("reference-skill").exists());
+    assert!(!rust_target.join("untagged-skill").exists());
 }
 
 #[test]
@@ -772,178 +852,6 @@ fn sync_triage_dry_run_makes_no_changes() {
 }
 
 #[test]
-fn sync_respects_machine_disabled() {
-    // Test that sync with --machine skips disabled skills during distribution
-    // AND removes their existing symlinks from targets.
-    let tmp = TempDir::new().unwrap();
-    let skills_dir = tmp.path().join("skills");
-    create_skill(&skills_dir, "keep-skill");
-    create_skill(&skills_dir, "drop-skill");
-
-    let target_dir = tmp.path().join("target");
-
-    let config = write_config_with_target(
-        tmp.path(),
-        &format!(
-            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
-            skills_dir.display()
-        ),
-        &target_dir,
-    );
-
-    // Sync — both skills should be distributed
-    tome()
-        .args(["--config", config.to_str().unwrap(), "sync"])
-        .assert()
-        .success();
-
-    assert!(target_dir.join("keep-skill").is_symlink());
-    assert!(target_dir.join("drop-skill").is_symlink());
-
-    // Create machine.toml that disables "drop-skill"
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(&machine_path, "disabled = [\"drop-skill\"]\n").unwrap();
-    restore_legacy_fixture(&config);
-
-    // Re-sync with --machine — disabled skill's symlink should be removed
-    tome()
-        .args([
-            "--config",
-            config.to_str().unwrap(),
-            "--machine",
-            machine_path.to_str().unwrap(),
-            "sync",
-        ])
-        .assert()
-        .success();
-
-    assert!(
-        target_dir.join("keep-skill").is_symlink(),
-        "enabled skill should still be linked"
-    );
-    assert!(
-        !target_dir.join("drop-skill").exists(),
-        "disabled skill's symlink should be removed by sync"
-    );
-}
-
-#[test]
-fn sync_triage_disable_removes_symlink() {
-    // Test that disabling a skill and re-running update removes its symlink from targets.
-    // Since we can't interact with the TTY in tests, we simulate the effect:
-    // 1. Sync normally (both skills distributed)
-    // 2. Manually create machine.toml disabling one skill
-    // 3. The next update should not re-create the disabled symlink and should clean it up
-    let tmp = TempDir::new().unwrap();
-    let skills_dir = tmp.path().join("skills");
-    create_skill(&skills_dir, "enabled-skill");
-    create_skill(&skills_dir, "disabled-skill");
-
-    let target_dir = tmp.path().join("target");
-
-    let config = write_config_with_target(
-        tmp.path(),
-        &format!(
-            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
-            skills_dir.display()
-        ),
-        &target_dir,
-    );
-
-    let config_str = config.to_str().unwrap();
-
-    // Initial sync — both skills distributed
-    tome()
-        .args(["--config", config_str, "sync"])
-        .assert()
-        .success();
-
-    assert!(target_dir.join("enabled-skill").is_symlink());
-    assert!(target_dir.join("disabled-skill").is_symlink());
-
-    // Create machine.toml disabling one skill
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(&machine_path, "disabled = [\"disabled-skill\"]\n").unwrap();
-    let machine_str = machine_path.to_str().unwrap();
-    restore_legacy_fixture(&config);
-
-    // Re-run update with --machine — should clean up disabled skill's symlink
-    tome()
-        .args([
-            "--config",
-            config_str,
-            "--machine",
-            machine_str,
-            "--quiet",
-            "sync",
-        ])
-        .assert()
-        .success();
-
-    assert!(
-        target_dir.join("enabled-skill").is_symlink(),
-        "enabled skill should still be linked"
-    );
-    assert!(
-        !target_dir.join("disabled-skill").exists(),
-        "disabled skill's symlink should be removed by update"
-    );
-}
-
-#[test]
-fn sync_respects_machine_disabled_targets() {
-    // Test that sync with a disabled target does not distribute skills there,
-    // and that an unknown disabled_target produces a warning on stderr.
-    let tmp = TempDir::new().unwrap();
-    let skills_dir = tmp.path().join("skills");
-    create_skill(&skills_dir, "my-skill");
-
-    let target_dir = tmp.path().join("target");
-
-    let config = write_config_with_target(
-        tmp.path(),
-        &format!(
-            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
-            skills_dir.display()
-        ),
-        &target_dir,
-    );
-
-    // Create machine.toml that disables the configured target and also lists an unknown target
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(
-        &machine_path,
-        "disabled_directories = [\"test-target\", \"nonexistent-target\"]\n",
-    )
-    .unwrap();
-    restore_legacy_fixture(&config);
-
-    tome()
-        .args([
-            "--config",
-            config.to_str().unwrap(),
-            "--machine",
-            machine_path.to_str().unwrap(),
-            "sync",
-        ])
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Sync complete"))
-        .stderr(predicate::str::contains(
-            "warning: disabled directory 'nonexistent-target' in machine.toml does not match any configured directory",
-        ));
-
-    // The target directory should not have the skill (target is disabled)
-    assert!(
-        !target_dir.join("my-skill").exists(),
-        "disabled target should not receive skills"
-    );
-
-    // The skill should still be in the library
-    assert!(tmp.path().join("library/my-skill").is_dir());
-}
-
-#[test]
 fn sync_with_two_targets_via_config() {
     // Quick smoke test for write_config_with_target plus manual second target
     let tmp = TempDir::new().unwrap();
@@ -993,55 +901,6 @@ role = "target"
 
     assert!(target_a.join("my-skill").is_symlink());
     assert!(target_b.join("my-skill").is_symlink());
-}
-
-#[test]
-fn sync_warns_unknown_disabled_targets() {
-    // Test that `tome update` warns about disabled_targets in machine.toml
-    // that don't match any configured target.
-    let tmp = TempDir::new().unwrap();
-    let skills_dir = tmp.path().join("skills");
-    create_skill(&skills_dir, "my-skill");
-
-    let target_dir = tmp.path().join("target");
-
-    let config = write_config_with_target(
-        tmp.path(),
-        &format!(
-            "[directories.test]\npath = \"{}\"\ntype = \"directory\"\nrole = \"source\"\n",
-            skills_dir.display()
-        ),
-        &target_dir,
-    );
-
-    // Initial sync so library and lockfile exist
-    tome()
-        .args(["--config", config.to_str().unwrap(), "sync"])
-        .assert()
-        .success();
-
-    // Create machine.toml with an unknown disabled target
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(
-        &machine_path,
-        "disabled_directories = [\"nonexistent-target\"]\n",
-    )
-    .unwrap();
-    restore_legacy_fixture(&config);
-
-    tome()
-        .args([
-            "--config",
-            config.to_str().unwrap(),
-            "--machine",
-            machine_path.to_str().unwrap(),
-            "sync",
-        ])
-        .assert()
-        .success()
-        .stderr(predicate::str::contains(
-            "warning: disabled directory 'nonexistent-target' in machine.toml does not match any configured directory",
-        ));
 }
 
 #[test]
@@ -1707,35 +1566,6 @@ fn lifecycle_multi_target_distribution() {
         env.target_dir("target-b").join("my-skill").is_symlink(),
         "target-b should have the skill"
     );
-
-    // Disable target-b via machine.toml and re-sync
-    let machine_path = env.tome_home().join("machine.toml");
-    std::fs::write(&machine_path, "disabled_directories = [\"target-b\"]\n").unwrap();
-
-    env.cmd()
-        .args(["--machine", machine_path.to_str().unwrap(), "sync"])
-        .assert()
-        .success();
-
-    assert!(
-        env.target_dir("target-a").join("my-skill").is_symlink(),
-        "target-a should still have the skill"
-    );
-    // Note: disabled targets are skipped entirely (no distribute AND no cleanup),
-    // so existing symlinks in disabled targets are left in place.
-    assert!(
-        env.target_dir("target-b").join("my-skill").is_symlink(),
-        "target-b symlinks are preserved (disabled targets are skipped, not cleaned)"
-    );
-
-    // Remove machine.toml and re-sync — target-b should still work
-    std::fs::remove_file(&machine_path).unwrap();
-    env.cmd().arg("sync").assert().success();
-
-    assert!(
-        env.target_dir("target-b").join("my-skill").is_symlink(),
-        "target-b should work after re-enabling"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1819,7 +1649,7 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
 // fixture where exactly one skill falls into each bucket:
 //   A: source dir was removed from config (preserve as Unowned)
 //   B: source still configured but file vanished from disk (delete)
-//   C: skill still discovered but added to machine.toml::disabled
+//   C: skill still discovered but added to a destination route's exclusions
 //      (distribution symlink torn down)
 //
 // Then runs `tome sync --no-input` against the fixture and asserts the
@@ -1945,10 +1775,23 @@ role = "target"
     let config_path = tome_home.join("tome.toml");
     std::fs::write(&config_path, config_toml).unwrap();
 
-    // machine.toml disables bucket-c-skill globally so distribution
-    // cleanup tears down its symlink and surfaces it in Bucket C.
-    let machine_path = tmp.path().join("machine.toml");
-    std::fs::write(&machine_path, "disabled = [\"bucket-c-skill\"]\n").unwrap();
+    migrate_ordinary_fixture(&config_path);
+    tome()
+        .args([
+            "--tome-home",
+            tome_home.to_str().unwrap(),
+            "--config",
+            config_path.to_str().unwrap(),
+            "route",
+            "exclude",
+            "add",
+            "--to",
+            "tgt",
+            "bucket-c-skill",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
 
     // Run sync against the fixture and capture stderr.
     let output = tome()
@@ -1957,8 +1800,6 @@ role = "target"
             tome_home.to_str().unwrap(),
             "--config",
             config_path.to_str().unwrap(),
-            "--machine",
-            machine_path.to_str().unwrap(),
             "sync",
             "--no-input",
         ])

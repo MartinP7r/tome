@@ -56,15 +56,18 @@ fn record_in_manifest(
     skill: &DiscoveredSkill,
     content_hash: crate::validation::ContentHash,
 ) {
-    manifest.insert(
-        skill.name.clone(),
-        SkillEntry::new(
-            skill.path.clone(),
-            skill.source_name.clone(),
-            content_hash,
-            skill.origin.is_managed(),
-        ),
+    let tags = manifest
+        .tags_for(skill.name.as_str())
+        .cloned()
+        .unwrap_or_default();
+    let mut entry = SkillEntry::new(
+        skill.path.clone(),
+        skill.source_name.clone(),
+        content_hash,
+        skill.origin.is_managed(),
     );
+    entry.tags = tags;
+    manifest.insert(skill.name.clone(), entry);
 }
 
 /// Consolidate discovered skills into the library directory.
@@ -135,14 +138,6 @@ pub fn consolidate(
 ///
 /// Idempotency: when the source's content_hash matches the manifest entry,
 /// this is a no-op (`result.unchanged += 1`).
-///
-/// v0.9-shape detection: if a symlink already exists at `dest` AND the skill
-/// is in the manifest, this function refuses to auto-convert and returns
-/// `result.skipped += 1` with a stderr warning. The user must run
-/// `tome migrate-library` to convert the v0.9-shape library to v0.10-shape
-/// (per D-01). Normally this branch is unreachable because `lib.rs::sync`
-/// performs an isolated v0.9-shape detection check before consolidate (per
-/// D-02) and refuses with a hint.
 fn consolidate_managed(
     skill: &DiscoveredSkill,
     dest: &Path,
@@ -154,19 +149,6 @@ fn consolidate_managed(
     let content_hash = manifest::hash_directory(&skill.path)?;
 
     match classify_destination(dest) {
-        DestinationState::Symlink => {
-            // v0.9-shape (managed-as-symlink) — refuse to auto-convert.
-            // The user must run `tome migrate-library` (per D-01).
-            // Normally `lib.rs::sync` blocks this path entirely (per D-02);
-            // this branch defends the boundary in case sync's gate is bypassed
-            // (e.g. direct call to consolidate from a test or future helper).
-            warn!(
-                "{} is a v0.9-shape symlink for managed skill — \
-                 run `tome migrate-library` to convert to v0.10 shape, skipping",
-                dest.display()
-            );
-            result.skipped += 1;
-        }
         DestinationState::Directory => {
             if let Some(entry) = manifest.get(skill.name.as_str()) {
                 if entry.content_hash == content_hash && !force {
@@ -229,7 +211,7 @@ fn consolidate_managed(
                 "re-emitted",
             );
         }
-        DestinationState::Other => {
+        DestinationState::Symlink | DestinationState::Other => {
             warn!(
                 "{} exists but is not in the manifest, skipping",
                 dest.display()
@@ -600,6 +582,30 @@ mod tests {
         // Library copy should have the new content
         let content = std::fs::read_to_string(library.path().join("my-skill/SKILL.md")).unwrap();
         assert_eq!(content, "# updated");
+    }
+
+    #[test]
+    fn consolidate_preserves_tags_when_content_changes() {
+        let source = TempDir::new().unwrap();
+        let library = TempDir::new().unwrap();
+        let skill = make_skill(source.path(), "my-skill");
+        let paths =
+            TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap();
+
+        let (_, mut manifest) =
+            consolidate(std::slice::from_ref(&skill), &paths, false, false).unwrap();
+        let tag = crate::manifest::SkillTag::new("reference").unwrap();
+        assert!(manifest.add_tag("my-skill", tag.clone()));
+        manifest::save(&manifest, library.path()).unwrap();
+
+        std::fs::write(source.path().join("my-skill/SKILL.md"), "# updated").unwrap();
+
+        let (_, manifest) =
+            consolidate(std::slice::from_ref(&skill), &paths, false, false).unwrap();
+        assert_eq!(
+            manifest.tags_for("my-skill"),
+            Some(&[tag].into_iter().collect())
+        );
     }
 
     #[test]
@@ -1452,6 +1458,7 @@ mod tests {
                 content_hash: crate::validation::test_hash("stale-hash"),
                 synced_at: "2024-01-01T00:00:00Z".to_string(),
                 managed: false,
+                tags: std::collections::BTreeSet::new(),
             },
         );
 
@@ -1494,46 +1501,6 @@ mod tests {
             "manifest entry should be updated to managed: true"
         );
         assert_eq!(result.updated, 1);
-    }
-
-    #[test]
-    fn consolidate_refuses_v09_shape_managed_symlink() {
-        use std::os::unix::fs as unix_fs;
-        let source = TempDir::new().unwrap();
-        let library = TempDir::new().unwrap();
-        let skill = make_managed_skill(source.path(), "plugin-skill");
-
-        // Pre-create a v0.9-shape symlink + manifest entry simulating an
-        // un-migrated library that bypassed the lib.rs::sync gate.
-        unix_fs::symlink(&skill.path, library.path().join("plugin-skill")).unwrap();
-        let mut manifest = Manifest::default();
-        manifest.insert(
-            skill.name.clone(),
-            SkillEntry::new(
-                skill.path.clone(),
-                skill.source_name.clone(),
-                manifest::hash_directory(&skill.path).unwrap(),
-                true,
-            ),
-        );
-        manifest::save(&manifest, library.path()).unwrap();
-
-        let (result, _) = consolidate(
-            std::slice::from_ref(&skill),
-            &TomePaths::new(library.path().to_path_buf(), library.path().to_path_buf()).unwrap(),
-            false,
-            false,
-        )
-        .unwrap();
-
-        // consolidate_managed must NOT auto-convert — that's migration's job.
-        assert_eq!(result.skipped, 1);
-        assert_eq!(result.created, 0);
-        assert_eq!(result.updated, 0);
-        assert!(
-            library.path().join("plugin-skill").is_symlink(),
-            "v0.9 symlink must be preserved (skipped, not auto-converted)"
-        );
     }
 
     #[test]

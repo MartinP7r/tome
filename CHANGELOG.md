@@ -7,12 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+- **Configuration now resolves shared repository policy, a selected committed
+  profile, the nearest project `.tome.toml`, and local `settings.toml`.** Git
+  sources are repository-owned; machine-wide directories and routes belong to
+  `machines/<profile>.toml`; project files may add project-only destinations
+  and routes. Released commands no longer read or write `machine.toml`, and the
+  global `--machine` option has been removed.
+- **Destination distribution is tag-routed and new skills are untagged by
+  default.** Shared tags live on individual `.tome-manifest.json` entries. A
+  configured destination route selects a skill when any tag matches, while an
+  explicit per-destination exclusion wins. Untagged skills remain in the
+  library without being linked into tag-routed destinations.
+- **Obsolete compatibility commands have been removed.** Use `tome --version`
+  instead of `tome version`; use `tome pool exclude` and `tome pool restore`
+  instead of `tome remove pool`. The one-shot `tome migrate-library` command is
+  no longer shipped.
+
 ### Added
 
 - **Official `using-tome` agent skill** for safe setup, configuration, sync,
   diagnosis, and recovery. The repository now doubles as a Claude plugin
   marketplace (`tome@tome`), and interactive `tome init` can add the same skill
   as a cross-tool Git source. Noninteractive init remains network-source-free.
+- **Shared skill tags and profile/project destination routes.** `tome tag`
+  manages manifest tags; `tome route tag` manages OR-match selectors; and
+  `tome route exclude` manages explicit destination exceptions. Tome searches
+  upward from the working directory for additive project `.tome.toml` files.
+- **Scoped test targets.** `make test-core` tests only the CLI/core crate,
+  `make test-desktop` tests the Desktop crate, and `make test` aggregates both.
+
+### Changed
+
+- **`tome add` separates source registration from routing.** Git URLs and
+  GitHub slugs create shared discovery sources in repository policy and accept
+  neither `--to` nor `--role`. Explicit local paths remain profile-owned and
+  may select a role.
+- **Native tool plugins remain tool-specific adapters.** Tome owns desired
+  skill/plugin state, the portable library copies, and their cross-tool tag
+  routing; native plugin installation and updates still run through the
+  corresponding tool adapter under local consent.
 
 ## [0.16.4] - 2026-07-30
 
