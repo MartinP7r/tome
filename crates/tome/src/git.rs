@@ -61,13 +61,20 @@ fn git_stdout(repo_dir: &Path, args: &[&str]) -> Result<String> {
 
 /// Whether `dir` is the root of a usable Git working tree.
 ///
-/// The cache must own a non-symlink `.git` directory produced by `git clone`,
-/// then `git rev-parse` must confirm that `dir` itself is inside a work tree.
-/// Rejecting `.git` files and symlinks prevents a forged cache from redirecting
-/// fetch/reset operations into another checkout. `git_command` caps Git's
+/// The cache root and its `.git` metadata must both be non-symlink directories
+/// produced by `git clone`, then `git rev-parse` must confirm that `dir` itself
+/// is inside a work tree. Rejecting redirected cache roots, `.git` files, and
+/// `.git` symlinks prevents a forged cache from redirecting fetch/reset operations into another checkout. `git_command` caps Git's
 /// upward discovery at `dir`'s parent, so validation cannot accidentally accept
 /// an enclosing repository.
 pub(crate) fn is_git_repo(dir: &Path) -> bool {
+    let Ok(dir_metadata) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    if dir_metadata.file_type().is_symlink() || !dir_metadata.is_dir() {
+        return false;
+    }
+
     let git_dir = dir.join(".git");
     let Ok(metadata) = std::fs::symlink_metadata(&git_dir) else {
         return false;
@@ -366,6 +373,17 @@ mod tests {
         .unwrap();
 
         assert!(!is_git_repo(cache.path()));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_cache_root_symlink_to_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let parent = TempDir::new().unwrap();
+        let cache = parent.path().join("cache");
+        std::os::unix::fs::symlink(external.path(), &cache).unwrap();
+
+        assert!(!is_git_repo(&cache));
     }
 
     #[test]
