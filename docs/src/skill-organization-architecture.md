@@ -27,18 +27,22 @@ Tome already implements most of the right storage boundary:
 
 The remaining work is to make those boundaries consistently visible and useful to a person curating a growing skill collection.
 
-## Decision: copy the canonical pool; symlink only at local targets
+## Decision: copy the canonical pool and every target
 
-**Adopt a copy-based canonical library and retain symlinks only for disposable, local target materialization.**
+**Adopt copy materialization as Tome's default and supported deployment model.**
+
+The canonical pool is the place where Tome owns and curates skills; targets are self-contained deployments. A target must continue working if Tome is uninstalled, unavailable, misconfigured, moved, or simply not run again.
 
 | Layer | Storage rule | Why |
 |---|---|---|
 | Source/package-manager cache | Read-only input | A cache or installed plugin can change or disappear independently of Tome. |
 | Canonical pool (`skills/`) | Real directory copies | Content can be reviewed, hashed, committed, backed up, migrated, and used on another machine. |
-| Tool/project target directory | Tome-owned symlink to canonical pool where supported | Avoids duplicate local content and makes routing changes cheap and reversible. |
-| Target without safe symlink support | Explicit copy materialization, tracked as such | Portability must not depend on Unix links or a tool's link-following behavior. |
+| Tool target directory | Real directory copy from the canonical pool | The tool remains self-contained and usable if the pool or Tome executable disappears. |
+| Project target directory | Real directory copy from the canonical pool | Git resets, project tooling, deletion of the checkout, or removal of Tome cannot dereference, break, or mutate the canonical pool. |
 
-Do **not** reintroduce source/cache symlinks inside the canonical pool. That would make the pool depend on machine-local paths and would undermine cross-machine recovery. A target copy is a compatibility mode, not a new source of truth: its manifest record must identify the canonical hash, materialization mode, target path, and last successful sync.
+Do **not** reintroduce source/cache symlinks inside the canonical pool. Do not use target symlinks as normal materialization either. Symlinks economize on local copies but couple every target to Tome's continued path correctness and turn ordinary target-file writes into a possible canonical-pool mutation.
+
+A target copy is a derived deployment, not a second source of truth. Its deployment record must identify the canonical hash, target path, materialization mode `copy`, and last successful sync. A later `tome sync` can report drift and offer an explicit, previewed refresh; it must never silently treat a changed target copy as canonical content.
 
 ## State model
 
@@ -127,7 +131,7 @@ Evaluation evidence may inform a curation decision. It must not automatically ro
 ### Next: curation and controlled deployment
 
 1. Add the curation-record contract and deterministic catalog views: domains, capabilities, lifecycle, provenance, overlap candidates, and gap reports.
-2. Add explicit target materialization capability: `symlink` or `copy`, with repairable drift reporting.
+2. Add explicit target deployment records for copy materialization, including canonical hash, target path, last successful sync, and previewed drift refresh.
 3. Add project route inspection and selection on top of the existing profile boundary.
 4. Implement the provider-neutral evaluation core as curation evidence, followed by a separate runner-adapter spike.
 
@@ -143,7 +147,7 @@ Evaluation evidence may inform a curation decision. It must not automatically ro
 - No source disappearance may delete canonical pool content without an explicit pool removal decision.
 - No same-name/different-content candidate may overwrite content or provenance silently.
 - Never delete or replace a foreign target link/file without an explicit force/repair decision.
-- Copy materializations and symlink materializations must be identifiable and repairable from canonical hashes.
+- Every deployed target copy must be identifiable and repairable from its canonical hash, but a changed target copy is never canonical input.
 - Project configuration cannot mutate the shared pool.
 - Provider credentials, raw evaluation traces, and machine-specific consent do not enter shared Git state.
 - A suggestion engine may prioritize review but cannot enact acceptance, routing, customization, forking, or deletion on its own.
