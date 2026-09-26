@@ -61,13 +61,18 @@ fn git_stdout(repo_dir: &Path, args: &[&str]) -> Result<String> {
 
 /// Whether `dir` is the root of a usable Git working tree.
 ///
-/// The `.git` entry must exist directly inside `dir`, and `git rev-parse` must
-/// confirm that `dir` itself is inside a work tree. The second condition rejects
-/// interrupted clones and arbitrary directories with a forged `.git` marker.
-/// `git_command` caps Git's upward discovery at `dir`'s parent, so validation
-/// cannot accidentally accept an enclosing repository.
+/// The cache must own a non-symlink `.git` directory produced by `git clone`,
+/// then `git rev-parse` must confirm that `dir` itself is inside a work tree.
+/// Rejecting `.git` files and symlinks prevents a forged cache from redirecting
+/// fetch/reset operations into another checkout. `git_command` caps Git's
+/// upward discovery at `dir`'s parent, so validation cannot accidentally accept
+/// an enclosing repository.
 pub(crate) fn is_git_repo(dir: &Path) -> bool {
-    if !dir.join(".git").exists() {
+    let git_dir = dir.join(".git");
+    let Ok(metadata) = std::fs::symlink_metadata(&git_dir) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
         return false;
     }
 
@@ -347,6 +352,31 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
         assert!(!is_git_repo(tmp.path()));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_dot_git_file_pointing_at_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let cache = TempDir::new().unwrap();
+        std::fs::write(
+            cache.path().join(".git"),
+            format!("gitdir: {}\n", external.path().join(".git").display()),
+        )
+        .unwrap();
+
+        assert!(!is_git_repo(cache.path()));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_dot_git_symlink_to_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let cache = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(external.path().join(".git"), cache.path().join(".git"))
+            .unwrap();
+
+        assert!(!is_git_repo(cache.path()));
     }
 
     #[test]
