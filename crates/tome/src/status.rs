@@ -778,6 +778,20 @@ mod tests {
 
     // -- gather() tests --
 
+    fn create_git_repo(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
     fn gather_unconfigured_returns_not_configured() {
         let config = Config {
@@ -870,7 +884,7 @@ mod tests {
         let paths = TomePaths::new(tmp.path().to_path_buf(), library.clone()).unwrap();
         let url = "https://example.invalid/skills.git";
         let cache = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(cache.join(".git")).unwrap();
+        create_git_repo(&cache);
         let skill = cache.join("cached-skill");
         std::fs::create_dir_all(&skill).unwrap();
         std::fs::write(skill.join("SKILL.md"), "# cached-skill").unwrap();

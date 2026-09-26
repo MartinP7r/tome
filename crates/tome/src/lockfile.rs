@@ -816,6 +816,20 @@ mod tests {
         TomePaths::new(tmp.to_path_buf(), library_dir).unwrap()
     }
 
+    fn create_git_repo(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// Write a minimal lockfile to `tome_home` containing a single skill
     /// whose `source_name = source` and `git_commit_sha = sha`.
     fn write_lockfile(tome_home: &Path, source: &str, sha: Option<&str>) {
@@ -895,6 +909,29 @@ mod tests {
     }
 
     #[test]
+    fn resolved_paths_from_lockfile_cache_rejects_forged_dot_git_marker() {
+        let tmp = TempDir::new().unwrap();
+        let paths = paths_for(tmp.path());
+        let url = "https://example.invalid/foo.git";
+        let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
+        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        std::fs::create_dir_all(cache_dir.join("forged-skill")).unwrap();
+        std::fs::write(cache_dir.join("forged-skill/SKILL.md"), "# forged").unwrap();
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("myrepo", git_dir_config(url, None))],
+        );
+
+        let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
+
+        assert!(map.is_empty(), "forged .git marker must not be scanned");
+        assert!(
+            warnings.iter().any(|warning| warning.contains("tome sync")),
+            "recovery warning missing: {warnings:?}"
+        );
+    }
+
+    #[test]
     fn resolved_paths_from_lockfile_cache_warns_when_cache_dir_missing() {
         let tmp = TempDir::new().unwrap();
         let paths = paths_for(tmp.path());
@@ -934,7 +971,7 @@ mod tests {
 
         // Create the cache dir at repos_dir/<sha256(url)>/.
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),
@@ -963,7 +1000,7 @@ mod tests {
         write_lockfile(paths.config_dir(), "myrepo", Some("cafebabe"));
 
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),
@@ -992,7 +1029,7 @@ mod tests {
         write_empty_lockfile(paths.config_dir());
 
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),

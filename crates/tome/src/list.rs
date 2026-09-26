@@ -107,6 +107,20 @@ mod tests {
         TomePaths::new(tmp.to_path_buf(), library_dir).unwrap()
     }
 
+    fn create_git_repo(path: &std::path::Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// D-16: a discover-only run (no manifest join) returns skills with
     /// `synced_at: None`. Pins that `collect_with_paths()` does NOT spontaneously
     /// stamp a value — listing is read-only and never writes the manifest.
@@ -138,7 +152,7 @@ mod tests {
         let paths = paths_for(tmp.path());
         let url = "https://example.invalid/skills.git";
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        create_git_repo(&cache_dir);
         create_skill(&cache_dir, "cached-skill");
 
         let mut directories = BTreeMap::new();

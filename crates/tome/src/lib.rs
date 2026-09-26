@@ -1164,7 +1164,11 @@ pub(crate) fn cmd_browse(
         }
     }
     if skills.is_empty() {
-        println!("No skills found. Run `tome init` to configure sources.");
+        if warnings.iter().any(|warning| warning.contains("tome sync")) {
+            println!("No skills found. Run `tome sync` to clone or refresh Git sources.");
+        } else {
+            println!("No skills found. Run `tome init` to configure sources.");
+        }
         return Ok(());
     }
     let manifest = manifest::load(paths.config_dir())?;
