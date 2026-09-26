@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Cached Git sources now appear consistently in `tome list`, `tome browse`,
+  and `tome status` without read-only commands fetching from the network**
+  (Paperclip MCO-52). Read-only discovery resolves a verified local Git cache
+  even before a lockfile exists, rather than treating the remote URL as a
+  filesystem path or silently reporting zero skills. Status preserves the
+  configured remote URL and separately reports the effective local scan path;
+  an unavailable cache now gives the source name, cache path, remote URL, and
+  the concrete recovery command `tome sync`.
+
 ### Breaking
 
 - **Configuration now resolves shared repository policy, a selected committed

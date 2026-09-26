@@ -203,7 +203,13 @@ pub struct DirectoryStatus {
     /// discovered here AND distributed here)"`). Display-only — GUI
     /// consumers should branch on [`role`](Self::role) instead.
     pub role_description: String,
+    /// Configured path. For Git sources this is the remote URL.
     pub path: String,
+    /// Local checkout scanned for a Git source, when an offline cache is available.
+    /// Kept separate from `path` so callers can distinguish remote provenance from
+    /// the effective filesystem location.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_scan_path: Option<String>,
     /// Number of skills discovered (for discovery dirs) or symlinks present (for target dirs),
     /// or an error message if counting failed.
     pub skill_count: CountOrError,
@@ -301,6 +307,9 @@ pub(crate) fn gather_with_profile(
                 role_description: role.description().to_string(),
                 role,
                 path: dir_config.path.display().to_string(),
+                effective_scan_path: resolved_paths
+                    .get(name)
+                    .map(|(path, _)| path.display().to_string()),
                 skill_count: skill_count.into(),
                 warnings,
                 override_applied: dir_config.override_applied,
@@ -601,7 +610,14 @@ fn render_status(report: &StatusReport) {
                 dir.name.clone(),
                 dir.directory_type.clone(),
                 dir.role_description.clone(),
-                format_dir_path_column(&dir.path, dir.override_applied),
+                match &dir.effective_scan_path {
+                    Some(effective) => format!(
+                        "{} → {}",
+                        format_dir_path_column(&dir.path, dir.override_applied),
+                        crate::paths::collapse_home(std::path::Path::new(effective))
+                    ),
+                    None => format_dir_path_column(&dir.path, dir.override_applied),
+                },
                 count,
             ]);
         }
@@ -762,6 +778,20 @@ mod tests {
 
     // -- gather() tests --
 
+    fn create_git_repo(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     #[test]
     fn gather_unconfigured_returns_not_configured() {
         let config = Config {
@@ -844,6 +874,44 @@ mod tests {
         .unwrap();
         assert!(report.configured);
         assert_eq!(report.library_count.count, Some(2));
+    }
+
+    #[test]
+    fn gather_with_cached_git_source_exposes_remote_and_effective_scan_path() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library.clone()).unwrap();
+        let url = "https://example.invalid/skills.git";
+        let cache = crate::git::repo_cache_dir(&paths.repos_dir(), url);
+        create_git_repo(&cache);
+        let skill = cache.join("cached-skill");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(skill.join("SKILL.md"), "# cached-skill").unwrap();
+        let config = Config {
+            library_dir: library,
+            directories: BTreeMap::from([(
+                DirectoryName::new("remote").unwrap(),
+                DirectoryConfig {
+                    path: url.into(),
+                    directory_type: DirectoryType::Git,
+                    role: Some(DirectoryRole::Source),
+                    git_ref: None,
+                    subdir: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+
+        let report = gather(&config, &paths).unwrap();
+        let directory = &report.directories[0];
+        assert_eq!(directory.path, url);
+        assert_eq!(
+            directory.effective_scan_path.as_deref(),
+            Some(cache.to_str().unwrap())
+        );
+        assert_eq!(directory.skill_count.count, Some(1));
     }
 
     #[test]
@@ -1235,6 +1303,7 @@ mod tests {
             role: DirectoryRole::Source,
             role_description: "Source (discovery only)".to_string(),
             path: "/some/path".to_string(),
+            effective_scan_path: None,
             skill_count: CountOrError {
                 count: Some(0),
                 error: None,
