@@ -59,18 +59,35 @@ fn git_stdout(repo_dir: &Path, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Whether `dir` is the root of a git repository.
+/// Whether `dir` is the root of a usable Git working tree.
 ///
-/// Checks for a `.git` entry directly inside `dir` — deliberately *not* using
-/// `git rev-parse`, which walks up to ancestor repositories and would report
-/// `true` for any directory nested inside one. The repo cache lives inside the
-/// library, which is frequently a git repo, so upward-walking checks are unsafe
-/// here.
-///
-/// `.git` may be a directory (normal clone) or a file (worktree/submodule
-/// gitlink), so both are accepted.
+/// The cache root and its `.git` metadata must both be non-symlink directories
+/// produced by `git clone`, then `git rev-parse` must confirm that `dir` itself
+/// is inside a work tree. Rejecting redirected cache roots, `.git` files, and
+/// `.git` symlinks prevents a forged cache from redirecting fetch/reset operations into another checkout. `git_command` caps Git's
+/// upward discovery at `dir`'s parent, so validation cannot accidentally accept
+/// an enclosing repository.
 pub(crate) fn is_git_repo(dir: &Path) -> bool {
-    dir.join(".git").exists()
+    let Ok(dir_metadata) = std::fs::symlink_metadata(dir) else {
+        return false;
+    };
+    if dir_metadata.file_type().is_symlink() || !dir_metadata.is_dir() {
+        return false;
+    }
+
+    let git_dir = dir.join(".git");
+    let Ok(metadata) = std::fs::symlink_metadata(&git_dir) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return false;
+    }
+
+    git_command(dir, &["rev-parse", "--is-inside-work-tree"])
+        .map(|output| {
+            output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true"
+        })
+        .unwrap_or(false)
 }
 
 /// Compute the cache directory path for a git repo URL.
@@ -326,7 +343,7 @@ mod tests {
         // An upward-walking check (`git rev-parse`) would answer `true` here;
         // that is exactly the confusion that let `reset --hard` hit the library.
         let outer = TempDir::new().unwrap();
-        std::fs::create_dir(outer.path().join(".git")).unwrap();
+        run_git(outer.path(), &["init", "--initial-branch", "main"]);
         let nested = outer.path().join("repos").join("deadbeef");
         std::fs::create_dir_all(&nested).unwrap();
 
@@ -338,11 +355,53 @@ mod tests {
     }
 
     #[test]
-    fn is_git_repo_true_when_dot_git_is_a_file() {
-        // Worktrees and submodules use a `.git` *file* containing a gitdir pointer.
+    fn is_git_repo_false_for_malformed_dot_git_file() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join(".git"), "gitdir: /elsewhere\n").unwrap();
-        assert!(is_git_repo(tmp.path()));
+        assert!(!is_git_repo(tmp.path()));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_dot_git_file_pointing_at_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let cache = TempDir::new().unwrap();
+        std::fs::write(
+            cache.path().join(".git"),
+            format!("gitdir: {}\n", external.path().join(".git").display()),
+        )
+        .unwrap();
+
+        assert!(!is_git_repo(cache.path()));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_cache_root_symlink_to_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let parent = TempDir::new().unwrap();
+        let cache = parent.path().join("cache");
+        std::os::unix::fs::symlink(external.path(), &cache).unwrap();
+
+        assert!(!is_git_repo(&cache));
+    }
+
+    #[test]
+    fn is_git_repo_rejects_dot_git_symlink_to_an_external_repo() {
+        let external = TempDir::new().unwrap();
+        run_git(external.path(), &["init", "--initial-branch", "main"]);
+        let cache = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(external.path().join(".git"), cache.path().join(".git"))
+            .unwrap();
+
+        assert!(!is_git_repo(cache.path()));
+    }
+
+    #[test]
+    fn is_git_repo_false_for_empty_dot_git_directory() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        assert!(!is_git_repo(tmp.path()));
     }
 
     #[test]

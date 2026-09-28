@@ -822,7 +822,7 @@ pub fn run(cli: Cli) -> Result<()> {
             cli.dry_run,
         ),
         Command::Completions { shell, print } => cmd_completions(shell, print),
-        Command::List { json } => cmd_list(&config, cli.log_level().is_quiet(), json),
+        Command::List { json } => cmd_list(&config, &paths, cli.log_level().is_quiet(), json),
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
         Command::Profile { .. } => unreachable_early_return("Command::Profile"),
@@ -1155,15 +1155,20 @@ pub(crate) fn cmd_browse(
     quiet: bool,
     machine_prefs: machine::MachinePrefs,
 ) -> Result<()> {
-    let mut warnings = Vec::new();
-    let skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
+    let (resolved_paths, mut warnings) =
+        lockfile::resolved_paths_from_lockfile_cache(config, paths);
+    let skills = discover::discover_all(config, &resolved_paths, &mut warnings)?;
     if !quiet {
         for w in &warnings {
             eprintln!("warning: {}", w);
         }
     }
     if skills.is_empty() {
-        println!("No skills found. Run `tome init` to configure sources.");
+        if warnings.iter().any(|warning| warning.contains("tome sync")) {
+            println!("No skills found. Run `tome sync` to clone or refresh Git sources.");
+        } else {
+            println!("No skills found. Run `tome init` to configure sources.");
+        }
         return Ok(());
     }
     let manifest = manifest::load(paths.config_dir())?;
@@ -1652,8 +1657,8 @@ pub(crate) fn cmd_completions(shell: clap_complete::Shell, print: bool) -> Resul
 }
 
 /// `tome list` — list all discovered skills (text or JSON).
-pub(crate) fn cmd_list(config: &Config, quiet: bool, json: bool) -> Result<()> {
-    list(config, quiet, json)
+pub(crate) fn cmd_list(config: &Config, paths: &TomePaths, quiet: bool, json: bool) -> Result<()> {
+    list(config, paths, quiet, json)
 }
 
 /// `tome config` — show resolved config (TOML) or just the path.
@@ -2951,11 +2956,11 @@ fn render_sync_report(report: &SyncReport) {
 /// List all discovered skills.
 ///
 /// Thin presenter (D-GUI-08): the domain computation (discover + sort) lives in
-/// `list::collect`; this function only formats the resulting [`list::ListReport`]
-/// as text or JSON. The GUI calls `list::collect` directly and renders the
-/// report without this CLI formatting.
-fn list(config: &Config, quiet: bool, json: bool) -> Result<()> {
-    let report = list::collect(config)?;
+/// `list::collect_with_paths`; this function only formats the resulting [`list::ListReport`]
+/// as text or JSON. Callers with a [`TomePaths`] use `collect_with_paths` to
+/// include cached Git sources without network access.
+fn list(config: &Config, paths: &TomePaths, quiet: bool, json: bool) -> Result<()> {
+    let report = list::collect_with_paths(config, paths)?;
     let skills = report.skills;
     if !quiet {
         for w in &report.warnings {

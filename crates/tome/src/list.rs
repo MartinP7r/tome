@@ -15,6 +15,8 @@ use anyhow::Result;
 
 use crate::config::Config;
 use crate::discover::{self, DiscoveredSkill};
+use crate::lockfile;
+use crate::paths::TomePaths;
 
 /// The structured result of `tome list`: every discovered skill (sorted by
 /// name) plus any non-fatal discovery warnings.
@@ -34,16 +36,28 @@ pub struct ListReport {
     pub warnings: Vec<String>,
 }
 
-/// Discover all skills for `tome list` and return them as a structured
-/// [`ListReport`].
+/// Discover all skills without a Tome-home context.
 ///
-/// Discovery uses an empty `resolved_paths` map (git directories are listed at
-/// their config URL, matching the previous inline `list()` behavior — listing
-/// does not clone). Skills are sorted by name so both the CLI table and the GUI
-/// list get a stable order.
+/// Retained for API compatibility with callers that cannot resolve the local
+/// cache. Such callers discover non-Git sources only; the CLI and TUI use
+/// [`collect_with_paths`] to include cached Git sources.
 pub fn collect(config: &Config) -> Result<ListReport> {
     let mut warnings = Vec::new();
     let mut skills = discover::discover_all(config, &BTreeMap::new(), &mut warnings)?;
+    skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
+    Ok(ListReport { skills, warnings })
+}
+
+/// Discover all skills for a caller that can resolve the Tome home directory.
+///
+/// Discovery resolves cached Git checkouts without network access, so listing
+/// remains read-only while still showing skills previously fetched by `sync`.
+/// Skills are sorted by name so both the CLI table and the TUI list get a
+/// stable order.
+pub fn collect_with_paths(config: &Config, paths: &TomePaths) -> Result<ListReport> {
+    let (resolved_paths, mut warnings) =
+        lockfile::resolved_paths_from_lockfile_cache(config, paths);
+    let mut skills = discover::discover_all(config, &resolved_paths, &mut warnings)?;
     skills.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     Ok(ListReport { skills, warnings })
 }
@@ -53,6 +67,7 @@ mod tests {
     use super::*;
     use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
     use crate::discover::{DiscoveredSkill, SkillName, SkillOrigin};
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use tempfile::TempDir;
 
@@ -86,9 +101,29 @@ mod tests {
         .unwrap();
     }
 
+    fn paths_for(tmp: &std::path::Path) -> TomePaths {
+        let library_dir = tmp.join("library");
+        std::fs::create_dir_all(&library_dir).unwrap();
+        TomePaths::new(tmp.to_path_buf(), library_dir).unwrap()
+    }
+
+    fn create_git_repo(path: &std::path::Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// D-16: a discover-only run (no manifest join) returns skills with
-    /// `synced_at: None`. Pins that `collect()` does NOT spontaneously
-    /// stamp a value — `list` is read-only and never writes the manifest.
+    /// `synced_at: None`. Pins that `collect_with_paths()` does NOT spontaneously
+    /// stamp a value — listing is read-only and never writes the manifest.
     #[test]
     fn collect_leaves_synced_at_none_for_unstamped_skills() {
         let tmp = TempDir::new().unwrap();
@@ -96,7 +131,8 @@ mod tests {
         create_skill(tmp.path(), "beta");
 
         let config = config_with_source(tmp.path().to_path_buf());
-        let report = collect(&config).unwrap();
+        let paths = paths_for(tmp.path());
+        let report = collect_with_paths(&config, &paths).unwrap();
 
         assert_eq!(report.skills.len(), 2);
         for skill in &report.skills {
@@ -108,6 +144,43 @@ mod tests {
                 skill.name,
             );
         }
+    }
+
+    #[test]
+    fn collect_discovers_skills_from_a_cached_git_source_without_a_lockfile() {
+        let tmp = TempDir::new().unwrap();
+        let paths = paths_for(tmp.path());
+        let url = "https://example.invalid/skills.git";
+        let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
+        create_git_repo(&cache_dir);
+        create_skill(&cache_dir, "cached-skill");
+
+        let mut directories = BTreeMap::new();
+        directories.insert(
+            DirectoryName::new("remote").unwrap(),
+            DirectoryConfig {
+                path: url.into(),
+                directory_type: DirectoryType::Git,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: None,
+                override_applied: false,
+            },
+        );
+        let config = Config {
+            directories,
+            ..Config::default()
+        };
+
+        let report = collect_with_paths(&config, &paths).unwrap();
+
+        assert_eq!(report.skills.len(), 1);
+        assert_eq!(report.skills[0].name.as_str(), "cached-skill");
+        assert!(
+            report.warnings.is_empty(),
+            "an existing cache must be usable without a lockfile: {:?}",
+            report.warnings
+        );
     }
 
     /// D-16: ListReport's serde round-trip surfaces the `synced_at` field

@@ -297,10 +297,9 @@ pub fn generate(manifest: &Manifest, skills: &[DiscoveredSkill]) -> Lockfile {
 /// they regenerate the lockfile after in-memory mutation. Unlike `sync()`'s
 /// online `resolve_git_directories`, this helper:
 ///
-/// - reads the previous lockfile to recover `git_commit_sha` per directory,
+/// - reads the previous lockfile when available to recover `git_commit_sha` per directory,
 /// - checks the on-disk cache dir for each git-type directory,
-/// - emits a stderr-bound warning string when the lockfile is missing OR
-///   the cache dir is gone (so the caller can `eprintln!("warning: {}", w)`),
+/// - emits a stderr-bound warning string when a cache dir is unavailable,
 /// - never clones, fetches, or talks to a remote.
 ///
 /// Returns `(map, warnings)`. Map values are `(effective_path, Option<git_commit_sha>)`
@@ -361,23 +360,12 @@ pub(crate) fn resolved_paths_from_lockfile_cache(
             continue;
         }
 
-        // The lockfile is our only offline source of `git_commit_sha`. If it's
-        // missing entirely, surface a per-directory warning so the user is
-        // not left in the dark — replaces the silent drop in #461 H1.
-        if previous.is_none() {
-            warnings.push(format!(
-                "cannot resolve git directory '{name}' from lockfile (lockfile missing) — \
-                 git-sourced skills may be omitted from the regenerated lockfile",
-            ));
-            continue;
-        }
-
         let url = dir_config.path.to_string_lossy();
         let cache_dir = crate::git::repo_cache_dir(&repos_dir, &url);
-        if !cache_dir.is_dir() {
+        if !crate::git::is_git_repo(&cache_dir) {
             warnings.push(format!(
-                "cannot resolve git directory '{name}' — cache dir {} not found; \
-                 git-sourced skills will be omitted from the regenerated lockfile",
+                "cannot resolve git directory '{name}' — cache dir {} has no usable Git checkout; \
+                 run `tome sync` to clone or refresh {url}",
                 cache_dir.display(),
             ));
             continue;
@@ -828,6 +816,20 @@ mod tests {
         TomePaths::new(tmp.to_path_buf(), library_dir).unwrap()
     }
 
+    fn create_git_repo(path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--initial-branch", "main"])
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
     /// Write a minimal lockfile to `tome_home` containing a single skill
     /// whose `source_name = source` and `git_commit_sha = sha`.
     fn write_lockfile(tome_home: &Path, source: &str, sha: Option<&str>) {
@@ -879,11 +881,11 @@ mod tests {
     }
 
     #[test]
-    fn resolved_paths_from_lockfile_cache_warns_when_lockfile_missing() {
+    fn resolved_paths_from_lockfile_cache_warns_when_cached_checkout_is_missing() {
         let tmp = TempDir::new().unwrap();
         let paths = paths_for(tmp.path());
 
-        // No tome.lock written. One git directory in config.
+        // No tome.lock or cached checkout written. One git directory in config.
         let config = config_with_dirs(
             paths.library_dir(),
             vec![(
@@ -893,10 +895,7 @@ mod tests {
         );
 
         let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
-        assert!(
-            map.is_empty(),
-            "lockfile missing → entry omitted, got {map:?}"
-        );
+        assert!(map.is_empty(), "missing cache → entry omitted, got {map:?}");
         assert_eq!(warnings.len(), 1, "expected one warning, got {warnings:?}");
         let w = &warnings[0];
         assert!(
@@ -904,8 +903,31 @@ mod tests {
             "warning should name the directory: {w}"
         );
         assert!(
-            w.contains("lockfile"),
-            "warning should mention 'lockfile': {w}"
+            w.contains("cache dir"),
+            "warning should identify the unavailable cache dir: {w}"
+        );
+    }
+
+    #[test]
+    fn resolved_paths_from_lockfile_cache_rejects_forged_dot_git_marker() {
+        let tmp = TempDir::new().unwrap();
+        let paths = paths_for(tmp.path());
+        let url = "https://example.invalid/foo.git";
+        let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
+        std::fs::create_dir_all(cache_dir.join(".git")).unwrap();
+        std::fs::create_dir_all(cache_dir.join("forged-skill")).unwrap();
+        std::fs::write(cache_dir.join("forged-skill/SKILL.md"), "# forged").unwrap();
+        let config = config_with_dirs(
+            paths.library_dir(),
+            vec![("myrepo", git_dir_config(url, None))],
+        );
+
+        let (map, warnings) = resolved_paths_from_lockfile_cache(&config, &paths);
+
+        assert!(map.is_empty(), "forged .git marker must not be scanned");
+        assert!(
+            warnings.iter().any(|warning| warning.contains("tome sync")),
+            "recovery warning missing: {warnings:?}"
         );
     }
 
@@ -949,7 +971,7 @@ mod tests {
 
         // Create the cache dir at repos_dir/<sha256(url)>/.
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),
@@ -978,7 +1000,7 @@ mod tests {
         write_lockfile(paths.config_dir(), "myrepo", Some("cafebabe"));
 
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),
@@ -1007,7 +1029,7 @@ mod tests {
         write_empty_lockfile(paths.config_dir());
 
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url);
-        std::fs::create_dir_all(&cache_dir).unwrap();
+        create_git_repo(&cache_dir);
 
         let config = config_with_dirs(
             paths.library_dir(),
