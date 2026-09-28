@@ -197,6 +197,22 @@ Model **use-case sets** as named, shared curated collections for a concrete purp
 
 Sets are deployment intent, not a second canonical source. A Paperclip agent or project target receives an explicitly assigned set only after the effective profile, target constraints, and deployment plan are resolved. A target-copy edit or agent-runtime edit cannot silently change categories, set membership, or canonical curation. Project configuration may select approved shared sets for its additive routes, but may not create global sources, rewrite shared taxonomy, or change another agent's assignment.
 
+Persist explicit agent/project-target assignments in a shared, versioned assignment registry owned by the curation layer. The registry records target identity, selected set IDs, the catalog revision used for resolution, and the permitted writer. Tome CLI/TUI curation actions are the normal writers; a Paperclip adapter is a read-only consumer unless an explicitly authorized Tome action invokes the same validated write path. A project `.tome.toml` may select approved shared set IDs for its own additive route only; it cannot alter the shared registry, set definitions, categories, or another target's assignment.
+
+#### Effective-set resolution and conflicts
+
+Resolve every assignment from one immutable catalog revision with this algorithm:
+
+1. Load the assignment's selected set IDs. Missing, deprecated, or unapproved set IDs are validation errors.
+2. Evaluate every selected set's deterministic rules and direct members against that revision. Union duplicate candidates by canonical skill ID/hash and retain all inclusion reasons.
+3. Union explicit exclusions across the selected sets, then remove excluded candidates. **Explicit exclusion always wins** over a direct member or rule match; the TUI/CLI must retain the exclusion reason.
+4. Intersect the selected sets' declared target/capability constraints with the effective profile and target. Exclude candidates that fail a satisfiable constraint and record the reason. If selected set constraints are mutually incompatible or require an unavailable target capability, fail validation for the assignment rather than choosing an arbitrary set or silently dropping a constraint.
+5. Sort the resulting included skills by stable canonical skill ID. Materialization receives only this resolved, hash-addressed list plus its reasons and the catalog revision.
+
+Set order never changes the result. The implementation must reject a same-ID/different-hash catalog inconsistency, an invalid rule, a constraint contradiction, a stale assignment catalog revision that cannot be re-resolved, or an attempted project-local override of shared membership/exclusion semantics.
+
+Changing a category, deterministic set rule, direct member, exclusion, constraint, or assignment is a potentially fleet-wide deployment change. Before persistence, the CLI/TUI must atomically resolve **before** and **after** snapshots for every affected assignment and render: added/removed/resolved skills, changed hashes, inclusion/exclusion/constraint reasons, affected Paperclip agents and project targets, and planned materialization/drift/conflict impact. Persist only after explicit confirmation; then update the catalog/assignment revision atomically. A target copy is never changed as part of the curation edit itself—materialization remains a separately previewed operation.
+
 ### 6.2 Deterministic intake workflow
 
 1. Discover/import a candidate and store its observed provenance plus immutable hash.
@@ -248,8 +264,8 @@ Required views/actions:
 - canonical pool inventory with lifecycle, provenance, domains and constraints;
 - browse/filter by category, capability, lifecycle, provenance, target compatibility and use-case-set membership;
 - inspect the effective set assignment for a Paperclip agent or project target, including every inclusion/exclusion and its reason;
-- create, rename, categorize and retire categories; edit explicit set membership and deterministic set rules with validation and a rendered diff before writing shared curation state;
-- preview the routing/materialization impact before changing a Paperclip-agent or project-target set assignment;
+- create, rename, categorize and retire categories; edit explicit set membership, exclusions, constraints and deterministic set rules only through the shared curation writer;
+- for every category, rule, membership, exclusion, constraint, or assignment edit, atomically preview before/after resolved membership, hashes, inclusion/exclusion reasons, affected agents/project targets, and downstream materialization/drift/conflict impact before explicit confirmation;
 - selected local configuration and active project routes;
 - per-target deployment mode, canonical version, health and drift;
 - dry-run/preview for create, refresh, migrate, remove and repair;
@@ -310,12 +326,12 @@ Required views/actions:
 **Outcome:** a growing pool becomes explainable and reviewable.
 
 - Define curation record schema and migration/validation rules.
-- Define category taxonomy and use-case-set schemas, including explicit Paperclip-agent/project-target assignments and explainable rule evaluation.
+- Define category taxonomy, versioned assignment registry, and use-case-set schemas, including explicit Paperclip-agent/project-target assignments, the effective-set resolution algorithm, explainable rule evaluation, and permitted writers.
 - Add catalog/category/set read/write operations and deterministic views.
 - Implement candidate lifecycle and explicit triage outcomes.
 - Add provenance merge and same-name/different-content conflict behavior.
 
-**Acceptance:** every canonical skill can state what it is, where it came from, how it is categorized, which sets include/exclude it, why it is routed or excluded, and what content hash that decision applies to. A Paperclip agent or specialized project target can show its selected set(s), resolved skills, constraint exclusions, and a preview before any deployment change.
+**Acceptance:** every canonical skill can state what it is, where it came from, how it is categorized, which sets include/exclude it, why it is routed or excluded, and what content hash that decision applies to. A Paperclip agent or specialized project target can show its selected set(s), deterministic resolved skills, constraint exclusions, and a preview before any deployment change. Category/rule/set/constraint/assignment edits atomically preview all affected targets and require explicit confirmation; incompatible multi-set constraints, stale revisions, invalid rules, and project-local overrides fail validation without changing curation or deployments.
 
 ### Phase F — overlap/gap, customization and fork workflows
 

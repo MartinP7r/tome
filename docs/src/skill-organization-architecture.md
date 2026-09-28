@@ -104,6 +104,12 @@ Sets are deployment intent, not another canonical source. A Paperclip agent or p
 
 The model must allow a project to select from shared approved sets or add an additive project-local route, but a project configuration must not create arbitrary global sources, rewrite shared categories, or change another agent's set assignment.
 
+An explicit, versioned curation assignment registry owns each agent/project-target assignment and records its selected set IDs, catalog revision, and permitted writer. Tome's curation CLI/TUI writes that registry through one validated path; Paperclip consumes it read-only unless an authorized Tome action uses the same path. Project configuration can select approved sets only for its own additive route.
+
+Set composition is order-independent: resolve direct members and deterministic rules from one catalog revision, union candidates by canonical skill ID/hash, then apply the union of explicit exclusions (**exclusion wins**). Intersect set constraints with the selected profile/target; a mutually incompatible or unavailable constraint is a validation failure, not an arbitrary precedence decision. Sort surviving skills by canonical ID and retain every inclusion/exclusion reason. Missing/deprecated sets, invalid rules, same-ID/different-hash inconsistencies, stale unresolvable revisions, and project-local attempts to override shared membership are rejected before deployment.
+
+Changing a category, rule, member, exclusion, constraint, or assignment can affect every target using the set. Before persisting it, Tome must atomically calculate before/after resolved membership, reasons, hashes, affected agents/project targets, and materialization/drift/conflict impact, render that diff, and require explicit confirmation. The curation edit changes no target copy itself; materialization remains a separately previewed action.
+
 ### Intake workflow
 
 1. **Discover/import** a candidate and record its provenance and immutable hash.
@@ -162,8 +168,8 @@ At minimum, the TUI must support:
 1. browsing the canonical pool and deployed/available state;
 2. filtering by category, capability, lifecycle, provenance, target compatibility, and set membership;
 3. inspecting which sets apply to a Paperclip agent or project target and why;
-4. editing categories and explicit use-case-set membership with validation, a rendered diff/preview, and durable shared-state writes; and
-5. previewing the deployment impact before changing an agent/project assignment or materializing a target.
+4. editing categories, set members/exclusions/constraints, and deterministic rules only through the shared curation writer, with validation and a rendered diff/preview; and
+5. previewing before/after resolved membership and deployment impact for every curation edit or assignment change before explicit confirmation and separate materialization.
 
 Bulk or rule-based set membership must remain explainable: the UI shows the rule, each resulting skill, excluded candidates, and any target-constraint reason. It must not use opaque semantic scoring to make edits or deploy changes automatically.
 
