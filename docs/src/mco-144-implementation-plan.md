@@ -1,6 +1,6 @@
 # MCO-144 implementation plan: portable skill pool and curated copy deployments
 
-> **Status:** Proposed implementation plan derived from the [skill-organization architecture](skill-organization-architecture.md). Paperclip is the authoritative execution record: [MCO-144](https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-144). This plan deliberately retains the existing `machine.toml` boundary for its first delivery; it does not require the architecture document's broader named-profile proposal.
+> **Status:** Proposed implementation plan derived from the [skill-organization architecture](skill-organization-architecture.md). Paperclip is the authoritative execution record: [MCO-144](https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-144); [MCO-148](https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-148) tracks the implementation-program execution. This plan consumes the committed profile and local-settings boundary established by the architecture branch: shared `tome.toml`, committed `machines/<profile>.toml`, and private `settings.toml` selecting the active profile. It does not redesign that model.
 >
 > **Product focus:** organize and curate AI-agent skills across machines and projects. Validation and evaluation are supporting evidence. Desktop/Tauri work remains paused unless Martin explicitly reprioritizes it.
 
@@ -21,7 +21,7 @@ A successful implementation has these properties:
 3. A target copy is derived state, never canonical input. Editing it cannot silently alter or become pool content.
 4. Tome never overwrites, removes, or adopts a foreign or drifted target directory without an explicit, previewed decision.
 5. The CLI/TUI can explain a skill's provenance, canonical hash, curation state, selected routes, target health, and drift.
-6. Existing effective configuration, including portable `tome.toml`, local `machine.toml`, committed profile selection, and project routes, remains compatible. This delivery must not redesign or require a configuration-framework migration.
+6. Normal commands resolve their routes, target availability, disable state, and consent from the established effective context: shared `tome.toml`, the explicitly selected committed `machines/<profile>.toml`, and private local `settings.toml`. This delivery must preserve those selection semantics.
 7. A project `.tome.toml` can add project-local destinations but cannot change global sources, pool policy, canonical curation, or the active machine configuration.
 
 ## 2. Scope boundaries
@@ -32,7 +32,7 @@ A successful implementation has these properties:
 - Deployment ownership, hashes, drift detection, preview, refresh and safe removal.
 - Migration of existing Tome-created target symlinks.
 - Target status and doctor diagnostics.
-- Existing machine-local configuration retention and constrained project routes.
+- Established profile/settings configuration and constrained project routes.
 - Curation records, deterministic intake, provenance, lifecycle, overlap/gap views, customization and fork lineage.
 - Structural validation as curation evidence.
 - Terminal/TUI-first inspection and actions.
@@ -44,7 +44,7 @@ A successful implementation has these properties:
 - Semantic/LLM overlap decisions that automatically route, delete, accept, customize or fork skills.
 - Marketplace/ecosystem expansion beyond reliable generic discovery and provenance.
 - Automatic adoption of user/project edits in a target as canonical changes.
-- A configuration-framework migration or changes to unrelated local-settings ownership.
+- A redesign of profile selection, profile schema, or unrelated local-settings ownership.
 
 ## 3. Preconditions and sequencing
 
@@ -70,7 +70,7 @@ No migration should be inferred from a path name alone. A path must be proven to
 
 ### 3.3 First-slice boundary
 
-The first executable slice is intentionally narrow: existing machine-level targets, the existing route/disable behavior, and the existing CLI/TUI data path. It introduces copied targets and their external records; it does **not** redesign configuration, add profiles, or require project routes. Existing project routes remain compatible but receive no copy-deployment mutations in this slice. Project destinations and curation remain later slices, so a deployment-safety regression cannot be hidden behind a broad schema migration.
+The first executable slice is intentionally narrow: targets and routes from the already-selected effective profile context, its established disable/consent decisions, and the existing CLI/TUI data path. It introduces copied targets and their external records; it does **not** redesign profile selection, add a second configuration model, or require project routes. Existing project routes remain compatible but receive no copy-deployment mutations in this slice. Project destinations and curation remain later slices, so a deployment-safety regression cannot be hidden behind a broad schema migration.
 
 ## 4. Target deployment contract
 
@@ -119,7 +119,7 @@ Status/doctor should classify every candidate route as one of:
 - `legacy-symlink`: current Tome-managed symlink eligible for explicit migration;
 - `foreign`: unrecorded or ownership-mismatched file, directory, or symlink;
 - `unavailable`: configured target path/tool is unavailable on this machine;
-- `disabled-locally`: disabled by existing `machine.toml` settings;
+- `disabled-locally`: disabled by the effective local settings/profile context;
 - `blocked-by-constraint`: route conflicts with declared target capability/constraint;
 - `stale-record`: deployment record exists but no longer corresponds to a valid route or canonical skill.
 - `interrupted`: a durable replacement transition or backup is present and must be recovered or explicitly repaired before another mutation.
@@ -137,15 +137,16 @@ Status/doctor should classify every candidate route as one of:
 
 ## 5. Configuration boundary
 
-### 5.1 Preserve existing layers
+### 5.1 Consume the established layers
 
-Build on the current configuration boundary rather than duplicating it:
+Build on the established configuration boundary rather than duplicating or bypassing it:
 
-- Shared, portable `tome.toml`: pool source policy, source exclusions, existing targets and shared routing policy.
+- Shared, portable `tome.toml`: pool policy, validated Git sources, source exclusions, and source pins; it does not define machine targets or routes.
+- Committed `machines/<profile>.toml`: named machine target topology, target capabilities, route predicates, and profile-level exclusions.
+- Private `~/.config/tome/settings.toml`: explicit active-profile selection plus machine-local runtime consent and temporary overrides.
 - Shared library/lockfile/manifest: canonical content, reproducibility and provenance.
-- Local `~/.config/tome/machine.toml`: disabled skills/directories, target filters, path overrides and machine-local consent.
 
-The existing `machine.toml` is the retained per-machine configuration for this delivery. Do not add a second local-settings file or a named-profile abstraction as part of copy deployment. If current code has profile-oriented compatibility paths, copy deployment must consume the already-effective target/route/disable decisions without changing their selection semantics.
+Copy deployment must receive the already-effective target, route, disable, capability, and consent decisions from normal command context loading; it must not parse a parallel `machine.toml` path or infer a profile from the hostname. Legacy `machine.toml` compatibility, if retained by the implementation, is read only through an explicit, tested compatibility/migration adapter before normal commands construct the effective context. The adapter must make migration status and recovery steps visible, and copy deployment must never guess legacy target ownership or route selection.
 
 ### 5.2 Project routes
 
@@ -154,14 +155,14 @@ Add a project configuration format only after machine-level copy deployment, sta
 Validation rules:
 
 - project config may not add or alter global sources;
-- project config may not select or rewrite machine-local settings;
+- project config may not select or rewrite the active profile or local settings;
 - project config may not mutate canonical pool content, curation, exclusions or provenance;
 - project destinations inherit the copy-only materialization contract;
 - all project operations must canonicalize the project root before resolving routes, reject destination escapes through `..` or symlinked ancestors, and re-check the boundary immediately before mutation.
 
-### 5.3 Future named profiles
+### 5.3 Profile-model stability
 
-Revisit committed named profiles only when concrete machines need portable, selectable target topologies that cannot be expressed safely by shared `tome.toml` and existing local overrides. If added later, profile selection must be explicit—not inferred from hostnames—and profiles must not redefine canonical source policy.
+The selected-profile model is already the supported operational boundary. Copy deployment may add target deployment records and diagnostics around its resolved outputs, but must not change profile selection, permit hostname inference, or let profiles redefine canonical source policy. Any future profile-schema evolution requires a separately reviewed migration and compatibility plan.
 
 ## 6. Curation catalog and intake
 
