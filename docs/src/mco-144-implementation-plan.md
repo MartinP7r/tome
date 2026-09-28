@@ -22,7 +22,7 @@ A successful implementation has these properties:
 4. Tome never overwrites, removes, or adopts a foreign or drifted target directory without an explicit, previewed decision.
 5. The CLI/TUI can explain a skill's provenance, canonical hash, curation state, selected routes, target health, and drift.
 6. Normal commands resolve their routes, target availability, disable state, and consent from the established effective context: shared `tome.toml`, the explicitly selected committed `machines/<profile>.toml`, and private local `settings.toml`. This delivery must preserve those selection semantics.
-7. A project `.tome.toml`, when introduced, can add project-local destinations but cannot change global sources, pool policy, canonical curation, or the active machine configuration.
+7. A project `.tome.toml` can add project-local destinations but cannot change global sources, pool policy, canonical curation, or the active machine configuration.
 
 ## 2. Scope boundaries
 
@@ -70,7 +70,7 @@ No migration should be inferred from a path name alone. A path must be proven to
 
 ### 3.3 First-slice boundary
 
-The first executable slice is intentionally narrow: targets and routes from the already-selected effective profile context, its established disable/consent decisions, and the existing CLI/TUI data path. It introduces copied targets and their external records; it does **not** redesign profile selection, add a second configuration model, or require project routes. Project destinations and curation remain later slices, so a deployment-safety regression cannot be hidden behind a broad schema migration.
+The first executable slice is intentionally narrow: targets and routes from the already-selected effective profile context, its established disable/consent decisions, and the existing CLI/TUI data path. It introduces copied targets and their external records; it does **not** redesign profile selection, add a second configuration model, or require project routes. Existing project routes remain compatible but receive no copy-deployment mutations in this slice. Project destinations and curation remain later slices, so a deployment-safety regression cannot be hidden behind a broad schema migration.
 
 ## 4. Target deployment contract
 
@@ -267,12 +267,12 @@ Required views/actions:
 **Outcome:** users can understand and safely reconcile target state.
 
 - Implement the deployment state machine in status and doctor.
-- Add explicit migration for a symlink proven to be Tome-managed, including broken-link handling and rollback from its original link on failure.
+- Add explicit migration for a symlink proven to be Tome-managed, including broken-link handling, a former target directory that becomes `source`, and rollback from its original link on failure.
 - Replace symlink-oriented cleanup/eject semantics with ownership-aware copy semantics.
 - Add previewed refresh, remove and repair flows.
 - Add migration and recovery documentation.
 
-**Acceptance:** every state category, including `interrupted`, has focused tests and clear CLI/JSON output; migration preserves a foreign or uncertain link; cleanup never removes drifted/foreign/identity-mismatched target content automatically.
+**Acceptance:** every state category, including `interrupted`, has focused tests and clear CLI/JSON output; migration preserves a foreign or uncertain link; when a directory changes from `synced` to `source`, cleanup removes only a proven Tome-managed legacy deployment and preserves real, foreign, drifted, or identity-mismatched target content.
 
 ### Phase D — project routes and configuration validation
 
@@ -325,6 +325,7 @@ Use unit, integration and end-to-end filesystem tests. Required scenarios includ
 - healthy target, canonical-updated, drifted, missing, foreign and stale-record states;
 - record/path/target-root/file-identity mismatch and interrupted replacement recovery;
 - symlink migration: valid Tome-managed, broken Tome-managed, foreign and redirecting cases;
+- former target role transition: `synced` to `source` removes only the proven Tome-managed legacy deployment;
 - safe cleanup/removal with and without target drift;
 - project route boundary and configuration restrictions;
 - same-name/different-content intake conflict and equal-content provenance merge;
