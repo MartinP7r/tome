@@ -141,8 +141,8 @@ Status/doctor should classify every candidate route as one of:
 
 Build on the established configuration boundary rather than duplicating or bypassing it:
 
-- Shared, portable `tome.toml`: pool source policy, source exclusions, existing targets and shared routing policy.
-- Committed `machines/<profile>.toml`: named machine topology, target capabilities, route predicates, and profile-level exclusions.
+- Shared, portable `tome.toml`: pool policy, validated Git sources, source exclusions, and source pins; it does not define machine targets or routes.
+- Committed `machines/<profile>.toml`: named machine target topology, target capabilities, route predicates, and profile-level exclusions.
 - Private `~/.config/tome/settings.toml`: explicit active-profile selection plus machine-local runtime consent and temporary overrides.
 - Shared library/lockfile/manifest: canonical content, reproducibility and provenance.
 
