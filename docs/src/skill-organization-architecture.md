@@ -93,6 +93,23 @@ Each canonical skill needs a curation record with at least:
 
 Tags alone are useful routing primitives, but they are insufficient as the entire curation model: a tag cannot explain overlap, a fork's upstream, or why a candidate is excluded.
 
+### Categories and use-case sets
+
+The catalog must also define two explicit, shared curation constructs:
+
+- **Categories** provide the maintained domain/capability taxonomy used for browsing and filtering. A skill may belong to several categories; categories are not inferred from a target path or an agent name.
+- **Use-case sets** are named, reviewable collections of curated skills for a concrete operating context—for example a Paperclip agent role, a project type, or a specialized project target. A set records its purpose, direct members and/or deterministic category/capability rules, and applicable target constraints.
+
+Sets are deployment intent, not another canonical source. A Paperclip agent or project route receives an explicitly assigned set, after the selected machine/profile and target constraints are resolved. An edit to a target copy or an agent's runtime workspace never silently changes set membership, categories, or canonical curation.
+
+The model must allow a project to select from shared approved sets or add an additive project-local route, but a project configuration must not create arbitrary global sources, rewrite shared categories, or change another agent's set assignment.
+
+An explicit, versioned curation assignment registry owns each agent/project-target assignment and records its selected set IDs, catalog revision, and permitted writer. Tome's curation CLI/TUI writes that registry through one validated path; Paperclip consumes it read-only unless an authorized Tome action uses the same path. Project configuration can select approved sets only for its own additive route.
+
+Set composition is order-independent: resolve direct members and deterministic rules from one catalog revision, union candidates by canonical skill ID/hash, then apply the union of explicit exclusions (**exclusion wins**). Intersect set constraints with the selected profile/target; a mutually incompatible or unavailable constraint is a validation failure, not an arbitrary precedence decision. Sort surviving skills by canonical ID and retain every inclusion/exclusion reason. Missing/deprecated sets, invalid rules, same-ID/different-hash inconsistencies, stale unresolvable revisions, and project-local attempts to override shared membership are rejected before deployment.
+
+Changing a category, rule, member, exclusion, constraint, or assignment can affect every target using the set. Before persisting it, Tome must atomically calculate before/after resolved membership, reasons, hashes, affected agents/project targets, and materialization/drift/conflict impact, render that diff, and require explicit confirmation. The curation edit changes no target copy itself; materialization remains a separately previewed action.
+
 ### Intake workflow
 
 1. **Discover/import** a candidate and record its provenance and immutable hash.
@@ -130,9 +147,9 @@ Evaluation evidence may inform a curation decision. It must not automatically ro
 
 ### Next: curation and controlled deployment
 
-1. Add the curation-record contract and deterministic catalog views: domains, capabilities, lifecycle, provenance, overlap candidates, and gap reports.
+1. Add the curation-record contract, category taxonomy, and named use-case sets for Paperclip agents and specialized project targets; provide deterministic catalog views, domains, capabilities, lifecycle, provenance, overlap candidates, and gap reports.
 2. Add explicit target deployment records for copy materialization, including canonical hash, target path, last successful sync, and previewed drift refresh.
-3. Add project route inspection and selection on top of the existing profile boundary.
+3. Add agent/set assignment and project route inspection/selection on top of the existing profile boundary.
 4. Implement the provider-neutral evaluation core as curation evidence, followed by a separate runner-adapter spike.
 
 ### Later: advisory intelligence and ecosystem expansion
@@ -141,6 +158,20 @@ Evaluation evidence may inform a curation decision. It must not automatically ro
 2. Customization-overlay and fork workflows with upstream-delta reporting.
 3. New ecosystems and marketplaces only after generic source discovery, provenance, and materialization are reliable.
 4. Desktop/Tauri work only after an explicit reprioritization; it must render the same pool/profile/curation model rather than create GUI-only state.
+
+## Terminal/TUI curation interaction
+
+The terminal UI is a primary operating surface for this work. It must use the same catalog, category, set, profile, and deployment records as the CLI—never a separate UI-only store.
+
+At minimum, the TUI must support:
+
+1. browsing the canonical pool and deployed/available state;
+2. filtering by category, capability, lifecycle, provenance, target compatibility, and set membership;
+3. inspecting which sets apply to a Paperclip agent or project target and why;
+4. editing categories, set members/exclusions/constraints, and deterministic rules only through the shared curation writer, with validation and a rendered diff/preview; and
+5. previewing before/after resolved membership and deployment impact for every curation edit or assignment change before explicit confirmation and separate materialization.
+
+Bulk or rule-based set membership must remain explainable: the UI shows the rule, each resulting skill, excluded candidates, and any target-constraint reason. It must not use opaque semantic scoring to make edits or deploy changes automatically.
 
 ## Safety constraints
 
