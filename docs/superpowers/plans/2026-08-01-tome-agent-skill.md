@@ -313,7 +313,7 @@ Expected: all new local tests and all existing Git add tests pass; format and Cl
 ```bash
 git add crates/tome/src/cli.rs crates/tome/src/lib.rs crates/tome/src/add.rs crates/tome/tests/cli_add.rs
 git diff --cached --check
-git commit -m "feat(add): support local skill directories" -m "OpenSpec: ship-tome-agent-skill"
+git commit -m "feat(add): support local skill directories" -m "Paperclip: MCO-19"
 ```
 
 ---
@@ -539,7 +539,7 @@ git add \
   crates/tome-desktop/ui/src/components/KeyValueRow.tsx \
   crates/tome-desktop/ui/src/components/KeyValueRow.module.css
 git diff --cached --check
-git commit -m "fix(desktop): clarify the Tome data folder" -m "OpenSpec: ship-tome-agent-skill"
+git commit -m "fix(desktop): clarify the Tome data folder" -m "Paperclip: MCO-19"
 ```
 
 ---
@@ -774,7 +774,7 @@ Expected: both exit 0. If rustfmt reports changes, run `cargo fmt`, inspect only
 ```bash
 git add crates/tome/src/lib.rs crates/tome/src/wizard.rs crates/tome/tests/cli_init.rs
 git diff --cached --check
-git commit -m "feat(init): clarify data folder and recommend skills" -m "OpenSpec: ship-tome-agent-skill"
+git commit -m "feat(init): clarify data folder and recommend skills" -m "Paperclip: MCO-19"
 ```
 
 ---

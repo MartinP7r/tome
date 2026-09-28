@@ -48,9 +48,6 @@
 │   │   ├── test-setup.md                # Test architecture
 │   │   └── [other docs]
 │   └── gfx/, visuals/, architecture/    # Diagrams + images
-├── openspec/                            # OpenSpec tracking
-│   ├── changes/                         # Change proposals
-│   └── specs/                           # Detailed specifications
 ├── .claude/                             # Claude-specific config
 ├── .planning/                           # GSD planning directory
 │   └── codebase/                        # GSD codebase docs (ARCHITECTURE.md, STRUCTURE.md, etc.)
@@ -79,11 +76,6 @@
 - Purpose: MDBook documentation source (public-facing)
 - Contains: Architecture deep-dive, CLI reference, config guide, test setup, development workflow
 - Key files: `architecture.md` (detailed sync pipeline), `configuration.md` (TOML schema)
-
-**openspec/:**
-- Purpose: Formal specification and change tracking
-- Contains: Proposal documents, spec files, change archive
-- Not generated; committed to git
 
 **.planning/codebase/:**
 - Purpose: GSD agent-generated codebase analysis documents

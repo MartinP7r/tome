@@ -1241,7 +1241,7 @@ These are the actionable directives from `./CLAUDE.md` that constrain Phase 26 w
 3. **Unix-only project.** No Windows support; symlinks via `std::os::unix::fs::symlink`. (Tauri-desktop is macOS-only per D-GUI-06, even tighter.)
 4. **No CLI regression.** `crates/tome` ships unchanged; `crates/tome/tests/cli*.rs` must keep passing.
 5. **Single user; backward compat: none.** New `StatusReport` fields (lockfile state, machine-prefs summary) can ship without migration.
-6. **OpenSpec workflow** for substantial changes — Phase 26 is substantial; opens an OpenSpec change in plan 26-01.
+6. **Paperclip-led workflow** for substantial changes — Phase 26 is substantial; record the planning and implementation evidence in Paperclip and the PR.
 7. **GitHub Issues + GSD** for execution state; no parallel TODO markdown files.
 8. **Session completion** — work isn't done until `git push` succeeds; full quality gates (`make ci`) before push.
 9. **No nested git** — git source clones go to `~/.tome/repos/`, not inside the library dir.

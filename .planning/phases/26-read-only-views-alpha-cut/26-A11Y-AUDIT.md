@@ -198,7 +198,7 @@ The 4 tests disable exactly one axe rule:
   the keyboard / VoiceOver dimensions; the color-contrast tightening
   is a separate work item.
 
-  **Action**: file a follow-up issue / OpenSpec entry titled
+  **Action**: file a Paperclip follow-up issue titled
   "tighten Phase-26 design tokens to clear WCAG-AA-normal (4.5:1)
   contrast on every label / button / pill pairing" and reference it
   in §Revision Log. Candidate fixes the design owner can pick from:

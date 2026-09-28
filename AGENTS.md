@@ -63,60 +63,37 @@ cp -rf source dest          # NOT: cp -r source dest
 - Tasks and roadmap tracked via **GitHub Issues** with milestones (v0.4.1, v0.4.2, v0.5, etc.)
 - Project board: **"tome Execution Board"** on GitHub Projects
 - Labels: `bug`, `enhancement`, `architecture`, `testing`, `documentation`, `dependencies`
-- Default workflow for substantial changes: GitHub issue/idea → OpenSpec change → GSD phase/plans → implementation → archive/close
+- Planning authority: Paperclip is the canonical work queue; GitHub issues are linked history and repository-facing discussion.
+- For substantial changes, use a concise repository design/implementation document only when it adds durable technical value, then link it from Paperclip and the PR.
 - Reference doc: `docs/src/development-workflow.md`
-- Small fixes (typos, tiny bugs, narrowly scoped cleanups) do **not** need full OpenSpec + GSD overhead
+- Small fixes (typos, tiny bugs, narrowly scoped cleanups) can go directly from a Paperclip issue to code, tests, and PR.
 
 ## Tech Stack
 
 Rust edition 2024. Key crates: `clap` (CLI), `dialoguer` (interactive prompts), `indicatif` (progress bars), `tabled` (table output), `walkdir` (dir traversal), `sha2` (hashing), `serde`/`toml` (config). Test crates: `assert_cmd`, `tempfile`, `assert_fs`.
 
-## OpenSpec + Traceability
+## Planning and Traceability
 
-For substantial changes (new features, significant refactors, architecture-impacting work, or process changes), use the repo workflow described in `docs/src/development-workflow.md`.
-
-### OpenSpec
-
-Use OpenSpec to capture the planning layer:
-- proposal
-- design
-- task checklist
-- any spec deltas needed for changed behavior
-
-Typical commands:
-```bash
-openspec new change <change-id>
-openspec show <change-id>
-openspec status --change <change-id>
-openspec validate <change-id>
-openspec archive <change-id>
-```
+For substantial changes, follow the Paperclip-led workflow in `docs/src/development-workflow.md`.
 
 ### Traceability Convention
 
-For meaningful changes, link the layers when they exist:
-- GitHub issue: `#123`
-- OpenSpec change: `<change-id>`
-- GSD phase: `.planning/phases/<NN>-<name>/`
-- Requirement IDs: as defined in `.planning/REQUIREMENTS.md`
-- Commit / PR: implementation evidence
+For meaningful changes, link the evidence that genuinely helps a future reader:
+- Paperclip issue: `MCO-<number>` and its Paperclip link
+- GitHub issue or PR when relevant external history exists
+- Repository design/implementation document, when one was written
+- Verification commands/results
 
-Commit-body / PR-footer shapes used in recent PRs (pick one — don't invent a new shape):
+A compact commit body or PR footer is sufficient:
 ```text
-Refs #123
-OpenSpec: <change-id>
-```
-or, for PRs that close a phase:
-```text
-## Traceability
-- Requirements: WHARD-04, WHARD-05, WHARD-06
-- Phase artifacts: .planning/phases/05-wizard-test-coverage/
+Paperclip: MCO-52
+https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-52
 ```
 
 This repo uses:
-- **GitHub Issues** for backlog / roadmap intent
-- **OpenSpec** for requirements + design + checklist
-- **GSD** (`.planning/` + `/gsd:*` commands) for phase/plan execution state
+- **Paperclip** for backlog, roadmap, execution state, and closure evidence
+- **GitHub Issues** for linked external/repository history
+- **Repository documents** for durable design context when warranted
 - **git / PRs** for shipped evidence
 
 ## Build & Development Commands
@@ -196,12 +173,13 @@ Releases are managed by [cargo-dist](https://opensource.axo.dev/cargo-dist/). Th
 
 ## Issue Tracking
 
-This project uses **GitHub Issues** for backlog and roadmap intent, and **GSD** (`.planning/` + `/gsd:*` commands) for phase-level execution state. Do NOT create markdown TODOs or parallel task trackers — they fall out of sync.
+This project uses **Paperclip** for backlog, roadmap, execution state, and closure evidence. Do NOT create markdown TODOs or parallel task trackers — they fall out of sync.
 
-- **Backlog / product intent**: GitHub Issues + Milestones (`gh issue create`, project board "tome Execution Board")
-- **Milestone/phase execution**: GSD planning artifacts under `.planning/` (ROADMAP.md, PROJECT.md, STATE.md, REQUIREMENTS.md) and the `/gsd:*` commands (`/gsd:progress`, `/gsd:plan-phase`, `/gsd:execute-phase`, `/gsd:verify-work`)
-- **Substantial changes** also flow through OpenSpec — see `docs/src/development-workflow.md`
-- **Small fixes** (typos, tiny bugs, narrowly scoped cleanups) do NOT need full OpenSpec + GSD overhead — issue → code → PR is fine
+- **Planning and execution state**: Paperclip
+- **Repository-visible historical context**: GitHub Issues and milestones when relevant
+- **Design context**: versioned repository documents when warranted
+- **Implementation evidence**: git / PRs / CI
+- **Small fixes** (typos, tiny bugs, narrowly scoped cleanups) can proceed directly from a Paperclip issue to code, tests, and PR.
 
 ## Session Completion
 
