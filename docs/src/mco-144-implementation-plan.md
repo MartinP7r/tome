@@ -23,6 +23,7 @@ A successful implementation has these properties:
 5. The CLI/TUI can explain a skill's provenance, canonical hash, curation state, selected routes, target health, and drift.
 6. Normal commands resolve their routes, target availability, disable state, and consent from the established effective context: shared `tome.toml`, the explicitly selected committed `machines/<profile>.toml`, and private local `settings.toml`. This delivery must preserve those selection semantics.
 7. A project `.tome.toml` can add project-local destinations but cannot change global sources, pool policy, canonical curation, or the active machine configuration.
+8. Named, shared use-case sets can be assigned to Paperclip agents and specialized project targets. The assignment is explicit, constraint-checked, previewable, and never inferred from target-local edits.
 
 ## 2. Scope boundaries
 
@@ -34,6 +35,7 @@ A successful implementation has these properties:
 - Target status and doctor diagnostics.
 - Established profile/settings configuration and constrained project routes.
 - Curation records, deterministic intake, provenance, lifecycle, overlap/gap views, customization and fork lineage.
+- Category taxonomy and named use-case sets for Paperclip agents, project types, and specialized project targets.
 - Structural validation as curation evidence.
 - Terminal/TUI-first inspection and actions.
 
@@ -181,6 +183,20 @@ Add a versioned, committed curation record for each canonical skill. It must inc
 
 The catalog must not treat free-form tags as a sufficient substitute for provenance, lifecycle, relationships and decision rationale.
 
+### 6.1a Categories and use-case sets
+
+Model **categories** as maintained, shared domain/capability taxonomy. A skill may belong to several categories; category assignment is explicit and reviewable rather than inferred from a target path or an agent name.
+
+Model **use-case sets** as named, shared curated collections for a concrete purpose. A set must record:
+
+- stable set ID/name, description and intended use case;
+- direct skill members and/or deterministic category/capability inclusion rules;
+- target/capability constraints and explicit exclusions;
+- applicable Paperclip agent roles and/or specialized project-target classes;
+- provenance for membership decisions and the canonical hashes to which they apply.
+
+Sets are deployment intent, not a second canonical source. A Paperclip agent or project target receives an explicitly assigned set only after the effective profile, target constraints, and deployment plan are resolved. A target-copy edit or agent-runtime edit cannot silently change categories, set membership, or canonical curation. Project configuration may select approved shared sets for its additive routes, but may not create global sources, rewrite shared taxonomy, or change another agent's assignment.
+
 ### 6.2 Deterministic intake workflow
 
 1. Discover/import a candidate and store its observed provenance plus immutable hash.
@@ -230,6 +246,10 @@ Prioritize terminal and ratatui surfaces. The TUI must render the same core stat
 Required views/actions:
 
 - canonical pool inventory with lifecycle, provenance, domains and constraints;
+- browse/filter by category, capability, lifecycle, provenance, target compatibility and use-case-set membership;
+- inspect the effective set assignment for a Paperclip agent or project target, including every inclusion/exclusion and its reason;
+- create, rename, categorize and retire categories; edit explicit set membership and deterministic set rules with validation and a rendered diff before writing shared curation state;
+- preview the routing/materialization impact before changing a Paperclip-agent or project-target set assignment;
 - selected local configuration and active project routes;
 - per-target deployment mode, canonical version, health and drift;
 - dry-run/preview for create, refresh, migrate, remove and repair;
@@ -290,11 +310,12 @@ Required views/actions:
 **Outcome:** a growing pool becomes explainable and reviewable.
 
 - Define curation record schema and migration/validation rules.
-- Add catalog read/write operations and deterministic views.
+- Define category taxonomy and use-case-set schemas, including explicit Paperclip-agent/project-target assignments and explainable rule evaluation.
+- Add catalog/category/set read/write operations and deterministic views.
 - Implement candidate lifecycle and explicit triage outcomes.
 - Add provenance merge and same-name/different-content conflict behavior.
 
-**Acceptance:** every canonical skill can state what it is, where it came from, how it is classified, why it is routed or excluded, and what content hash that decision applies to.
+**Acceptance:** every canonical skill can state what it is, where it came from, how it is categorized, which sets include/exclude it, why it is routed or excluded, and what content hash that decision applies to. A Paperclip agent or specialized project target can show its selected set(s), resolved skills, constraint exclusions, and a preview before any deployment change.
 
 ### Phase F — overlap/gap, customization and fork workflows
 
