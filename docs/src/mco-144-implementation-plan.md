@@ -1,6 +1,6 @@
 # MCO-144 implementation plan: portable skill pool and curated copy deployments
 
-> **Status:** Proposed implementation plan derived from the [skill-organization architecture](skill-organization-architecture.md). Paperclip is the authoritative execution record: [MCO-144](https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-144).
+> **Status:** Proposed implementation plan derived from the [skill-organization architecture](skill-organization-architecture.md). Paperclip is the authoritative execution record: [MCO-144](https://mmini.zuul-bee.ts.net:8443/MCO/issues/MCO-144). This plan deliberately retains the existing `machine.toml` boundary for its first delivery; it does not require the architecture document's broader named-profile proposal.
 >
 > **Product focus:** organize and curate AI-agent skills across machines and projects. Validation and evaluation are supporting evidence. Desktop/Tauri work remains paused unless Martin explicitly reprioritizes it.
 
@@ -21,7 +21,7 @@ A successful implementation has these properties:
 3. A target copy is derived state, never canonical input. Editing it cannot silently alter or become pool content.
 4. Tome never overwrites, removes, or adopts a foreign or drifted target directory without an explicit, previewed decision.
 5. The CLI/TUI can explain a skill's provenance, canonical hash, curation state, selected routes, target health, and drift.
-6. Existing portable `tome.toml` plus local `machine.toml` remain the base configuration boundary. Do not introduce a second named-profile framework unless a demonstrated multi-machine need exceeds the current model.
+6. Existing portable `tome.toml` plus local `machine.toml` remain the base configuration boundary. This delivery must not migrate users to, create, or require a named-profile framework.
 7. A project `.tome.toml`, when introduced, can add project-local destinations but cannot change global sources, pool policy, canonical curation, or the active machine configuration.
 
 ## 2. Scope boundaries
@@ -32,7 +32,7 @@ A successful implementation has these properties:
 - Deployment ownership, hashes, drift detection, preview, refresh and safe removal.
 - Migration of existing Tome-created target symlinks.
 - Target status and doctor diagnostics.
-- Existing machine-local configuration clarification and constrained project routes.
+- Existing machine-local configuration retention and constrained project routes.
 - Curation records, deterministic intake, provenance, lifecycle, overlap/gap views, customization and fork lineage.
 - Structural validation as curation evidence.
 - Terminal/TUI-first inspection and actions.
@@ -44,6 +44,7 @@ A successful implementation has these properties:
 - Semantic/LLM overlap decisions that automatically route, delete, accept, customize or fork skills.
 - Marketplace/ecosystem expansion beyond reliable generic discovery and provenance.
 - Automatic adoption of user/project edits in a target as canonical changes.
+- A configuration-framework migration (including named profiles, profile selection, or changes to unrelated local-settings ownership).
 
 ## 3. Preconditions and sequencing
 
@@ -63,9 +64,13 @@ Before the copy-deployment migration:
 1. Inventory every current target directory and classify each entry as Tome-managed symlink, broken Tome symlink, foreign symlink, foreign real directory, missing, or already copied.
 2. Record current manifest/lockfile semantics, ownership assumptions, cleanup behavior, doctor behavior and CLI/TUI output snapshots.
 3. Identify public configuration and JSON/status compatibility requirements.
-4. Define migration recovery behavior before writing destructive code.
+4. Define migration recovery behavior, record-location migration, and crash-recovery behavior before writing destructive code.
 
 No migration should be inferred from a path name alone. A path must be proven to be a current Tome-managed symlink before Tome offers to replace it.
+
+### 3.3 First-slice boundary
+
+The first executable slice is intentionally narrow: existing machine-level targets, the existing route/disable behavior, and the existing CLI/TUI data path. It introduces copied targets and their external records; it does **not** redesign configuration, add profiles, or require project routes. Project destinations and curation remain later slices, so a deployment-safety regression cannot be hidden behind a broad schema migration.
 
 ## 4. Target deployment contract
 
@@ -79,8 +84,9 @@ For a selected `(skill, target)` route:
 2. Inspect the destination with symlink-aware metadata.
 3. Compare it with the recorded deployment state.
 4. Render a plan: create, refresh, report drift, migrate, skip, remove, or require explicit repair/force.
-5. Make an approved change through a staging sibling directory and atomic rename where the filesystem allows it.
-6. Persist deployment state only after the copy succeeds.
+5. Copy only a validated regular-file/directory tree to a staging sibling, validate its hash, and make an approved change without following or creating symlinks in the deployed tree.
+6. Use an atomic exchange only where it is supported. Otherwise rename the old managed target to a sibling backup, rename the verified staging directory into place, then remove the backup; on failure, restore the backup before returning an error.
+7. Persist deployment state only after the active target is verified. A durable transition/backup marker must let doctor recover or report a crash between target replacement and record persistence.
 
 A destination is never replaced merely because it has the expected directory name.
 
@@ -91,14 +97,16 @@ Introduce a versioned, atomic deployment-state file outside the target directori
 - schema version;
 - stable canonical skill ID/name;
 - canonical content hash at last materialization;
-- target identifier and absolute target path;
+- target identifier, canonicalized absolute target path, and the target-root identity used for boundary checks;
 - materialization mode, initially only `copy`;
 - last successful materialization timestamp;
-- optional observed target hash and last-observed timestamp;
+- observed target hash, last-observed timestamp, and platform-supported file identity (for example device/inode) captured after a successful materialization;
 - ownership/migration provenance sufficient to distinguish a Tome-managed copy from foreign content;
 - source/canonical reference useful for diagnostics, but not a live target dependency.
 
 Do not put a required mutable metadata marker inside an agent tool's skill directory. Target directories must remain native, self-contained skill directories. If a small marker is later considered, it must be optional and never the sole ownership proof.
+
+The external record provides an ownership chain only for a target that was created or migrated by Tome. Matching bytes alone never prove ownership: an unrecorded path, a record/path mismatch, a changed target-root identity, or a changed recorded file identity is `foreign`/`repair-required`, even if its content hash equals the canonical hash. The implementation must document the residual limitation that an external actor can replace a directory with indistinguishable metadata; `--force` remains required when ownership cannot be established.
 
 ### 4.3 State machine
 
@@ -114,17 +122,18 @@ Status/doctor should classify every candidate route as one of:
 - `disabled-locally`: disabled by existing `machine.toml` settings;
 - `blocked-by-constraint`: route conflicts with declared target capability/constraint;
 - `stale-record`: deployment record exists but no longer corresponds to a valid route or canonical skill.
+- `interrupted`: a durable replacement transition or backup is present and must be recovered or explicitly repaired before another mutation.
 
 `drifted`, `foreign`, and `legacy-symlink` are never silently refreshed or pruned.
 
 ### 4.4 Safe operations
 
 - **Create:** only if the destination is absent or an explicit create plan is approved.
-- **Refresh:** replace only a healthy Tome-managed copy after preview; never refresh a drifted target without explicit conflict resolution.
+- **Refresh:** replace only a healthy Tome-managed copy whose record, canonicalized path, target-root boundary, and recorded identity still agree after preview; never refresh a drifted target without explicit conflict resolution.
 - **Migrate:** transform only a proven Tome-managed symlink into a copied deployment after preview. Preserve a foreign/broken symlink and explain why it was not changed.
-- **Remove:** remove only a record-matching healthy Tome-managed copy after preview. A drifted copy becomes a report/repair decision, not an automatic cleanup.
+- **Remove:** remove only a record-matching healthy Tome-managed copy after preview. A drifted, identity-mismatched, or interrupted copy becomes a report/repair decision, not an automatic cleanup.
 - **Repair:** require an explicit `--force`/interactive confirmation mode with a clear description of affected paths and lost target-local edits.
-- **Failure recovery:** retain the previous target until the replacement is fully staged. Remove staging artifacts on normal failure and make leftovers detectable by doctor.
+- **Failure recovery:** retain the previous target until the replacement is fully staged and hashed; restore the backup on a failed fallback rename. Remove staging artifacts on normal failure and make leftover staging/backup/transition artifacts detectable by doctor.
 
 ## 5. Configuration boundary
 
@@ -132,15 +141,15 @@ Status/doctor should classify every candidate route as one of:
 
 Build on the current configuration boundary rather than duplicating it:
 
-- Shared, portable `tome.toml`: pool source policy, source exclusions, targets and shared routing policy.
+- Shared, portable `tome.toml`: pool source policy, source exclusions, existing targets and shared routing policy.
 - Shared library/lockfile/manifest: canonical content, reproducibility and provenance.
 - Local `~/.config/tome/machine.toml`: disabled skills/directories, target filters, path overrides and machine-local consent.
 
-The existing `machine.toml` is useful per-machine configuration. It is not a committed named-profile system, and named profiles are not required for the first delivery.
+The existing `machine.toml` is the retained per-machine configuration for this delivery. Do not add a second local-settings file or a named-profile abstraction as part of copy deployment. If current code has profile-oriented compatibility paths, copy deployment must consume the already-effective target/route/disable decisions without changing their selection semantics.
 
 ### 5.2 Project routes
 
-Add a project configuration format only when copy deployment supports project targets. A nearest `.tome.toml` may add project-local routes/destinations under that checkout.
+Add a project configuration format only after machine-level copy deployment, status, recovery, and removal are proven. A nearest `.tome.toml` may then add project-local routes/destinations under that checkout.
 
 Validation rules:
 
@@ -148,7 +157,7 @@ Validation rules:
 - project config may not select or rewrite machine-local settings;
 - project config may not mutate canonical pool content, curation, exclusions or provenance;
 - project destinations inherit the copy-only materialization contract;
-- all project operations must resolve paths safely under the intended project boundary.
+- all project operations must canonicalize the project root before resolving routes, reject destination escapes through `..` or symlinked ancestors, and re-check the boundary immediately before mutation.
 
 ### 5.3 Future named profiles
 
@@ -240,28 +249,29 @@ Required views/actions:
 
 **Acceptance:** read-only discovery remains network-free; invalid/redirected Git caches are not trusted; fixtures cover real, broken and foreign target artifacts.
 
-### Phase B — copy materialization and deployment state
+### Phase B — inspect, record, and create copied deployments
 
-**Outcome:** target symlinks are replaced by safe copied deployments for a bounded set of existing tool targets.
+**Outcome:** a bounded set of existing machine targets can receive newly created, independently usable copied deployments without changing legacy links.
 
-- Implement deployment record schema and atomic persistence.
-- Implement symlink-aware inspection, staging copy, atomic replacement and rollback/recovery behavior.
+- Implement the deployment record schema, transition marker, and atomic persistence.
+- Implement symlink-aware inspection and the complete read-only state classifier before enabling a mutation.
+- Implement validated staging copy, supported atomic exchange/fallback backup-rename behavior, rollback, and doctor recovery for interruption artifacts.
 - Add dry-run plan rendering.
-- Add explicit migration for verified Tome-managed target symlinks.
-- Preserve foreign and drifted targets.
+- Enable create only for absent destinations; preserve every pre-existing target artifact.
 
-**Acceptance:** deleting/moving the canonical library after a successful deployment does not break a target; target edits are detected as drift; unowned files are untouched; interrupted refresh does not leave a partial active target.
+**Acceptance:** deleting/moving the canonical library after a successful deployment does not break a target; non-empty targets are real directories with no deployed symlinks; unowned files are untouched; interrupted create leaves no active partial target and is reported by doctor.
 
-### Phase C — status, doctor, cleanup and explicit refresh
+### Phase C — migrate, reconcile, and remove safely
 
 **Outcome:** users can understand and safely reconcile target state.
 
 - Implement the deployment state machine in status and doctor.
+- Add explicit migration for a symlink proven to be Tome-managed, including broken-link handling and rollback from its original link on failure.
 - Replace symlink-oriented cleanup/eject semantics with ownership-aware copy semantics.
 - Add previewed refresh, remove and repair flows.
 - Add migration and recovery documentation.
 
-**Acceptance:** every status category has focused tests and clear CLI output; cleanup never removes drifted/foreign target content automatically.
+**Acceptance:** every state category, including `interrupted`, has focused tests and clear CLI/JSON output; migration preserves a foreign or uncertain link; cleanup never removes drifted/foreign/identity-mismatched target content automatically.
 
 ### Phase D — project routes and configuration validation
 
@@ -270,7 +280,7 @@ Required views/actions:
 - Define the minimal project `.tome.toml` schema.
 - Implement nearest-project discovery and boundary-safe path resolution.
 - Validate prohibited configuration fields and route conflicts.
-- Add project-specific deployment records and tests around Git checkout deletion/reset scenarios.
+- Ensure project records bind both project-root identity and canonical target path; add tests around checkout deletion, reset, root replacement, and symlink escape attempts.
 
 **Acceptance:** a project can receive an independently usable target copy; a project config cannot add sources or change canonical/ machine-local policy.
 
@@ -310,7 +320,9 @@ Use unit, integration and end-to-end filesystem tests. Required scenarios includ
 - canonical copy and target copy content equality;
 - target independence after canonical path deletion/relocation;
 - copy update with atomic replacement and simulated failure recovery;
+- nested symlink, special-file, and symlinked-target-parent rejection during materialization;
 - healthy target, canonical-updated, drifted, missing, foreign and stale-record states;
+- record/path/target-root/file-identity mismatch and interrupted replacement recovery;
 - symlink migration: valid Tome-managed, broken Tome-managed, foreign and redirecting cases;
 - safe cleanup/removal with and without target drift;
 - project route boundary and configuration restrictions;
@@ -328,7 +340,8 @@ Run formatting, clippy, focused tests, full `cargo test -p tome`, doc build wher
 | --- | --- |
 | Copy deployment can overwrite user/project work. | External deployment records, hash-based drift detection, preview-first mutation, explicit force/repair only. |
 | Migration mistakes classify foreign links as Tome-owned. | Require strong ownership proof and preserve uncertain paths. |
-| Staging/rename differs across filesystems. | Stage beside destination where possible; detect cross-device cases and fail safely rather than partially replacing. |
+| Staging/rename differs across filesystems. | Stage beside destination; use an atomic exchange only when supported, otherwise use a durable backup-rename-and-rollback protocol. Detect cross-device cases and fail safely rather than partially replacing. |
+| An external actor can recreate a target with matching content. | Require a matching external record, canonicalized target boundary, and recorded identity before unattended mutation; classify uncertainty as repair-required and document that exact metadata spoofing still needs explicit force. |
 | Curation metadata becomes a second hidden source of truth. | Bind every record to canonical hash; require explicit reassessment when content changes. |
 | Configuration grows into competing policy layers. | Keep current shared/local split; restrict project config; defer named profiles until evidence requires them. |
 | Evaluation becomes an automatic quality or security claim. | Keep evaluation optional, isolated, diagnostic and non-authoritative. |
@@ -339,8 +352,8 @@ Run formatting, clippy, focused tests, full `cargo test -p tome`, doc build wher
 Paperclip remains authoritative. Convert these phases into individually testable issues rather than one long-lived implementation ticket:
 
 1. Close the MCO-52 reliability lane and linked source tests.
-2. Create copy-deployment engine and deployment-state issue.
-3. Create target migration/doctor/cleanup issue.
+2. Create inspect/record/create-copy deployment issue (no legacy replacement).
+3. Create target migration/doctor/reconcile/cleanup issue.
 4. Create safe project-route issue.
 5. Create curation record and intake issue.
 6. Create overlap/gap and customization/fork issue.

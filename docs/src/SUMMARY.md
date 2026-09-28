@@ -7,7 +7,7 @@
 - [Configuration](configuration.md)
 - [Cross-machine sync](cross-machine-sync.md)
 - [Skill-organization architecture](skill-organization-architecture.md)
-- [MCO-144 implementation plan](mco-144-implementation-plan.md)
+- [MCO-144 implementation plan — copy deployments](mco-144-implementation-plan.md)
 - [Development Workflow](development-workflow.md)
 - [Architecture](architecture.md)
 - [Tool Landscape](tool-landscape.md)
