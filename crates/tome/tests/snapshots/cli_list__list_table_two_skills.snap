@@ -1,9 +1,9 @@
 ---
-source: crates/tome/tests/cli.rs
+source: crates/tome/tests/cli_list.rs
 expression: stdout
 ---
- SKILL         SOURCE   VERSION   PATH
- my-skill      test               [TMPDIR]/skills/my-skill
- other-skill   test               [TMPDIR]/skills/other-skill
+ SKILL         SOURCE    VERSION   PATH
+ my-skill      library             [TMPDIR]/library/my-skill
+ other-skill   library             [TMPDIR]/library/other-skill
 
 2 skill(s) total

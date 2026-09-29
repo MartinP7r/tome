@@ -30,6 +30,9 @@ fn list_shows_discovered_skills() {
             skills_dir.display()
         ),
     );
+    let library_dir = tmp.path().join("library");
+    create_skill(&library_dir, "my-skill");
+    create_skill(&library_dir, "other-skill");
 
     let output = tome()
         .args(["--config", config.to_str().unwrap(), "list"])
@@ -59,6 +62,9 @@ fn list_json_outputs_valid_json() {
             skills_dir.display()
         ),
     );
+    let library_dir = tmp.path().join("library");
+    create_skill(&library_dir, "alpha-skill");
+    create_skill(&library_dir, "beta-skill");
 
     let output = tome()
         .args(["--config", config.to_str().unwrap(), "list", "--json"])
@@ -97,6 +103,7 @@ fn list_json_with_quiet_still_outputs_json() {
             skills_dir.display()
         ),
     );
+    create_skill(&tmp.path().join("library"), "my-skill");
 
     let output = tome()
         .args([

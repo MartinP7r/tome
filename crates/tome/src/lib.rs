@@ -1148,30 +1148,18 @@ pub(crate) fn cmd_lint(
     Ok(())
 }
 
-/// `tome browse` — interactive TUI browser for the discovered skills.
+/// `tome browse` — interactive TUI browser for the canonical library.
 pub(crate) fn cmd_browse(
-    config: &Config,
+    _config: &Config,
     paths: &TomePaths,
-    quiet: bool,
+    _quiet: bool,
     machine_prefs: machine::MachinePrefs,
 ) -> Result<()> {
-    let (resolved_paths, mut warnings) =
-        lockfile::resolved_paths_from_lockfile_cache(config, paths);
-    let skills = discover::discover_all(config, &resolved_paths, &mut warnings)?;
-    if !quiet {
-        for w in &warnings {
-            eprintln!("warning: {}", w);
-        }
-    }
+    let (skills, manifest) = browse::load_library_skills(paths)?;
     if skills.is_empty() {
-        if warnings.iter().any(|warning| warning.contains("tome sync")) {
-            println!("No skills found. Run `tome sync` to clone or refresh Git sources.");
-        } else {
-            println!("No skills found. Run `tome init` to configure sources.");
-        }
+        println!("No skills found. Run `tome init` to configure sources.");
         return Ok(());
     }
-    let manifest = manifest::load(paths.config_dir())?;
     browse::browse(skills, &manifest, machine_prefs)?;
     Ok(())
 }
