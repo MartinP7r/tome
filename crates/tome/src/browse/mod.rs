@@ -45,16 +45,13 @@ pub(crate) fn load_library_skills(
     let mut skills = Vec::new();
 
     let mut paths_in_library = if paths.library_dir().is_dir() {
-        std::fs::read_dir(paths.library_dir())
-            .with_context(|| {
-                format!(
-                    "failed to read canonical library {}",
-                    paths.library_dir().display()
-                )
-            })?
-            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-            .filter(|path| is_skill_directory(path))
-            .collect::<Vec<_>>()
+        let entries = std::fs::read_dir(paths.library_dir()).with_context(|| {
+            format!(
+                "failed to read canonical library {}",
+                paths.library_dir().display()
+            )
+        })?;
+        collect_skill_paths(entries, paths.library_dir())?
     } else {
         Vec::new()
     };
@@ -108,8 +105,37 @@ pub(crate) fn load_library_skills(
     Ok((skills, manifest))
 }
 
+fn collect_skill_paths<I>(entries: I, library_dir: &Path) -> Result<Vec<std::path::PathBuf>>
+where
+    I: IntoIterator<Item = std::io::Result<std::fs::DirEntry>>,
+{
+    let mut paths = Vec::new();
+    for entry in entries {
+        let entry = entry.with_context(|| {
+            format!(
+                "failed to enumerate canonical library {}",
+                library_dir.display()
+            )
+        })?;
+        let path = entry.path();
+        if is_skill_directory(&path) {
+            paths.push(path);
+        }
+    }
+    Ok(paths)
+}
+
 fn is_skill_directory(path: &Path) -> bool {
-    path.is_dir() && path.join("SKILL.md").is_file()
+    let Ok(metadata) = path.symlink_metadata() else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return false;
+    }
+
+    path.join("SKILL.md")
+        .symlink_metadata()
+        .is_ok_and(|metadata| !metadata.file_type().is_symlink() && metadata.is_file())
 }
 
 /// Launch the interactive skill browser.
@@ -251,5 +277,64 @@ mod tests {
         assert!(!skills[0].origin.is_managed());
         assert_eq!(skills[0].synced_at, None);
         assert!(!manifest.contains_key("untracked-skill"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn library_skills_reject_symlinked_entries() {
+        let tmp = TempDir::new().unwrap();
+        let library_dir = tmp.path().join("skills");
+        let external_skill_dir = create_skill(&tmp.path().join("external"), "linked-skill");
+        std::fs::create_dir_all(&library_dir).unwrap();
+        std::os::unix::fs::symlink(&external_skill_dir, library_dir.join("linked-skill")).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library_dir).unwrap();
+
+        let (skills, _) = load_library_skills(&paths).unwrap();
+
+        assert!(
+            skills.is_empty(),
+            "symlinked library entries must be rejected"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn library_skills_reject_symlinked_skill_files() {
+        let tmp = TempDir::new().unwrap();
+        let library_dir = tmp.path().join("skills");
+        let skill_dir = library_dir.join("linked-skill-file");
+        let external_skill_file = tmp.path().join("external-skill.md");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            &external_skill_file,
+            "---\nname: linked-skill-file\n---\n# Skill",
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&external_skill_file, skill_dir.join("SKILL.md")).unwrap();
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library_dir).unwrap();
+
+        let (skills, _) = load_library_skills(&paths).unwrap();
+
+        assert!(
+            skills.is_empty(),
+            "symlinked SKILL.md files must be rejected"
+        );
+    }
+
+    #[test]
+    fn library_entry_errors_are_returned() {
+        let result = collect_skill_paths(
+            std::iter::once(Err(std::io::Error::other(
+                "simulated directory read failure",
+            ))),
+            Path::new("/library"),
+        );
+
+        let error = result.expect_err("directory entry errors must not be ignored");
+        assert!(
+            error
+                .to_string()
+                .contains("failed to enumerate canonical library /library")
+        );
     }
 }
