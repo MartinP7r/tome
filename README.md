@@ -109,8 +109,8 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | `tome reassign <skill> --to <dir>` | Re-anchor an Unowned skill to a directory       |
 | `tome fork <skill>`     | Promote a managed skill to local (editable in library)    |
 | `tome status`           | Show library, directories, last-sync, and health          |
-| `tome list`             | List all discovered skills with directory                 |
-| `tome browse`           | Interactively browse discovered skills (fuzzy search)     |
+| `tome list`             | List canonical library skills with directory               |
+| `tome browse`           | Interactively browse canonical library skills (fuzzy search) |
 | `tome doctor`           | Diagnose Library / Directory / Config / Foreign-symlink issues; auto-repair broken symlinks, stale manifest entries, and target real-dir collisions |
 | `tome lint`             | Validate skill frontmatter and report issues              |
 | `tome config`           | Show current configuration                                |

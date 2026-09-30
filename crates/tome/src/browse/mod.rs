@@ -21,14 +21,96 @@ pub mod ui;
 #[cfg(not(any(test, feature = "test-support")))]
 pub(crate) mod ui;
 
+use std::path::Path;
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use crossterm::event::{self, Event};
 
 use crate::discover::DiscoveredSkill;
 use crate::machine::MachinePrefs;
 use app::{App, SkillRow};
+
+/// Project the canonical library into the rows consumed by the browser.
+///
+/// Browse is a view of skills that have already been consolidated, not a
+/// source discovery command. The manifest supplies ownership, sync time, and
+/// managed/provenance metadata while the library remains the filesystem
+/// authority for which skills are present.
+pub(crate) fn load_library_skills(
+    paths: &crate::paths::TomePaths,
+) -> Result<(Vec<DiscoveredSkill>, crate::manifest::Manifest)> {
+    let manifest = crate::manifest::load(paths.config_dir())?;
+    let lockfile = crate::lockfile::load(paths.config_dir())?;
+    let mut skills = Vec::new();
+
+    let mut paths_in_library = if paths.library_dir().is_dir() {
+        std::fs::read_dir(paths.library_dir())
+            .with_context(|| {
+                format!(
+                    "failed to read canonical library {}",
+                    paths.library_dir().display()
+                )
+            })?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| is_skill_directory(path))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    paths_in_library.sort();
+
+    for path in paths_in_library {
+        let Some(name) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| crate::discover::SkillName::new(name).ok())
+        else {
+            continue;
+        };
+        let entry = manifest.get(name.as_str());
+        let source_name = entry
+            .and_then(|entry| entry.source_name().or_else(|| entry.previous_source()))
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::config::DirectoryName::new("library")
+                    .expect("the static canonical-library source name is valid")
+            });
+        let provenance = lockfile
+            .as_ref()
+            .and_then(|lockfile| lockfile.skills.get(&name))
+            .and_then(|entry| {
+                entry
+                    .registry_id
+                    .as_ref()
+                    .map(|registry_id| crate::discover::SkillProvenance {
+                        registry_id: registry_id.clone(),
+                        version: entry.version.clone(),
+                        git_commit_sha: entry.git_commit_sha.clone(),
+                    })
+            });
+        let origin = if entry.is_some_and(|entry| entry.managed) {
+            crate::discover::SkillOrigin::Managed { provenance }
+        } else {
+            crate::discover::SkillOrigin::Local
+        };
+
+        skills.push(DiscoveredSkill {
+            name,
+            path,
+            source_name,
+            origin,
+            frontmatter: None,
+            synced_at: entry.map(|entry| entry.synced_at.clone()),
+        });
+    }
+
+    Ok((skills, manifest))
+}
+
+fn is_skill_directory(path: &Path) -> bool {
+    path.is_dir() && path.join("SKILL.md").is_file()
+}
 
 /// Launch the interactive skill browser.
 ///
@@ -99,4 +181,75 @@ fn run_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::DirectoryName;
+    use crate::manifest::{Manifest, SkillEntry};
+    use crate::paths::TomePaths;
+    use crate::validation::test_hash;
+    use tempfile::TempDir;
+
+    fn create_skill(library_dir: &Path, name: &str) -> std::path::PathBuf {
+        let skill_dir = library_dir.join(name);
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            format!("---\nname: {name}\n---\n# Demo skill"),
+        )
+        .unwrap();
+        skill_dir
+    }
+
+    #[test]
+    fn library_skills_are_loaded_without_configured_sources() {
+        let tmp = TempDir::new().unwrap();
+        let library_dir = tmp.path().join("skills");
+        let skill_dir = create_skill(&library_dir, "demo-skill");
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library_dir.clone()).unwrap();
+
+        let mut manifest = Manifest::default();
+        let mut entry = SkillEntry::new(
+            skill_dir.clone(),
+            DirectoryName::new("original-source").unwrap(),
+            test_hash("demo-skill"),
+            true,
+        );
+        entry.synced_at = "2026-09-29T00:00:00Z".to_string();
+        manifest.insert(
+            crate::discover::SkillName::new("demo-skill").unwrap(),
+            entry,
+        );
+        crate::manifest::save(&manifest, paths.config_dir()).unwrap();
+
+        let (skills, loaded_manifest) = load_library_skills(&paths).unwrap();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name.as_str(), "demo-skill");
+        assert_eq!(skills[0].path, skill_dir);
+        assert_eq!(skills[0].source_name.as_str(), "original-source");
+        assert!(skills[0].origin.is_managed());
+        assert_eq!(skills[0].synced_at.as_deref(), Some("2026-09-29T00:00:00Z"));
+        assert!(loaded_manifest.contains_key("demo-skill"));
+    }
+
+    #[test]
+    fn library_skills_are_loaded_without_a_manifest_entry() {
+        let tmp = TempDir::new().unwrap();
+        let library_dir = tmp.path().join("skills");
+        let skill_dir = create_skill(&library_dir, "untracked-skill");
+        let paths = TomePaths::new(tmp.path().to_path_buf(), library_dir).unwrap();
+
+        let (skills, manifest) = load_library_skills(&paths).unwrap();
+
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name.as_str(), "untracked-skill");
+        assert_eq!(skills[0].path, skill_dir);
+        assert_eq!(skills[0].source_name.as_str(), "library");
+        assert!(!skills[0].origin.is_managed());
+        assert_eq!(skills[0].synced_at, None);
+        assert!(!manifest.contains_key("untracked-skill"));
+    }
 }
