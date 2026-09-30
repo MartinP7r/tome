@@ -90,7 +90,7 @@ read-only directories.
 
 ## Development
 
-For repository workflow guidance, see [docs/src/development-workflow.md](docs/src/development-workflow.md). It explains when `tome` uses GitHub Issues vs OpenSpec vs GSD, and how to link them cleanly in commits and PRs.
+For repository workflow guidance, see [docs/src/development-workflow.md](docs/src/development-workflow.md). It explains Paperclip-led planning, GitHub's role as linked repository history, and how to preserve useful design and verification evidence in commits and PRs.
 
 ## Commands
 

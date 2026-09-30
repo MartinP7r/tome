@@ -26,9 +26,6 @@ Both blocking findings are fixed and verified.
 - `crates/tome/src/wizard.rs`
 - `crates/tome/tests/cli_add.rs`
 - `docs/superpowers/specs/2026-08-01-tome-agent-skill-design.md`
-- `openspec/changes/ship-tome-agent-skill/design.md`
-- `openspec/changes/ship-tome-agent-skill/specs/agent-skill-distribution/spec.md`
-- `openspec/changes/ship-tome-agent-skill/tasks.md`
 
 ## Verification
 
@@ -37,7 +34,7 @@ Both blocking findings are fixed and verified.
 - Focused wizard suite: 55 passed, 0 failed.
 - `cargo fmt --all`: passed.
 - `cargo clippy --all-targets -- -D warnings`: passed.
-- `openspec validate ship-tome-agent-skill`: valid.
+- Paperclip integration work is recorded under MCO-19.
 - `make ci`: passed, including 972 Tome library tests, all CLI integration suites, 36 desktop tests, watcher tests, doctests, formatting, Clippy, and typos.
 
 ## Signed Commit

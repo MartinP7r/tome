@@ -363,7 +363,7 @@ pub enum Command {
 - **dry_run threading:** All operations accept `dry_run: bool`, skip filesystem writes.
 - **No backward compat:** Single user, hard-breaking changes OK with migration docs.
 - **Quality gates:** `make ci` (fmt-check + lint + test) before merge.
-- **bd (beads)** for issue tracking, not markdown TODOs.
+- **Paperclip** for issue tracking, not markdown TODOs.
 
 ## Sources
 

@@ -425,7 +425,7 @@ for (dir_name, dir_config) in config.distribution_dirs() {
 - **Rust edition:** 2024. Strict clippy with `-D warnings`.
 - **Non-interactive shell commands:** Use `cp -f`, `mv -f`, `rm -f` to avoid hanging.
 - **Build commands:** `make ci` (fmt-check + lint + test), `cargo test -p tome`.
-- **Issue tracking:** Use `bd` (beads) for ALL task tracking. No markdown TODO lists.
+- **Issue tracking:** Use Paperclip for all task tracking. Avoid markdown TODO lists as competing execution state.
 - **Git:** Never commit directly to `main`. Always create a feature branch.
 - **Test pattern:** Unit tests co-located with modules (`#[cfg(test)] mod tests`). Integration tests in `tests/cli.rs`.
 - **Error handling:** `anyhow::Result<T>` throughout. `.with_context()` for operation context.
@@ -433,7 +433,7 @@ for (dir_name, dir_config) in config.distribution_dirs() {
 - **Atomic writes:** temp+rename for manifest, lockfile, machine.toml.
 - **Insta snapshots:** Delete old, regenerate with `cargo insta review` (D-11).
 - **GSD Workflow:** Use `/gsd:quick`, `/gsd:debug`, or `/gsd:execute-phase` entry points.
-- **OpenSpec + Traceability:** For substantial changes, link GitHub issue, OpenSpec change, Beads task, commit/PR.
+- **Traceability:** For substantial changes, link the relevant Paperclip issue, repository design evidence, commit/PR, and verification output.
 - **Session completion:** MUST push to remote before ending session.
 
 ## Sources

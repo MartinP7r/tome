@@ -60,7 +60,7 @@ The audit baseline is: CFG-01, CFG-02, CFG-03, and CFG-05 have no shipped deskto
 
 ## Project Constraints (from AGENTS.md)
 
-- Use the substantial-change workflow: GitHub issue → OpenSpec → GSD phase/plans → implementation → archive/close. [VERIFIED: AGENTS.md:61-68]
+- Use the substantial-change workflow: Paperclip issue → repository design/implementation plan when warranted → implementation → PR/verification.
 - Rust edition is 2024; clippy warnings are failures. [VERIFIED: AGENTS.md:70-72] [VERIFIED: AGENTS.md:122-140]
 - Preserve the CLI; the desktop crate is cargo-dist excluded until the v1.0 desktop release. [VERIFIED: AGENTS.md:21-23]
 - Keep changes surgical, use `anyhow` application errors, atomically write persisted state, and use co-located Rust unit tests plus CLI integration tests. [VERIFIED: AGENTS.md:174-185]
