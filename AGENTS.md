@@ -187,10 +187,10 @@ This project uses **Paperclip** for backlog, roadmap, execution state, and closu
 
 **MANDATORY WORKFLOW:**
 
-1. **File follow-up issues** — Open GitHub issues (or add `/gsd:add-backlog` entries) for anything discovered that won't ship in this session.
+1. **Record follow-ups in Paperclip** — Create or update the relevant Paperclip issue for anything that will not ship in this session.
 2. **Run quality gates** — `make ci` (fmt-check, clippy -D warnings, tests) if code changed.
-3. **Update planning artifacts** — Mark completed plans/phases in `.planning/`. `/gsd:execute-phase` handles this automatically on success; otherwise update STATE.md and ROADMAP.md manually.
-4. **PUSH TO REMOTE** — This is MANDATORY:
+3. **Record completion evidence in Paperclip** — Link the PR, verification results, and remaining follow-ups before changing issue status.
+4. **PUSH TO REMOTE** — This is mandatory:
    ```bash
    git push
    git status  # MUST show "up to date with origin"
@@ -205,7 +205,6 @@ This project uses **Paperclip** for backlog, roadmap, execution state, and closu
 - NEVER say "ready to push when you are" — YOU must push.
 - If push fails, resolve and retry until it succeeds.
 
-<!-- GSD:project-start source:PROJECT.md -->
 ## Project
 
 **tome v0.9 — Cross-Machine Path Overrides (shipped); next milestone — Desktop GUI (drafted)**
@@ -221,9 +220,6 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - **Single user**: Martin is the sole user. This unblocks hard-breaking changes but means there's no migration tooling.
 - **No nested git**: Git source clones go to `~/.tome/repos/`, not inside the library dir (which may be its own git repo).
 - **Backward compat**: None. Old `tome.toml` files will fail to parse. Migration is documented, not automated.
-<!-- GSD:project-end -->
-
-<!-- GSD:stack-start source:codebase/STACK.md -->
 ## Technology Stack
 
 ## Languages
@@ -295,9 +291,6 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 ## Dependency Audit Policy
 - Multiple versions of the same crate trigger warnings (highlight all)
 - Unknown registries and git sources trigger warnings
-<!-- GSD:stack-end -->
-
-<!-- GSD:conventions-start source:CONVENTIONS.md -->
 ## Conventions
 
 ## Naming Patterns
@@ -376,9 +369,6 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - `#[serde(transparent)]` for newtype wrappers
 - `#[serde(default)]` for optional fields
 - Custom deserialize impls validate during parsing
-<!-- GSD:conventions-end -->
-
-<!-- GSD:architecture-start source:ARCHITECTURE.md -->
 ## Architecture
 
 ## Pattern Overview
@@ -496,24 +486,3 @@ tome is a CLI tool that manages AI coding agent skills across multiple tools (Cl
 - Config TOML: `toml::from_str()` with custom deserialization
 - Paths: Absolute path requirements in TomePaths constructor
 - Symlinks: `symlink_points_to()` verifies destination before operations
-<!-- GSD:architecture-end -->
-
-<!-- GSD:workflow-start source:GSD defaults -->
-## GSD Workflow Enforcement
-
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
-
-Use these entry points:
-- `/gsd:quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd:debug` for investigation and bug fixing
-- `/gsd:execute-phase` for planned phase work
-
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-<!-- GSD:profile-start -->
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd:profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
