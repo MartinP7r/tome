@@ -1,6 +1,6 @@
 use assert_fs::TempDir;
 use predicates::prelude::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 
 mod common;
@@ -50,6 +50,21 @@ fn init_git_repo(dir: &std::path::Path) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[cfg(unix)]
+fn replace_target_copy_with_legacy_symlink(tome_home: &Path, target_dir: &Path, skill: &str) {
+    use std::os::unix::fs as unix_fs;
+
+    let target = target_dir.join(skill);
+    if let Ok(metadata) = std::fs::symlink_metadata(&target) {
+        if metadata.file_type().is_symlink() || metadata.is_file() {
+            std::fs::remove_file(&target).unwrap();
+        } else {
+            std::fs::remove_dir_all(&target).unwrap();
+        }
+    }
+    unix_fs::symlink(tome_home.join("library").join(skill), &target).unwrap();
 }
 
 #[test]
@@ -131,16 +146,16 @@ fn test_remove_local_directory() {
 
     // Verify cleanup
     // v0.10 (LIB-04): library content for owned skills is preserved on
-    // `tome remove`; the manifest entry transitions to Unowned. Distribution
-    // symlinks ARE still removed (the user removed the source from config,
-    // not the skill from the library).
+    // `tome remove`; the manifest entry transitions to Unowned. MCO-152's
+    // first copy-deployment slice does not implement target-copy removal, so
+    // the materialized target copy is preserved too.
     assert!(
         library_dir.join("my-skill").exists(),
         "library skill must be preserved as Unowned per LIB-04"
     );
     assert!(
-        !target_dir.join("my-skill").exists(),
-        "target symlink should be removed"
+        target_dir.join("my-skill/SKILL.md").is_file(),
+        "target copy should be preserved"
     );
 
     // Verify config no longer has the directory
@@ -284,6 +299,7 @@ fn remove_partial_failure_exits_nonzero_with_warning_marker() {
         .success();
 
     assert!(target_dir.join("my-skill").exists());
+    replace_target_copy_with_legacy_symlink(tmp.path(), &target_dir, "my-skill");
 
     // Clamp the target dir to read+execute only: plan() can still read_dir
     // it to enumerate the symlinks, but execute()'s remove_file call needs
@@ -386,6 +402,7 @@ fn remove_partial_failure_does_not_save_disk_state() {
         .env("NO_COLOR", "1")
         .assert()
         .success();
+    replace_target_copy_with_legacy_symlink(tmp.path(), &target_dir, "my-skill");
 
     // Snapshot pre-remove disk state. tome.lock may or may not exist
     // depending on what `tome sync --no-triage` writes for a non-git
@@ -487,7 +504,9 @@ fn remove_retry_succeeds_after_failure_resolved() {
         ),
     );
 
-    // Prime: sync to wire library + target symlink.
+    // Prime: sync to wire library + target copy, then replace it with a
+    // legacy symlink so this test continues to exercise symlink failure
+    // retention while copy removal remains explicitly out of scope.
     tome()
         .args([
             "--tome-home",
@@ -500,8 +519,9 @@ fn remove_retry_succeeds_after_failure_resolved() {
         .success();
     assert!(
         target_dir.join("my-skill").exists(),
-        "fixture: target symlink must exist after sync"
+        "fixture: target deployment must exist after sync"
     );
+    replace_target_copy_with_legacy_symlink(tmp.path(), &target_dir, "my-skill");
 
     // Step 1 — partial failure: chmod 0o500 on target dir.
     std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
@@ -677,6 +697,7 @@ fn remove_failure_summary_wording() {
         .env("NO_COLOR", "1")
         .assert()
         .success();
+    replace_target_copy_with_legacy_symlink(tmp.path(), &target_dir, "my-skill");
 
     std::fs::set_permissions(&target_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
@@ -1178,7 +1199,7 @@ fn tome_remove_dir_cleans_claude_plugins() {
         ),
     );
 
-    // Sync to populate library + manifest + distribution symlinks.
+    // Sync to populate library + manifest + distribution copy.
     tome()
         .args([
             "--tome-home",
@@ -1198,10 +1219,11 @@ fn tome_remove_dir_cleans_claude_plugins() {
 
     let dist_link = target_dir.join("managed-foo");
     assert!(
-        dist_link.is_symlink(),
-        "distribution symlink must exist post-sync: {}",
+        dist_link.join("SKILL.md").is_file(),
+        "distribution copy must exist post-sync: {}",
         dist_link.display()
     );
+    replace_target_copy_with_legacy_symlink(tmp.path(), &target_dir, "managed-foo");
 
     let manifest_before: serde_json::Value = serde_json::from_str(
         &std::fs::read_to_string(tmp.path().join(".tome-manifest.json")).unwrap(),
@@ -1239,8 +1261,8 @@ fn tome_remove_dir_cleans_claude_plugins() {
         "config must no longer contain test-cp directory: {config_after}"
     );
 
-    // -- Verify: distribution symlinks pointing at the removed source's library
-    //    entries are removed.
+    // -- Verify: legacy distribution symlinks pointing at the removed source's
+    //    library entries are removed.
     assert!(
         !dist_link.exists() && !dist_link.is_symlink(),
         "distribution symlink at {} must be removed post-`remove dir`",

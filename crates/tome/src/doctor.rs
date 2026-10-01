@@ -545,7 +545,13 @@ pub fn check(config: &Config, paths: &TomePaths) -> Result<DoctorReport> {
         });
     }
 
-    let config_issues = check_config(config)?;
+    let mut config_issues = check_config(config)?;
+    for finding in crate::deployment::transition_findings(paths.config_dir())? {
+        config_issues.push(DiagnosticIssue::config(
+            IssueSeverity::Warning,
+            format!("{finding} (recoverable; no destructive doctor repair in this release)"),
+        ));
+    }
 
     // UNOWN-03 / D-D3: collect Unowned skills from the manifest.
     // Manifest read errors degrade gracefully to an empty Vec — the
@@ -1662,11 +1668,10 @@ fn check_distribution_dir(
                 ));
             }
         } else if path.is_dir() {
-            // Phase 24 (v0.16+): real directory in a distribution dir.
-            // If the library has a same-named skill, hash-compare:
-            //   - identical content → auto-fixable (delete + symlink)
-            //   - diverging content → Warning, no auto-repair (the user
-            //     made local changes; reconcile manually)
+            // Phase 24 originally repaired matching real directories back to
+            // symlinks. MCO-152 makes create-only target copies legitimate, so
+            // identical content is healthy; only divergent content remains a
+            // manual warning.
             // If the library has no same-named skill, leave the
             // directory alone — it's not a tome-managed artifact and we
             // don't presume to own it. Promoted from backlog 999.3.
@@ -1681,25 +1686,7 @@ fn check_distribution_dir(
                 manifest::hash_directory(&path),
                 manifest::hash_directory(&library_skill),
             ) {
-                (Ok(t), Ok(l)) if t == l => {
-                    let issue = DiagnosticIssue::directory_repairable(
-                        IssueSeverity::Warning,
-                        format!(
-                            "real directory in target matches library content (should be a symlink): {}",
-                            path.display()
-                        ),
-                        RepairKind::ConsolidateTargetRealDirToSymlink,
-                    );
-                    let issue = if let Some(dn) = dir_name.clone() {
-                        issue.with_id(FindingId::TargetRealDirToSymlink {
-                            directory: dn,
-                            path: path.clone(),
-                        })
-                    } else {
-                        issue
-                    };
-                    issues.push(issue);
-                }
+                (Ok(t), Ok(l)) if t == l => {}
                 (Ok(_), Ok(_)) => {
                     let issue = DiagnosticIssue::directory(
                         IssueSeverity::Warning,
@@ -2347,23 +2334,16 @@ mod tests {
     }
 
     #[test]
-    fn check_distribution_dir_real_dir_matching_library_is_repairable() {
+    fn check_distribution_dir_real_dir_matching_library_is_healthy() {
         let library = TempDir::new().unwrap();
         let target = TempDir::new().unwrap();
         make_library_and_target_skill(library.path(), target.path(), "twin", false);
 
         let result = check_distribution_dir("test", target.path(), library.path()).unwrap();
-        let matched: Vec<_> = result
-            .iter()
-            .filter(|i| i.repair_kind == Some(RepairKind::ConsolidateTargetRealDirToSymlink))
-            .collect();
-        assert_eq!(
-            matched.len(),
-            1,
-            "matching real dir must surface as one repairable Warning, got: {result:?}"
+        assert!(
+            result.is_empty(),
+            "matching real target copies are healthy in the copy-deployment model, got: {result:?}"
         );
-        assert_eq!(matched[0].severity, IssueSeverity::Warning);
-        assert_eq!(matched[0].category, IssueCategory::Directory);
     }
 
     #[test]
@@ -3837,6 +3817,50 @@ mod tests {
         assert!(view.findings.is_empty(), "got: {view:?}");
         assert_eq!(view.auto_fixable_count, 0);
         assert_eq!(view.manual_count, 0);
+    }
+
+    #[test]
+    fn check_reports_interrupted_deployment_transition() {
+        let tome_home = TempDir::new().unwrap();
+        let library = tome_home.path().join("skills");
+        std::fs::create_dir_all(&library).unwrap();
+        let lock_dir = tome_home.path().join("deployments/v1/codex");
+        std::fs::create_dir_all(&lock_dir).unwrap();
+        std::fs::write(
+            lock_dir.join("skill-a.lock.json"),
+            serde_json::json!({
+                "schema_version": 1,
+                "transition_id": "test-transition",
+                "skill_id": "skill-a",
+                "target_name": "codex",
+                "target_root": "/tmp/codex-skills",
+                "target_root_identity": { "dev": 1, "ino": 2 },
+                "target_path": "/tmp/codex-skills/skill-a",
+                "staging_path": "/tmp/codex-skills/.tome-stage-skill-a-test",
+                "canonical_hash": "a".repeat(64),
+                "phase": "staging",
+                "owner_pid": 123,
+                "created_at": "2026-10-01T00:00:00Z"
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let config = Config {
+            library_dir: library.clone(),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tome_home.path().to_path_buf(), library).unwrap();
+        let report = check(&config, &paths).unwrap();
+
+        assert!(
+            report.config_issues.iter().any(|issue| issue
+                .message
+                .contains("interrupted deployment transition")
+                && issue.message.contains("skill-a")),
+            "doctor should report interrupted deployment transitions: {:?}",
+            report.config_issues
+        );
     }
 
     #[test]

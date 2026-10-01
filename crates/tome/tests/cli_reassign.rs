@@ -197,15 +197,11 @@ fn test_fork_dry_run() {
         .success()
         .stdout(predicate::str::contains("Would"));
 
-    // Target may already have a symlink from sync, but the fork dry run
-    // should not have created a regular (non-symlink) directory
+    // The initial sync may already have a create-only deployment copy. The
+    // fork dry run must leave that copy alone rather than materializing a fork.
     let target_skill = tmp.path().join("target").join("my-skill");
-    if target_skill.exists() {
-        assert!(
-            target_skill.is_symlink(),
-            "dry run should not create a real directory copy in target"
-        );
-    }
+    assert!(target_skill.join("SKILL.md").is_file());
+    assert!(!target_skill.is_symlink());
 }
 
 #[test]

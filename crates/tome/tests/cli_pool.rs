@@ -21,6 +21,12 @@ fn git(dir: &std::path::Path, args: &[&str]) {
     );
 }
 
+fn configure_git_identity(dir: &std::path::Path) {
+    git(dir, &["config", "user.email", "test@example.com"]);
+    git(dir, &["config", "user.name", "Test User"]);
+    git(dir, &["config", "commit.gpgsign", "false"]);
+}
+
 fn run(config: &std::path::Path, settings: &std::path::Path) -> Command {
     let mut command = cargo_bin_cmd!("tome");
     command.args([
@@ -76,7 +82,8 @@ fn cross_profile_pool_preserves_and_distributes() {
 
     std::fs::write(&settings, "profile = \"profile-b\"\ngit_sync = \"never\"\n").unwrap();
     run(&config, &settings).assert().success();
-    assert!(target.join("shared-skill").is_symlink());
+    assert!(target.join("shared-skill/SKILL.md").is_file());
+    assert!(!target.join("shared-skill").is_symlink());
 }
 
 #[test]
@@ -190,8 +197,7 @@ fn git_policy_matrix_uses_pulled_profile_in_the_same_sync() {
         root,
         &["clone", remote.to_str().unwrap(), seed.to_str().unwrap()],
     );
-    git(&seed, &["config", "user.email", "test@example.com"]);
-    git(&seed, &["config", "user.name", "Test User"]);
+    configure_git_identity(&seed);
     std::fs::create_dir_all(seed.join("machines")).unwrap();
     std::fs::write(
         seed.join("tome.toml"),
@@ -216,12 +222,12 @@ fn git_policy_matrix_uses_pulled_profile_in_the_same_sync() {
         root,
         &["clone", remote.to_str().unwrap(), local.to_str().unwrap()],
     );
+    configure_git_identity(&local);
     git(
         root,
         &["clone", remote.to_str().unwrap(), writer.to_str().unwrap()],
     );
-    git(&writer, &["config", "user.email", "test@example.com"]);
-    git(&writer, &["config", "user.name", "Test User"]);
+    configure_git_identity(&writer);
     std::fs::write(
         writer.join("machines/test.toml"),
         format!(
@@ -270,8 +276,7 @@ fn git_owned_path_staging_commits_only_pool_content() {
         root,
         &["clone", remote.to_str().unwrap(), local.to_str().unwrap()],
     );
-    git(&local, &["config", "user.email", "test@example.com"]);
-    git(&local, &["config", "user.name", "Test User"]);
+    configure_git_identity(&local);
     std::fs::create_dir_all(local.join("machines")).unwrap();
     std::fs::write(
         local.join("tome.toml"),

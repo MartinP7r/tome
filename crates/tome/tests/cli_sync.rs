@@ -1,6 +1,7 @@
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::TempDir;
 use predicates::prelude::*;
+use std::path::Path;
 use std::process::Command as StdCommand;
 
 mod common;
@@ -36,6 +37,19 @@ fn git_init(dir: &std::path::Path) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+fn assert_target_copy(path: &Path) {
+    assert!(
+        path.join("SKILL.md").is_file(),
+        "expected target copy with SKILL.md at {}",
+        path.display()
+    );
+    assert!(
+        !path.is_symlink(),
+        "target deployment should be a real copied directory: {}",
+        path.display()
+    );
 }
 
 #[test]
@@ -218,13 +232,13 @@ fn sync_dry_run_does_not_create_lockfile() {
 }
 
 #[test]
-fn sync_distributes_to_symlink_target() {
+fn sync_distributes_to_existing_target_copy() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "my-skill");
 
     let target_dir = tmp.path().join("target");
-    // Don't create target_dir — sync should create it
+    std::fs::create_dir_all(&target_dir).unwrap();
 
     let library_dir = tmp.path().join("library");
     std::fs::create_dir_all(&library_dir).unwrap();
@@ -262,8 +276,7 @@ role = "target"
     // Library has the skill as a real directory (v0.2)
     assert!(library_dir.join("my-skill").is_dir());
     assert!(!library_dir.join("my-skill").is_symlink());
-    // Target has a symlink pointing to the library entry
-    assert!(target_dir.join("my-skill").is_symlink());
+    assert_target_copy(&target_dir.join("my-skill"));
 }
 
 #[test]
@@ -279,6 +292,8 @@ fn sync_routes_tagged_source_skills_to_distinct_destinations() {
     create_skill(&source, "reference-skill");
     create_skill(&source, "rust-skill");
     create_skill(&source, "untagged-skill");
+    std::fs::create_dir_all(&reference_target).unwrap();
+    std::fs::create_dir_all(&rust_target).unwrap();
     std::fs::create_dir_all(tmp.path().join("machines")).unwrap();
     std::fs::write(
         &config,
@@ -337,10 +352,10 @@ fn sync_routes_tagged_source_skills_to_distinct_destinations() {
     assert!(library.join("reference-skill").is_dir());
     assert!(library.join("rust-skill").is_dir());
     assert!(library.join("untagged-skill").is_dir());
-    assert!(reference_target.join("reference-skill").is_symlink());
+    assert_target_copy(&reference_target.join("reference-skill"));
     assert!(!reference_target.join("rust-skill").exists());
     assert!(!reference_target.join("untagged-skill").exists());
-    assert!(rust_target.join("rust-skill").is_symlink());
+    assert_target_copy(&rust_target.join("rust-skill"));
     assert!(!rust_target.join("reference-skill").exists());
     assert!(!rust_target.join("untagged-skill").exists());
 }
@@ -747,6 +762,7 @@ fn sync_with_no_lockfile_works_gracefully() {
     create_skill(&skills_dir, "my-skill");
 
     let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
 
     let config = write_config_with_target(
         tmp.path(),
@@ -767,8 +783,7 @@ fn sync_with_no_lockfile_works_gracefully() {
 
     // Library should have the skill
     assert!(tmp.path().join("library/my-skill").is_dir());
-    // Target should have symlink
-    assert!(target_dir.join("my-skill").is_symlink());
+    assert_target_copy(&target_dir.join("my-skill"));
     // Lockfile should be created at tome home (config file's parent dir)
     assert!(tmp.path().join("tome.lock").exists());
 }
@@ -780,6 +795,7 @@ fn sync_triage_shows_new_skills() {
     create_skill(&skills_dir, "existing-skill");
 
     let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
 
     let config = write_config_with_target(
         tmp.path(),
@@ -807,9 +823,9 @@ fn sync_triage_shows_new_skills() {
         .assert()
         .success();
 
-    // New skill should be in the library and linked to target
+    // New skill should be in the library and copied to target
     assert!(tmp.path().join("library/brand-new-skill").is_dir());
-    assert!(target_dir.join("brand-new-skill").is_symlink());
+    assert_target_copy(&target_dir.join("brand-new-skill"));
 }
 
 #[test]
@@ -819,6 +835,7 @@ fn sync_triage_dry_run_makes_no_changes() {
     create_skill(&skills_dir, "my-skill");
 
     let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&target_dir).unwrap();
 
     let config = write_config_with_target(
         tmp.path(),
@@ -860,6 +877,7 @@ fn sync_with_two_targets_via_config() {
 
     let target_a = tmp.path().join("target-a");
     let target_b = tmp.path().join("target-b");
+    std::fs::create_dir_all(&target_a).unwrap();
     std::fs::create_dir_all(&target_b).unwrap();
 
     let config_path = tmp.path().join("config.toml");
@@ -899,12 +917,12 @@ role = "target"
         .assert()
         .success();
 
-    assert!(target_a.join("my-skill").is_symlink());
-    assert!(target_b.join("my-skill").is_symlink());
+    assert_target_copy(&target_a.join("my-skill"));
+    assert_target_copy(&target_b.join("my-skill"));
 }
 
 #[test]
-fn symlink_chain_local_skill() {
+fn target_copy_local_skill() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
         .target("test-tool")
@@ -932,29 +950,18 @@ fn symlink_chain_local_skill() {
     let library_content = std::fs::read_to_string(library_skill.join("SKILL.md")).unwrap();
     assert_eq!(source_content, library_content);
 
-    // Target should be a symlink pointing to the library entry
-    assert!(
-        target_skill.is_symlink(),
-        "target skill should be a symlink"
-    );
-    let target_link = std::fs::canonicalize(&target_skill).unwrap();
-    let library_canonical = std::fs::canonicalize(&library_skill).unwrap();
-    assert_eq!(
-        target_link, library_canonical,
-        "target symlink should resolve to the library entry"
-    );
+    assert_target_copy(&target_skill);
 
-    // Reading through the target symlink should work
     let target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
     assert_eq!(source_content, target_content);
 }
 
 #[test]
-fn symlink_chain_managed_skill() {
+fn target_copy_managed_skill() {
     // v0.10 (LIB-01): managed skills become real directory copies in the
     // library, NOT symlinks into machine-specific cache paths. The previous
     // (v0.9) shape — library entry is a symlink → source install dir — has
-    // been replaced by the copy model. Targets still symlink into the library.
+    // been replaced by the copy model. Targets receive independent copies.
     //
     // Phase 13 added a hard requirement that the `claude` binary be on PATH
     // whenever ANY [directories.<name>] has type = "claude-plugins" (D-20):
@@ -963,7 +970,7 @@ fn symlink_chain_managed_skill() {
     // without claude — the same skip-gate pattern as marketplace.rs's smoke
     // tests.
     if !tome::marketplace::is_claude_available() {
-        eprintln!("skipping symlink_chain_managed_skill: claude binary not on PATH");
+        eprintln!("skipping target_copy_managed_skill: claude binary not on PATH");
         return;
     }
 
@@ -1001,20 +1008,10 @@ fn symlink_chain_managed_skill() {
         "library copy must hash identically to the managed source"
     );
 
-    // Target is still a symlink (target → library).
-    assert!(
-        target_skill.is_symlink(),
-        "target skill should be a symlink"
-    );
-    let target_resolved = std::fs::canonicalize(&target_skill).unwrap();
-    let library_canonical = std::fs::canonicalize(&library_skill).unwrap();
-    assert_eq!(
-        target_resolved, library_canonical,
-        "target symlink should resolve to the (real-dir) library entry"
-    );
+    assert_target_copy(&target_skill);
 
     // Reading SKILL.md through the target should return the same content as
-    // the source — proves the copy fidelity end-to-end.
+    // the source — proves copy fidelity end-to-end.
     let source_content = std::fs::read_to_string(source_skill_dir.join("SKILL.md")).unwrap();
     let target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
     assert_eq!(
@@ -1024,7 +1021,7 @@ fn symlink_chain_managed_skill() {
 }
 
 #[test]
-fn symlink_chain_survives_content_update() {
+fn target_copy_preserves_existing_content_on_source_update() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
         .target("test-tool")
@@ -1035,7 +1032,8 @@ fn symlink_chain_survives_content_update() {
     env.cmd().arg("sync").assert().success();
 
     let target_skill = env.target_dir("test-tool").join("alpha");
-    assert!(target_skill.is_symlink());
+    assert_target_copy(&target_skill);
+    let original_target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
 
     // Modify source content
     env.modify_skill(
@@ -1047,16 +1045,21 @@ fn symlink_chain_survives_content_update() {
     // Re-sync
     env.cmd().arg("sync").assert().success();
 
-    // Target symlink should still work and return the NEW content
-    let target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
+    // Refresh is out of scope for the first copy-deployment slice: the
+    // canonical library updates, while the already materialized target copy is
+    // preserved for a later explicit refresh/repair operation.
+    let library_content =
+        std::fs::read_to_string(env.library_dir().join("alpha/SKILL.md")).unwrap();
     assert!(
-        target_content.contains("Updated content"),
-        "target should serve updated content after re-sync"
+        library_content.contains("Updated content"),
+        "library should update after source change"
     );
+    let target_content = std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap();
+    assert_eq!(target_content, original_target_content);
 }
 
 #[test]
-fn symlink_chain_broken_after_source_removal() {
+fn target_copy_survives_source_removal_until_later_repair_slice() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
         .target("test-tool")
@@ -1069,8 +1072,8 @@ fn symlink_chain_broken_after_source_removal() {
 
     assert!(env.library_dir().join("keep-me").is_dir());
     assert!(env.library_dir().join("remove-me").is_dir());
-    assert!(env.target_dir("test-tool").join("keep-me").is_symlink());
-    assert!(env.target_dir("test-tool").join("remove-me").is_symlink());
+    assert_target_copy(&env.target_dir("test-tool").join("keep-me"));
+    assert_target_copy(&env.target_dir("test-tool").join("remove-me"));
 
     // Remove one skill from source
     env.remove_skill("remove-me", "local");
@@ -1078,14 +1081,17 @@ fn symlink_chain_broken_after_source_removal() {
     // Re-sync — should clean up the removed skill
     env.cmd().arg("sync").assert().success();
 
-    // Removed skill should be gone from library and target
+    // Removed skill should be gone from the canonical library. Target copy
+    // removal is explicitly out of scope for this create-only slice.
     assert!(
         !env.library_dir().join("remove-me").exists(),
         "removed skill should be cleaned from library"
     );
     assert!(
-        !env.target_dir("test-tool").join("remove-me").exists(),
-        "removed skill should be cleaned from target"
+        env.target_dir("test-tool")
+            .join("remove-me/SKILL.md")
+            .is_file(),
+        "removed skill target copy should be preserved"
     );
 
     // Remaining skill should still work through the chain
@@ -1104,18 +1110,18 @@ fn edge_target_dir_disappears_between_syncs() {
 
     // First sync
     env.cmd().arg("sync").assert().success();
-    assert!(env.target_dir("test-tool").join("my-skill").is_symlink());
+    assert_target_copy(&env.target_dir("test-tool").join("my-skill"));
 
     // Delete target directory
     std::fs::remove_dir_all(env.target_dir("test-tool")).unwrap();
     assert!(!env.target_dir("test-tool").exists());
 
-    // Re-sync should recreate target and symlinks
+    // Re-sync should not recreate a missing target root in this slice.
     env.cmd().arg("sync").assert().success();
 
     assert!(
-        env.target_dir("test-tool").join("my-skill").is_symlink(),
-        "symlink should be recreated after target dir was deleted"
+        !env.target_dir("test-tool").exists(),
+        "missing target root should be preserved as unavailable"
     );
 }
 
@@ -1188,11 +1194,7 @@ fn edge_broken_symlink_in_target_before_sync() {
     // Sync
     env.cmd().arg("sync").assert().success();
 
-    // Real skill should be linked
-    assert!(
-        env.target_dir("test-tool").join("real-skill").is_symlink(),
-        "real skill should be distributed"
-    );
+    assert_target_copy(&env.target_dir("test-tool").join("real-skill"));
 
     // Stale link should be cleaned up (it doesn't point into our library)
     // Note: cleanup_target only removes symlinks pointing into the library dir,
@@ -1221,7 +1223,7 @@ fn edge_permission_denied_on_target() {
     // Restore permissions so TempDir can clean up
     std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-    // Verify: sync should have failed (permission denied on creating symlinks)
+    // Verify: sync should have failed (permission denied on creating target copies)
     assert!(
         !output.status.success() || !String::from_utf8_lossy(&output.stderr).is_empty(),
         "sync should fail or warn when target is unwritable"
@@ -1378,7 +1380,7 @@ fn lifecycle_full_sync_journey() {
         "first skill should be created: {stdout}"
     );
     assert!(env.library_dir().join("alpha").is_dir());
-    assert!(env.target_dir("test-tool").join("alpha").is_symlink());
+    assert_target_copy(&env.target_dir("test-tool").join("alpha"));
 
     // Step 3: Add second skill and sync
     env.add_skill("beta", "local");
@@ -1414,16 +1416,18 @@ fn lifecycle_full_sync_journey() {
         "removed skill should be cleaned from library"
     );
     assert!(
-        !env.target_dir("test-tool").join("beta").exists(),
-        "removed skill should be cleaned from target"
+        env.target_dir("test-tool").join("beta/SKILL.md").is_file(),
+        "removed skill target copy should be preserved in this slice"
     );
 
-    // Step 6: Doctor should find no issues
+    // Step 6: Doctor should report the preserved target-copy drift. Refresh is
+    // a later slice, so the existing target copy intentionally remains on the
+    // old content after alpha's source update.
     env.cmd()
         .args(["doctor", "--dry-run"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("No issues found"));
+        .stdout(predicate::str::contains("diverges from library content"));
 
     // Step 7: Status should show 1 skill
     env.cmd().arg("status").assert().success();
@@ -1454,7 +1458,9 @@ fn lifecycle_update_with_lockfile_diff() {
         "new skill should be in library after update"
     );
     assert!(
-        env.target_dir("test-tool").join("skill-c").is_symlink(),
+        env.target_dir("test-tool")
+            .join("skill-c/SKILL.md")
+            .is_file(),
         "new skill should be in target after update"
     );
 
@@ -1556,23 +1562,18 @@ fn lifecycle_multi_target_distribution() {
         .skill("my-skill", "local")
         .build();
 
-    // Sync — both targets should get symlinks
+    // Sync — both targets should get independent copies
     env.cmd().arg("sync").assert().success();
-    assert!(
-        env.target_dir("target-a").join("my-skill").is_symlink(),
-        "target-a should have the skill"
-    );
-    assert!(
-        env.target_dir("target-b").join("my-skill").is_symlink(),
-        "target-b should have the skill"
-    );
+    assert_target_copy(&env.target_dir("target-a").join("my-skill"));
+    assert_target_copy(&env.target_dir("target-b").join("my-skill"));
 }
 
 // ---------------------------------------------------------------------------
 // HARD-09 / D-DIST-1: foreign-symlink protection — end-to-end via `tome sync`.
 // Stage two synthetic tome installs sharing one distribution dir, run sync
 // from install A, and assert that B's pre-existing symlink is NOT clobbered
-// without --force, and IS clobbered with --force.
+// without --force, and is still preserved with --force in this create-only
+// slice.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -1615,12 +1616,8 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
     let output = assert.get_output();
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("is a foreign symlink"),
-        "stderr must surface the D-DIST-1 foreign-symlink warning, got: {stderr}"
-    );
-    assert!(
-        stderr.contains("Pass --force to overwrite"),
-        "warning must mention --force as the opt-in, got: {stderr}"
+        stderr.contains("legacy symlink exists"),
+        "stderr must surface the create-only symlink preservation warning, got: {stderr}"
     );
     // Foreign link unchanged on disk.
     let actual = std::fs::read_link(target.join("shared-skill")).unwrap();
@@ -1629,17 +1626,16 @@ fn sync_warns_and_skips_foreign_symlink_in_distribution_dir() {
         "default sync must leave the foreign symlink intact"
     );
 
-    // --force re-runs and clobbers the foreign link.
+    // --force still preserves the foreign link in this slice.
     tome()
         .args(["--config", config_path.to_str().unwrap(), "sync", "--force"])
         .env("NO_COLOR", "1")
         .assert()
         .success();
     let actual = std::fs::read_link(target.join("shared-skill")).unwrap();
-    assert!(
-        actual.starts_with(tmp.path().join("library")),
-        "force sync must redirect the link into our library, got {}",
-        actual.display()
+    assert_eq!(
+        actual, other_skill,
+        "force sync must preserve existing symlink"
     );
 }
 

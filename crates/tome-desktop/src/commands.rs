@@ -490,6 +490,7 @@ pub async fn start_sync_with_runtime<R: tauri::Runtime>(
     let config = context.config;
     let machine_prefs = context.machine_prefs;
     let routing = context.routing;
+    let selected_profile = context.profile;
     let policy = context.git_sync;
     let settings_path = tome::default_settings_path();
 
@@ -520,6 +521,7 @@ pub async fn start_sync_with_runtime<R: tauri::Runtime>(
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
             routing,
+            selected_profile: Some(selected_profile),
             settings_path: &settings_path,
             start_stage: None,
         };
@@ -682,10 +684,11 @@ pub async fn retry_sync_from(
             machine_path,
             context.machine_prefs,
             context.routing,
+            context.profile,
         ))
     })();
 
-    let (config, paths, machine_path, machine_prefs, routing) = match setup {
+    let (config, paths, machine_path, machine_prefs, routing, selected_profile) = match setup {
         Ok(parts) => parts,
         Err(e) => {
             *state.cancel.lock().expect("SyncState mutex poisoned") = None;
@@ -707,6 +710,7 @@ pub async fn retry_sync_from(
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
             routing,
+            selected_profile: Some(selected_profile),
             settings_path: &tome::default_settings_path(),
             start_stage: Some(stage),
         };
@@ -769,10 +773,11 @@ pub async fn retry_failed_items(
             machine_path,
             context.machine_prefs,
             context.routing,
+            context.profile,
         ))
     })();
 
-    let (config, paths, machine_path, machine_prefs, routing) = match setup {
+    let (config, paths, machine_path, machine_prefs, routing, selected_profile) = match setup {
         Ok(parts) => parts,
         Err(e) => {
             *state.cancel.lock().expect("SyncState mutex poisoned") = None;
@@ -809,6 +814,7 @@ pub async fn retry_failed_items(
             machine_path: &machine_path,
             machine_prefs: &machine_prefs,
             routing,
+            selected_profile: Some(selected_profile),
             settings_path: &tome::default_settings_path(),
             start_stage: None,
         };

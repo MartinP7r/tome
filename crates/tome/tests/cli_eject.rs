@@ -4,66 +4,60 @@ mod common;
 use common::*;
 
 #[test]
-fn eject_removes_symlinks_and_sync_restores() {
+fn eject_leaves_copy_deployments_for_future_remove_slice() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
         .target("test-target")
         .skill("my-skill", "local")
         .build();
 
-    // First sync to distribute
+    // First sync to distribute a create-only copy.
     env.cmd().arg("sync").assert().success();
     assert!(
-        env.target_dir("test-target").join("my-skill").is_symlink(),
-        "skill should be distributed after sync"
+        env.target_dir("test-target").join("my-skill").is_dir(),
+        "skill should be copied after sync"
     );
 
-    // Eject (non-interactive, stdin is not a terminal in tests so no prompt)
+    // Eject remains scoped to legacy symlinks in this slice. Copy removal is
+    // explicitly out of scope for MCO-152.
     env.cmd()
         .arg("eject")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Removed 1 symlink(s)"));
+        .stdout(predicate::str::contains("Nothing to eject"));
 
     assert!(
-        !env.target_dir("test-target").join("my-skill").exists(),
-        "symlink should be removed after eject"
+        env.target_dir("test-target").join("my-skill").is_dir(),
+        "copy deployment should be preserved after eject"
     );
     assert!(
         env.library_dir().join("my-skill").is_dir(),
         "library should remain intact after eject"
     );
-
-    // Sync again to restore
-    env.cmd().arg("sync").assert().success();
-    assert!(
-        env.target_dir("test-target").join("my-skill").is_symlink(),
-        "skill should be restored after re-sync"
-    );
 }
 
 #[test]
-fn eject_dry_run_does_not_remove() {
+fn eject_dry_run_leaves_copy_deployment() {
     let env = TestEnvBuilder::new()
         .source("local", "directory")
         .target("test-target")
         .skill("my-skill", "local")
         .build();
 
-    // First sync to distribute
+    // First sync to distribute a create-only copy.
     env.cmd().arg("sync").assert().success();
-    assert!(env.target_dir("test-target").join("my-skill").is_symlink());
+    assert!(env.target_dir("test-target").join("my-skill").is_dir());
 
-    // Eject with dry-run
+    // Eject with dry-run still has no symlink work to perform.
     env.cmd()
         .args(["--dry-run", "eject"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Dry run"));
+        .stdout(predicate::str::contains("Nothing to eject"));
 
     assert!(
-        env.target_dir("test-target").join("my-skill").is_symlink(),
-        "symlink should still exist after dry-run eject"
+        env.target_dir("test-target").join("my-skill").is_dir(),
+        "copy deployment should still exist after dry-run eject"
     );
 }
 

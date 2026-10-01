@@ -196,9 +196,9 @@ fn no_input_flag_skips_all_prompts() {
         .assert()
         .success();
 
-    // Verify skill was distributed to default target
+    // Verify skill was copied to default target
     let target_dir = &env.target_dirs[0].1;
-    assert!(target_dir.join("skill-a").is_symlink());
+    assert!(target_dir.join("skill-a").is_dir());
 }
 
 #[test]
