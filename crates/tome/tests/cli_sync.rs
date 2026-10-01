@@ -280,7 +280,7 @@ role = "target"
 }
 
 #[test]
-fn sync_creates_missing_configured_target_root() {
+fn sync_skips_missing_configured_target_root() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");
     create_skill(&skills_dir, "my-skill");
@@ -317,10 +317,18 @@ role = "target"
         .args(["--config", config_path.to_str().unwrap(), "sync"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Sync complete"));
+        .stdout(predicate::str::contains(
+            "antigravity: 0 copied, 0 unchanged, 1 skipped",
+        ))
+        .stderr(predicate::str::contains(
+            "my-skill not copied to antigravity: target root is unavailable",
+        ));
 
-    assert!(target_dir.is_dir());
-    assert_target_copy(&target_dir.join("my-skill"));
+    assert!(library_dir.join("my-skill").is_dir());
+    assert!(
+        !target_dir.exists(),
+        "configured target root must not be created implicitly"
+    );
 }
 
 #[test]
@@ -1160,13 +1168,22 @@ fn edge_target_dir_disappears_between_syncs() {
     std::fs::remove_dir_all(env.target_dir("test-tool")).unwrap();
     assert!(!env.target_dir("test-tool").exists());
 
-    // Re-sync restores the configured root, but does not repair the recorded
-    // skill copy in this create-only slice.
-    env.cmd().arg("sync").assert().success();
+    // Re-sync skips the unavailable configured root and does not repair the
+    // recorded skill copy in this create-only slice.
+    env.cmd()
+        .arg("sync")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "test-tool: 0 copied, 0 unchanged, 1 skipped",
+        ))
+        .stderr(predicate::str::contains(
+            "my-skill not copied to test-tool: target root is unavailable",
+        ));
 
     assert!(
-        env.target_dir("test-tool").is_dir(),
-        "missing configured target root should be recreated"
+        !env.target_dir("test-tool").exists(),
+        "missing configured target root must not be recreated implicitly"
     );
     assert!(
         !env.target_dir("test-tool").join("my-skill").exists(),

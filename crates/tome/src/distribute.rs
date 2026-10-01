@@ -150,11 +150,6 @@ pub(crate) fn distribute_to_directory_with_context(
 ) -> Result<DistributeResult> {
     let skills_dir = &dir_config.path;
 
-    if !dry_run {
-        std::fs::create_dir_all(skills_dir)
-            .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
-    }
-
     let mut result = DistributeResult {
         directory_name: dir_name.clone(),
         changed: 0,
@@ -508,6 +503,36 @@ mod tests {
         assert!(target_dir.path().join("skill-b").is_dir());
         assert!(target_dir.path().join("skill-a/SKILL.md").is_file());
         assert!(target_dir.path().join("skill-b/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn distribute_skips_missing_target_root_without_creating_it() {
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        let target_dir = tmp.path().join("missing-target");
+        std::fs::create_dir_all(&library).unwrap();
+        setup_library(&library, &["skill-a"]);
+
+        let dir_name = DirectoryName::new("test").unwrap();
+        let dir_config = make_dir_config(target_dir.clone());
+
+        let result = distribute_to_directory(
+            &library,
+            &dir_name,
+            &dir_config,
+            &empty_manifest(),
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.skipped, 1);
+        assert!(
+            !target_dir.exists(),
+            "configured target root must not be created implicitly"
+        );
     }
 
     #[test]

@@ -3041,10 +3041,10 @@ fn list(config: &Config, paths: &TomePaths, quiet: bool, json: bool) -> Result<(
     Ok(())
 }
 
-/// Format a "skipped (path conflict)" suffix, or an empty string if count is zero.
+/// Format a create-only deployment skip suffix, or an empty string if count is zero.
 fn skipped_note(count: usize) -> String {
     if count > 0 {
-        format!(", {} skipped (path conflict)", style(count).yellow())
+        format!(", {} skipped (needs attention)", style(count).yellow())
     } else {
         String::new()
     }
