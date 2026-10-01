@@ -684,7 +684,15 @@ fn activate_staging_no_replace(staging_path: &Path, target_path: &Path) -> Resul
     let staging = cstring_from_path(staging_path)?;
     let target = cstring_from_path(target_path)?;
 
-    #[cfg(target_os = "linux")]
+    match rename_no_replace(staging.as_c_str(), target.as_c_str()) {
+        Ok(()) => Ok(ActivateOutcome::Activated),
+        Err(error) if is_destination_exists_error(&error) => Ok(ActivateOutcome::DestinationExists),
+        Err(error) => Err(error).context("no-replace rename failed"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn rename_no_replace(staging: &CStr, target: &CStr) -> io::Result<()> {
     let rc = unsafe {
         // SAFETY: both C strings are NUL-terminated, live for the call, and are
         // passed with AT_FDCWD so libc does not retain their pointers.
@@ -696,8 +704,11 @@ fn activate_staging_no_replace(staging_path: &Path, target_path: &Path) -> Resul
             libc::RENAME_NOREPLACE,
         )
     };
+    syscall_unit_result(rc)
+}
 
-    #[cfg(target_os = "macos")]
+#[cfg(target_os = "macos")]
+fn rename_no_replace(staging: &CStr, target: &CStr) -> io::Result<()> {
     let rc = unsafe {
         // SAFETY: both C strings are NUL-terminated, live for the call, and are
         // passed with AT_FDCWD so libc does not retain their pointers.
@@ -709,22 +720,23 @@ fn activate_staging_no_replace(staging_path: &Path, target_path: &Path) -> Resul
             libc::RENAME_EXCL,
         )
     };
+    syscall_unit_result(rc)
+}
 
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    let rc = {
-        let _ = (staging, target);
-        bail!("no-replace deployment activation is unsupported on this platform");
-    };
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn rename_no_replace(staging: &CStr, target: &CStr) -> io::Result<()> {
+    let _ = (staging, target);
+    Err(io::Error::new(
+        ErrorKind::Unsupported,
+        "no-replace deployment activation is unsupported on this platform",
+    ))
+}
 
+fn syscall_unit_result(rc: i32) -> io::Result<()> {
     if rc == 0 {
-        return Ok(ActivateOutcome::Activated);
-    }
-
-    let error = io::Error::last_os_error();
-    if is_destination_exists_error(&error) {
-        Ok(ActivateOutcome::DestinationExists)
+        Ok(())
     } else {
-        Err(error).context("no-replace rename failed")
+        Err(io::Error::last_os_error())
     }
 }
 
