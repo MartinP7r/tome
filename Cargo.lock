@@ -5504,6 +5504,7 @@ dependencies = [
  "dirs 7.0.0",
  "indicatif",
  "insta",
+ "libc",
  "nucleo-matcher",
  "predicates",
  "ratatui",

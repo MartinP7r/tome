@@ -150,6 +150,11 @@ pub(crate) fn distribute_to_directory_with_context(
 ) -> Result<DistributeResult> {
     let skills_dir = &dir_config.path;
 
+    if !dry_run {
+        std::fs::create_dir_all(skills_dir)
+            .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
+    }
+
     let mut result = DistributeResult {
         directory_name: dir_name.clone(),
         changed: 0,

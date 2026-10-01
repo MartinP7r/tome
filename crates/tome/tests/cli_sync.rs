@@ -280,6 +280,50 @@ role = "target"
 }
 
 #[test]
+fn sync_creates_missing_configured_target_root() {
+    let tmp = TempDir::new().unwrap();
+    let skills_dir = tmp.path().join("skills");
+    create_skill(&skills_dir, "my-skill");
+
+    let target_dir = tmp.path().join("target");
+    let library_dir = tmp.path().join("library");
+    std::fs::create_dir_all(&library_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[directories.test]
+path = "{}"
+type = "directory"
+role = "source"
+
+[directories.antigravity]
+path = "{}"
+type = "directory"
+role = "target"
+"#,
+            library_dir.display(),
+            skills_dir.display(),
+            target_dir.display()
+        ),
+    )
+    .unwrap();
+    migrate_ordinary_fixture(&config_path);
+
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Sync complete"));
+
+    assert!(target_dir.is_dir());
+    assert_target_copy(&target_dir.join("my-skill"));
+}
+
+#[test]
 fn sync_routes_tagged_source_skills_to_distinct_destinations() {
     let tmp = TempDir::new().unwrap();
     let source = tmp.path().join("source");
@@ -1116,12 +1160,17 @@ fn edge_target_dir_disappears_between_syncs() {
     std::fs::remove_dir_all(env.target_dir("test-tool")).unwrap();
     assert!(!env.target_dir("test-tool").exists());
 
-    // Re-sync should not recreate a missing target root in this slice.
+    // Re-sync restores the configured root, but does not repair the recorded
+    // skill copy in this create-only slice.
     env.cmd().arg("sync").assert().success();
 
     assert!(
-        !env.target_dir("test-tool").exists(),
-        "missing target root should be preserved as unavailable"
+        env.target_dir("test-tool").is_dir(),
+        "missing configured target root should be recreated"
+    );
+    assert!(
+        !env.target_dir("test-tool").join("my-skill").exists(),
+        "stale recorded target copy repair remains out of scope"
     );
 }
 

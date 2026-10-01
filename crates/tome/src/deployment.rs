@@ -6,9 +6,13 @@
 //! target tree. It intentionally does not refresh, remove, repair, or migrate
 //! existing artifacts.
 
-use std::fs::{self, OpenOptions};
-use std::io::ErrorKind;
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::ffi::{CStr, CString, OsStr, OsString};
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, ErrorKind};
+use std::mem::MaybeUninit;
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -119,7 +123,10 @@ enum TransitionPhase {
 }
 
 /// Immutable create-only plan produced by read-only inspection.
-#[derive(Debug, Clone)]
+#[cfg(test)]
+type BeforeActivateHook = std::sync::Arc<dyn Fn(&DeploymentPlan) + Send + Sync>;
+
+#[derive(Clone)]
 pub(crate) struct DeploymentPlan {
     pub(crate) state: DeploymentState,
     action: DeploymentAction,
@@ -134,6 +141,8 @@ pub(crate) struct DeploymentPlan {
     skill: SkillName,
     source_name: Option<DirectoryName>,
     managed_source: bool,
+    #[cfg(test)]
+    before_activate: Option<BeforeActivateHook>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -213,6 +222,8 @@ pub(crate) fn plan_create_only(
         skill: skill.clone(),
         source_name: provenance.source_name,
         managed_source: provenance.managed_source,
+        #[cfg(test)]
+        before_activate: None,
     };
 
     if validate_regular_tree(canonical_path).is_err() {
@@ -369,13 +380,21 @@ impl DeploymentPlan {
                 return Ok(DeploymentApplyResult::skipped(DeploymentState::Foreign));
             }
 
-            fs::rename(&staging_path, &self.target_path).with_context(|| {
-                format!(
-                    "failed to activate staging dir {} -> {}",
-                    staging_path.display(),
-                    self.target_path.display()
-                )
-            })?;
+            self.run_before_activate_hook();
+            match activate_staging_no_replace(&staging_path, &self.target_path).with_context(
+                || {
+                    format!(
+                        "failed to activate staging dir {} -> {}",
+                        staging_path.display(),
+                        self.target_path.display()
+                    )
+                },
+            )? {
+                ActivateOutcome::Activated => {}
+                ActivateOutcome::DestinationExists => {
+                    return Ok(DeploymentApplyResult::skipped(DeploymentState::Foreign));
+                }
+            }
             activated = true;
             staging_path = self.target_path.clone();
             transition.phase = TransitionPhase::ActivatedPendingRecord;
@@ -426,7 +445,7 @@ impl DeploymentPlan {
             Ok(DeploymentApplyResult::changed(DeploymentState::Healthy))
         })();
 
-        if result.is_err() && !activated {
+        if !activated {
             let _ = fs::remove_dir_all(&staging_path);
             let _ = fs::remove_file(self.lock_path());
         }
@@ -528,6 +547,22 @@ impl DeploymentPlan {
                 Err(e).with_context(|| format!("failed to inspect {}", self.target_path.display()))
             }
         }
+    }
+
+    fn run_before_activate_hook(&self) {
+        #[cfg(test)]
+        if let Some(hook) = &self.before_activate {
+            hook(self);
+        }
+    }
+
+    #[cfg(test)]
+    fn with_before_activate(
+        mut self,
+        hook: impl Fn(&DeploymentPlan) + Send + Sync + 'static,
+    ) -> Self {
+        self.before_activate = Some(std::sync::Arc::new(hook));
+        self
     }
 
     pub(crate) fn record_path(&self) -> PathBuf {
@@ -639,57 +674,410 @@ fn validate_regular_tree(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy_regular_tree(source: &Path, destination: &Path) -> Result<()> {
-    validate_regular_tree(source)?;
-    let mut entries = Vec::new();
-    for entry in WalkDir::new(source).follow_links(false).into_iter() {
-        let entry = entry.with_context(|| format!("failed to walk {}", source.display()))?;
-        entries.push(entry.path().to_path_buf());
-    }
-    entries.sort();
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ActivateOutcome {
+    Activated,
+    DestinationExists,
+}
 
-    for path in entries {
-        let rel = path.strip_prefix(source).with_context(|| {
-            format!(
-                "BUG: WalkDir yielded path {} not under {}",
-                path.display(),
-                source.display()
+fn activate_staging_no_replace(staging_path: &Path, target_path: &Path) -> Result<ActivateOutcome> {
+    let staging = cstring_from_path(staging_path)?;
+    let target = cstring_from_path(target_path)?;
+
+    #[cfg(target_os = "linux")]
+    let rc = unsafe {
+        // SAFETY: both C strings are NUL-terminated, live for the call, and are
+        // passed with AT_FDCWD so libc does not retain their pointers.
+        libc::renameat2(
+            libc::AT_FDCWD,
+            staging.as_ptr(),
+            libc::AT_FDCWD,
+            target.as_ptr(),
+            libc::RENAME_NOREPLACE,
+        )
+    };
+
+    #[cfg(target_os = "macos")]
+    let rc = unsafe {
+        // SAFETY: both C strings are NUL-terminated, live for the call, and are
+        // passed with AT_FDCWD so libc does not retain their pointers.
+        libc::renameatx_np(
+            libc::AT_FDCWD,
+            staging.as_ptr(),
+            libc::AT_FDCWD,
+            target.as_ptr(),
+            libc::RENAME_EXCL,
+        )
+    };
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let rc = {
+        let _ = (staging, target);
+        bail!("no-replace deployment activation is unsupported on this platform");
+    };
+
+    if rc == 0 {
+        return Ok(ActivateOutcome::Activated);
+    }
+
+    let error = io::Error::last_os_error();
+    if is_destination_exists_error(&error) {
+        Ok(ActivateOutcome::DestinationExists)
+    } else {
+        Err(error).context("no-replace rename failed")
+    }
+}
+
+fn is_destination_exists_error(error: &io::Error) -> bool {
+    error.kind() == ErrorKind::AlreadyExists
+        || error.raw_os_error() == Some(libc::EEXIST)
+        || error.raw_os_error() == Some(libc::ENOTEMPTY)
+}
+
+fn copy_regular_tree(source: &Path, destination: &Path) -> Result<()> {
+    copy_regular_tree_inner(source, destination, &mut |_| Ok(()))
+}
+
+#[cfg(test)]
+fn copy_regular_tree_with_hook(
+    source: &Path,
+    destination: &Path,
+    mut before_open: impl FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    copy_regular_tree_inner(source, destination, &mut before_open)
+}
+
+fn copy_regular_tree_inner(
+    source: &Path,
+    destination: &Path,
+    before_open: &mut dyn FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let source_dir = SourceDir::open_root(source)?;
+    copy_regular_dir_entries(&source_dir, source, destination, before_open)
+}
+
+struct SourceDir {
+    file: File,
+}
+
+impl SourceDir {
+    fn open_root(path: &Path) -> Result<Self> {
+        let path_c = cstring_from_path(path)?;
+        let fd = unsafe {
+            // SAFETY: path_c is a valid, NUL-terminated path for this call.
+            libc::open(
+                path_c.as_ptr(),
+                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
             )
-        })?;
-        if rel.as_os_str().is_empty() {
-            continue;
+        };
+        let file = file_from_fd(fd)
+            .with_context(|| format!("failed to open source directory {}", path.display()))?;
+        let stat = fstat_file(&file)
+            .with_context(|| format!("failed to inspect source directory {}", path.display()))?;
+        if !stat_is_dir(&stat) {
+            bail!("canonical root is not a real directory: {}", path.display());
         }
-        let target = destination.join(rel);
-        let metadata = fs::symlink_metadata(&path)
-            .with_context(|| format!("failed to inspect {}", path.display()))?;
-        let ty = metadata.file_type();
-        if ty.is_dir() {
-            fs::create_dir(&target)
-                .with_context(|| format!("failed to create directory {}", target.display()))?;
-            fs::set_permissions(&target, metadata.permissions()).with_context(|| {
+        Ok(Self { file })
+    }
+
+    fn open_child_dir(&self, name: &OsStr, expected: &libc::stat, path: &Path) -> Result<Self> {
+        let name_c = cstring_from_os_str(name)?;
+        let fd = unsafe {
+            // SAFETY: name_c is a single path component opened relative to self.file.
+            libc::openat(
+                self.file.as_raw_fd(),
+                name_c.as_ptr(),
+                libc::O_RDONLY | libc::O_CLOEXEC | libc::O_DIRECTORY | libc::O_NOFOLLOW,
+            )
+        };
+        let file = file_from_fd(fd)
+            .with_context(|| format!("failed to open directory {}", path.display()))?;
+        let actual =
+            fstat_file(&file).with_context(|| format!("failed to inspect {}", path.display()))?;
+        if !stat_is_dir(&actual) || !same_identity(expected, &actual) {
+            bail!("source directory changed while staging: {}", path.display());
+        }
+        Ok(Self { file })
+    }
+}
+
+struct DirStream {
+    ptr: *mut libc::DIR,
+}
+
+impl Drop for DirStream {
+    fn drop(&mut self) {
+        unsafe {
+            // SAFETY: ptr came from fdopendir and is owned by this DirStream.
+            libc::closedir(self.ptr);
+        }
+    }
+}
+
+#[derive(Clone)]
+struct SourceEntry {
+    name: OsString,
+    stat: libc::stat,
+}
+
+fn copy_regular_dir_entries(
+    source_dir: &SourceDir,
+    source_path: &Path,
+    destination: &Path,
+    before_open: &mut dyn FnMut(&Path) -> Result<()>,
+) -> Result<()> {
+    let mut entries = read_dir_entries(source_dir, source_path)?;
+    entries.sort_by(|a, b| {
+        a.name
+            .as_os_str()
+            .as_bytes()
+            .cmp(b.name.as_os_str().as_bytes())
+    });
+
+    for entry in entries {
+        let source_child = source_path.join(&entry.name);
+        let target_child = destination.join(&entry.name);
+        if stat_is_dir(&entry.stat) {
+            before_open(&source_child)?;
+            let child_dir = source_dir.open_child_dir(&entry.name, &entry.stat, &source_child)?;
+            fs::create_dir(&target_child).with_context(|| {
+                format!("failed to create directory {}", target_child.display())
+            })?;
+            copy_regular_dir_entries(&child_dir, &source_child, &target_child, before_open)?;
+            fs::set_permissions(
+                &target_child,
+                fs::Permissions::from_mode(permission_bits(&entry.stat)),
+            )
+            .with_context(|| {
                 format!(
                     "failed to set permissions on directory {}",
-                    target.display()
+                    target_child.display()
                 )
             })?;
-        } else if ty.is_file() {
-            if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent)
-                    .with_context(|| format!("failed to create directory {}", parent.display()))?;
-            }
-            fs::copy(&path, &target).with_context(|| {
-                format!("failed to copy {} -> {}", path.display(), target.display())
-            })?;
-            fs::set_permissions(&target, fs::Permissions::from_mode(metadata.mode() & 0o777))
-                .with_context(|| format!("failed to set permissions on {}", target.display()))?;
+        } else if stat_is_regular(&entry.stat) {
+            before_open(&source_child)?;
+            copy_regular_file(
+                source_dir,
+                &entry.name,
+                &entry.stat,
+                &source_child,
+                &target_child,
+            )?;
         } else {
             bail!(
                 "deployment tree contains symlink or special file: {}",
-                path.display()
+                source_child.display()
             );
         }
     }
     Ok(())
+}
+
+fn read_dir_entries(source_dir: &SourceDir, source_path: &Path) -> Result<Vec<SourceEntry>> {
+    let duplicated_fd = unsafe {
+        // SAFETY: dup only borrows the fd number and returns a new owned fd.
+        libc::dup(source_dir.file.as_raw_fd())
+    };
+    if duplicated_fd < 0 {
+        return Err(io::Error::last_os_error())
+            .with_context(|| format!("failed to duplicate fd for {}", source_path.display()));
+    }
+    let dir_ptr = unsafe {
+        // SAFETY: duplicated_fd is a valid owned directory fd; fdopendir takes ownership.
+        libc::fdopendir(duplicated_fd)
+    };
+    if dir_ptr.is_null() {
+        let error = io::Error::last_os_error();
+        unsafe {
+            // SAFETY: fdopendir failed, so duplicated_fd is still owned here.
+            libc::close(duplicated_fd);
+        }
+        return Err(error).with_context(|| format!("failed to read {}", source_path.display()));
+    }
+    let stream = DirStream { ptr: dir_ptr };
+    let mut entries = Vec::new();
+
+    loop {
+        clear_errno();
+        let dirent = unsafe {
+            // SAFETY: stream.ptr is a live DIR* owned for the duration of this loop.
+            libc::readdir(stream.ptr)
+        };
+        if dirent.is_null() {
+            let errno = current_errno();
+            if errno == 0 {
+                break;
+            }
+            return Err(io::Error::from_raw_os_error(errno))
+                .with_context(|| format!("failed to read {}", source_path.display()));
+        }
+
+        let name = unsafe {
+            // SAFETY: readdir returned a non-null dirent whose d_name is NUL-terminated.
+            CStr::from_ptr((*dirent).d_name.as_ptr())
+        };
+        let bytes = name.to_bytes();
+        if bytes == b"." || bytes == b".." {
+            continue;
+        }
+        let name_os = OsStr::from_bytes(bytes).to_os_string();
+        let stat = fstatat_nofollow(source_dir.file.as_raw_fd(), &name_os).with_context(|| {
+            format!("failed to inspect {}", source_path.join(&name_os).display())
+        })?;
+        entries.push(SourceEntry {
+            name: name_os,
+            stat,
+        });
+    }
+
+    Ok(entries)
+}
+
+fn copy_regular_file(
+    source_dir: &SourceDir,
+    name: &OsStr,
+    expected: &libc::stat,
+    source_path: &Path,
+    target_path: &Path,
+) -> Result<()> {
+    let name_c = cstring_from_os_str(name)?;
+    let fd = unsafe {
+        // SAFETY: name_c is a single path component opened relative to source_dir.file.
+        libc::openat(
+            source_dir.file.as_raw_fd(),
+            name_c.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        )
+    };
+    let mut source_file =
+        file_from_fd(fd).with_context(|| format!("failed to open {}", source_path.display()))?;
+    let actual = fstat_file(&source_file)
+        .with_context(|| format!("failed to inspect {}", source_path.display()))?;
+    if !stat_is_regular(&actual) || !same_identity(expected, &actual) {
+        bail!(
+            "source file changed while staging: {}",
+            source_path.display()
+        );
+    }
+
+    let mut target_file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(permission_bits(expected))
+        .open(target_path)
+        .with_context(|| format!("failed to create {}", target_path.display()))?;
+    io::copy(&mut source_file, &mut target_file).with_context(|| {
+        format!(
+            "failed to copy {} -> {}",
+            source_path.display(),
+            target_path.display()
+        )
+    })?;
+    fs::set_permissions(
+        target_path,
+        fs::Permissions::from_mode(permission_bits(expected)),
+    )
+    .with_context(|| format!("failed to set permissions on {}", target_path.display()))?;
+    Ok(())
+}
+
+fn file_from_fd(fd: RawFd) -> Result<File, io::Error> {
+    if fd < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        let file = unsafe {
+            // SAFETY: fd is newly owned by this function when non-negative.
+            File::from_raw_fd(fd)
+        };
+        Ok(file)
+    }
+}
+
+fn fstat_file(file: &File) -> Result<libc::stat, io::Error> {
+    let mut stat = MaybeUninit::<libc::stat>::uninit();
+    let rc = unsafe {
+        // SAFETY: stat points to writable memory and file.as_raw_fd() is valid.
+        libc::fstat(file.as_raw_fd(), stat.as_mut_ptr())
+    };
+    if rc == 0 {
+        Ok(unsafe {
+            // SAFETY: fstat initialized stat on success.
+            stat.assume_init()
+        })
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn fstatat_nofollow(dir_fd: RawFd, name: &OsStr) -> Result<libc::stat, io::Error> {
+    let name_c = cstring_from_os_str(name).map_err(io::Error::other)?;
+    let mut stat = MaybeUninit::<libc::stat>::uninit();
+    let rc = unsafe {
+        // SAFETY: name_c is NUL-terminated and stat points to writable memory.
+        libc::fstatat(
+            dir_fd,
+            name_c.as_ptr(),
+            stat.as_mut_ptr(),
+            libc::AT_SYMLINK_NOFOLLOW,
+        )
+    };
+    if rc == 0 {
+        Ok(unsafe {
+            // SAFETY: fstatat initialized stat on success.
+            stat.assume_init()
+        })
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
+fn stat_is_dir(stat: &libc::stat) -> bool {
+    stat.st_mode & libc::S_IFMT == libc::S_IFDIR
+}
+
+fn stat_is_regular(stat: &libc::stat) -> bool {
+    stat.st_mode & libc::S_IFMT == libc::S_IFREG
+}
+
+fn same_identity(left: &libc::stat, right: &libc::stat) -> bool {
+    left.st_dev == right.st_dev && left.st_ino == right.st_ino
+}
+
+fn permission_bits(stat: &libc::stat) -> u32 {
+    (stat.st_mode & 0o777) as u32
+}
+
+fn cstring_from_path(path: &Path) -> Result<CString> {
+    cstring_from_os_str(path.as_os_str())
+        .with_context(|| format!("path contains an interior NUL byte: {}", path.display()))
+}
+
+fn cstring_from_os_str(value: &OsStr) -> Result<CString> {
+    CString::new(value.as_bytes()).context("path component contains an interior NUL byte")
+}
+
+fn clear_errno() {
+    unsafe {
+        // SAFETY: errno is thread-local on supported Unix targets.
+        *errno_location() = 0;
+    }
+}
+
+fn current_errno() -> i32 {
+    unsafe {
+        // SAFETY: errno is thread-local on supported Unix targets.
+        *errno_location()
+    }
+}
+
+#[cfg(target_os = "linux")]
+unsafe fn errno_location() -> *mut libc::c_int {
+    unsafe { libc::__errno_location() }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn errno_location() -> *mut libc::c_int {
+    unsafe { libc::__error() }
 }
 
 fn new_transition_id() -> String {
@@ -973,5 +1361,98 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert!(findings[0].contains("interrupted deployment transition"));
         assert!(findings[0].contains("skill-a"));
+    }
+
+    #[test]
+    fn activation_race_preserves_concurrently_created_empty_target() {
+        let tmp = TempDir::new().unwrap();
+        let config_dir = tmp.path().join("config");
+        let library = tmp.path().join("library");
+        let target = tmp.path().join("target");
+        fs::create_dir_all(&library).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        let canonical = create_skill(&library, "skill-a");
+        let raced_target = target.join("skill-a");
+
+        let plan =
+            plan(&config_dir, &target, &canonical, "skill-a").with_before_activate(move |_| {
+                fs::create_dir(&raced_target).unwrap();
+            });
+        let lock_path = transition_path(&config_dir, &plan.target_name, &plan.skill);
+
+        let result = plan.apply(false).unwrap();
+        assert_eq!(result.state, DeploymentState::Foreign);
+        assert!(result.skipped);
+        assert!(target.join("skill-a").is_dir());
+        assert!(
+            fs::read_dir(target.join("skill-a"))
+                .unwrap()
+                .next()
+                .is_none(),
+            "the concurrently-created empty directory must not be replaced"
+        );
+        assert!(!plan.record_path().exists());
+        assert!(!lock_path.exists());
+        assert!(
+            fs::read_dir(&target)
+                .unwrap()
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".tome-stage-")),
+            "abandoned staging directory should be cleaned up"
+        );
+    }
+
+    #[test]
+    fn copy_rejects_file_replaced_with_symlink_before_open() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source");
+        let destination = tmp.path().join("destination");
+        fs::create_dir_all(&destination).unwrap();
+        let canonical = create_skill(&source, "skill-a");
+        let outside = tmp.path().join("outside.txt");
+        fs::write(&outside, "outside").unwrap();
+
+        let err = copy_regular_tree_with_hook(&canonical, &destination, |path| {
+            if path.file_name() == Some(OsStr::new("SKILL.md")) {
+                fs::remove_file(path).unwrap();
+                std::os::unix::fs::symlink(&outside, path).unwrap();
+            }
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(
+            format!("{err:#}").contains("failed to open")
+                || format!("{err:#}").contains("source file changed while staging")
+        );
+        assert!(!destination.join("SKILL.md").exists());
+    }
+
+    #[test]
+    fn copy_rejects_file_replaced_with_fifo_before_open() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source");
+        let destination = tmp.path().join("destination");
+        fs::create_dir_all(&destination).unwrap();
+        let canonical = create_skill(&source, "skill-a");
+
+        let err = copy_regular_tree_with_hook(&canonical, &destination, |path| {
+            if path.file_name() == Some(OsStr::new("SKILL.md")) {
+                fs::remove_file(path).unwrap();
+                let status = std::process::Command::new("mkfifo")
+                    .arg(path)
+                    .status()
+                    .unwrap();
+                assert!(status.success(), "mkfifo should create a FIFO fixture");
+            }
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(format!("{err:#}").contains("source file changed while staging"));
+        assert!(!destination.join("SKILL.md").exists());
     }
 }
