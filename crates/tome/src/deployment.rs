@@ -1055,6 +1055,12 @@ fn same_identity(left: &libc::stat, right: &libc::stat) -> bool {
     left.st_dev == right.st_dev && left.st_ino == right.st_ino
 }
 
+#[cfg(target_os = "linux")]
+fn permission_bits(stat: &libc::stat) -> u32 {
+    stat.st_mode & 0o777
+}
+
+#[cfg(not(target_os = "linux"))]
 fn permission_bits(stat: &libc::stat) -> u32 {
     (stat.st_mode & 0o777) as u32
 }
