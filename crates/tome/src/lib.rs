@@ -16,8 +16,8 @@
 //! 3. **Consolidate** — copy every discovered skill (managed AND local)
 //!    into the library as a real directory (v0.10 library-canonical model;
 //!    no symlinks).
-//! 4. **Distribute** — push library skills to target tools via symlinks
-//!    into `target` / `synced` directories.
+//! 4. **Distribute** — materialize library skills into `target` / `synced`
+//!    directories as create-only target copies.
 //! 5. **Cleanup** — three-bucket stale-skill report
 //!    (removed-from-config / missing-from-disk / now-in-exclude-list);
 //!    orphan transitions preserve library content per LIB-04.
@@ -55,6 +55,7 @@ pub(crate) mod change_cause;
 pub(crate) mod cleanup;
 pub mod cli;
 pub mod config;
+pub(crate) mod deployment;
 pub(crate) mod discover;
 pub(crate) mod distribute;
 // `doctor` is `pub` since Phase 26 plan 26-05: the GUI Health view's two
@@ -617,6 +618,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     machine_path: &settings_path,
                     machine_prefs: &machine_prefs,
                     routing: routing::RoutingPolicy::default(),
+                    selected_profile: None,
                     settings_path: &settings_path,
                     start_stage: None,
                 },
@@ -695,6 +697,7 @@ pub fn run(cli: Cli) -> Result<()> {
             &paths,
             &context.machine_prefs,
             context.routing,
+            Some(&context.profile),
             &settings_path,
             cli.dry_run,
             cli.no_input,
@@ -794,6 +797,7 @@ pub fn run(cli: Cli) -> Result<()> {
                 &paths,
                 &machine_prefs,
                 routing,
+                selected_profile.as_ref(),
                 &settings_path,
                 cli.dry_run,
                 cli.no_input,
@@ -1052,6 +1056,7 @@ pub(crate) fn cmd_sync(
     paths: &TomePaths,
     machine_prefs: &machine::MachinePrefs,
     routing: routing::RoutingPolicy,
+    selected_profile: Option<&DirectoryName>,
     settings_path: &Path,
     dry_run: bool,
     no_input: bool,
@@ -1087,6 +1092,7 @@ pub(crate) fn cmd_sync(
             machine_path: settings_path,
             machine_prefs,
             routing,
+            selected_profile: selected_profile.cloned(),
             settings_path,
             start_stage: None,
         },
@@ -1766,6 +1772,8 @@ pub struct SyncOptions<'a> {
     /// In-memory projection of the selected profile's distribution filters.
     pub machine_prefs: &'a machine::MachinePrefs,
     pub routing: routing::RoutingPolicy,
+    /// Selected committed profile that resolved the effective targets, if known.
+    pub selected_profile: Option<DirectoryName>,
     pub settings_path: &'a Path,
     /// Phase 27 plan 27-05 (SYNC-05): when `Some(stage)`, skip every
     /// pipeline stage strictly before `stage`. Used by the GUI's
@@ -2075,6 +2083,7 @@ pub fn sync(
         machine_path: _,
         machine_prefs: prefs_in,
         routing,
+        selected_profile,
         settings_path,
         // Phase 27 plan 27-05: today `start_stage` is an advisory tag the
         // GUI sets via its retry commands; the inner pipeline still runs
@@ -2433,14 +2442,16 @@ pub fn sync(
                 total,
                 // D-08: per-stage subtitle. Distribute iterates per
                 // distribution directory; the current `name` is the
-                // DirectoryName receiving symlinks. Per-skill emission inside
+                // DirectoryName receiving copies. Per-skill emission inside
                 // distribute::distribute_to_directory is a future-plan
                 // expansion — when it lands, set `item: Some(skill_name.to_string())`
                 // there instead.
                 item: Some(name.to_string()),
             });
-            let result = distribute::distribute_to_directory_with_sources(
+            let result = distribute::distribute_to_directory_with_context(
+                paths.config_dir(),
                 paths.library_dir(),
+                selected_profile.as_ref(),
                 name,
                 dir_config,
                 &manifest,
@@ -2448,7 +2459,6 @@ pub fn sync(
                 &routing,
                 &config.directories,
                 dry_run,
-                force,
             )?;
             results.push(result);
         }
@@ -2890,7 +2900,7 @@ fn render_sync_report(report: &SyncReport) {
 
     for dr in &report.distributions {
         println!(
-            "  {}: {} linked, {} unchanged{}{}{}",
+            "  {}: {} copied, {} unchanged{}{}{}",
             style(&dr.directory_name).bold(),
             style(dr.changed).cyan(),
             dr.unchanged,
@@ -3031,10 +3041,10 @@ fn list(config: &Config, paths: &TomePaths, quiet: bool, json: bool) -> Result<(
     Ok(())
 }
 
-/// Format a "skipped (path conflict)" suffix, or an empty string if count is zero.
+/// Format a create-only deployment skip suffix, or an empty string if count is zero.
 fn skipped_note(count: usize) -> String {
     if count > 0 {
-        format!(", {} skipped (path conflict)", style(count).yellow())
+        format!(", {} skipped (needs attention)", style(count).yellow())
     } else {
         String::new()
     }
@@ -3318,6 +3328,7 @@ mod tests {
                 machine_path: &machine_path,
                 machine_prefs: &machine_prefs,
                 routing: routing::RoutingPolicy::default(),
+                selected_profile: None,
                 settings_path: &machine_path,
                 start_stage: None,
             },

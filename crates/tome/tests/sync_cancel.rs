@@ -139,6 +139,7 @@ fn opts<'a>(
         machine_path: settings_path,
         machine_prefs,
         routing: tome::RoutingPolicy::default(),
+        selected_profile: None,
         settings_path,
         start_stage: None,
     }

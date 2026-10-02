@@ -21,6 +21,7 @@ ctrlc.workspace = true
 dialoguer.workspace = true
 dirs.workspace = true
 indicatif.workspace = true
+libc.workspace = true
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -1,16 +1,16 @@
-//! Distribute library skills to configured directories via symlinks.
+//! Distribute library skills to configured directories via copied deployments.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
-use std::os::unix::fs as unix_fs;
 use std::path::Path;
 use tracing::{info, warn};
 
 use crate::change_cause::ChangeCause;
 use crate::config::{DirectoryConfig, DirectoryName, DirectoryType};
+use crate::deployment::{self, DeploymentProvenance, DeploymentState};
 use crate::machine::MachinePrefs;
 use crate::manifest::Manifest;
-use crate::paths::{points_into_library, resolve_symlink_target, symlink_points_to};
+use crate::paths::{points_into_library, resolve_symlink_target};
 use crate::routing::RoutingPolicy;
 
 /// Whether `target` is the personal skills directory of the same tool whose
@@ -40,11 +40,11 @@ fn owns_same_tool_as(source: &DirectoryConfig, target: &DirectoryConfig) -> bool
 pub struct DistributeResult {
     pub changed: usize,
     pub unchanged: usize,
-    /// Skills skipped because a non-symlink file already exists at the destination.
+    /// Skills skipped because an existing target artifact is not create-only actionable.
     pub skipped: usize,
     /// Skills skipped because they are disabled in machine preferences.
     pub disabled: usize,
-    /// Skills skipped because they originate from the same directory (prevents circular symlinks).
+    /// Skills skipped because they originate from, or are already loaded by, the target tool.
     pub skipped_managed: usize,
     pub directory_name: DirectoryName,
 }
@@ -82,7 +82,7 @@ fn distribute_to_directory(
 ///
 /// `all_directories` is the full configured directory set, used to resolve each
 /// skill's *source* directory. Without it a skill discovered from a tool's plugin
-/// manager is symlinked back into that same tool's personal skills directory, so
+/// manager is copied back into that same tool's personal skills directory, so
 /// the tool loads it twice — once as `plugin:name`, once as bare `name`. The
 /// duplicate costs context on every session and makes bare-name invocation
 /// ambiguous between the live plugin and the library snapshot, which can drift.
@@ -93,13 +93,14 @@ fn distribute_to_directory(
 /// the target (e.g. `~/.claude/plugins` and `~/.claude/skills`). A Codex or
 /// Antigravity target keeps receiving them.
 ///
-/// Creates symlinks in `dir_config.path` pointing to library entries. When `force`
-/// is true, all symlinks are recreated even if they already point at the correct
-/// target.
+/// Creates independent target copies in `dir_config.path` only when the target
+/// entry is absent. Existing target artifacts are preserved in this first
+/// copy-deployment slice; `force` is intentionally ignored for target copies.
 // One argument over clippy's threshold. Grouping them into a struct would touch
 // every call site and the desktop IPC layer for no behavioural gain; the
 // parameters are all distinct types, so misordering them is a compile error.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub fn distribute_to_directory_with_sources(
     library_dir: &Path,
     dir_name: &DirectoryName,
@@ -109,14 +110,45 @@ pub fn distribute_to_directory_with_sources(
     routing: &RoutingPolicy,
     all_directories: &BTreeMap<DirectoryName, DirectoryConfig>,
     dry_run: bool,
-    force: bool,
+    _force: bool,
+) -> Result<DistributeResult> {
+    let config_dir = library_dir.parent().unwrap_or(library_dir).join(format!(
+        ".tome-deploy-{}",
+        library_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("records")
+    ));
+    distribute_to_directory_with_context(
+        &config_dir,
+        library_dir,
+        None,
+        dir_name,
+        dir_config,
+        manifest,
+        machine_prefs,
+        routing,
+        all_directories,
+        dry_run,
+    )
+}
+
+/// Context-aware distribution entry used by the sync pipeline so deployment
+/// records live next to `tome.toml` and retain the selected profile.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn distribute_to_directory_with_context(
+    config_dir: &Path,
+    library_dir: &Path,
+    selected_profile: Option<&DirectoryName>,
+    dir_name: &DirectoryName,
+    dir_config: &DirectoryConfig,
+    manifest: &Manifest,
+    machine_prefs: &MachinePrefs,
+    routing: &RoutingPolicy,
+    all_directories: &BTreeMap<DirectoryName, DirectoryConfig>,
+    dry_run: bool,
 ) -> Result<DistributeResult> {
     let skills_dir = &dir_config.path;
-
-    if !dry_run {
-        std::fs::create_dir_all(skills_dir)
-            .with_context(|| format!("failed to create target dir {}", skills_dir.display()))?;
-    }
 
     let mut result = DistributeResult {
         directory_name: dir_name.clone(),
@@ -145,7 +177,7 @@ pub fn distribute_to_directory_with_sources(
         let skill_name = entry.file_name();
         let skill_name_str = skill_name.to_string_lossy();
         let library_skill_path = entry.path();
-        let target_link = skills_dir.join(&skill_name);
+        let target_entry = skills_dir.join(&skill_name);
 
         // Skip non-directory entries (e.g. .tome-manifest.json, .gitignore)
         if !library_skill_path.is_dir() {
@@ -175,15 +207,16 @@ pub fn distribute_to_directory_with_sources(
                 .source_name()
                 .is_some_and(|s| s == dir_name.as_str())
         {
-            // Remove any existing symlink from a previous sync that
-            // didn't have this check (cleans up legacy duplicates).
+            // Remove any existing symlink from a previous sync that didn't
+            // have this check (cleans up legacy duplicates). Real directories
+            // are preserved; create-only copy deployment never adopts them.
             if !dry_run
-                && target_link.is_symlink()
-                && let Err(e) = std::fs::remove_file(&target_link)
+                && target_entry.is_symlink()
+                && let Err(e) = std::fs::remove_file(&target_entry)
             {
                 warn!(
                     "failed to remove legacy symlink {}: {}",
-                    target_link.display(),
+                    target_entry.display(),
                     e
                 );
             }
@@ -201,12 +234,12 @@ pub fn distribute_to_directory_with_sources(
             && owns_same_tool_as(source_config, dir_config)
         {
             if !dry_run
-                && target_link.is_symlink()
-                && let Err(e) = std::fs::remove_file(&target_link)
+                && target_entry.is_symlink()
+                && let Err(e) = std::fs::remove_file(&target_entry)
             {
                 warn!(
                     "failed to remove duplicate plugin symlink {}: {}",
-                    target_link.display(),
+                    target_entry.display(),
                     e
                 );
             }
@@ -216,73 +249,61 @@ pub fn distribute_to_directory_with_sources(
 
         // OBS-04 state snapshot — sample BEFORE any remove/create happens so
         // the cause classification is faithful to the world at iteration start.
-        let was_symlink = target_link.is_symlink();
+        let existed_before = std::fs::symlink_metadata(&target_entry).is_ok();
         let in_manifest = manifest.get(skill_name_str.as_ref()).is_some();
 
-        if target_link.is_symlink() {
-            if symlink_points_to(&target_link, &library_skill_path) && !force {
-                result.unchanged += 1;
-                continue;
-            }
-            // HARD-09 / D-DIST-1: foreign-symlink protection. If the
-            // existing symlink points OUTSIDE the current `library_dir`,
-            // it was almost certainly placed there by a different tome
-            // install (or a hand-edited dotfiles workflow). Refuse to
-            // clobber it unless `force` is set; the existing `force`
-            // semantic ("recreate stale links") is extended to also
-            // mean "yes, clobber foreign symlinks", consistent with the
-            // existing flag's meaning. No new CLI surface.
-            //
-            // Detection uses canonicalize so symlinks-in-the-middle of
-            // the path resolve correctly (a target like
-            // /var/lib/x → /private/var/lib/x on macOS still resolves
-            // under the real library_dir if one is a prefix of the
-            // other).
-            if !force && is_foreign_symlink(&target_link, library_dir) {
-                let actual_target =
-                    std::fs::read_link(&target_link).unwrap_or_else(|_| target_link.clone());
+        let manifest_entry = manifest.get(skill_name_str.as_ref());
+        let canonical_hash =
+            crate::manifest::hash_directory(&library_skill_path).with_context(|| {
+                format!(
+                    "failed to hash library skill {}",
+                    library_skill_path.display()
+                )
+            })?;
+        let provenance = DeploymentProvenance {
+            source_name: manifest_entry.and_then(|entry| entry.source_name().cloned()),
+            managed_source: manifest_entry.is_some_and(|entry| entry.managed),
+        };
+        let plan = deployment::plan_create_only(
+            config_dir,
+            selected_profile,
+            dir_name,
+            skills_dir,
+            &skill,
+            &library_skill_path,
+            &canonical_hash,
+            provenance,
+        )?;
+        let state = plan.state;
+        let apply = plan.apply(dry_run)?;
+
+        if apply.changed {
+            result.changed += 1;
+        } else if apply.unchanged {
+            result.unchanged += 1;
+            continue;
+        } else {
+            if should_warn_for_skipped_state(state) {
                 warn!(
-                    "{} is a foreign symlink (→ {}); skipping. Pass --force to overwrite, or remove manually.",
-                    target_link.display(),
-                    actual_target.display(),
+                    "{} not copied to {}: {}",
+                    skill_name_str,
+                    dir_name,
+                    skipped_state_message(state, &target_entry),
                 );
-                result.skipped += 1;
-                continue;
             }
-            // Update stale link (or force-recreating)
-            if !dry_run {
-                std::fs::remove_file(&target_link).with_context(|| {
-                    format!("failed to remove stale symlink {}", target_link.display())
-                })?;
-            }
-        } else if target_link.exists() {
-            warn!(
-                "{} exists in target and is not a symlink, skipping",
-                target_link.display()
-            );
             result.skipped += 1;
             continue;
         }
 
-        if !dry_run {
-            unix_fs::symlink(&library_skill_path, &target_link).with_context(|| {
-                format!(
-                    "failed to symlink {} -> {}",
-                    target_link.display(),
-                    library_skill_path.display()
-                )
-            })?;
-        }
-        result.changed += 1;
-
         // OBS-04 emission. Classification per RESEARCH §Open Question 2:
-        // - was_symlink: an existing symlink was replaced (stale link update) → HashChanged
-        // - !was_symlink && in_manifest: skill already known to consolidate but no symlink
+        // - existed_before: copy deployment replaced no existing artifact in this slice, so this
+        //   only appears for dry-run plans against an already-known transition.
+        // - !existed_before && in_manifest: skill already known to consolidate but no deployment
         //   in this directory; plausibly the directory was disabled previously and is now
         //   allowed (machine_prefs flip) → DirectoryNowAllowed inference
-        // - !was_symlink && !in_manifest: cannot occur in practice because consolidate
+        // - !existed_before && !in_manifest: cannot occur in practice because consolidate
         //   inserts the manifest entry BEFORE distribute runs; defensive NewlyAdded fallback
-        let cause = if was_symlink {
+        let cause = if existed_before {
             ChangeCause::HashChanged
         } else if in_manifest {
             ChangeCause::DirectoryNowAllowed
@@ -293,11 +314,50 @@ pub fn distribute_to_directory_with_sources(
             skill = %skill_name_str,
             directory = %dir_name,
             cause = %cause,
-            "re-emitted",
+            "deployed",
         );
     }
 
     Ok(result)
+}
+
+fn should_warn_for_skipped_state(state: DeploymentState) -> bool {
+    matches!(
+        state,
+        DeploymentState::Foreign
+            | DeploymentState::LegacySymlink
+            | DeploymentState::Unavailable
+            | DeploymentState::StaleRecord
+            | DeploymentState::InvalidCanonical
+            | DeploymentState::Busy
+            | DeploymentState::Drifted
+            | DeploymentState::Interrupted
+    )
+}
+
+fn skipped_state_message(state: DeploymentState, path: &Path) -> String {
+    match state {
+        DeploymentState::Foreign => {
+            format!("existing target artifact is foreign ({})", path.display())
+        }
+        DeploymentState::LegacySymlink => {
+            format!(
+                "legacy symlink exists and migration is out of scope ({})",
+                path.display()
+            )
+        }
+        DeploymentState::Unavailable => "target root is unavailable".to_string(),
+        DeploymentState::StaleRecord => "deployment record no longer matches target".to_string(),
+        DeploymentState::InvalidCanonical => {
+            "canonical skill tree contains a symlink or special file".to_string()
+        }
+        DeploymentState::Busy => "another deployment transition is in progress".to_string(),
+        DeploymentState::Drifted => "recorded target copy has drifted".to_string(),
+        DeploymentState::Interrupted => "deployment transition is interrupted".to_string(),
+        DeploymentState::Absent | DeploymentState::Healthy | DeploymentState::Disabled => {
+            "not actionable".to_string()
+        }
+    }
 }
 
 /// HARD-09 / D-DIST-1: classify whether `link_path` is a symlink whose
@@ -330,6 +390,7 @@ mod tests {
     use crate::config::{DirectoryConfig, DirectoryName, DirectoryType};
     use crate::machine::MachinePrefs;
     use crate::manifest::SkillEntry;
+    use std::os::unix::fs as unix_fs;
     use tempfile::TempDir;
 
     fn setup_library(dir: &std::path::Path, skill_names: &[&str]) {
@@ -412,14 +473,14 @@ mod tests {
 
         assert_eq!(result.changed, 1);
         assert_eq!(result.disabled, 3);
-        assert!(target_dir.path().join("matched").is_symlink());
+        assert!(target_dir.path().join("matched").is_dir());
         assert!(!target_dir.path().join("mismatched").exists());
         assert!(!target_dir.path().join("untagged").exists());
         assert!(!target_dir.path().join("excluded").exists());
     }
 
     #[test]
-    fn distribute_creates_symlinks() {
+    fn distribute_creates_copies() {
         let library = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         setup_library(library.path(), &["skill-a", "skill-b"]);
@@ -438,8 +499,40 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.changed, 2);
-        assert!(target_dir.path().join("skill-a").is_symlink());
-        assert!(target_dir.path().join("skill-b").is_symlink());
+        assert!(target_dir.path().join("skill-a").is_dir());
+        assert!(target_dir.path().join("skill-b").is_dir());
+        assert!(target_dir.path().join("skill-a/SKILL.md").is_file());
+        assert!(target_dir.path().join("skill-b/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn distribute_skips_missing_target_root_without_creating_it() {
+        let tmp = TempDir::new().unwrap();
+        let library = tmp.path().join("library");
+        let target_dir = tmp.path().join("missing-target");
+        std::fs::create_dir_all(&library).unwrap();
+        setup_library(&library, &["skill-a"]);
+
+        let dir_name = DirectoryName::new("test").unwrap();
+        let dir_config = make_dir_config(target_dir.clone());
+
+        let result = distribute_to_directory(
+            &library,
+            &dir_name,
+            &dir_config,
+            &empty_manifest(),
+            &MachinePrefs::default(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.skipped, 1);
+        assert!(
+            !target_dir.exists(),
+            "configured target root must not be created implicitly"
+        );
     }
 
     #[test]
@@ -477,7 +570,7 @@ mod tests {
     }
 
     #[test]
-    fn distribute_force_recreates_links() {
+    fn distribute_force_preserves_healthy_copy() {
         let library = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         setup_library(library.path(), &["skill-a"]);
@@ -506,12 +599,15 @@ mod tests {
             true,
         )
         .unwrap();
-        assert_eq!(result.changed, 1, "force should recreate unchanged link");
-        assert_eq!(result.unchanged, 0);
+        assert_eq!(
+            result.changed, 0,
+            "force must not refresh a healthy copy in the create-only slice"
+        );
+        assert_eq!(result.unchanged, 1);
     }
 
     #[test]
-    fn distribute_idempotent_with_canonicalized_paths() {
+    fn distribute_preserves_legacy_relative_symlink() {
         let tmp = TempDir::new().unwrap();
         let lib_dir = tmp.path().join("library");
         let target_dir = tmp.path().join("target");
@@ -543,15 +639,13 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(
-            result.unchanged, 1,
-            "relative symlink should be recognized as matching"
-        );
+        assert_eq!(result.skipped, 1);
+        assert!(target_dir.join("skill-a").is_symlink());
         assert_eq!(result.changed, 0);
     }
 
     #[test]
-    fn distribute_updates_stale_link() {
+    fn distribute_preserves_stale_legacy_symlink() {
         let library = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         setup_library(library.path(), &["skill-a"]);
@@ -560,32 +654,10 @@ mod tests {
         let dir_config = make_dir_config(target_dir.path().to_path_buf());
         let manifest = empty_manifest();
 
-        // First distribute: creates the link
-        distribute_to_directory(
-            library.path(),
-            &dir_name,
-            &dir_config,
-            &manifest,
-            &MachinePrefs::default(),
-            false,
-            false,
-        )
-        .unwrap();
-
-        // Simulate the target link now pointing somewhere else WITHIN the
-        // current library (stale-but-not-foreign). HARD-09 / D-DIST-1 only
-        // protects symlinks that point OUTSIDE library_dir; intra-library
-        // staleness keeps the original "auto-recreate" behaviour.
-        //
-        // The stale target deliberately does NOT exist on disk — we want
-        // to test the "wrong but in-library" branch without inflating the
-        // library entry count distribute_to_directory walks.
         let stale_path = target_dir.path().join("skill-a");
-        std::fs::remove_file(&stale_path).unwrap();
         let stale_target = library.path().join("skill-stale-target-missing");
         unix_fs::symlink(&stale_target, &stale_path).unwrap();
 
-        // Second distribute: should update the stale link
         let result = distribute_to_directory(
             library.path(),
             &dir_name,
@@ -596,12 +668,12 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(result.changed, 1, "stale link should be updated");
+        assert_eq!(
+            result.skipped, 1,
+            "legacy symlink migration is out of scope"
+        );
         assert_eq!(result.unchanged, 0);
-
-        // Link should now point to the library entry
-        let link_target = std::fs::read_link(&stale_path).unwrap();
-        assert_eq!(link_target, library.path().join("skill-a"));
+        assert_eq!(std::fs::read_link(&stale_path).unwrap(), stale_target);
     }
 
     #[test]
@@ -647,7 +719,8 @@ mod tests {
             false,
         )
         .unwrap();
-        assert_eq!(result.changed, 1);
+        assert_eq!(result.changed, 0);
+        assert_eq!(result.skipped, 1);
         assert!(!nonexistent_target.exists());
     }
 
@@ -708,7 +781,7 @@ mod tests {
         );
         assert!(
             !target_dir.path().join(".tome-manifest.json").exists(),
-            "manifest file should not be symlinked to target"
+            "manifest file should not be copied to target"
         );
     }
 
@@ -789,7 +862,7 @@ mod tests {
 
     #[test]
     fn distribute_skips_plugin_skills_for_the_owning_tool() {
-        // Regression: a skill discovered from ~/.claude/plugins was symlinked into
+        // Regression: a skill discovered from ~/.claude/plugins was deployed into
         // ~/.claude/skills, so Claude Code loaded it twice — once as
         // `plugin:name`, once as bare `name`.
         let library = TempDir::new().unwrap();
@@ -871,7 +944,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(result.changed, 1);
-        assert!(codex_skills.join("my-skill").is_symlink());
+        assert!(codex_skills.join("my-skill").is_dir());
     }
 
     #[test]
@@ -980,7 +1053,7 @@ mod tests {
         .unwrap();
         assert_eq!(result.changed, 1);
         assert!(
-            target_dir.path().join("my-skill").is_symlink(),
+            target_dir.path().join("my-skill").is_dir(),
             "skill SHOULD be distributed to a different directory"
         );
     }
@@ -1009,7 +1082,7 @@ mod tests {
         .unwrap();
         assert_eq!(result.changed, 1);
         assert_eq!(result.disabled, 1);
-        assert!(target_dir.path().join("enabled-skill").is_symlink());
+        assert!(target_dir.path().join("enabled-skill").is_dir());
         assert!(!target_dir.path().join("disabled-skill").exists());
     }
 
@@ -1223,11 +1296,10 @@ mod tests {
         assert_eq!(std::fs::read_link(&target_link).unwrap(), foreign_target);
     }
 
-    /// D-DIST-1 force opt-out: with force=true the foreign symlink IS
-    /// clobbered (consistent with the existing `force` semantic of
-    /// "recreate stale links").
+    /// Create-only copy deployment does not let `--force` clobber a foreign
+    /// symlink. Explicit migration/repair is a later MCO-144 slice.
     #[test]
-    fn distribute_force_clobbers_foreign_symlink() {
+    fn distribute_force_preserves_foreign_symlink() {
         let library = TempDir::new().unwrap();
         let target_dir = TempDir::new().unwrap();
         let other_library = TempDir::new().unwrap();
@@ -1250,11 +1322,10 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(result.skipped, 0, "force must bypass the foreign skip");
-        assert_eq!(result.changed, 1, "force must recreate the symlink");
+        assert_eq!(result.skipped, 1, "force must preserve foreign symlinks");
+        assert_eq!(result.changed, 0);
 
-        // Symlink now points into the current library, not the foreign one.
         let actual = std::fs::read_link(target_dir.path().join("skill-a")).unwrap();
-        assert_eq!(actual, library.path().join("skill-a"));
+        assert_eq!(actual, other_skill);
     }
 }

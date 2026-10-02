@@ -227,6 +227,7 @@ fn normalize_path(path: &Path) -> PathBuf {
 ///
 /// Falls back to `resolve_symlink_target` when the symlink target doesn't exist
 /// (e.g., the original was deleted).
+#[allow(dead_code)]
 pub fn symlink_points_to(link_path: &Path, expected_target: &Path) -> bool {
     let raw_target = match std::fs::read_link(link_path) {
         Ok(t) => t,

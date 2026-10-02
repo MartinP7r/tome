@@ -9,7 +9,7 @@
 //!
 //! What these tests cover:
 //! - Summary line negative control (sync runs with no claude-plugins config).
-//! - Vanished entry → distribution still symlinks preserved library copy
+//! - Vanished entry → distribution still copies preserved library content
 //!   (RECON-04 anchor; proxied via the local-skill distribution path).
 //! - `--no-install` skips apply unconditionally; exit zero (RECON-02 / D-09).
 //! - `--no-input` against an edit-in-library fixture: exit zero, no overwrite
@@ -220,7 +220,7 @@ fn sync_ignores_and_preserves_legacy_machine_toml() -> Result<()> {
         .success();
 
     assert!(
-        f.dist_dir.join("alpha").is_symlink(),
+        f.dist_dir.join("alpha/SKILL.md").is_file(),
         "legacy machine.toml must not affect route eligibility"
     );
     assert_eq!(std::fs::read_to_string(machine_path)?, legacy);
@@ -380,12 +380,12 @@ fn sync_settings_with_invalid_managed_plugin_install_errors() -> Result<()> {
 fn vanished_entry_in_lockfile_still_distributes_preserved_library_copy() -> Result<()> {
     // RECON-04 anchor: when a managed skill exists in the library but its
     // marketplace presence is gone, distribution must still create the
-    // symlink to the preserved copy.
+    // target copy from the preserved canonical copy.
     //
     // Simulation strategy: pre-populate the library with a local skill
     // copy (no marketplace involvement at distribute time — the source of
     // truth at distribute is the library). Sync runs with no claude-plugins
-    // directory (so reconcile doesn't fire), and we verify the symlink is
+    // directory (so reconcile doesn't fire), and we verify the copy is
     // created in the dist dir.
     //
     // This proves the distribution path works for any preserved library
@@ -402,12 +402,12 @@ fn vanished_entry_in_lockfile_still_distributes_preserved_library_copy() -> Resu
     // Run sync to populate library + distribute.
     f.run_sync(&["--no-input"]).assert().success();
 
-    // Verify symlink exists in dist dir.
-    let symlink = f.dist_dir.join("preserved");
+    // Verify target copy exists in dist dir.
+    let deployed = f.dist_dir.join("preserved");
     assert!(
-        symlink.exists() || symlink.is_symlink(),
-        "expected symlink at {} after sync",
-        symlink.display()
+        deployed.join("SKILL.md").is_file() && !deployed.is_symlink(),
+        "expected target copy at {} after sync",
+        deployed.display()
     );
     Ok(())
 }
