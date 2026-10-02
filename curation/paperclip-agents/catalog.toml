@@ -1,0 +1,13 @@
+revision = "catalog-2026-10-02-mco-163-preview"
+
+[categories.tome-operations]
+description = "Tome setup, sync, diagnosis, and recovery workflows."
+
+[skills.using-tome]
+company_skill = "using-tome"
+categories = ["tome-operations"]
+constraints = ["paperclip-agent"]
+
+[use_case_sets.tome-maintainer]
+skills = ["using-tome"]
+constraints = ["paperclip-agent"]

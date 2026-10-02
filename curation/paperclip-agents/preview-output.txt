@@ -1,0 +1,12 @@
+Paperclip agent skill materialization
+Catalog revision: catalog-2026-10-02-mco-163-preview
+Effective constraints: paperclip-agent
+Confirmation token: apply-v2-d8e72af27dc8e0a26de40395569ffea7
+
+No Paperclip agent skills were changed.
+Agent FoundingEngineer (ecadbdc0-fcf5-4d18-b62f-111999f269c0)
+  before desired: (none)
+  intended desired: using-tome
+  add: using-tome
+  remove: (none)
+  keep: (none)

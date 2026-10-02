@@ -1,0 +1,17 @@
+Command:
+
+TOME_HOME="$PAPERCLIP_RUN_SCRATCH_DIR/mco-163-preview-run/tome-home-real-api" cargo run -p tome -- paperclip-agents preview \
+  --catalog curation/paperclip-agents/catalog.toml \
+  --assignments curation/paperclip-agents/agents.toml \
+  --constraint paperclip-agent \
+  --paperclip-api-url "$PAPERCLIP_API_URL"
+
+Exit status: 1
+
+Result:
+
+The command reached the read-only Paperclip API boundary and failed before issuing a confirmation token:
+
+error: Paperclip request GET /api/agents/ecadbdc0-fcf5-4d18-b62f-111999f269c0/skills failed with HTTP 403: {"error":"Missing permission: agents:suggest-changes.","details":{"reason":"deny_missing_grant"}}
+
+Scratch confirmation files: none.
