@@ -9,6 +9,7 @@
 | `tome route tag add\|remove` | Manage tag selectors for a destination |
 | `tome route exclude add\|remove` | Manage explicit per-destination skill exclusions |
 | `tome profile create\|list\|select` | Manage committed machine profiles |
+| `tome paperclip-agents preview\|apply` | Preview and synchronize resolved use-case skill sets to Paperclip agents |
 | `tome pool exclude\|restore` | Exclude a skill from shared discovery or restore it |
 | `tome remove dir <name>` | Remove a directory entry (manifest entries transition to Unowned per LIB-04) |
 | `tome remove skill <name>` | Delete an Unowned skill from the library, manifest, distributions, and lockfile |
@@ -224,6 +225,68 @@ Untagged skills stay library-only for destinations with configured routes.
 `tome profile create <name>` creates `machines/<name>.toml`, `tome profile
 list` lists profiles, and `tome profile select <name>` records the active
 profile in local `settings.toml`.
+
+### `tome paperclip-agents`
+
+Explicitly materializes versioned catalog categories/use-case sets into
+Paperclip agents' desired company-skill assignments. This is separate from
+generic `tome sync` target deployment: copy deployment never mutates Paperclip
+agents.
+
+`preview` resolves one canonical catalog revision plus the selected effective
+constraints, reads current desired/runtime state from either a disposable state
+file or the Paperclip API, and renders one fleet-wide before/after impact. It
+does not mutate the canonical library or any Paperclip agent.
+
+```bash
+tome paperclip-agents preview \
+  --catalog catalog.toml \
+  --assignments agents.toml \
+  --current-state state.json \
+  --constraint paperclip-agent
+```
+
+`apply` recomputes the same plan, requires the preview confirmation token, uses
+Paperclip's desired-skill sync endpoint in replace mode, then reads every
+affected agent back and fails if desired/runtime state differs from the
+intended set. The API URL is read from `--paperclip-api-url` or
+`PAPERCLIP_API_URL`; the token is read from `PAPERCLIP_API_KEY` by default.
+
+```bash
+tome paperclip-agents apply \
+  --catalog catalog.toml \
+  --assignments agents.toml \
+  --constraint paperclip-agent \
+  --confirm apply-abc123def456
+```
+
+Catalog TOML is intentionally small and deterministic:
+
+```toml
+revision = "catalog-2026-10-02"
+
+[categories.engineering]
+description = "Engineering work"
+
+[skills.using-tome]
+company_skill = "using-tome"
+categories = ["engineering"]
+constraints = ["paperclip-agent"]
+
+[use_case_sets.founding-engineer]
+categories = ["engineering"]
+constraints = ["paperclip-agent"]
+```
+
+Assignment TOML selects sets per agent:
+
+```toml
+[[agents]]
+agent_id = "agent-id"
+display_name = "FoundingEngineer"
+sets = ["founding-engineer"]
+constraints = ["codex"]
+```
 
 ### `tome pool`
 

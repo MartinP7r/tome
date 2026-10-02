@@ -386,6 +386,15 @@ pub enum Command {
         #[command(subcommand)]
         sub: ProfileCommand,
     },
+
+    /// Preview or apply resolved use-case skill sets to Paperclip agents.
+    #[command(
+        after_help = "Examples:\n  tome paperclip-agents preview --catalog catalog.toml --assignments agents.toml --current-state state.json --constraint paperclip-agent\n  tome paperclip-agents apply --catalog catalog.toml --assignments agents.toml --constraint paperclip-agent --confirm apply-abc123def456"
+    )]
+    PaperclipAgents {
+        #[command(subcommand)]
+        sub: PaperclipAgentsCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -396,6 +405,52 @@ pub enum ProfileCommand {
     List,
     /// Select the profile used by normal commands on this machine.
     Select { name: String },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum PaperclipAgentsCommand {
+    /// Render the fleet-wide before/after impact without changing agents.
+    Preview {
+        /// Versioned canonical catalog TOML.
+        #[arg(long)]
+        catalog: PathBuf,
+        /// Agent assignment TOML selecting use-case sets.
+        #[arg(long)]
+        assignments: PathBuf,
+        /// Disposable JSON snapshot of current agent desired/runtime skills.
+        #[arg(long)]
+        current_state: Option<PathBuf>,
+        /// Effective target/profile constraint. Repeatable.
+        #[arg(long = "constraint")]
+        constraints: Vec<String>,
+        /// Paperclip API URL used only for read-only preview when no state file is supplied.
+        #[arg(long)]
+        paperclip_api_url: Option<String>,
+        /// Environment variable containing the Paperclip API token.
+        #[arg(long, default_value = "PAPERCLIP_API_KEY")]
+        paperclip_api_key_env: String,
+    },
+    /// Replace selected Paperclip agents' desired-skill sets, then read them back.
+    Apply {
+        /// Versioned canonical catalog TOML.
+        #[arg(long)]
+        catalog: PathBuf,
+        /// Agent assignment TOML selecting use-case sets.
+        #[arg(long)]
+        assignments: PathBuf,
+        /// Effective target/profile constraint. Repeatable.
+        #[arg(long = "constraint")]
+        constraints: Vec<String>,
+        /// Confirmation token from a matching preview.
+        #[arg(long)]
+        confirm: String,
+        /// Paperclip API URL.
+        #[arg(long)]
+        paperclip_api_url: Option<String>,
+        /// Environment variable containing the Paperclip API token.
+        #[arg(long, default_value = "PAPERCLIP_API_KEY")]
+        paperclip_api_key_env: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
