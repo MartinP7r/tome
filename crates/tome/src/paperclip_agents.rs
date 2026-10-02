@@ -48,6 +48,10 @@ impl AgentId {
     fn as_str(&self) -> &str {
         &self.0
     }
+
+    fn api_path_segment(&self) -> String {
+        encode_path_segment(self.as_str())
+    }
 }
 
 impl std::fmt::Display for AgentId {
@@ -396,11 +400,7 @@ fn curl_config_escape(value: &str) -> String {
 
 impl PaperclipAgentSkillBoundary for CurlPaperclipBoundary {
     fn read_agent_skills(&mut self, agent_id: &AgentId) -> Result<AgentSkillState> {
-        let value = self.request(
-            "GET",
-            &format!("/api/agents/{}/skills", agent_id.as_str()),
-            None,
-        )?;
+        let value = self.request("GET", &agent_skills_path(agent_id), None)?;
         parse_agent_skill_state(agent_id, &value)
     }
 
@@ -417,11 +417,7 @@ impl PaperclipAgentSkillBoundary for CurlPaperclipBoundary {
             "mode": "replace",
             "desiredSkills": desired,
         });
-        self.request(
-            "POST",
-            &format!("/api/agents/{}/skills/sync", agent_id.as_str()),
-            Some(&body),
-        )?;
+        self.request("POST", &agent_skills_sync_path(agent_id), Some(&body))?;
         Ok(())
     }
 }
@@ -585,8 +581,7 @@ pub(crate) fn apply_with_boundary(
 ) -> Result<ApplyReport> {
     anyhow::ensure!(
         confirm_token == plan.confirmation_token(),
-        "confirmation token mismatch: expected '{}'",
-        plan.confirmation_token()
+        "confirmation token mismatch; run preview again and pass the exact token it printed"
     );
     let preview = preview_with_boundary(plan.clone(), boundary)?;
 
@@ -929,6 +924,28 @@ fn confirmation_token(plan: &MaterializationPlan) -> Result<String> {
     Ok(format!("apply-{}", &hex[..12]))
 }
 
+fn agent_skills_path(agent_id: &AgentId) -> String {
+    format!("/api/agents/{}/skills", agent_id.api_path_segment())
+}
+
+fn agent_skills_sync_path(agent_id: &AgentId) -> String {
+    format!("/api/agents/{}/skills/sync", agent_id.api_path_segment())
+}
+
+fn encode_path_segment(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write as _;
+
+            write!(&mut encoded, "%{byte:02X}").expect("writing to String cannot fail");
+        }
+    }
+    encoded
+}
+
 fn normalize_api_base(input: &str) -> String {
     let mut value = input.trim_end_matches('/').to_string();
     if value.ends_with("/api") {
@@ -1171,11 +1188,14 @@ constraints = ["codex"]
             &[String::from("paperclip-agent")],
         )
         .unwrap();
+        let expected_token = plan.confirmation_token().to_string();
         let mut boundary = MockPaperclipBoundary::default();
 
         let err = apply_with_boundary(plan, &mut boundary, "apply-wrong").unwrap_err();
+        let error_text = format!("{err:#}");
 
-        assert!(format!("{err:#}").contains("confirmation token mismatch"));
+        assert!(error_text.contains("confirmation token mismatch"));
+        assert!(!error_text.contains(&expected_token));
         assert!(boundary.syncs.is_empty());
     }
 
@@ -1273,6 +1293,20 @@ constraints = ["codex"]
         assert_eq!(
             normalize_api_base("https://paperclip.example/root"),
             "https://paperclip.example/root"
+        );
+    }
+
+    #[test]
+    fn agent_api_paths_percent_encode_agent_id_segment() {
+        let agent_id = AgentId::new("agent/a?b#c", "agent_id").unwrap();
+
+        assert_eq!(
+            agent_skills_path(&agent_id),
+            "/api/agents/agent%2Fa%3Fb%23c/skills"
+        );
+        assert_eq!(
+            agent_skills_sync_path(&agent_id),
+            "/api/agents/agent%2Fa%3Fb%23c/skills/sync"
         );
     }
 
