@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   manages manifest tags; `tome route tag` manages OR-match selectors; and
   `tome route exclude` manages explicit destination exceptions. Tome searches
   upward from the working directory for additive project `.tome.toml` files.
+- **Explicit Paperclip agent skill materialization.** `tome paperclip-agents`
+  resolves versioned catalog categories/use-case sets against selected
+  constraints, renders a fleet-wide before/after preview with a confirmation
+  token, then applies desired-skill replacements only through the explicit
+  Paperclip agent workflow and verifies every affected agent by read-back.
 - **Scoped test targets.** `make test-core` tests only the CLI/core crate,
   `make test-desktop` tests the Desktop crate, and `make test` aggregates both.
 

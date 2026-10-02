@@ -104,6 +104,7 @@ pub(crate) mod machine;
 // `tome::list` was lifted in plan 26-02.
 pub mod manifest;
 pub mod marketplace;
+pub(crate) mod paperclip_agents;
 pub(crate) mod paths;
 pub(crate) mod pool;
 pub mod profiles;
@@ -657,7 +658,10 @@ pub fn run(cli: Cli) -> Result<()> {
         .unwrap_or(config::default_config_path()?);
     if config_path_for_recovery.is_file()
         && profiles::is_legacy_flat_config(&config_path_for_recovery)?
-        && !matches!(&cli.command, Command::Add { .. } | Command::Tag { .. })
+        && !matches!(
+            &cli.command,
+            Command::Add { .. } | Command::Tag { .. } | Command::PaperclipAgents { .. }
+        )
     {
         anyhow::bail!(
             "legacy flat configuration detected. Required layered files: tome.toml, machines/<profile>.toml, and settings.toml."
@@ -718,6 +722,7 @@ pub fn run(cli: Cli) -> Result<()> {
             | Command::Tag { .. }
             | Command::Config { .. }
             | Command::Lint { path: Some(_), .. }
+            | Command::PaperclipAgents { .. }
     ) {
         (
             Config::load_or_default(effective_config.as_deref())?,
@@ -830,6 +835,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
         Command::Profile { .. } => unreachable_early_return("Command::Profile"),
+        Command::PaperclipAgents { sub } => cmd_paperclip_agents(sub, &paths, cli.dry_run),
     }
 }
 
@@ -1213,6 +1219,101 @@ fn cmd_pool(sub: PoolCommand, paths: &TomePaths) -> Result<()> {
         }
     }
     profiles::save_pool_settings(&paths.config_path(), &settings)
+}
+
+/// `tome paperclip-agents` — explicit Paperclip agent skill assignment workflow.
+fn cmd_paperclip_agents(
+    sub: cli::PaperclipAgentsCommand,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
+    match sub {
+        cli::PaperclipAgentsCommand::Preview {
+            catalog,
+            assignments,
+            current_state,
+            constraints,
+            paperclip_api_url,
+            paperclip_api_key_env,
+        } => {
+            let catalog = paperclip_agents::load_catalog(&catalog)?;
+            let assignments = paperclip_agents::load_assignments(&assignments)?;
+            let plan = paperclip_agents::resolve_plan(&catalog, &assignments, &constraints)?;
+            let mut confirmation_store =
+                paperclip_agents::FileConfirmationTokenStore::new(paths.config_dir());
+            let report = if let Some(path) = current_state {
+                let mut boundary = paperclip_agents::StateFileBoundary::from_path(&path)?;
+                paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?
+            } else {
+                let mut boundary =
+                    paperclip_boundary_from_env(paperclip_api_url, &paperclip_api_key_env)?;
+                paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?
+            };
+            print!("{}", paperclip_agents::render_preview(&report));
+            Ok(())
+        }
+        cli::PaperclipAgentsCommand::Apply {
+            catalog,
+            assignments,
+            constraints,
+            confirm,
+            paperclip_api_url,
+            paperclip_api_key_env,
+        } => {
+            let catalog = paperclip_agents::load_catalog(&catalog)?;
+            let assignments = paperclip_agents::load_assignments(&assignments)?;
+            let plan = paperclip_agents::resolve_plan(&catalog, &assignments, &constraints)?;
+            let mut boundary =
+                paperclip_boundary_from_env(paperclip_api_url, &paperclip_api_key_env)?;
+            let mut confirmation_store =
+                paperclip_agents::FileConfirmationTokenStore::new(paths.config_dir());
+            if dry_run {
+                let report = paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?;
+                print!("{}", paperclip_agents::render_preview(&report));
+                println!("Dry run -- no Paperclip agent skills were changed.");
+                return Ok(());
+            }
+            let report = paperclip_agents::apply_with_boundary(
+                plan,
+                &mut boundary,
+                &confirm,
+                &mut confirmation_store,
+            )?;
+            print!("{}", paperclip_agents::render_apply(&report));
+            if report.has_failures() {
+                let failures = report.failure_messages();
+                anyhow::bail!(
+                    "Paperclip agent apply completed with failures: {}",
+                    failures.join("; ")
+                );
+            }
+            Ok(())
+        }
+    }
+}
+
+fn paperclip_boundary_from_env(
+    api_url: Option<String>,
+    api_key_env: &str,
+) -> Result<paperclip_agents::CurlPaperclipBoundary> {
+    let api_url = api_url
+        .or_else(|| std::env::var("PAPERCLIP_API_URL").ok())
+        .context("provide --paperclip-api-url or PAPERCLIP_API_URL")?;
+    let api_key = std::env::var(api_key_env)
+        .with_context(|| format!("environment variable '{api_key_env}' is not set"))?;
+    paperclip_agents::CurlPaperclipBoundary::new(api_url, api_key)
 }
 
 /// `tome remove dir <name>` — remove a directory entry from `tome.toml` and
