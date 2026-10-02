@@ -238,6 +238,12 @@ constraints, reads current desired/runtime state from either a disposable state
 file or the Paperclip API, and renders one fleet-wide before/after impact. It
 does not mutate the canonical library or any Paperclip agent.
 
+When reading live Paperclip state, Tome first uses the read-only company skill
+attachment route (`GET /api/companies/{companyId}/skills/{skillId}`) and derives
+each agent's current desired skills from `usedByAgents[].desired`. Runtime state
+is optional and may be unavailable on that route. The mutating
+`POST /api/agents/{agentId}/skills/sync` endpoint is used only by `apply`.
+
 ```bash
 tome paperclip-agents preview \
   --catalog catalog.toml \
