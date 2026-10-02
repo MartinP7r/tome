@@ -6,7 +6,10 @@
 //! `paperclip-agents` command.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +21,8 @@ use sha2::{Digest, Sha256};
 const CONFIRMATION_TOKEN_PREFIX: &str = "apply-v2-";
 const CONFIRMATION_TOKEN_TTL_SECS: u64 = 15 * 60;
 const CONFIRMATION_STORE_FILENAME: &str = ".paperclip-agent-confirmations.json";
+const CONFIRMATION_STORE_LOCK_FILENAME: &str = ".paperclip-agent-confirmations.lock";
+const CONFIRMATION_STORE_CLAIMS_DIRNAME: &str = ".paperclip-agent-confirmation-claims";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub(crate) struct SkillRef(String);
@@ -396,44 +401,188 @@ impl StoredAgentSkillState {
 
 pub(crate) struct FileConfirmationTokenStore {
     path: PathBuf,
+    lock_path: PathBuf,
+    claims_dir: PathBuf,
 }
 
 impl FileConfirmationTokenStore {
     pub(crate) fn new(config_dir: &Path) -> Self {
         Self {
             path: config_dir.join(CONFIRMATION_STORE_FILENAME),
+            lock_path: config_dir.join(CONFIRMATION_STORE_LOCK_FILENAME),
+            claims_dir: config_dir.join(CONFIRMATION_STORE_CLAIMS_DIRNAME),
         }
     }
 
-    fn load(&self) -> Result<ConfirmationStoreDocument> {
+    fn load_unlocked(&self) -> Result<ConfirmationStoreDocument> {
         if !self.path.exists() {
             return Ok(ConfirmationStoreDocument::default());
         }
-        let text = std::fs::read_to_string(&self.path)
+        let text = fs::read_to_string(&self.path)
             .with_context(|| format!("failed to read {}", self.path.display()))?;
         serde_json::from_str(&text)
             .with_context(|| format!("failed to parse {}", self.path.display()))
     }
 
-    fn save(&self, document: &ConfirmationStoreDocument) -> Result<()> {
+    fn save_unlocked(&self, document: &ConfirmationStoreDocument) -> Result<()> {
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
+            fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create {}", parent.display()))?;
         }
-        let tmp = self.path.with_extension("json.tmp");
         let bytes = serde_json::to_vec_pretty(document)
             .context("failed to serialize Paperclip confirmation store")?;
-        std::fs::write(&tmp, bytes)
-            .with_context(|| format!("failed to write {}", tmp.display()))?;
-        std::fs::rename(&tmp, &self.path).with_context(|| {
-            format!(
-                "failed to replace {} with {}",
-                self.path.display(),
-                tmp.display()
-            )
-        })?;
+        let (tmp, mut file) = self.create_unique_temp_file()?;
+        let save_result = (|| -> Result<()> {
+            file.write_all(&bytes)
+                .with_context(|| format!("failed to write {}", tmp.display()))?;
+            file.sync_all()
+                .with_context(|| format!("failed to sync {}", tmp.display()))?;
+            drop(file);
+            fs::rename(&tmp, &self.path).with_context(|| {
+                format!(
+                    "failed to replace {} with {}",
+                    self.path.display(),
+                    tmp.display()
+                )
+            })?;
+            sync_parent_dir(&self.path)?;
+            Ok(())
+        })();
+        if save_result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        save_result
+    }
+
+    fn with_locked_document<T>(
+        &self,
+        f: impl FnOnce(&mut ConfirmationStoreDocument) -> Result<T>,
+    ) -> Result<T> {
+        let _lock = ConfirmationStoreLock::acquire(&self.lock_path)?;
+        let mut document = self.load_unlocked()?;
+        let value = f(&mut document)?;
+        self.save_unlocked(&document)?;
+        Ok(value)
+    }
+
+    fn create_unique_temp_file(&self) -> Result<(PathBuf, File)> {
+        let parent = self
+            .path
+            .parent()
+            .context("confirmation store path has no parent directory")?;
+        let file_name = self
+            .path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("paperclip-agent-confirmations");
+        for _ in 0..16 {
+            let tmp = parent.join(format!(
+                "{file_name}.{}.{}.tmp",
+                std::process::id(),
+                random_token_hex()?
+            ));
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)
+            {
+                Ok(file) => return Ok((tmp, file)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to create {}", tmp.display()));
+                }
+            }
+        }
+        bail!(
+            "failed to create a unique temp file next to {}",
+            self.path.display()
+        )
+    }
+
+    fn claim_path(&self, token: &str) -> PathBuf {
+        self.claims_dir
+            .join(format!("{}.claim", hex_digest(token.as_bytes())))
+    }
+
+    fn token_claim_exists(&self, token: &str) -> bool {
+        self.claim_path(token).exists()
+    }
+
+    fn create_token_claim(&self, token: &str, now: u64) -> Result<()> {
+        fs::create_dir_all(&self.claims_dir)
+            .with_context(|| format!("failed to create {}", self.claims_dir.display()))?;
+        let claim_path = self.claim_path(token);
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&claim_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                bail!("confirmation token has already been used; run preview again")
+            }
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to create {}", claim_path.display()));
+            }
+        };
+        file.write_all(format!("{now}\n").as_bytes())
+            .with_context(|| format!("failed to write {}", claim_path.display()))?;
+        file.sync_all()
+            .with_context(|| format!("failed to sync {}", claim_path.display()))?;
+        sync_parent_dir(&claim_path)?;
         Ok(())
     }
+}
+
+struct ConfirmationStoreLock {
+    file: File,
+}
+
+impl ConfirmationStoreLock {
+    fn acquire(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(path)
+            .with_context(|| format!("failed to open {}", path.display()))?;
+        loop {
+            let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+            if result == 0 {
+                return Ok(Self { file });
+            }
+            let error = std::io::Error::last_os_error();
+            if error.kind() != std::io::ErrorKind::Interrupted {
+                return Err(error).with_context(|| format!("failed to lock {}", path.display()));
+            }
+        }
+    }
+}
+
+impl Drop for ConfirmationStoreLock {
+    fn drop(&mut self) {
+        let _ = unsafe { libc::flock(self.file.as_raw_fd(), libc::LOCK_UN) };
+    }
+}
+
+fn sync_parent_dir(path: &Path) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        let dir = File::open(parent)
+            .with_context(|| format!("failed to open {} for sync", parent.display()))?;
+        dir.sync_all()
+            .with_context(|| format!("failed to sync {}", parent.display()))?;
+    }
+    Ok(())
 }
 
 impl ConfirmationTokenStore for FileConfirmationTokenStore {
@@ -442,63 +591,63 @@ impl ConfirmationTokenStore for FileConfirmationTokenStore {
         plan: &MaterializationPlan,
         before_states: &BTreeMap<AgentId, AgentSkillState>,
     ) -> Result<String> {
-        let mut document = self.load()?;
-        let issued_at_epoch_secs = current_unix_secs()?;
-        let expires_at_epoch_secs =
-            issued_at_epoch_secs.saturating_add(CONFIRMATION_TOKEN_TTL_SECS);
-        let plan_fingerprint = plan_fingerprint(plan)?;
-        let agents = stored_confirmation_agents(before_states);
-        let before_fingerprint = before_fingerprint(&agents)?;
-        let token = loop {
-            let token = format!("{CONFIRMATION_TOKEN_PREFIX}{}", random_token_hex()?);
-            if !document.tokens.contains_key(&token) {
-                break token;
-            }
-        };
-        document.tokens.insert(
-            token.clone(),
-            StoredConfirmation {
-                issued_at_epoch_secs,
-                expires_at_epoch_secs,
-                consumed_at_epoch_secs: None,
-                plan_fingerprint,
-                before_fingerprint,
-                agents,
-            },
-        );
-        self.save(&document)?;
-        Ok(token)
+        self.with_locked_document(|document| {
+            let issued_at_epoch_secs = current_unix_secs()?;
+            let expires_at_epoch_secs =
+                issued_at_epoch_secs.saturating_add(CONFIRMATION_TOKEN_TTL_SECS);
+            let plan_fingerprint = plan_fingerprint(plan)?;
+            let agents = stored_confirmation_agents(before_states);
+            let before_fingerprint = before_fingerprint(&agents)?;
+            let token = loop {
+                let token = format!("{CONFIRMATION_TOKEN_PREFIX}{}", random_token_hex()?);
+                if !document.tokens.contains_key(&token) && !self.token_claim_exists(&token) {
+                    break token;
+                }
+            };
+            document.tokens.insert(
+                token.clone(),
+                StoredConfirmation {
+                    issued_at_epoch_secs,
+                    expires_at_epoch_secs,
+                    consumed_at_epoch_secs: None,
+                    plan_fingerprint,
+                    before_fingerprint,
+                    agents,
+                },
+            );
+            Ok(token)
+        })
     }
 
     fn consume(&mut self, token: &str, plan: &MaterializationPlan) -> Result<StoredConfirmation> {
-        let mut document = self.load()?;
-        let expected_plan_fingerprint = plan_fingerprint(plan)?;
-        let now = current_unix_secs()?;
-        let record = document
-            .tokens
-            .get_mut(token)
-            .with_context(|| "confirmation token was not issued by preview; run preview again")?;
-        anyhow::ensure!(
-            record.consumed_at_epoch_secs.is_none(),
-            "confirmation token has already been used; run preview again"
-        );
-        anyhow::ensure!(
-            now <= record.expires_at_epoch_secs,
-            "confirmation token has expired; run preview again"
-        );
-        anyhow::ensure!(
-            record.plan_fingerprint == expected_plan_fingerprint,
-            "confirmation token does not match this immutable plan; run preview again"
-        );
-        let agents = record.agents.clone();
-        anyhow::ensure!(
-            record.before_fingerprint == before_fingerprint(&agents)?,
-            "confirmation token's before-state snapshot is invalid; run preview again"
-        );
-        record.consumed_at_epoch_secs = Some(now);
-        let consumed = record.clone();
-        self.save(&document)?;
-        Ok(consumed)
+        self.with_locked_document(|document| {
+            let expected_plan_fingerprint = plan_fingerprint(plan)?;
+            let now = current_unix_secs()?;
+            let already_claimed = self.token_claim_exists(token);
+            let record = document.tokens.get_mut(token).with_context(
+                || "confirmation token was not issued by preview; run preview again",
+            )?;
+            anyhow::ensure!(
+                !already_claimed && record.consumed_at_epoch_secs.is_none(),
+                "confirmation token has already been used; run preview again"
+            );
+            anyhow::ensure!(
+                now <= record.expires_at_epoch_secs,
+                "confirmation token has expired; run preview again"
+            );
+            anyhow::ensure!(
+                record.plan_fingerprint == expected_plan_fingerprint,
+                "confirmation token does not match this immutable plan; run preview again"
+            );
+            let agents = record.agents.clone();
+            anyhow::ensure!(
+                record.before_fingerprint == before_fingerprint(&agents)?,
+                "confirmation token's before-state snapshot is invalid; run preview again"
+            );
+            self.create_token_claim(token, now)?;
+            record.consumed_at_epoch_secs = Some(now);
+            Ok(record.clone())
+        })
     }
 }
 
@@ -1563,6 +1712,7 @@ pub(crate) mod testing {
 mod tests {
     use super::testing::{MemoryConfirmationTokenStore, MockPaperclipBoundary, state};
     use super::*;
+    use std::sync::{Arc, Barrier};
 
     fn catalog() -> CanonicalCatalog {
         toml::from_str(
@@ -1637,6 +1787,15 @@ constraints = ["codex"]
             &[String::from("paperclip-agent")],
         )
         .unwrap()
+    }
+
+    fn file_store_before_states() -> BTreeMap<AgentId, AgentSkillState> {
+        let mut before_states = BTreeMap::new();
+        before_states.insert(
+            AgentId::new("agent-a", "agent_id").unwrap(),
+            state(&["company/review"], Some(&["company/review"])),
+        );
+        before_states
     }
 
     fn preview_token_for(
@@ -1898,6 +2057,159 @@ constraints = ["codex"]
 
         assert!(format!("{err:#}").contains("confirmation token has already been used"));
         assert!(second_boundary.syncs.is_empty());
+    }
+
+    #[test]
+    fn file_confirmation_store_concurrent_apply_consumes_token_once() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plan = plan();
+        let mut issuing_store = FileConfirmationTokenStore::new(tmp.path());
+        let token = issuing_store
+            .issue(&plan, &file_store_before_states())
+            .unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let barrier = Arc::clone(&barrier);
+            let config_dir = tmp.path().to_path_buf();
+            let plan = plan.clone();
+            let token = token.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut store = FileConfirmationTokenStore::new(&config_dir);
+                let mut boundary = MockPaperclipBoundary::default();
+                boundary.push_state(
+                    "agent-a",
+                    state(&["company/review"], Some(&["company/review"])),
+                );
+                boundary.push_state(
+                    "agent-a",
+                    state(
+                        &["company/review", "company/rust"],
+                        Some(&["company/review", "company/rust"]),
+                    ),
+                );
+
+                barrier.wait();
+                let result = apply_with_boundary(plan, &mut boundary, &token, &mut store);
+                (result.map(|_| ()), boundary.syncs)
+            }));
+        }
+
+        let mut successes = 0;
+        let mut failures = Vec::new();
+        let mut sync_count = 0;
+        for handle in handles {
+            let (result, syncs) = handle.join().unwrap();
+            sync_count += syncs.len();
+            match result {
+                Ok(()) => successes += 1,
+                Err(error) => failures.push((format!("{error:#}"), syncs.len())),
+            }
+        }
+
+        assert_eq!(successes, 1, "exactly one apply should consume the token");
+        assert_eq!(failures.len(), 1, "exactly one apply should lose the race");
+        assert_eq!(sync_count, 1, "the losing apply must not mutate agents");
+        assert_eq!(failures[0].1, 0, "losing apply performed a sync");
+        assert!(
+            failures[0]
+                .0
+                .contains("confirmation token has already been used"),
+            "unexpected losing error: {}",
+            failures[0].0
+        );
+
+        let document = FileConfirmationTokenStore::new(tmp.path())
+            .load_unlocked()
+            .unwrap();
+        assert!(
+            document.tokens[&token].consumed_at_epoch_secs.is_some(),
+            "the winning consume must be durably recorded"
+        );
+    }
+
+    #[test]
+    fn file_confirmation_store_concurrent_issue_preserves_all_records() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plan = plan();
+        let before_states = file_store_before_states();
+        let barrier = Arc::new(Barrier::new(3));
+        let lock_path = tmp.path().join(CONFIRMATION_STORE_LOCK_FILENAME);
+        let lock = ConfirmationStoreLock::acquire(&lock_path).unwrap();
+        let mut handles = Vec::new();
+
+        for _ in 0..2 {
+            let barrier = Arc::clone(&barrier);
+            let config_dir = tmp.path().to_path_buf();
+            let plan = plan.clone();
+            let before_states = before_states.clone();
+            handles.push(std::thread::spawn(move || {
+                let mut store = FileConfirmationTokenStore::new(&config_dir);
+                barrier.wait();
+                store.issue(&plan, &before_states)
+            }));
+        }
+
+        barrier.wait();
+        drop(lock);
+
+        let tokens = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap().unwrap())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            tokens.len(),
+            2,
+            "each issue operation should return a token"
+        );
+
+        let document = FileConfirmationTokenStore::new(tmp.path())
+            .load_unlocked()
+            .unwrap();
+        assert_eq!(
+            document.tokens.keys().cloned().collect::<BTreeSet<_>>(),
+            tokens,
+            "concurrent issue operations must not overwrite each other's records"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_confirmation_store_failed_consume_burns_token_and_preserves_store() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let plan = plan();
+        let mut store = FileConfirmationTokenStore::new(tmp.path());
+        let token = store.issue(&plan, &file_store_before_states()).unwrap();
+        fs::create_dir_all(&store.claims_dir).unwrap();
+
+        let original_mode = fs::metadata(tmp.path()).unwrap().permissions().mode();
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(0o500)).unwrap();
+        let consume_result = store.consume(&token, &plan);
+        fs::set_permissions(tmp.path(), fs::Permissions::from_mode(original_mode)).unwrap();
+
+        assert!(
+            consume_result.is_err(),
+            "consume must fail when the store replacement cannot be written"
+        );
+
+        let document = store.load_unlocked().unwrap();
+        assert!(
+            document.tokens.contains_key(&token),
+            "failed consume must not corrupt or remove the store record"
+        );
+        assert!(
+            document.tokens[&token].consumed_at_epoch_secs.is_none(),
+            "the main store should remain at its pre-failure state"
+        );
+
+        let second_consume = store.consume(&token, &plan).unwrap_err();
+        assert!(
+            format!("{second_consume:#}").contains("confirmation token has already been used"),
+            "a failed consume claim must burn the token instead of leaving it reusable"
+        );
     }
 
     #[test]
