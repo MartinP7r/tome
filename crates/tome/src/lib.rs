@@ -835,7 +835,7 @@ pub fn run(cli: Cli) -> Result<()> {
         Command::Config { path } => cmd_config(&config, path, &paths),
         Command::Backup { sub } => cmd_backup(sub, &paths, cli.dry_run),
         Command::Profile { .. } => unreachable_early_return("Command::Profile"),
-        Command::PaperclipAgents { sub } => cmd_paperclip_agents(sub, cli.dry_run),
+        Command::PaperclipAgents { sub } => cmd_paperclip_agents(sub, &paths, cli.dry_run),
     }
 }
 
@@ -1222,7 +1222,11 @@ fn cmd_pool(sub: PoolCommand, paths: &TomePaths) -> Result<()> {
 }
 
 /// `tome paperclip-agents` — explicit Paperclip agent skill assignment workflow.
-fn cmd_paperclip_agents(sub: cli::PaperclipAgentsCommand, dry_run: bool) -> Result<()> {
+fn cmd_paperclip_agents(
+    sub: cli::PaperclipAgentsCommand,
+    paths: &TomePaths,
+    dry_run: bool,
+) -> Result<()> {
     match sub {
         cli::PaperclipAgentsCommand::Preview {
             catalog,
@@ -1235,13 +1239,23 @@ fn cmd_paperclip_agents(sub: cli::PaperclipAgentsCommand, dry_run: bool) -> Resu
             let catalog = paperclip_agents::load_catalog(&catalog)?;
             let assignments = paperclip_agents::load_assignments(&assignments)?;
             let plan = paperclip_agents::resolve_plan(&catalog, &assignments, &constraints)?;
+            let mut confirmation_store =
+                paperclip_agents::FileConfirmationTokenStore::new(paths.config_dir());
             let report = if let Some(path) = current_state {
                 let mut boundary = paperclip_agents::StateFileBoundary::from_path(&path)?;
-                paperclip_agents::preview_with_boundary(plan, &mut boundary)?
+                paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?
             } else {
                 let mut boundary =
                     paperclip_boundary_from_env(paperclip_api_url, &paperclip_api_key_env)?;
-                paperclip_agents::preview_with_boundary(plan, &mut boundary)?
+                paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?
             };
             print!("{}", paperclip_agents::render_preview(&report));
             Ok(())
@@ -1259,14 +1273,32 @@ fn cmd_paperclip_agents(sub: cli::PaperclipAgentsCommand, dry_run: bool) -> Resu
             let plan = paperclip_agents::resolve_plan(&catalog, &assignments, &constraints)?;
             let mut boundary =
                 paperclip_boundary_from_env(paperclip_api_url, &paperclip_api_key_env)?;
+            let mut confirmation_store =
+                paperclip_agents::FileConfirmationTokenStore::new(paths.config_dir());
             if dry_run {
-                let report = paperclip_agents::preview_with_boundary(plan, &mut boundary)?;
+                let report = paperclip_agents::preview_with_boundary(
+                    plan,
+                    &mut boundary,
+                    &mut confirmation_store,
+                )?;
                 print!("{}", paperclip_agents::render_preview(&report));
                 println!("Dry run -- no Paperclip agent skills were changed.");
                 return Ok(());
             }
-            let report = paperclip_agents::apply_with_boundary(plan, &mut boundary, &confirm)?;
+            let report = paperclip_agents::apply_with_boundary(
+                plan,
+                &mut boundary,
+                &confirm,
+                &mut confirmation_store,
+            )?;
             print!("{}", paperclip_agents::render_apply(&report));
+            if report.has_failures() {
+                let failures = report.failure_messages();
+                anyhow::bail!(
+                    "Paperclip agent apply completed with failures: {}",
+                    failures.join("; ")
+                );
+            }
             Ok(())
         }
     }
