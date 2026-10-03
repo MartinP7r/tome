@@ -41,7 +41,7 @@ directory.
 Command:
 
 ```bash
-TOME_HOME="$PAPERCLIP_RUN_SCRATCH_DIR/mco-165-live-preview/tome-home" \
+TOME_HOME="$PAPERCLIP_RUN_SCRATCH_DIR/mco-163-preview-preserve/tome-home" \
   cargo run -p tome -- paperclip-agents preview \
   --catalog curation/paperclip-agents/catalog.toml \
   --assignments curation/paperclip-agents/agents.toml \
@@ -49,21 +49,20 @@ TOME_HOME="$PAPERCLIP_RUN_SCRATCH_DIR/mco-165-live-preview/tome-home" \
   --paperclip-api-url "$PAPERCLIP_API_URL"
 ```
 
-Result: exit 0. The preview established a live before state for
-`FoundingEngineer` (`ecadbdc0-fcf5-4d18-b62f-111999f269c0`):
+Result: exit 0. The refreshed 2026-10-03 MCO-163 preview established a live
+before state for `FoundingEngineer`
+(`ecadbdc0-fcf5-4d18-b62f-111999f269c0`):
 
 ```text
 before desired: local/fbfe9eb2f4/rtk-command-output
-intended desired: using-tome
-add: using-tome
-remove: local/fbfe9eb2f4/rtk-command-output
-keep: (none)
+intended desired: local/d64eaed4a6/using-tome, local/fbfe9eb2f4/rtk-command-output
+add: local/d64eaed4a6/using-tome
+remove: (none)
+keep: local/fbfe9eb2f4/rtk-command-output
 ```
 
-This means the current MCO-163 assignment is now trustworthy as a live preview,
-but it also shows a real apply risk: because apply uses replace semantics, the
-current assignment would remove `local/fbfe9eb2f4/rtk-command-output` from
-FoundingEngineer unless the parent plan intentionally preserves it.
+This means the current MCO-163 assignment is now trustworthy as a live preview
+and no longer proposes removing `local/fbfe9eb2f4/rtk-command-output`.
 
 ## Verification
 

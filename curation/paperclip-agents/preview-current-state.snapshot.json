@@ -2,8 +2,9 @@
   "agents": [
     {
       "agent_id": "ecadbdc0-fcf5-4d18-b62f-111999f269c0",
-      "desired_skills": [],
-      "runtime_skills": null
+      "desired_skills": [
+        "local/fbfe9eb2f4/rtk-command-output"
+      ]
     }
   ]
 }

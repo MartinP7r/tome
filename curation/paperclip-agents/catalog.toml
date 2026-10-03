@@ -1,13 +1,21 @@
-revision = "catalog-2026-10-02-mco-163-preview"
+revision = "catalog-2026-10-03-mco-163-preview"
+
+[categories.agent-runtime-operations]
+description = "Agent runtime output, logging, and command-result handling for Paperclip Codex runs."
 
 [categories.tome-operations]
 description = "Tome setup, sync, diagnosis, and recovery workflows."
 
+[skills.rtk-command-output]
+company_skill = "local/fbfe9eb2f4/rtk-command-output"
+categories = ["agent-runtime-operations"]
+constraints = ["codex", "paperclip-agent"]
+
 [skills.using-tome]
-company_skill = "using-tome"
+company_skill = "local/d64eaed4a6/using-tome"
 categories = ["tome-operations"]
 constraints = ["paperclip-agent"]
 
 [use_case_sets.tome-maintainer]
-skills = ["using-tome"]
+skills = ["rtk-command-output", "using-tome"]
 constraints = ["paperclip-agent"]
