@@ -1,0 +1,32 @@
+Command:
+
+TOME_HOME="$PAPERCLIP_RUN_SCRATCH_DIR/mco-163-preview-preserve/tome-home" cargo run -p tome -- paperclip-agents preview \
+  --catalog curation/paperclip-agents/catalog.toml \
+  --assignments curation/paperclip-agents/agents.toml \
+  --constraint paperclip-agent \
+  --paperclip-api-url "$PAPERCLIP_API_URL"
+
+Exit status: 0
+
+Result:
+
+Paperclip agent skill materialization
+Catalog revision: catalog-2026-10-03-mco-163-preview
+Effective constraints: paperclip-agent
+Confirmation token: apply-v2-85775d96c95c367387b98db6cea6a214
+
+No Paperclip agent skills were changed.
+Agent FoundingEngineer (ecadbdc0-fcf5-4d18-b62f-111999f269c0)
+  before desired: local/fbfe9eb2f4/rtk-command-output
+  intended desired: local/d64eaed4a6/using-tome, local/fbfe9eb2f4/rtk-command-output
+  add: local/d64eaed4a6/using-tome
+  remove: (none)
+  keep: local/fbfe9eb2f4/rtk-command-output
+
+Scratch confirmation metadata:
+
+- Issued: 2026-10-03T12:38:25Z
+- Expires: 2026-10-03T12:53:25Z
+- Plan fingerprint: b9bd18f08b306bceda817bec9c82f89560776782bda6f02fdd68cd2e17f713a6
+- Before-state fingerprint: 6602cf5a39b92ac95ccb59e764e021bb99db1a984ae9e49d49f78705b4f0bb8b
+- Before-state desired skills: local/fbfe9eb2f4/rtk-command-output

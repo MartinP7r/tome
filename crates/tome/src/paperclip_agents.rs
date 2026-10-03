@@ -699,6 +699,7 @@ impl PaperclipAgentSkillBoundary for StateFileBoundary {
 pub(crate) struct CurlPaperclipBoundary {
     base_url: String,
     api_key: String,
+    company_skill_indexes: BTreeMap<String, CompanySkillIndex>,
 }
 
 impl CurlPaperclipBoundary {
@@ -712,7 +713,11 @@ impl CurlPaperclipBoundary {
             "Paperclip API key must not be empty"
         );
         let base_url = normalize_api_base(&base_url);
-        Ok(Self { base_url, api_key })
+        Ok(Self {
+            base_url,
+            api_key,
+            company_skill_indexes: BTreeMap::new(),
+        })
     }
 
     fn request(
@@ -814,8 +819,19 @@ fn curl_config_escape(value: &str) -> String {
 
 impl PaperclipAgentSkillBoundary for CurlPaperclipBoundary {
     fn read_agent_skills(&mut self, agent_id: &AgentId) -> Result<AgentSkillState> {
-        let value = self.request("GET", &agent_skills_path(agent_id), None)?;
-        parse_agent_skill_state(agent_id, &value)
+        match self.read_agent_skills_from_company_index(agent_id) {
+            Ok(state) => Ok(state),
+            Err(company_error) => {
+                let value = self
+                    .request("GET", &agent_skills_path(agent_id), None)
+                    .with_context(|| {
+                        format!(
+                            "failed to read Paperclip skills through read-only company skill attachments: {company_error:#}"
+                        )
+                    })?;
+                parse_agent_skill_state(agent_id, &value)
+            }
+        }
     }
 
     fn sync_agent_desired_skills(
@@ -833,6 +849,69 @@ impl PaperclipAgentSkillBoundary for CurlPaperclipBoundary {
         });
         self.request("POST", &agent_skills_sync_path(agent_id), Some(&body))?;
         Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct CompanySkillIndex {
+    desired_by_agent: BTreeMap<AgentId, BTreeSet<SkillRef>>,
+}
+
+impl CompanySkillIndex {
+    fn read_agent_skills(&self, agent_id: &AgentId) -> AgentSkillState {
+        AgentSkillState {
+            desired_skills: self
+                .desired_by_agent
+                .get(agent_id)
+                .cloned()
+                .unwrap_or_default(),
+            // The company skill attachment route exposes desired attachments.
+            // It does not currently expose runtime adapter state.
+            runtime_skills: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CompanySkillListItem {
+    id: String,
+    attached_agent_count: Option<u64>,
+}
+
+impl CurlPaperclipBoundary {
+    fn read_agent_skills_from_company_index(
+        &mut self,
+        agent_id: &AgentId,
+    ) -> Result<AgentSkillState> {
+        let company_id = self.agent_company_id(agent_id)?;
+        if !self.company_skill_indexes.contains_key(&company_id) {
+            let index = self.fetch_company_skill_index(&company_id)?;
+            self.company_skill_indexes.insert(company_id.clone(), index);
+        }
+        Ok(self
+            .company_skill_indexes
+            .get(&company_id)
+            .expect("company skill index was just inserted or already cached")
+            .read_agent_skills(agent_id))
+    }
+
+    fn agent_company_id(&self, agent_id: &AgentId) -> Result<String> {
+        let value = self.request("GET", &agent_path(agent_id), None)?;
+        parse_agent_company_id(agent_id, &value)
+    }
+
+    fn fetch_company_skill_index(&self, company_id: &str) -> Result<CompanySkillIndex> {
+        let value = self.request("GET", &company_skills_path(company_id), None)?;
+        let list = parse_company_skill_list(company_id, &value)?;
+        let mut index = CompanySkillIndex::default();
+        for skill in list {
+            if skill.attached_agent_count.is_none_or(|count| count > 0) {
+                let value =
+                    self.request("GET", &company_skill_path(company_id, &skill.id), None)?;
+                add_company_skill_detail_to_index(&mut index, &value)?;
+            }
+        }
+        Ok(index)
     }
 }
 
@@ -1479,8 +1558,24 @@ fn agent_skills_path(agent_id: &AgentId) -> String {
     format!("/api/agents/{}/skills", agent_id.api_path_segment())
 }
 
+fn agent_path(agent_id: &AgentId) -> String {
+    format!("/api/agents/{}", agent_id.api_path_segment())
+}
+
 fn agent_skills_sync_path(agent_id: &AgentId) -> String {
     format!("/api/agents/{}/skills/sync", agent_id.api_path_segment())
+}
+
+fn company_skills_path(company_id: &str) -> String {
+    format!("/api/companies/{}/skills", encode_path_segment(company_id))
+}
+
+fn company_skill_path(company_id: &str, skill_id: &str) -> String {
+    format!(
+        "/api/companies/{}/skills/{}",
+        encode_path_segment(company_id),
+        encode_path_segment(skill_id)
+    )
 }
 
 fn encode_path_segment(value: &str) -> String {
@@ -1503,6 +1598,89 @@ fn normalize_api_base(input: &str) -> String {
         value.truncate(value.len() - "/api".len());
     }
     value
+}
+
+fn parse_agent_company_id(agent_id: &AgentId, value: &serde_json::Value) -> Result<String> {
+    let company_id = value
+        .get("companyId")
+        .and_then(|id| id.as_str())
+        .with_context(|| {
+            format!("Paperclip agent '{agent_id}' response did not include companyId")
+        })?;
+    anyhow::ensure!(
+        !company_id.trim().is_empty(),
+        "Paperclip agent '{agent_id}' response included an empty companyId"
+    );
+    Ok(company_id.to_string())
+}
+
+fn parse_company_skill_list(
+    company_id: &str,
+    value: &serde_json::Value,
+) -> Result<Vec<CompanySkillListItem>> {
+    let skills = value.as_array().with_context(|| {
+        format!("Paperclip company '{company_id}' skills response was not a list")
+    })?;
+    skills
+        .iter()
+        .map(|skill| {
+            let id = skill
+                .get("id")
+                .and_then(|id| id.as_str())
+                .with_context(|| {
+                    format!("Paperclip company '{company_id}' skill list item did not include id")
+                })?;
+            anyhow::ensure!(
+                !id.trim().is_empty(),
+                "Paperclip company '{company_id}' skill list item included an empty id"
+            );
+            Ok(CompanySkillListItem {
+                id: id.to_string(),
+                attached_agent_count: skill
+                    .get("attachedAgentCount")
+                    .and_then(|count| count.as_u64()),
+            })
+        })
+        .collect()
+}
+
+fn add_company_skill_detail_to_index(
+    index: &mut CompanySkillIndex,
+    value: &serde_json::Value,
+) -> Result<()> {
+    let key = value
+        .get("key")
+        .and_then(|key| key.as_str())
+        .context("Paperclip company skill detail did not include key")?;
+    let skill = SkillRef::new(key.to_string(), "company skill key")?;
+    let used_by_agents = value
+        .get("usedByAgents")
+        .and_then(|agents| agents.as_array())
+        .with_context(|| {
+            format!("Paperclip company skill '{skill}' detail did not include usedByAgents")
+        })?;
+    for agent in used_by_agents {
+        if !agent
+            .get("desired")
+            .and_then(|desired| desired.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let agent_id = agent
+            .get("id")
+            .and_then(|id| id.as_str())
+            .with_context(|| {
+                format!("Paperclip company skill '{skill}' usedByAgents item did not include id")
+            })?;
+        let agent_id = AgentId::new(agent_id.to_string(), "usedByAgents id")?;
+        index
+            .desired_by_agent
+            .entry(agent_id)
+            .or_default()
+            .insert(skill.clone());
+    }
+    Ok(())
 }
 
 fn parse_agent_skill_state(
@@ -2283,6 +2461,47 @@ constraints = ["codex"]
     }
 
     #[test]
+    fn company_skill_details_invert_used_by_agents_to_desired_state() {
+        let mut index = CompanySkillIndex::default();
+        let detail = serde_json::json!({
+            "key": "company/review",
+            "usedByAgents": [
+                { "id": "agent-a", "desired": true },
+                { "id": "agent-b", "desired": false }
+            ]
+        });
+
+        add_company_skill_detail_to_index(&mut index, &detail).unwrap();
+        let state = index.read_agent_skills(&AgentId::new("agent-a", "agent_id").unwrap());
+        let empty_state = index.read_agent_skills(&AgentId::new("agent-b", "agent_id").unwrap());
+
+        assert_eq!(
+            state
+                .desired_skills
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["company/review"]
+        );
+        assert!(state.runtime_skills.is_none());
+        assert!(empty_state.desired_skills.is_empty());
+    }
+
+    #[test]
+    fn company_skill_list_keeps_unknown_attachment_counts_fetchable() {
+        let value = serde_json::json!([
+            { "id": "skill-a", "attachedAgentCount": 2 },
+            { "id": "skill-b" }
+        ]);
+
+        let items = parse_company_skill_list("company-a", &value).unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].attached_agent_count, Some(2));
+        assert_eq!(items[1].attached_agent_count, None);
+    }
+
+    #[test]
     fn normalizes_api_base_without_guessing_company_scope() {
         assert_eq!(
             normalize_api_base("https://paperclip.example/api/"),
@@ -2298,6 +2517,7 @@ constraints = ["codex"]
     fn agent_api_paths_percent_encode_agent_id_segment() {
         let agent_id = AgentId::new("agent/a?b#c", "agent_id").unwrap();
 
+        assert_eq!(agent_path(&agent_id), "/api/agents/agent%2Fa%3Fb%23c");
         assert_eq!(
             agent_skills_path(&agent_id),
             "/api/agents/agent%2Fa%3Fb%23c/skills"
@@ -2305,6 +2525,14 @@ constraints = ["codex"]
         assert_eq!(
             agent_skills_sync_path(&agent_id),
             "/api/agents/agent%2Fa%3Fb%23c/skills/sync"
+        );
+        assert_eq!(
+            company_skills_path("company/a?b#c"),
+            "/api/companies/company%2Fa%3Fb%23c/skills"
+        );
+        assert_eq!(
+            company_skill_path("company/a?b#c", "skill/a?b#c"),
+            "/api/companies/company%2Fa%3Fb%23c/skills/skill%2Fa%3Fb%23c"
         );
     }
 
