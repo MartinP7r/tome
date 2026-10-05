@@ -875,7 +875,6 @@ impl CompanySkillIndex {
 #[derive(Debug, Clone)]
 struct CompanySkillListItem {
     id: String,
-    attached_agent_count: Option<u64>,
 }
 
 impl CurlPaperclipBoundary {
@@ -903,15 +902,9 @@ impl CurlPaperclipBoundary {
     fn fetch_company_skill_index(&self, company_id: &str) -> Result<CompanySkillIndex> {
         let value = self.request("GET", &company_skills_path(company_id), None)?;
         let list = parse_company_skill_list(company_id, &value)?;
-        let mut index = CompanySkillIndex::default();
-        for skill in list {
-            if skill.attached_agent_count.is_none_or(|count| count > 0) {
-                let value =
-                    self.request("GET", &company_skill_path(company_id, &skill.id), None)?;
-                add_company_skill_detail_to_index(&mut index, &value)?;
-            }
-        }
-        Ok(index)
+        build_company_skill_index(&list, |skill_id| {
+            self.request("GET", &company_skill_path(company_id, skill_id), None)
+        })
     }
 }
 
@@ -1634,14 +1627,24 @@ fn parse_company_skill_list(
                 !id.trim().is_empty(),
                 "Paperclip company '{company_id}' skill list item included an empty id"
             );
-            Ok(CompanySkillListItem {
-                id: id.to_string(),
-                attached_agent_count: skill
-                    .get("attachedAgentCount")
-                    .and_then(|count| count.as_u64()),
-            })
+            Ok(CompanySkillListItem { id: id.to_string() })
         })
         .collect()
+}
+
+fn build_company_skill_index(
+    list: &[CompanySkillListItem],
+    mut fetch_detail: impl FnMut(&str) -> Result<serde_json::Value>,
+) -> Result<CompanySkillIndex> {
+    let mut index = CompanySkillIndex::default();
+    for skill in list {
+        // Summary attachment counts can be stale or partial. Detail
+        // usedByAgents is the authoritative desired-state source.
+        let value = fetch_detail(&skill.id)
+            .with_context(|| format!("failed to fetch Paperclip company skill '{}'", skill.id))?;
+        add_company_skill_detail_to_index(&mut index, &value)?;
+    }
+    Ok(index)
 }
 
 fn add_company_skill_detail_to_index(
@@ -2488,17 +2491,34 @@ constraints = ["codex"]
     }
 
     #[test]
-    fn company_skill_list_keeps_unknown_attachment_counts_fetchable() {
+    fn company_skill_index_preserves_zero_count_desired_attachments() {
         let value = serde_json::json!([
-            { "id": "skill-a", "attachedAgentCount": 2 },
-            { "id": "skill-b" }
+            { "id": "skill-a", "attachedAgentCount": 0 }
         ]);
+        let list = parse_company_skill_list("company-a", &value).unwrap();
+        let mut fetched = Vec::new();
 
-        let items = parse_company_skill_list("company-a", &value).unwrap();
+        let index = build_company_skill_index(&list, |skill_id| {
+            fetched.push(skill_id.to_string());
+            Ok(serde_json::json!({
+                "key": "company/review",
+                "usedByAgents": [
+                    { "id": "agent-a", "desired": true }
+                ]
+            }))
+        })
+        .unwrap();
+        let state = index.read_agent_skills(&AgentId::new("agent-a", "agent_id").unwrap());
 
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].attached_agent_count, Some(2));
-        assert_eq!(items[1].attached_agent_count, None);
+        assert_eq!(fetched, vec!["skill-a"]);
+        assert_eq!(
+            state
+                .desired_skills
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["company/review"]
+        );
     }
 
     #[test]
