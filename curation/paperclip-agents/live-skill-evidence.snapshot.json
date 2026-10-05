@@ -1,0 +1,31 @@
+{
+  "paperclip_company_skills_read_at": "2026-10-03T12:38:25Z",
+  "skills": [
+    {
+      "id": "b01320ae-a9d0-4b4f-bc2a-11369709c574",
+      "key": "local/fbfe9eb2f4/rtk-command-output",
+      "slug": "rtk-command-output",
+      "name": "rtk-command-output",
+      "description": "Use RTK (Rust Token Killer) to keep shell output concise in Paperclip Codex runs. Apply for output-heavy repository inspection, tests, builds, logs, Git, JSON, and search commands.",
+      "source": null,
+      "provenance": null,
+      "constraints": null,
+      "compatible_constraints": null,
+      "attached_agent_count": 7,
+      "founding_engineer_desired": true
+    },
+    {
+      "id": "cfa45993-3618-49df-8d5d-4cc0cc28f7c4",
+      "key": "local/d64eaed4a6/using-tome",
+      "slug": "using-tome",
+      "name": "using-tome",
+      "description": "Use when setting up Tome, adding skill repositories or local skill directories, syncing skills across AI tools, changing Tome directory roles or machine preferences, diagnosing missing skills or failed syncs, or recovering a Tome-managed skill library.",
+      "source": null,
+      "provenance": null,
+      "constraints": null,
+      "compatible_constraints": null,
+      "attached_agent_count": 0,
+      "founding_engineer_desired": false
+    }
+  ]
+}
