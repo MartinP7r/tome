@@ -621,6 +621,9 @@ fn show_directory_summary(directories: &BTreeMap<DirectoryName, DirectoryConfig>
 
     let table = render_directory_summary_table(directories, term_cols);
     eprintln!("{table}");
+    eprintln!(
+        "Role legend: managed = read-only package-manager source; synced = discovered and distributed; source = discovered only; target = distributed only"
+    );
     eprintln!();
 }
 
@@ -659,7 +662,7 @@ fn render_directory_summary_table(
         rows.push([
             name.to_string(),
             cfg.directory_type.to_string(),
-            cfg.role().description().to_string(),
+            cfg.role().kebab_case().to_string(),
             crate::paths::collapse_home(&cfg.path),
         ]);
     }
@@ -1270,6 +1273,9 @@ mod tests {
         );
 
         let rendered = render_directory_summary_table(&dirs, 120);
+        assert!(rendered.contains("synced"));
+        assert!(rendered.contains("source"));
+        assert!(!rendered.contains("Synced (skills discovered here AND distributed here)"));
 
         // Assert: every `│` (vertical-bar) divider in the header row
         // appears at the same VISIBLE column index as in body rows. We
