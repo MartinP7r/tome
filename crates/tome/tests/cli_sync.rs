@@ -2,6 +2,7 @@ use assert_cmd::cargo::cargo_bin_cmd;
 use assert_fs::TempDir;
 use predicates::prelude::*;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command as StdCommand;
 
 mod common;
@@ -39,6 +40,77 @@ fn git_init(dir: &std::path::Path) {
     }
 }
 
+fn git_with_config(dir: &Path, args: &[&str], global_config: &Path) {
+    let output = StdCommand::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_CONFIG")
+        .env_remove("GIT_CONFIG_COUNT")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", global_config)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed with {}: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+struct FileGitSkillRepo {
+    remote: PathBuf,
+    global_config: PathBuf,
+}
+
+fn init_bare_file_git_repo_with_skill(tmp: &Path, skill_name: &str) -> FileGitSkillRepo {
+    let global_config = tmp.join("isolated-gitconfig");
+    std::fs::write(&global_config, "").unwrap();
+
+    let seed = tmp.join("git-seed");
+    std::fs::create_dir_all(&seed).unwrap();
+    git_with_config(&seed, &["init", "-b", "main"], &global_config);
+    git_with_config(
+        &seed,
+        &["config", "--local", "user.email", "test@test.com"],
+        &global_config,
+    );
+    git_with_config(
+        &seed,
+        &["config", "--local", "user.name", "Test"],
+        &global_config,
+    );
+    git_with_config(
+        &seed,
+        &["config", "--local", "commit.gpgsign", "false"],
+        &global_config,
+    );
+    create_skill(&seed.join("skills"), skill_name);
+    git_with_config(&seed, &["add", "skills"], &global_config);
+    git_with_config(
+        &seed,
+        &["commit", "-m", "add file git skill fixture"],
+        &global_config,
+    );
+
+    let remote = tmp.join("git-remote.git");
+    let seed_arg = seed.to_str().unwrap();
+    let remote_arg = remote.to_str().unwrap();
+    git_with_config(
+        tmp,
+        &["clone", "--bare", seed_arg, remote_arg],
+        &global_config,
+    );
+
+    FileGitSkillRepo {
+        remote,
+        global_config,
+    }
+}
+
 fn assert_target_copy(path: &Path) {
     assert!(
         path.join("SKILL.md").is_file(),
@@ -49,6 +121,90 @@ fn assert_target_copy(path: &Path) {
         !path.is_symlink(),
         "target deployment should be a real copied directory: {}",
         path.display()
+    );
+}
+
+#[test]
+fn sync_clones_file_git_directory_and_copies_to_target() {
+    let tmp = TempDir::new().unwrap();
+    let repo = init_bare_file_git_repo_with_skill(tmp.path(), "git-pipeline-skill");
+
+    let library_dir = tmp.path().join("library");
+    let target_dir = tmp.path().join("target");
+    std::fs::create_dir_all(&library_dir).unwrap();
+    std::fs::create_dir_all(&target_dir).unwrap();
+
+    let config_path = tmp.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        format!("library_dir = \"{}\"\n", library_dir.display()),
+    )
+    .unwrap();
+    write_test_profile(
+        tmp.path(),
+        &format!(
+            "[directories.test-target]\npath = \"{}\"\ntype = \"directory\"\nrole = \"target\"\n",
+            target_dir.display()
+        ),
+    );
+
+    let remote_url = format!("file://{}", repo.remote.display());
+    tome()
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "add",
+            &remote_url,
+            "--name",
+            "file-git-skills",
+            "--subdir",
+            "skills",
+        ])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success();
+
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", &repo.global_config)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("test-target: 1 copied"));
+
+    let cloned_repos: Vec<_> = std::fs::read_dir(tmp.path().join("repos"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect();
+    assert_eq!(
+        cloned_repos.len(),
+        1,
+        "sync should create one git cache clone"
+    );
+    assert!(
+        cloned_repos[0]
+            .join("skills/git-pipeline-skill/SKILL.md")
+            .is_file(),
+        "cached clone should contain the subdir-scoped skill"
+    );
+
+    let library_skill = library_dir.join("git-pipeline-skill");
+    assert!(
+        library_skill.join("SKILL.md").is_file(),
+        "git skill should be consolidated into the canonical library"
+    );
+    assert!(
+        !library_skill.is_symlink(),
+        "canonical git skill should be a real copied directory"
+    );
+
+    let target_skill = target_dir.join("git-pipeline-skill");
+    assert_target_copy(&target_skill);
+    assert_eq!(
+        std::fs::read_to_string(library_skill.join("SKILL.md")).unwrap(),
+        std::fs::read_to_string(target_skill.join("SKILL.md")).unwrap(),
+        "target copy should match the canonical library content"
     );
 }
 
