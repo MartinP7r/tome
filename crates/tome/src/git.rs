@@ -469,6 +469,197 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clone_repo_with_branch_checks_out_shallow_branch_tip() {
+        run_in_isolated_git_test(
+            "git::tests::clone_repo_with_branch_checks_out_shallow_branch_tip",
+            || {
+                let tmp = TempDir::new().unwrap();
+                let repo = LocalBareRepo::new(tmp.path());
+                let dest = tmp.path().join("clone-feature");
+
+                clone_repo(
+                    &repo.file_url(),
+                    &dest,
+                    Some("feature"),
+                    None,
+                    None,
+                    &NullSink,
+                    &CancelToken::new(),
+                )
+                .unwrap();
+
+                assert_eq!(read_head_sha(&dest).unwrap(), repo.feature_sha);
+                assert_eq!(
+                    git_stdout(&dest, &["rev-parse", "--abbrev-ref", "HEAD"]).unwrap(),
+                    "feature"
+                );
+                assert_shallow_repo(&dest);
+            },
+        );
+    }
+
+    #[test]
+    fn clone_repo_with_rev_fetches_and_resets_to_pinned_commit() {
+        run_in_isolated_git_test(
+            "git::tests::clone_repo_with_rev_fetches_and_resets_to_pinned_commit",
+            || {
+                let tmp = TempDir::new().unwrap();
+                let repo = LocalBareRepo::new(tmp.path());
+                let dest = tmp.path().join("clone-rev");
+
+                clone_repo(
+                    &repo.file_url(),
+                    &dest,
+                    Some("main"),
+                    None,
+                    Some(&repo.first_sha),
+                    &NullSink,
+                    &CancelToken::new(),
+                )
+                .unwrap();
+
+                assert_eq!(read_head_sha(&dest).unwrap(), repo.first_sha);
+                assert_shallow_repo(&dest);
+            },
+        );
+    }
+
+    #[test]
+    fn update_repo_fast_forwards_branch_tip() {
+        run_in_isolated_git_test("git::tests::update_repo_fast_forwards_branch_tip", || {
+            let tmp = TempDir::new().unwrap();
+            let repo = LocalBareRepo::new(tmp.path());
+            let dest = tmp.path().join("clone-main");
+
+            clone_repo(
+                &repo.file_url(),
+                &dest,
+                Some("main"),
+                None,
+                None,
+                &NullSink,
+                &CancelToken::new(),
+            )
+            .unwrap();
+            assert_eq!(read_head_sha(&dest).unwrap(), repo.main_sha);
+
+            let new_sha = commit_file(
+                &repo.work_dir,
+                "main.txt",
+                "main branch tip after update\n",
+                "advance main",
+            );
+            let bare_arg = repo.bare_dir.to_str().unwrap();
+            run_git(&repo.work_dir, &["push", bare_arg, "main"]);
+
+            update_repo(
+                &dest,
+                Some("main"),
+                None,
+                None,
+                &NullSink,
+                &CancelToken::new(),
+            )
+            .unwrap();
+
+            assert_eq!(read_head_sha(&dest).unwrap(), new_sha);
+            assert_shallow_repo(&dest);
+        });
+    }
+
+    /// Run Git subprocess tests in a clean child process so they cannot inherit
+    /// user-level Git configuration. Production commands deliberately respect
+    /// user Git configuration, so this isolation belongs at the test boundary.
+    fn run_in_isolated_git_test(test_name: &str, test: impl FnOnce()) {
+        if std::env::var_os("TOME_GIT_TEST_CHILD").is_some() {
+            test();
+            return;
+        }
+
+        let config = TempDir::new().unwrap();
+        let config_path = config.path().join("gitconfig");
+        std::fs::write(&config_path, "").unwrap();
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", test_name, "--nocapture"])
+            .env("TOME_GIT_TEST_CHILD", "1")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", config_path)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "protocol.file.allow")
+            .env("GIT_CONFIG_VALUE_0", "always")
+            .env_remove("GIT_CONFIG")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated Git test {test_name} failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    struct LocalBareRepo {
+        bare_dir: PathBuf,
+        work_dir: PathBuf,
+        first_sha: String,
+        main_sha: String,
+        feature_sha: String,
+    }
+
+    impl LocalBareRepo {
+        fn new(root: &Path) -> Self {
+            let work_dir = root.join("seed");
+            std::fs::create_dir_all(&work_dir).unwrap();
+            run_git(&work_dir, &["init", "--initial-branch", "main"]);
+            configure_test_identity(&work_dir);
+
+            let first_sha = commit_file(&work_dir, "shared.txt", "base\n", "base commit");
+
+            run_git(&work_dir, &["switch", "-c", "feature"]);
+            let feature_sha = commit_file(
+                &work_dir,
+                "feature.txt",
+                "feature branch tip\n",
+                "feature commit",
+            );
+
+            run_git(&work_dir, &["switch", "main"]);
+            let main_sha = commit_file(&work_dir, "main.txt", "main branch tip\n", "main commit");
+
+            let bare_dir = root.join("upstream.git");
+            let work_arg = work_dir.to_str().unwrap();
+            let bare_arg = bare_dir.to_str().unwrap();
+            run_git(root, &["clone", "--bare", work_arg, bare_arg]);
+
+            Self {
+                bare_dir,
+                work_dir,
+                first_sha,
+                main_sha,
+                feature_sha,
+            }
+        }
+
+        fn file_url(&self) -> String {
+            format!("file://{}", self.bare_dir.display())
+        }
+    }
+
+    fn commit_file(repo_dir: &Path, name: &str, contents: &str, message: &str) -> String {
+        std::fs::write(repo_dir.join(name), contents).unwrap();
+        run_git(repo_dir, &["add", name]);
+        run_git(repo_dir, &["commit", "-m", message]);
+        git_stdout(repo_dir, &["rev-parse", "HEAD"]).unwrap()
+    }
+
+    fn assert_shallow_repo(repo_dir: &Path) {
+        assert_eq!(
+            git_stdout(repo_dir, &["rev-parse", "--is-shallow-repository"]).unwrap(),
+            "true"
+        );
+    }
+
     fn run_git(dir: &Path, args: &[&str]) {
         let out = std::process::Command::new("git")
             .args(args)
@@ -476,6 +667,10 @@ mod tests {
             .env_remove("GIT_DIR")
             .env_remove("GIT_WORK_TREE")
             .env_remove("GIT_INDEX_FILE")
+            .env_remove("GIT_CONFIG")
+            .env_remove("GIT_CONFIG_COUNT")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", dir.join(".gitconfig-empty"))
             .output()
             .unwrap();
         assert!(
