@@ -318,6 +318,7 @@ fn add_local(config: &mut Config, opts: AddOptions<'_>, path: PathBuf) -> Result
         role: opts.role,
         git_ref: None,
         subdir: None,
+        git_url: None,
         override_applied: false,
     };
     let resolved_role = opts
@@ -451,7 +452,8 @@ fn add_git(config: &mut Config, opts: AddOptions<'_>, input: &str) -> Result<()>
     };
 
     let dir_config = DirectoryConfig {
-        path: PathBuf::from(&resolved_url),
+        path: PathBuf::new(),
+        git_url: Some(resolved_url.clone()),
         directory_type: DirectoryType::Git,
         role: Some(DirectoryRole::Source),
         git_ref,
@@ -915,9 +917,10 @@ mod tests {
 
         let dir_name = DirectoryName::new("shipswift-skills").unwrap();
         let entry = config.directories.get(&dir_name).expect("directory added");
+        assert!(entry.path.as_os_str().is_empty());
         assert_eq!(
-            entry.path,
-            PathBuf::from("https://github.com/signerlabs/shipswift-skills")
+            entry.git_url.as_deref(),
+            Some("https://github.com/signerlabs/shipswift-skills")
         );
         assert!(matches!(entry.git_ref, Some(GitRef::Branch(ref b)) if b == "main"));
         assert_eq!(entry.subdir.as_deref(), Some("skills"));

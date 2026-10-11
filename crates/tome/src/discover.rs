@@ -739,6 +739,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             );
@@ -1456,6 +1457,7 @@ mod tests {
                 role: Some(DirectoryRole::Source),
                 git_ref: None,
                 subdir: Some("skills".to_string()),
+                git_url: None,
                 override_applied: false,
             },
         );

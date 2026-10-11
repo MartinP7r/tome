@@ -284,13 +284,12 @@ pub(crate) fn gather_with_profile(
         .iter()
         .map(|(name, dir_config)| {
             let role = dir_config.role();
-            let effective_path = resolved_paths
-                .get(name)
-                .map(|(path, _)| path)
-                .unwrap_or(&dir_config.path);
+            let effective_path = resolved_paths.get(name).map(|(path, _)| path);
             let skill_count = if role.is_discovery() {
                 // For discovery directories, count SKILL.md subdirs
-                count_skill_dirs(effective_path).map_err(|e| e.to_string())
+                effective_path
+                    .map(|path| count_skill_dirs(path).map_err(|e| e.to_string()))
+                    .unwrap_or(Ok(0))
             } else {
                 // For target-only directories, count existing symlinks
                 count_symlinks(&dir_config.path).map_err(|e| e.to_string())
@@ -306,10 +305,11 @@ pub(crate) fn gather_with_profile(
                 directory_type: dir_config.directory_type.to_string(),
                 role_description: role.description().to_string(),
                 role,
-                path: dir_config.path.display().to_string(),
-                effective_scan_path: resolved_paths
-                    .get(name)
-                    .map(|(path, _)| path.display().to_string()),
+                path: dir_config
+                    .git_url()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| dir_config.path.display().to_string()),
+                effective_scan_path: effective_path.map(|path| path.display().to_string()),
                 skill_count: skill_count.into(),
                 warnings,
                 override_applied: dir_config.override_applied,
@@ -838,6 +838,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -893,11 +894,12 @@ mod tests {
             directories: BTreeMap::from([(
                 DirectoryName::new("remote").unwrap(),
                 DirectoryConfig {
-                    path: url.into(),
+                    path: PathBuf::new(),
                     directory_type: DirectoryType::Git,
                     role: Some(DirectoryRole::Source),
                     git_ref: None,
                     subdir: None,
+                    git_url: Some(url.to_string()),
                     override_applied: false,
                 },
             )]),
@@ -930,6 +932,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -962,6 +965,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -1229,6 +1233,7 @@ mod tests {
                     role: Some(DirectoryRole::Source),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -1260,6 +1265,7 @@ mod tests {
                     role: Some(DirectoryRole::Source),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: true,
                 },
             )]),

@@ -1935,8 +1935,14 @@ fn resolve_git_directories(
             continue;
         }
 
-        let url = dir_config.path.to_string_lossy();
-        let cache_dir = git::repo_cache_dir(&repos_dir, &url);
+        let Some(url) = dir_config.git_url() else {
+            warn!(
+                "Git directory '{}' is missing its explicit remote URL",
+                name
+            );
+            continue;
+        };
+        let cache_dir = git::repo_cache_dir(&repos_dir, url);
         // Must be a *repository*, not merely an existing directory. A clone that
         // failed part-way leaves the directory behind without `.git`; treating
         // that as "already cloned" sends it down the fetch/reset path, where git
@@ -1993,7 +1999,7 @@ fn resolve_git_directories(
             }
             debug!("Cloning git directory '{}'...", name);
             git::clone_repo(
-                &url,
+                url,
                 &cache_dir,
                 dir_config.git_ref.as_ref().and_then(|r| r.branch()),
                 dir_config.git_ref.as_ref().and_then(|r| r.tag()),
@@ -3395,6 +3401,7 @@ mod tests {
                 role: Some(DirectoryRole::Source),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -3406,6 +3413,7 @@ mod tests {
                 role: Some(DirectoryRole::Synced),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );

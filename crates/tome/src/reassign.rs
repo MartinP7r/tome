@@ -438,6 +438,7 @@ mod tests {
                 role: None,
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -626,6 +627,7 @@ mod tests {
                 role: Some(DirectoryRole::Target), // target-only
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );

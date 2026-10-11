@@ -331,7 +331,9 @@ pub fn plan(
         if *other_name == dir_name {
             continue;
         }
-        let skills_dir = &other_config.path;
+        let Some(skills_dir) = other_config.local_path() else {
+            continue;
+        };
         if !skills_dir.is_dir() {
             continue;
         }
@@ -362,9 +364,8 @@ pub fn plan(
     // Check for cached git repo
     let git_cache_path = if dir_config.directory_type == DirectoryType::Git {
         let url_str = dir_config
-            .path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("directory '{}' path is not valid UTF-8", name))?;
+            .git_url()
+            .ok_or_else(|| anyhow::anyhow!("directory '{}' is missing its Git remote URL", name))?;
         let cache_dir = crate::git::repo_cache_dir(&paths.repos_dir(), url_str);
         if cache_dir.exists() {
             Some(cache_dir)
@@ -579,7 +580,10 @@ pub(crate) fn skill_plan(
         if !role.is_distribution() {
             continue;
         }
-        let skills_dir = match crate::config::expand_tilde(&other_config.path) {
+        let Some(local_path) = other_config.local_path() else {
+            continue;
+        };
+        let skills_dir = match crate::config::expand_tilde(local_path) {
             Ok(p) => p,
             Err(_) => continue,
         };
@@ -754,6 +758,7 @@ mod tests {
                 role: Some(DirectoryRole::Source),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -765,6 +770,7 @@ mod tests {
                 role: Some(DirectoryRole::Target),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );

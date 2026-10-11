@@ -454,7 +454,9 @@ fn profile_path(config_path: &Path, name: &DirectoryName) -> Result<PathBuf> {
 fn save_profile(profile: &MachineProfile, path: &Path) -> Result<()> {
     let mut for_save = profile.clone();
     for directory in for_save.directories.values_mut() {
-        directory.path = crate::paths::unexpand_tilde(&directory.path);
+        if directory.git_url.is_none() {
+            directory.path = crate::paths::unexpand_tilde(&directory.path);
+        }
     }
     let content =
         toml::to_string_pretty(&for_save).context("failed to serialize machine profile")?;

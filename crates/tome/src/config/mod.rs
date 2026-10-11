@@ -153,7 +153,9 @@ impl Config {
     pub(crate) fn expand_tildes(&mut self) -> Result<()> {
         self.library_dir = expand_tilde(&self.library_dir)?;
         for dir in self.directories.values_mut() {
-            dir.path = expand_tilde(&dir.path)?;
+            if dir.git_url.is_none() {
+                dir.path = expand_tilde(&dir.path)?;
+            }
         }
         Ok(())
     }
@@ -197,7 +199,9 @@ impl Config {
         let mut for_save = self.clone();
         for_save.library_dir = crate::paths::unexpand_tilde(&for_save.library_dir);
         for dir in for_save.directories.values_mut() {
-            dir.path = crate::paths::unexpand_tilde(&dir.path);
+            if dir.git_url.is_none() {
+                dir.path = crate::paths::unexpand_tilde(&dir.path);
+            }
         }
 
         // 3. TOML round-trip: serialize, parse back, re-serialize, compare the
@@ -517,6 +521,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -529,6 +534,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -541,6 +547,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -553,6 +560,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -577,6 +585,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -589,6 +598,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -601,6 +611,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -613,6 +624,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -716,6 +728,7 @@ skills_dir = "/tmp"
                     role: None,
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -766,6 +779,7 @@ skills_dir = "/tmp"
                     role: Some(DirectoryRole::Target),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -797,6 +811,7 @@ skills_dir = "/tmp"
                     role: Some(DirectoryRole::Synced),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -826,6 +841,7 @@ skills_dir = "/tmp"
                     role: Some(DirectoryRole::Synced),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -952,6 +968,7 @@ skills_dir = "/tmp"
                     role: Some(DirectoryRole::Source),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -984,6 +1001,7 @@ skills_dir = "/tmp"
                     role: Some(DirectoryRole::Source),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: true,
                 },
             )]),

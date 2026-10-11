@@ -384,22 +384,14 @@ pub struct GitAdapter {
 impl GitAdapter {
     /// Construct a `GitAdapter` from a git-type [`DirectoryConfig`].
     ///
-    /// Returns `Err` if the directory's `path` field (which holds the git URL
-    /// for git-type directories) is not valid UTF-8. Mirrors the existing
-    /// pattern at `crate::remove::plan` (remove.rs:241-244).
+    /// Returns `Err` if the directory is missing its explicit Git remote URL.
     ///
     /// The cache directory is precomputed at construction so repeat calls to
     /// trait methods don't re-hash the URL.
     pub fn for_directory(dir_config: &DirectoryConfig, paths: &TomePaths) -> Result<Self> {
         let url = dir_config
-            .path
-            .to_str()
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "git directory path is not valid UTF-8: {}",
-                    dir_config.path.display()
-                )
-            })?
+            .git_url()
+            .context("git directory is missing its explicit remote URL")?
             .to_string();
         let cache_dir = git::repo_cache_dir(&paths.repos_dir(), &url);
         Ok(Self {
@@ -1239,11 +1231,12 @@ mod tests {
 
     fn make_test_dir_config(path: std::path::PathBuf, git_ref: Option<GitRef>) -> DirectoryConfig {
         DirectoryConfig {
-            path,
+            path: std::path::PathBuf::new(),
             directory_type: crate::config::DirectoryType::Git,
             role: None,
             git_ref,
             subdir: None,
+            git_url: Some(path.to_string_lossy().into_owned()),
             override_applied: false,
         }
     }

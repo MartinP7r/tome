@@ -227,6 +227,7 @@ mod tests {
                     role: Some(DirectoryRole::Managed),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -252,6 +253,7 @@ mod tests {
                     role: Some(DirectoryRole::Managed),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -276,6 +278,7 @@ mod tests {
                     role: Some(DirectoryRole::Target),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -302,6 +305,7 @@ mod tests {
                     role: None,
                     git_ref: Some(GitRef::Branch("main".to_string())),
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -328,6 +332,7 @@ mod tests {
                     role: None,
                     git_ref: None,
                     subdir: Some("nested".to_string()),
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -354,6 +359,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -366,6 +372,7 @@ mod tests {
                         git_ref: None,
 
                         subdir: None,
+                        git_url: None,
                         override_applied: false,
                     },
                 ),
@@ -401,6 +408,7 @@ mod tests {
             role,
             git_ref: None,
             subdir: None,
+            git_url: None,
             override_applied: false,
         }
     }
@@ -597,14 +605,20 @@ mod tests {
         let library_dir = tmp.join("lib");
         let entry_path = tmp.join("entry");
         let mut directories = BTreeMap::new();
+        let is_git = dir_type == DirectoryType::Git;
         directories.insert(
             DirectoryName::new("combo").unwrap(),
             DirectoryConfig {
-                path: entry_path,
+                path: if is_git {
+                    PathBuf::new()
+                } else {
+                    entry_path.clone()
+                },
                 directory_type: dir_type,
                 role: Some(role),
                 git_ref: None,
                 subdir: None,
+                git_url: is_git.then(|| entry_path.display().to_string()),
                 override_applied: false,
             },
         );
