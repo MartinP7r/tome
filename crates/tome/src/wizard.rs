@@ -665,7 +665,9 @@ fn render_directory_summary_table(
             name.to_string(),
             cfg.directory_type.to_string(),
             cfg.role().kebab_case().to_string(),
-            crate::paths::collapse_home(&cfg.path),
+            cfg.git_url()
+                .map(str::to_owned)
+                .unwrap_or_else(|| crate::paths::collapse_home(&cfg.path)),
         ]);
     }
 
@@ -1239,6 +1241,19 @@ mod tests {
     // a future removal of the `ansi` feature (or other styling drift)
     // would re-introduce the misalignment and fail this test.
     // -------------------------------------------------------------------
+
+    #[test]
+    fn directory_summary_displays_git_source_url() {
+        let (name, directory) = tome_skills_directory().unwrap();
+        let directories = BTreeMap::from([(name, directory)]);
+
+        let rendered = render_directory_summary_table(&directories, 120);
+
+        assert!(
+            rendered.contains(TOME_REPOSITORY_URL),
+            "Git source summary should show its remote URL: {rendered}"
+        );
+    }
 
     #[test]
     fn show_directory_summary_aligns_header_with_body_under_ansi() {

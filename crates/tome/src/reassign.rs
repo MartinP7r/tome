@@ -143,6 +143,14 @@ pub fn plan(
         );
     }
 
+    if to_dir_config.directory_type == crate::config::DirectoryType::Git {
+        anyhow::bail!(
+            "directory '{}' is a Git source and cannot receive reassigned skills; \
+             choose a local discovery or mixed-role directory.",
+            to_dir,
+        );
+    }
+
     // Determine action: does the skill already exist in the target directory?
     let target_dir_for_skill = crate::config::expand_tilde(&to_dir_config.path)?.join(skill_name);
     let target_skill_md = target_dir_for_skill.join("SKILL.md");
@@ -607,6 +615,63 @@ mod tests {
         assert!(
             plan.from_directory.is_none(),
             "Unowned input → from_directory = None"
+        );
+    }
+
+    #[test]
+    fn plan_rejects_git_source_as_reassign_destination() {
+        use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
+        use crate::manifest::SkillEntry;
+        use crate::validation::ContentHash;
+
+        let tmp = TempDir::new().unwrap();
+        let paths = test_paths(&tmp);
+        write_skill_in_dir(paths.library_dir(), "test-skill", "library content");
+
+        let target_name = DirectoryName::new("remote-source").unwrap();
+        let mut config = Config::default();
+        config.directories.insert(
+            target_name,
+            DirectoryConfig {
+                path: PathBuf::new(),
+                directory_type: DirectoryType::Git,
+                role: Some(DirectoryRole::Source),
+                git_ref: None,
+                subdir: None,
+                git_url: Some("https://example.invalid/skills.git".to_string()),
+                override_applied: false,
+            },
+        );
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new("test-skill").unwrap(),
+            SkillEntry::new(
+                PathBuf::from("/some/path"),
+                DirectoryName::new("old-dir").unwrap(),
+                ContentHash::new("a".repeat(64)).unwrap(),
+                false,
+            ),
+        );
+
+        let error = plan(
+            "test-skill",
+            "remote-source",
+            &config,
+            &paths,
+            &manifest,
+            false,
+            false,
+        )
+        .expect_err("Git remotes cannot be destinations for reassigned local skills")
+        .to_string();
+
+        assert!(
+            error.contains("Git"),
+            "error should explain the Git restriction: {error}"
+        );
+        assert!(
+            error.contains("local"),
+            "error should suggest a local destination: {error}"
         );
     }
 

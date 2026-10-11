@@ -284,7 +284,16 @@ pub(crate) fn gather_with_profile(
         .iter()
         .map(|(name, dir_config)| {
             let role = dir_config.role();
-            let effective_path = resolved_paths.get(name).map(|(path, _)| path);
+            let effective_path = resolved_paths
+                .get(name)
+                .map(|(path, _)| path.as_path())
+                .or_else(|| {
+                    if role.is_discovery() {
+                        dir_config.local_path()
+                    } else {
+                        None
+                    }
+                });
             let skill_count = if role.is_discovery() {
                 // For discovery directories, count SKILL.md subdirs
                 effective_path
@@ -855,6 +864,42 @@ mod tests {
         assert_eq!(report.directories[0].name, "test");
         // Source path doesn't exist — count_skill_dirs returns Ok(0)
         assert_eq!(report.directories[0].skill_count.count, Some(0));
+    }
+
+    #[test]
+    fn gather_counts_skills_in_local_discovery_directory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let source = tmp.path().join("local-source");
+        std::fs::create_dir_all(source.join("skill-a")).unwrap();
+        std::fs::write(source.join("skill-a/SKILL.md"), "# skill-a").unwrap();
+        let library = tmp.path().join("library");
+        std::fs::create_dir_all(&library).unwrap();
+
+        let config = Config {
+            library_dir: library.clone(),
+            directories: BTreeMap::from([(
+                DirectoryName::new("local-source").unwrap(),
+                DirectoryConfig {
+                    path: source.clone(),
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Source),
+                    git_ref: None,
+                    subdir: None,
+                    git_url: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(tmp.path().join("tome-home"), library).unwrap();
+
+        let report = gather(&config, &paths).unwrap();
+        let directory = &report.directories[0];
+        assert_eq!(directory.skill_count.count, Some(1));
+        assert_eq!(
+            directory.effective_scan_path.as_deref(),
+            Some(source.to_str().unwrap())
+        );
     }
 
     #[test]
