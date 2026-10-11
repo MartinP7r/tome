@@ -360,8 +360,8 @@ pub(crate) fn resolved_paths_from_lockfile_cache(
             continue;
         }
 
-        let url = dir_config.path.to_string_lossy();
-        let cache_dir = crate::git::repo_cache_dir(&repos_dir, &url);
+        let url = dir_config.git_url().unwrap_or("<missing Git remote URL>");
+        let cache_dir = crate::git::repo_cache_dir(&repos_dir, url);
         if !crate::git::is_git_repo(&cache_dir) {
             warnings.push(format!(
                 "cannot resolve git directory '{name}' — cache dir {} has no usable Git checkout; \
@@ -761,7 +761,7 @@ mod tests {
         // Round-trip through TOML so we set the `pub(crate) role` field via
         // serde — avoids depending on field visibility from this module.
         let toml_src = format!(
-            "path = \"{}\"\ntype = \"git\"\nrole = \"source\"\n{}",
+            "url = \"{}\"\ntype = \"git\"\nrole = \"source\"\n{}",
             url,
             match subdir {
                 Some(s) => format!("subdir = \"{}\"\n", s),
@@ -787,9 +787,17 @@ mod tests {
     ) -> Config {
         let mut config_toml = format!("library_dir = \"{}\"\n", library_dir.display());
         for (name, dc) in &dirs {
+            let location = match dc.directory_type {
+                DirectoryType::Git => format!(
+                    "url = \"{}\"",
+                    dc.git_url().expect("Git fixture must have a remote URL")
+                ),
+                DirectoryType::Directory | DirectoryType::ClaudePlugins => {
+                    format!("path = \"{}\"", dc.path.display())
+                }
+            };
             config_toml.push_str(&format!(
-                "\n[directories.{name}]\npath = \"{}\"\ntype = \"{}\"\nrole = \"{}\"\n",
-                dc.path.display(),
+                "\n[directories.{name}]\n{location}\ntype = \"{}\"\nrole = \"{}\"\n",
                 match dc.directory_type {
                     DirectoryType::Git => "git",
                     DirectoryType::Directory => "directory",

@@ -272,8 +272,18 @@ impl GitRef {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(try_from = "DirectoryConfigRaw", into = "DirectoryConfigRaw")]
 pub struct DirectoryConfig {
-    /// Path to the directory
+    /// Local filesystem path for directory and Claude plugin entries.
+    ///
+    /// This is empty for Git entries. Git remotes live in [`Self::git_url`]
+    /// and resolved clone/cache paths are supplied by the sync/discovery layer.
     pub path: PathBuf,
+
+    /// Explicit Git remote identity for Git entries.
+    ///
+    /// This is `None` for local filesystem and Claude plugin entries. Keeping
+    /// this separate from `path` prevents URLs from being passed to filesystem
+    /// helpers by accident.
+    pub git_url: Option<String>,
 
     /// How to discover skills in this directory
     pub directory_type: DirectoryType,
@@ -306,6 +316,16 @@ impl DirectoryConfig {
         self.role
             .unwrap_or_else(|| self.directory_type.default_role())
     }
+
+    /// Return the local filesystem path, if this is not a Git entry.
+    pub fn local_path(&self) -> Option<&Path> {
+        self.git_url.is_none().then_some(self.path.as_path())
+    }
+
+    /// Return the Git remote identity, if this is a Git entry.
+    pub fn git_url(&self) -> Option<&str> {
+        self.git_url.as_deref()
+    }
 }
 
 /// On-disk shape for `DirectoryConfig` — preserves the v0.6 TOML schema
@@ -315,7 +335,12 @@ impl DirectoryConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct DirectoryConfigRaw {
-    path: PathBuf,
+    /// Legacy local path, or legacy Git URL. New Git configs use `url`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+    /// Explicit Git remote identity in the current wire format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
     #[serde(rename = "type", default)]
     directory_type: DirectoryType,
     #[serde(default)]
@@ -361,8 +386,37 @@ impl TryFrom<DirectoryConfigRaw> for DirectoryConfig {
                 );
             }
         };
+        let (path, git_url) = match raw.directory_type.clone() {
+            DirectoryType::Git => {
+                if raw.path.is_some() && raw.url.is_some() {
+                    anyhow::bail!(
+                        "directory of type 'git' cannot set both legacy 'path' and 'url'"
+                    );
+                }
+                let url = raw
+                    .url
+                    .or_else(|| raw.path.map(|path| path.to_string_lossy().into_owned()))
+                    .ok_or_else(|| anyhow::anyhow!("directory of type 'git' requires 'url'"))?;
+                (PathBuf::new(), Some(url))
+            }
+            _ => {
+                if raw.url.is_some() {
+                    anyhow::bail!(
+                        "directory of type '{}' cannot set 'url'",
+                        raw.directory_type
+                    );
+                }
+                (
+                    raw.path
+                        .ok_or_else(|| anyhow::anyhow!("directory requires 'path'"))?,
+                    None,
+                )
+            }
+        };
+
         Ok(Self {
-            path: raw.path,
+            path,
+            git_url,
             directory_type: raw.directory_type,
             role: raw.role,
             git_ref,
@@ -383,7 +437,8 @@ impl From<DirectoryConfig> for DirectoryConfigRaw {
         // `override_applied` is intentionally dropped: it's machine-local
         // state, never written to portable `tome.toml`.
         Self {
-            path: d.path,
+            path: d.git_url.is_none().then_some(d.path),
+            url: d.git_url,
             directory_type: d.directory_type,
             role: d.role,
             branch,
@@ -587,6 +642,7 @@ path = "/tmp/foo"
         let config: Config = toml::from_str(toml_str).unwrap();
         let foo = config.directories.get("foo").expect("foo missing");
         assert_eq!(foo.path, PathBuf::from("/tmp/foo"));
+        assert!(foo.git_url.is_none());
         assert_eq!(foo.directory_type, DirectoryType::Directory);
         assert_eq!(foo.role(), DirectoryRole::Synced);
     }
@@ -619,8 +675,63 @@ branch = "main"
             .get("remote-skills")
             .expect("remote-skills missing");
         assert_eq!(dir.directory_type, DirectoryType::Git);
+        assert!(dir.path.as_os_str().is_empty());
+        assert_eq!(dir.git_url.as_deref(), Some("/tmp/remote"));
         assert_eq!(dir.role(), DirectoryRole::Source);
         assert_eq!(dir.git_ref.as_ref().and_then(|r| r.branch()), Some("main"));
+    }
+
+    #[test]
+    fn config_parses_explicit_git_url_and_serializes_it_separately() {
+        let config: Config = toml::from_str(
+            r#"
+[directories.remote-skills]
+url = "https://github.com/example/skills"
+type = "git"
+branch = "main"
+"#,
+        )
+        .unwrap();
+        let dir = config.directories.get("remote-skills").unwrap();
+
+        assert!(dir.path.as_os_str().is_empty());
+        assert_eq!(
+            dir.local_path(),
+            None,
+            "Git entries must not expose a filesystem path"
+        );
+        assert_eq!(dir.git_url(), Some("https://github.com/example/skills"));
+
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("url = \"https://github.com/example/skills\""));
+        assert!(!serialized.contains("path = \"https://github.com/example/skills\""));
+    }
+
+    #[test]
+    fn config_rejects_git_directory_with_both_legacy_path_and_url() {
+        let err = toml::from_str::<Config>(
+            r#"
+[directories.remote-skills]
+path = "https://github.com/example/skills"
+url = "https://github.com/example/other"
+type = "git"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("both legacy 'path' and 'url'"));
+    }
+
+    #[test]
+    fn config_rejects_url_on_local_directory() {
+        let err = toml::from_str::<Config>(
+            r#"
+[directories.local-skills]
+url = "https://github.com/example/skills"
+type = "directory"
+"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("cannot set 'url'"));
     }
 
     #[test]

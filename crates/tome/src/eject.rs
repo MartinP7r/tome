@@ -136,6 +136,7 @@ mod tests {
                 git_ref: None,
 
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );

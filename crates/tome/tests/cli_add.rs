@@ -271,7 +271,7 @@ fn test_add_expands_bare_github_slug() {
 
     let config_content = std::fs::read_to_string(&config_path).unwrap();
     assert!(
-        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        config_content.contains("url = \"https://github.com/planetscale/database-skills\""),
         "config should store the expanded URL: {config_content}"
     );
     assert!(
@@ -343,7 +343,7 @@ fn test_add_bare_slug_with_name_override() {
         "user-supplied --name must win: {config_content}"
     );
     assert!(
-        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        config_content.contains("url = \"https://github.com/planetscale/database-skills\""),
         "slug must still be expanded when --name is set: {config_content}"
     );
 }
@@ -373,7 +373,7 @@ fn test_add_bare_slug_with_branch_flag() {
 
     let config_content = std::fs::read_to_string(&config_path).unwrap();
     assert!(
-        config_content.contains("path = \"https://github.com/planetscale/database-skills\""),
+        config_content.contains("url = \"https://github.com/planetscale/database-skills\""),
         "expanded URL not in config: {config_content}"
     );
     assert!(

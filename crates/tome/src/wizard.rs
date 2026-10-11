@@ -399,6 +399,7 @@ pub(crate) fn run(
                 role: Some(role),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -518,7 +519,8 @@ fn tome_skills_directory() -> Result<(DirectoryName, DirectoryConfig)> {
     Ok((
         DirectoryName::new(TOME_SKILLS_NAME)?,
         DirectoryConfig {
-            path: PathBuf::from(TOME_REPOSITORY_URL),
+            path: PathBuf::new(),
+            git_url: Some(TOME_REPOSITORY_URL.to_string()),
             directory_type: DirectoryType::Git,
             role: Some(DirectoryRole::Source),
             git_ref: None,
@@ -531,15 +533,15 @@ fn tome_skills_directory() -> Result<(DirectoryName, DirectoryConfig)> {
 fn has_tome_skills_source(directories: &BTreeMap<DirectoryName, DirectoryConfig>) -> bool {
     directories.values().any(|directory| {
         directory.directory_type == DirectoryType::Git
-            && is_tome_repository_url(&directory.path)
+            && directory
+                .git_url
+                .as_deref()
+                .is_some_and(is_tome_repository_url)
             && directory.subdir.as_deref() == Some(TOME_SKILLS_SUBDIR)
     })
 }
 
-fn is_tome_repository_url(path: &Path) -> bool {
-    let Some(url) = path.to_str() else {
-        return false;
-    };
+fn is_tome_repository_url(url: &str) -> bool {
     let url = url.trim_end_matches('/');
     let url = url.strip_suffix(".git").unwrap_or(url);
 
@@ -663,7 +665,9 @@ fn render_directory_summary_table(
             name.to_string(),
             cfg.directory_type.to_string(),
             cfg.role().kebab_case().to_string(),
-            crate::paths::collapse_home(&cfg.path),
+            cfg.git_url()
+                .map(str::to_owned)
+                .unwrap_or_else(|| crate::paths::collapse_home(&cfg.path)),
         ]);
     }
 
@@ -738,6 +742,7 @@ fn configure_directories(
                     role: Some(kd.default_role),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             );
@@ -1238,6 +1243,19 @@ mod tests {
     // -------------------------------------------------------------------
 
     #[test]
+    fn directory_summary_displays_git_source_url() {
+        let (name, directory) = tome_skills_directory().unwrap();
+        let directories = BTreeMap::from([(name, directory)]);
+
+        let rendered = render_directory_summary_table(&directories, 120);
+
+        assert!(
+            rendered.contains(TOME_REPOSITORY_URL),
+            "Git source summary should show its remote URL: {rendered}"
+        );
+    }
+
+    #[test]
     fn show_directory_summary_aligns_header_with_body_under_ansi() {
         use crate::config::{DirectoryConfig, DirectoryName, DirectoryRole, DirectoryType};
         use std::collections::BTreeMap;
@@ -1257,6 +1275,7 @@ mod tests {
                 role: Some(DirectoryRole::Synced),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -1268,6 +1287,7 @@ mod tests {
                 role: Some(DirectoryRole::Source),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );
@@ -1531,6 +1551,7 @@ mod tests {
             role: Some(role),
             git_ref: None,
             subdir: None,
+            git_url: None,
             override_applied: false,
         }
     }
@@ -1603,9 +1624,10 @@ mod tests {
     fn tome_skills_directory_is_valid_git_source() {
         let (name, directory) = tome_skills_directory().unwrap();
         assert_eq!(name.as_str(), "tome-skills");
+        assert!(directory.path.as_os_str().is_empty());
         assert_eq!(
-            directory.path,
-            PathBuf::from("https://github.com/MartinP7r/tome")
+            directory.git_url.as_deref(),
+            Some("https://github.com/MartinP7r/tome")
         );
         assert_eq!(directory.directory_type, DirectoryType::Git);
         assert_eq!(directory.role(), DirectoryRole::Source);
@@ -1659,7 +1681,7 @@ mod tests {
             "ssh://git@github.com/MartinP7r/tome.git",
         ] {
             let mut directory = tome_skills_directory().unwrap().1;
-            directory.path = PathBuf::from(url);
+            directory.git_url = Some(url.to_string());
             let mut directories = BTreeMap::new();
             directories.insert(DirectoryName::new("official").unwrap(), directory);
 
@@ -1680,7 +1702,7 @@ mod tests {
             ("https://github.com/MartinP7r/tome.git", "other-skills"),
         ] {
             let mut directory = tome_skills_directory().unwrap().1;
-            directory.path = PathBuf::from(url);
+            directory.git_url = Some(url.to_string());
             directory.subdir = Some(subdir.to_string());
             let mut directories = BTreeMap::new();
             directories.insert(DirectoryName::new("existing").unwrap(), directory);
@@ -2147,6 +2169,7 @@ mod tests {
                 role: Some(DirectoryRole::Synced),
                 git_ref: None,
                 subdir: None,
+                git_url: None,
                 override_applied: false,
             },
         );

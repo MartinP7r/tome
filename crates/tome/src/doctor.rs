@@ -1962,6 +1962,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -2424,6 +2425,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -2447,6 +2449,7 @@ mod tests {
                     git_ref: None,
 
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -2662,6 +2665,7 @@ mod tests {
                     role: Some(DirectoryRole::Target),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: false,
                 },
             )]),
@@ -2694,6 +2698,7 @@ mod tests {
                     role: Some(DirectoryRole::Target),
                     git_ref: None,
                     subdir: None,
+                    git_url: None,
                     override_applied: true,
                 },
             )]),
