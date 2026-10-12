@@ -734,7 +734,21 @@ pub(crate) fn cleanup_legacy_source_symlinks(
             return Ok(LegacySourceCleanupResult::empty(false));
         }
     };
-    if !source_metadata.is_dir() || source_metadata.file_type().is_symlink() {
+    if source_metadata.file_type().is_symlink() {
+        match std::fs::metadata(source_dir) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Ok(LegacySourceCleanupResult::empty(false)),
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %source_dir.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because source symlink target cannot be inspected"
+                );
+                return Ok(LegacySourceCleanupResult::empty(false));
+            }
+        }
+    } else if !source_metadata.is_dir() {
         return Ok(LegacySourceCleanupResult::empty(false));
     }
 
@@ -792,7 +806,21 @@ pub(crate) fn cleanup_legacy_source_symlinks(
         }
 
         let record_path = crate::deployment::record_path(config_dir, source_name, &skill);
-        if record_exists_or_unreadable(&record_path) || !path.is_symlink() {
+        match deployment_record_exists(&record_path) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %record_path.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because deployment record cannot be inspected"
+                );
+                complete = false;
+                continue;
+            }
+        }
+        if !path.is_symlink() {
             continue;
         }
 
@@ -835,10 +863,22 @@ pub(crate) fn cleanup_legacy_source_symlinks(
             continue;
         }
 
-        // Recheck immediately before unlinking so a replaced real file or a
-        // newly recorded copy is not mistaken for the inspected legacy link.
-        if !path.is_symlink() || record_exists_or_unreadable(&record_path) {
+        if !path.is_symlink() {
             continue;
+        }
+        match deployment_record_exists(&record_path) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %record_path.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because deployment record cannot be inspected"
+                );
+                complete = false;
+                continue;
+            }
         }
         let current_target = match std::fs::read_link(&path) {
             Ok(target) => target,
@@ -919,10 +959,11 @@ fn legacy_link_provenance_is_elsewhere(
     !owners.is_empty() && owners.into_iter().all(|owner| owner != source_name)
 }
 
-fn record_exists_or_unreadable(record_path: &Path) -> bool {
+fn deployment_record_exists(record_path: &Path) -> std::io::Result<bool> {
     match std::fs::symlink_metadata(record_path) {
-        Ok(_) => true,
-        Err(error) => error.kind() != std::io::ErrorKind::NotFound,
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
     }
 }
 
@@ -1032,6 +1073,88 @@ mod tests {
         assert_eq!(result.removed, 0);
         assert!(result.failures.is_empty());
         assert!(!result.complete, "an unreadable source scan is incomplete");
+    }
+
+    fn manifest_owned_by(source: &str, skill: &str) -> Manifest {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new(skill).unwrap(),
+            crate::manifest::SkillEntry::new(
+                PathBuf::from("/tmp/upstream").join(skill),
+                DirectoryName::new(source).unwrap(),
+                crate::validation::test_hash("abc"),
+                false,
+            ),
+        );
+        manifest
+    }
+
+    #[test]
+    fn cleanup_legacy_links_scans_symlinked_former_target_root() {
+        let tmp = TempDir::new().unwrap();
+        let real_source = tmp.path().join("real-source");
+        let configured_source = tmp.path().join("configured-source");
+        let library = tmp.path().join("library");
+        let config = tmp.path().join("config");
+        std::fs::create_dir(&real_source).unwrap();
+        std::fs::create_dir_all(library.join("legacy-skill")).unwrap();
+        unix_fs::symlink(&real_source, &configured_source).unwrap();
+        unix_fs::symlink(
+            library.join("legacy-skill"),
+            real_source.join("legacy-skill"),
+        )
+        .unwrap();
+
+        let result = cleanup_legacy_source_symlinks(
+            &configured_source,
+            &DirectoryName::new("former-target").unwrap(),
+            &library,
+            &config,
+            &manifest_owned_by("upstream", "legacy-skill"),
+            None,
+            LegacySourceCleanupOptions {
+                role_transition_recorded: true,
+                report_ambiguous_candidates: false,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.removed, 1);
+        assert!(result.complete);
+        assert!(!real_source.join("legacy-skill").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_retains_transition_when_deployment_record_probe_is_unreadable() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source");
+        let library = tmp.path().join("library");
+        let config = tmp.path().join("config");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir_all(library.join("legacy-skill")).unwrap();
+        std::fs::create_dir(&config).unwrap();
+        std::fs::write(config.join("deployments"), "not a directory").unwrap();
+        unix_fs::symlink(library.join("legacy-skill"), source.join("legacy-skill")).unwrap();
+
+        let result = cleanup_legacy_source_symlinks(
+            &source,
+            &DirectoryName::new("former-target").unwrap(),
+            &library,
+            &config,
+            &manifest_owned_by("upstream", "legacy-skill"),
+            None,
+            LegacySourceCleanupOptions {
+                role_transition_recorded: true,
+                report_ambiguous_candidates: false,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.removed, 0);
+        assert!(!result.complete);
+        assert!(source.join("legacy-skill").is_symlink());
     }
 
     fn config_with_dir(name: &str) -> crate::config::Config {
