@@ -1,7 +1,9 @@
-//! Remove stale entries from the library and broken symlinks from target directories.
+//! Remove stale entries from the library, broken target symlinks, and proven
+//! legacy distribution symlinks from source-only directories.
 //!
 //! Library cleanup compares manifest entries against currently discovered skill names.
-//! Target cleanup still removes broken symlinks pointing into the library.
+//! Target cleanup still removes broken symlinks pointing into the library; role-transition
+//! cleanup removes only provenance-backed legacy symlinks.
 //!
 //! ## Three-bucket cleanup output (UX-01)
 //!
@@ -30,14 +32,161 @@
 //! routes to stderr) — never `print!`/macro variants targeting stdout.
 
 use anyhow::{Context, Result};
-use std::collections::HashSet;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io::{IsTerminal, Write};
-use std::path::Path;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 
-use crate::config::DirectoryName;
+use crate::config::{Config, DirectoryName};
 use crate::discover::SkillName;
+use crate::lockfile::Lockfile;
 use crate::manifest::Manifest;
 use crate::paths::{points_into_library, resolve_symlink_target};
+
+const DIRECTORY_ROLE_HISTORY_FILENAME: &str = ".tome-role-history.json";
+const DIRECTORY_ROLE_HISTORY_VERSION: u32 = 1;
+
+/// Last successfully synced local distribution directories. This allows the
+/// cleanup pass to distinguish a recorded `synced`/`target` -> `source`
+/// transition for the same directory object from an always-source directory
+/// that merely contains a user-created symlink into the library.
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct DirectoryRoleHistory {
+    version: u32,
+    distribution_directories: BTreeMap<DirectoryName, DirectoryIdentity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct DirectoryIdentity {
+    configured_path: PathBuf,
+    canonical_path: PathBuf,
+    device: u64,
+    inode: u64,
+}
+
+impl DirectoryIdentity {
+    fn from_path(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        if !metadata.is_dir() {
+            return None;
+        }
+        Some(Self {
+            configured_path: path.to_path_buf(),
+            canonical_path: std::fs::canonicalize(path).ok()?,
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        })
+    }
+
+    /// If the path cannot be inspected, retain history only for the identical
+    /// configured path so a transient permission error can be retried. When
+    /// inspection succeeds, require the same directory object, not just a
+    /// path that may have been deleted and recreated.
+    fn matches_current_path(&self, path: &Path) -> bool {
+        match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_dir() => match std::fs::canonicalize(path) {
+                Ok(canonical_path) => {
+                    self.configured_path == path
+                        && self.canonical_path == canonical_path
+                        && self.device == metadata.dev()
+                        && self.inode == metadata.ino()
+                }
+                Err(_) => self.configured_path == path,
+            },
+            Ok(_) => false,
+            Err(error) => {
+                error.kind() != std::io::ErrorKind::NotFound && self.configured_path == path
+            }
+        }
+    }
+}
+
+impl DirectoryRoleHistory {
+    pub(crate) fn was_distribution_directory(&self, name: &DirectoryName, path: &Path) -> bool {
+        self.distribution_directories
+            .get(name)
+            .is_some_and(|previous| previous.matches_current_path(path))
+    }
+}
+
+/// Load role history. Missing, unreadable, malformed, or unsupported history
+/// is treated as unavailable, never as evidence that a directory was a target.
+pub(crate) fn load_directory_role_history(
+    config_dir: &Path,
+) -> Result<Option<DirectoryRoleHistory>> {
+    let path = config_dir.join(DIRECTORY_ROLE_HISTORY_FILENAME);
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()));
+        }
+    };
+    let history: DirectoryRoleHistory = serde_json::from_str(&contents)
+        .with_context(|| format!("failed to parse {}", path.display()))?;
+    if history.version != DIRECTORY_ROLE_HISTORY_VERSION {
+        anyhow::bail!(
+            "unsupported directory role history version {} in {}",
+            history.version,
+            path.display()
+        );
+    }
+    Ok(Some(history))
+}
+
+/// Persist effective local distribution directories after sync. Retain prior
+/// role evidence only for source directories whose transition cleanup could
+/// not complete, so later syncs can retry without re-cleaning completed ones.
+pub(crate) fn save_directory_role_history(
+    config: &Config,
+    config_dir: &Path,
+    previous: Option<&DirectoryRoleHistory>,
+    incomplete_source_transitions: &BTreeSet<DirectoryName>,
+) -> Result<()> {
+    let mut distribution_directories: BTreeMap<_, _> = config
+        .directories
+        .iter()
+        .filter_map(|(name, directory)| {
+            if !directory.role().is_distribution() {
+                return None;
+            }
+            let path = directory.local_path()?;
+            if !path.is_absolute() {
+                return None;
+            }
+            DirectoryIdentity::from_path(path).map(|identity| (name.clone(), identity))
+        })
+        .collect();
+    if let Some(previous) = previous {
+        for name in incomplete_source_transitions {
+            let Some(directory) = config.directories.get(name) else {
+                continue;
+            };
+            if directory.role() != crate::config::DirectoryRole::Source {
+                continue;
+            }
+            let Some(path) = directory.local_path() else {
+                continue;
+            };
+            let Some(previous_identity) = previous.distribution_directories.get(name) else {
+                continue;
+            };
+            if previous_identity.matches_current_path(path) {
+                distribution_directories.insert(name.clone(), previous_identity.clone());
+            }
+        }
+    }
+    let history = DirectoryRoleHistory {
+        version: DIRECTORY_ROLE_HISTORY_VERSION,
+        distribution_directories,
+    };
+    crate::deployment::atomic_write_json(
+        &config_dir.join(DIRECTORY_ROLE_HISTORY_FILENAME),
+        &history,
+        "directory role history",
+    )
+}
 
 /// One library skill whose distribution symlink was removed because the
 /// skill is excluded by the effective profile or destination route. Surfaced
@@ -59,9 +208,9 @@ pub enum DistributionCleanupOp {
     Remove,
 }
 
-/// One per-symlink cleanup failure aggregated by `cleanup_disabled_from_target`
-/// so a single ENOENT/EACCES on one stale symlink does not abort the whole
-/// sync's cleanup output. Mirrors the SAFE-01 aggregation pattern from
+/// One per-symlink cleanup failure aggregated by sync's cleanup passes so a single
+/// ENOENT/EACCES on one stale symlink does not abort the whole sync's cleanup
+/// output. Mirrors the SAFE-01 aggregation pattern from
 /// `crate::marketplace::InstallFailure` and `crate::remove::RemoveFailure`.
 #[derive(Debug)]
 pub struct DistributionCleanupFailure {
@@ -520,6 +669,304 @@ pub(crate) fn cleanup_pool_library() -> CleanupResult {
     CleanupResult::default()
 }
 
+/// Remove proven legacy Tome distribution symlinks from recorded former targets.
+///
+/// Old Tome versions materialized library skills as symlinks. Once a former
+/// distribution directory is configured as source-only, current distribution
+/// cleanup no longer visits it. Remove only when saved role history confirms
+/// the same named local directory was previously a distribution directory,
+/// and the link matches the legacy materialization convention and has
+/// provenance from a *different* source. Without history, preserve and report
+/// matching candidates rather than guessing their ownership.
+/// A copy deployment record is affirmative evidence of post-migration state, so
+/// it is preserved even if the path has since been replaced with a symlink.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct LegacySourceCleanupOptions {
+    pub(crate) role_transition_recorded: bool,
+    pub(crate) report_ambiguous_candidates: bool,
+    pub(crate) dry_run: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct LegacySourceCleanupResult {
+    pub(crate) removed: usize,
+    pub(crate) failures: Vec<DistributionCleanupFailure>,
+    /// False means inspection or a filesystem operation was incomplete; keep
+    /// prior role evidence so the transition can be retried safely.
+    pub(crate) complete: bool,
+}
+
+impl LegacySourceCleanupResult {
+    fn empty(complete: bool) -> Self {
+        Self {
+            removed: 0,
+            failures: Vec::new(),
+            complete,
+        }
+    }
+}
+
+pub(crate) fn cleanup_legacy_source_symlinks(
+    source_dir: &Path,
+    source_name: &DirectoryName,
+    library_dir: &Path,
+    config_dir: &Path,
+    manifest: &Manifest,
+    old_lockfile: Option<&Lockfile>,
+    options: LegacySourceCleanupOptions,
+) -> Result<LegacySourceCleanupResult> {
+    if !source_dir.is_absolute() {
+        return Ok(LegacySourceCleanupResult::empty(false));
+    }
+
+    let source_metadata = match std::fs::symlink_metadata(source_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(LegacySourceCleanupResult::empty(true));
+        }
+        Err(error) => {
+            tracing::warn!(
+                directory = %source_name,
+                path = %source_dir.display(),
+                error = %error,
+                "skipping legacy symlink cleanup because source directory cannot be inspected"
+            );
+            return Ok(LegacySourceCleanupResult::empty(false));
+        }
+    };
+    if source_metadata.file_type().is_symlink() {
+        match std::fs::metadata(source_dir) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Ok(LegacySourceCleanupResult::empty(false)),
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %source_dir.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because source symlink target cannot be inspected"
+                );
+                return Ok(LegacySourceCleanupResult::empty(false));
+            }
+        }
+    } else if !source_metadata.is_dir() {
+        return Ok(LegacySourceCleanupResult::empty(false));
+    }
+
+    let Ok(source_root) = std::fs::canonicalize(source_dir) else {
+        return Ok(LegacySourceCleanupResult::empty(false));
+    };
+    let Ok(library_root) = std::fs::canonicalize(library_dir) else {
+        return Ok(LegacySourceCleanupResult::empty(false));
+    };
+    // Never scan the library itself, one of its descendants, or an ancestor
+    // that contains it as a source-only directory.
+    if source_root.starts_with(&library_root) || library_root.starts_with(&source_root) {
+        return Ok(LegacySourceCleanupResult::empty(false));
+    }
+
+    let entries = match std::fs::read_dir(source_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::warn!(
+                directory = %source_name,
+                path = %source_dir.display(),
+                error = %error,
+                "skipping legacy symlink cleanup because source directory cannot be read"
+            );
+            return Ok(LegacySourceCleanupResult::empty(false));
+        }
+    };
+    let mut removed = 0;
+    let mut failures = Vec::new();
+    let mut complete = true;
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %source_dir.display(),
+                    error = %error,
+                    "skipping unreadable entry during legacy symlink cleanup"
+                );
+                complete = false;
+                continue;
+            }
+        };
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Ok(skill) = SkillName::new(name) else {
+            continue;
+        };
+        if !legacy_link_provenance_is_elsewhere(source_name, &skill, manifest, old_lockfile) {
+            continue;
+        }
+
+        let record_path = crate::deployment::record_path(config_dir, source_name, &skill);
+        match deployment_record_exists(&record_path) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %record_path.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because deployment record cannot be inspected"
+                );
+                complete = false;
+                continue;
+            }
+        }
+        if !path.is_symlink() {
+            continue;
+        }
+
+        let raw_target = match std::fs::read_link(&path) {
+            Ok(target) => target,
+            Err(error) => {
+                failures.push(DistributionCleanupFailure {
+                    directory: source_name.clone(),
+                    skill: name.to_string(),
+                    path,
+                    operation: DistributionCleanupOp::ReadLink,
+                    error,
+                });
+                complete = false;
+                continue;
+            }
+        };
+        let resolved_target = resolve_symlink_target(&path, &raw_target);
+        let expected_target = library_root.join(skill.as_str());
+        let canonical_target = canonicalize_target_or_parent(&resolved_target);
+        if !points_into_library(&resolved_target, &library_root)
+            || canonical_target != expected_target
+        {
+            continue;
+        }
+
+        if !options.role_transition_recorded {
+            if options.report_ambiguous_candidates {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %path.display(),
+                    "preserving potential legacy distribution symlink because previous directory-role history is unavailable"
+                );
+            }
+            continue;
+        }
+
+        if options.dry_run {
+            removed += 1;
+            continue;
+        }
+
+        if !path.is_symlink() {
+            continue;
+        }
+        match deployment_record_exists(&record_path) {
+            Ok(true) => continue,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    directory = %source_name,
+                    path = %record_path.display(),
+                    error = %error,
+                    "skipping legacy symlink cleanup because deployment record cannot be inspected"
+                );
+                complete = false;
+                continue;
+            }
+        }
+        let current_target = match std::fs::read_link(&path) {
+            Ok(target) => target,
+            Err(error) => {
+                failures.push(DistributionCleanupFailure {
+                    directory: source_name.clone(),
+                    skill: name.to_string(),
+                    path,
+                    operation: DistributionCleanupOp::ReadLink,
+                    error,
+                });
+                complete = false;
+                continue;
+            }
+        };
+        if current_target != raw_target {
+            continue;
+        }
+
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed += 1,
+            Err(error) => {
+                failures.push(DistributionCleanupFailure {
+                    directory: source_name.clone(),
+                    skill: name.to_string(),
+                    path,
+                    operation: DistributionCleanupOp::Remove,
+                    error,
+                });
+                complete = false;
+            }
+        }
+    }
+
+    Ok(LegacySourceCleanupResult {
+        removed,
+        failures,
+        complete,
+    })
+}
+
+fn canonicalize_target_or_parent(target: &Path) -> std::path::PathBuf {
+    if let Ok(canonical) = std::fs::canonicalize(target) {
+        return canonical;
+    }
+    let Some(parent) = target.parent() else {
+        return target.to_path_buf();
+    };
+    let Some(name) = target.file_name() else {
+        return target.to_path_buf();
+    };
+    std::fs::canonicalize(parent)
+        .map(|parent| parent.join(name))
+        .unwrap_or_else(|_| target.to_path_buf())
+}
+
+fn legacy_link_provenance_is_elsewhere(
+    source_name: &DirectoryName,
+    skill: &SkillName,
+    manifest: &Manifest,
+    old_lockfile: Option<&Lockfile>,
+) -> bool {
+    let mut owners = Vec::new();
+    if let Some(entry) = manifest.get(skill.as_str()) {
+        owners.extend(entry.source_name());
+        owners.extend(entry.previous_source());
+    }
+    if let Some(entry) = old_lockfile.and_then(|lockfile| lockfile.skills().get(skill)) {
+        owners.extend(entry.source_name.as_ref());
+        owners.extend(entry.previous_source.as_ref());
+        owners.extend(
+            entry
+                .observations
+                .iter()
+                .filter_map(|observation| observation.source_name.as_ref()),
+        );
+    }
+    !owners.is_empty() && owners.into_iter().all(|owner| owner != source_name)
+}
+
+fn deployment_record_exists(record_path: &Path) -> std::io::Result<bool> {
+    match std::fs::symlink_metadata(record_path) {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+
 /// Remove stale symlinks from a target directory.
 pub fn cleanup_target(target_dir: &Path, library_dir: &Path, dry_run: bool) -> Result<usize> {
     if !target_dir.is_dir() {
@@ -567,6 +1014,147 @@ mod tests {
 
     fn empty_config() -> crate::config::Config {
         crate::config::Config::default()
+    }
+
+    #[test]
+    fn directory_role_history_does_not_match_a_recreated_path() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("target");
+        let moved = tmp.path().join("moved-target");
+        std::fs::create_dir(&target).unwrap();
+        let previous = DirectoryIdentity::from_path(&target).unwrap();
+
+        std::fs::rename(&target, &moved).unwrap();
+        std::fs::create_dir(&target).unwrap();
+
+        assert!(
+            !previous.matches_current_path(&target),
+            "a new directory at the same path must not inherit old target history"
+        );
+    }
+
+    #[test]
+    fn cleanup_legacy_source_symlinks_skips_unreadable_source_directory() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source");
+        let library = tmp.path().join("library");
+        let config = tmp.path().join("config");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&library).unwrap();
+
+        let original_mode = std::fs::metadata(&source).unwrap().permissions().mode();
+        let mut unreadable = std::fs::metadata(&source).unwrap().permissions();
+        unreadable.set_mode(0o300);
+        std::fs::set_permissions(&source, unreadable).unwrap();
+        let read_error = std::fs::read_dir(&source).unwrap_err();
+        assert_eq!(read_error.kind(), std::io::ErrorKind::PermissionDenied);
+
+        let result = cleanup_legacy_source_symlinks(
+            &source,
+            &DirectoryName::new("source").unwrap(),
+            &library,
+            &config,
+            &Manifest::default(),
+            None,
+            LegacySourceCleanupOptions {
+                role_transition_recorded: false,
+                report_ambiguous_candidates: false,
+                dry_run: false,
+            },
+        );
+
+        let mut restored = std::fs::metadata(&source).unwrap().permissions();
+        restored.set_mode(original_mode);
+        std::fs::set_permissions(&source, restored).unwrap();
+
+        let result = result.expect("unreadable source root should be skipped");
+        assert_eq!(result.removed, 0);
+        assert!(result.failures.is_empty());
+        assert!(!result.complete, "an unreadable source scan is incomplete");
+    }
+
+    fn manifest_owned_by(source: &str, skill: &str) -> Manifest {
+        let mut manifest = Manifest::default();
+        manifest.insert(
+            SkillName::new(skill).unwrap(),
+            crate::manifest::SkillEntry::new(
+                PathBuf::from("/tmp/upstream").join(skill),
+                DirectoryName::new(source).unwrap(),
+                crate::validation::test_hash("abc"),
+                false,
+            ),
+        );
+        manifest
+    }
+
+    #[test]
+    fn cleanup_legacy_links_scans_symlinked_former_target_root() {
+        let tmp = TempDir::new().unwrap();
+        let real_source = tmp.path().join("real-source");
+        let configured_source = tmp.path().join("configured-source");
+        let library = tmp.path().join("library");
+        let config = tmp.path().join("config");
+        std::fs::create_dir(&real_source).unwrap();
+        std::fs::create_dir_all(library.join("legacy-skill")).unwrap();
+        unix_fs::symlink(&real_source, &configured_source).unwrap();
+        unix_fs::symlink(
+            library.join("legacy-skill"),
+            real_source.join("legacy-skill"),
+        )
+        .unwrap();
+
+        let result = cleanup_legacy_source_symlinks(
+            &configured_source,
+            &DirectoryName::new("former-target").unwrap(),
+            &library,
+            &config,
+            &manifest_owned_by("upstream", "legacy-skill"),
+            None,
+            LegacySourceCleanupOptions {
+                role_transition_recorded: true,
+                report_ambiguous_candidates: false,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.removed, 1);
+        assert!(result.complete);
+        assert!(!real_source.join("legacy-skill").is_symlink());
+    }
+
+    #[test]
+    fn cleanup_retains_transition_when_deployment_record_probe_is_unreadable() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("source");
+        let library = tmp.path().join("library");
+        let config = tmp.path().join("config");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir_all(library.join("legacy-skill")).unwrap();
+        std::fs::create_dir(&config).unwrap();
+        std::fs::write(config.join("deployments"), "not a directory").unwrap();
+        unix_fs::symlink(library.join("legacy-skill"), source.join("legacy-skill")).unwrap();
+
+        let result = cleanup_legacy_source_symlinks(
+            &source,
+            &DirectoryName::new("former-target").unwrap(),
+            &library,
+            &config,
+            &manifest_owned_by("upstream", "legacy-skill"),
+            None,
+            LegacySourceCleanupOptions {
+                role_transition_recorded: true,
+                report_ambiguous_candidates: false,
+                dry_run: false,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.removed, 0);
+        assert!(!result.complete);
+        assert!(source.join("legacy-skill").is_symlink());
     }
 
     fn config_with_dir(name: &str) -> crate::config::Config {
