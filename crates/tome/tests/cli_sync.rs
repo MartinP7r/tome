@@ -436,6 +436,273 @@ role = "target"
 }
 
 #[test]
+fn sync_role_transition_to_source_removes_only_proven_legacy_tome_symlinks() {
+    let tmp = TempDir::new().unwrap();
+    let source_dir = tmp.path().join("source");
+    let target_dir = tmp.path().join("target");
+    let library_dir = tmp.path().join("library");
+    let config_path = tmp.path().join("config.toml");
+    let external_dir = tmp.path().join("external");
+
+    create_skill(&source_dir, "legacy-skill");
+    create_skill(&source_dir, "drifted-copy");
+    create_skill(&source_dir, "recorded-symlink");
+    create_skill(&source_dir, "orphaned-skill");
+    std::fs::create_dir_all(&target_dir).unwrap();
+    std::fs::create_dir_all(&library_dir).unwrap();
+    create_skill(&external_dir, "foreign-skill");
+    std::fs::write(target_dir.join("notes.txt"), "user-owned notes\n").unwrap();
+    std::os::unix::fs::symlink(
+        external_dir.join("foreign-skill"),
+        target_dir.join("foreign-skill"),
+    )
+    .unwrap();
+
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[directories.source]
+path = "{}"
+type = "directory"
+role = "source"
+
+[directories.target]
+path = "{}"
+type = "directory"
+role = "synced"
+"#,
+            library_dir.display(),
+            source_dir.display(),
+            target_dir.display()
+        ),
+    )
+    .unwrap();
+    migrate_ordinary_fixture(&config_path);
+
+    tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target: 4 copied"));
+
+    let legacy_link = target_dir.join("legacy-skill");
+    let former_deployment_record = tmp.path().join("deployments/v1/target/legacy-skill.json");
+    assert!(legacy_link.is_dir());
+    assert!(former_deployment_record.is_file());
+    // Model a pre-copy-first Tome symlink: it predates deployment records.
+    std::fs::remove_file(former_deployment_record).unwrap();
+    std::fs::remove_dir_all(&legacy_link).unwrap();
+    std::os::unix::fs::symlink(library_dir.join("legacy-skill"), &legacy_link).unwrap();
+
+    // An orphaned legacy link remains identifiable from the old lockfile even
+    // after its library skill is removed during this sync.
+    let orphaned_link = target_dir.join("orphaned-skill");
+    let orphaned_record = tmp.path().join("deployments/v1/target/orphaned-skill.json");
+    assert!(orphaned_record.is_file());
+    std::fs::remove_file(orphaned_record).unwrap();
+    std::fs::remove_dir_all(&orphaned_link).unwrap();
+    std::os::unix::fs::symlink(library_dir.join("orphaned-skill"), &orphaned_link).unwrap();
+
+    // A symlink that replaced a recorded copy is drift, not legacy Tome output.
+    let recorded_symlink = target_dir.join("recorded-symlink");
+    std::fs::remove_dir_all(&recorded_symlink).unwrap();
+    std::os::unix::fs::symlink(library_dir.join("recorded-symlink"), &recorded_symlink).unwrap();
+
+    // A library link under a non-matching name is foreign, not Tome output.
+    std::os::unix::fs::symlink(
+        library_dir.join("legacy-skill"),
+        target_dir.join("alias-skill"),
+    )
+    .unwrap();
+
+    // Simulate a modified copy still owned by the old target deployment.
+    let drifted_copy = target_dir.join("drifted-copy");
+    std::fs::write(drifted_copy.join("SKILL.md"), "# locally drifted\n").unwrap();
+    std::fs::remove_dir_all(source_dir.join("drifted-copy")).unwrap();
+
+    let profile_path = tmp.path().join("machines/test.toml");
+    let updated_profile = std::fs::read_to_string(&profile_path)
+        .unwrap()
+        .replace("role = \"synced\"", "role = \"source\"");
+    std::fs::write(&profile_path, updated_profile).unwrap();
+
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut unreadable_permissions = std::fs::metadata(&target_dir).unwrap().permissions();
+    let original_permissions = unreadable_permissions.clone();
+    unreadable_permissions.set_mode(unreadable_permissions.mode() & !0o444);
+    std::fs::set_permissions(&target_dir, unreadable_permissions).unwrap();
+    let unreadable_sync = tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let restore_result = std::fs::set_permissions(&target_dir, original_permissions);
+    assert!(
+        restore_result.is_ok(),
+        "failed to restore source permissions"
+    );
+    assert!(
+        unreadable_sync.status.success(),
+        "sync with an unreadable former target failed: {}",
+        String::from_utf8_lossy(&unreadable_sync.stderr)
+    );
+    assert!(
+        legacy_link.is_symlink(),
+        "unreadable source must be left untouched"
+    );
+    std::fs::remove_dir_all(source_dir.join("orphaned-skill")).unwrap();
+
+    let dry_run = tome()
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "--dry-run",
+            "sync",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "dry-run sync failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(
+        legacy_link.is_symlink(),
+        "dry-run must not remove the legacy link"
+    );
+    assert!(
+        orphaned_link.is_symlink(),
+        "dry-run must preserve broken links"
+    );
+    assert!(library_dir.join("orphaned-skill").is_dir());
+
+    let output = tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "sync failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !legacy_link.is_symlink(),
+        "proven legacy Tome symlink should be removed from the former target; stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!orphaned_link.is_symlink());
+    assert!(!library_dir.join("orphaned-skill").exists());
+    assert!(target_dir.join("foreign-skill").is_symlink());
+    assert!(target_dir.join("alias-skill").is_symlink());
+    assert!(recorded_symlink.is_symlink());
+    assert!(drifted_copy.is_dir() && !drifted_copy.is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(drifted_copy.join("SKILL.md")).unwrap(),
+        "# locally drifted\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(target_dir.join("notes.txt")).unwrap(),
+        "user-owned notes\n"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Cleaned 2 stale distribution link(s)"),
+        "sync summary should report both removed legacy links; stdout was: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+#[test]
+fn sync_preserves_ambiguous_library_symlink_without_role_history() {
+    let tmp = TempDir::new().unwrap();
+    let upstream_dir = tmp.path().join("upstream");
+    let source_dir = tmp.path().join("source");
+    let library_dir = tmp.path().join("library");
+    let config_path = tmp.path().join("config.toml");
+    let history_path = tmp.path().join(".tome-role-history.json");
+
+    create_skill(&upstream_dir, "shared-skill");
+    std::fs::create_dir_all(&source_dir).unwrap();
+    std::fs::create_dir_all(&library_dir).unwrap();
+    std::os::unix::fs::symlink(
+        library_dir.join("shared-skill"),
+        source_dir.join("shared-skill"),
+    )
+    .unwrap();
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"library_dir = "{}"
+
+[directories.upstream]
+path = "{}"
+type = "directory"
+role = "source"
+
+[directories.consumer]
+path = "{}"
+type = "directory"
+role = "source"
+"#,
+            library_dir.display(),
+            upstream_dir.display(),
+            source_dir.display()
+        ),
+    )
+    .unwrap();
+    migrate_ordinary_fixture(&config_path);
+
+    let dry_run = tome()
+        .args([
+            "--config",
+            config_path.to_str().unwrap(),
+            "--dry-run",
+            "sync",
+        ])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        dry_run.status.success(),
+        "dry-run sync failed: {}",
+        String::from_utf8_lossy(&dry_run.stderr)
+    );
+    assert!(source_dir.join("shared-skill").is_symlink());
+    assert!(
+        !history_path.exists(),
+        "dry-run must not persist role history"
+    );
+
+    let output = tome()
+        .args(["--config", config_path.to_str().unwrap(), "sync"])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "sync failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        source_dir.join("shared-skill").is_symlink(),
+        "an always-source directory's ambiguous library link must be preserved without history"
+    );
+    assert!(
+        String::from_utf8_lossy(&output.stderr)
+            .contains("preserving potential legacy distribution symlink"),
+        "first upgrade should report ambiguous links; stderr was: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(history_path.is_file());
+}
+
+#[test]
 fn sync_skips_missing_configured_target_root() {
     let tmp = TempDir::new().unwrap();
     let skills_dir = tmp.path().join("skills");

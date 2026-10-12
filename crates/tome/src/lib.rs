@@ -19,8 +19,10 @@
 //! 4. **Distribute** — materialize library skills into `target` / `synced`
 //!    directories as create-only target copies.
 //! 5. **Cleanup** — three-bucket stale-skill report
-//!    (removed-from-config / missing-from-disk / now-in-exclude-list);
-//!    orphan transitions preserve library content per LIB-04.
+//!    (removed-from-config / missing-from-disk / now-in-exclude-list), plus
+//!    provenance-backed removal of legacy distribution links from source-only
+//!    directories after role changes; orphan transitions preserve library
+//!    content per LIB-04.
 //! 6. **Save** — persist manifest, lockfile, and `.gitignore`.
 //!
 //! # Public API
@@ -271,7 +273,8 @@ pub use sync_outcome::{
 ///   C: now-in-exclude-list). Use the public accessors on
 ///   [`CleanupResult`] for read-only access.
 /// - [`removed_from_targets`](Self::removed_from_targets) — total stale
-///   distribution symlinks pruned across all targets.
+///   distribution symlinks pruned from current targets and source-only directories
+///   when their legacy Tome ownership is proven.
 /// - [`reconcile`](Self::reconcile) — `None` when sync ran without a
 ///   `MarketplaceAdapter` (no `claude-plugins` directory configured).
 ///   `Some(_)` when reconcile ran; counts may all be zero on a clean
@@ -2248,6 +2251,21 @@ pub fn sync(
 
     // Load existing lockfile for diffing and reconciliation
     let old_lockfile = lockfile::load(paths.config_dir())?;
+    // Role history is advisory provenance for legacy symlink cleanup. Missing
+    // or invalid history never authorizes deletion; first-upgrade candidates
+    // are preserved and reported instead.
+    let (old_directory_role_history, role_history_can_be_updated) =
+        match cleanup::load_directory_role_history(paths.config_dir()) {
+            Ok(history) => (history, true),
+            Err(error) => {
+                tracing::warn!(
+                    path = %paths.config_dir().join(".tome-role-history.json").display(),
+                    error = %error,
+                    "directory role history is unavailable; ambiguous legacy links will be preserved"
+                );
+                (None, false)
+            }
+        };
     // Load manifest once for reconcile's edit-in-library detection. Held as
     // `mut` so apply_edit_decisions can mutate it in-memory after reconcile
     // returns — see Critical #1 refactor in the v0.11 review pass. The
@@ -2575,11 +2593,12 @@ pub fn sync(
         results
     };
 
-    // 6. Cleanup stale symlinks from distribution directories. Per-symlink
-    //    I/O failures aggregate into `distribution_cleanup_failures` (SAFE-01
-    //    pattern) so one stale ENOENT/EACCES does not erase the user-facing
-    //    Bucket A/B/C summary; sync exits non-zero at end if the slice is
-    //    non-empty.
+    // 6. Cleanup stale symlinks from current distribution directories and
+    //    proven legacy links from source-only directories after role changes.
+    //    Per-symlink I/O failures aggregate into `distribution_cleanup_failures`
+    //    (SAFE-01 pattern) so one stale ENOENT/EACCES does not erase the
+    //    user-facing Bucket A/B/C summary; sync exits non-zero at end if the
+    //    slice is non-empty.
     //    OBS-03: `cleanup` step span. Wraps target cleanup loop + the
     //    unified bucket render so the user-facing cleanup output is
     //    attributed to this step in the trace.
@@ -2595,7 +2614,12 @@ pub fn sync(
     if cancel.is_cancelled() {
         anyhow::bail!("sync cancelled");
     }
-    let (removed_from_targets, distribution_cleanup_failures, excluded_skills) = {
+    let (
+        removed_from_targets,
+        distribution_cleanup_failures,
+        excluded_skills,
+        incomplete_source_transitions,
+    ) = {
         let _span = info_span!("cleanup").entered();
         sink.emit(ProgressEvent::SyncStageStarted {
             stage: SyncStage::Cleanup,
@@ -2603,6 +2627,7 @@ pub fn sync(
         let mut removed: usize = 0;
         let mut excluded: Vec<cleanup::ExcludedSkill> = Vec::new();
         let mut failures: Vec<cleanup::DistributionCleanupFailure> = Vec::new();
+        let mut incomplete_source_transitions = std::collections::BTreeSet::new();
         for (name, dir_config) in config.distribution_dirs() {
             let skills_dir = &dir_config.path;
             removed += cleanup::cleanup_target(skills_dir, paths.library_dir(), dry_run)?;
@@ -2622,10 +2647,48 @@ pub fn sync(
             excluded.extend(dir_excluded);
             failures.extend(dir_failures);
         }
+        // A role transition removes the directory from `distribution_dirs`,
+        // so it no longer receives the normal target cleanup above. Inspect
+        // source-only local directories, but unlink only when saved role
+        // history confirms the same named directory object was previously distributed.
+        // On first upgrade, exact-looking candidates are preserved and reported.
+        for (name, dir_config) in &config.directories {
+            if dir_config.role() != config::DirectoryRole::Source {
+                continue;
+            }
+            let Some(source_dir) = dir_config.local_path() else {
+                continue;
+            };
+            if source_dir.as_os_str().is_empty() {
+                continue;
+            }
+            let role_transition_recorded = old_directory_role_history
+                .as_ref()
+                .is_some_and(|history| history.was_distribution_directory(name, source_dir));
+            let report_ambiguous_candidates = old_directory_role_history.is_none();
+            let source_result = cleanup::cleanup_legacy_source_symlinks(
+                source_dir,
+                name,
+                paths.library_dir(),
+                paths.config_dir(),
+                &manifest,
+                old_lockfile.as_ref(),
+                cleanup::LegacySourceCleanupOptions {
+                    role_transition_recorded,
+                    report_ambiguous_candidates,
+                    dry_run,
+                },
+            )?;
+            removed += source_result.removed;
+            failures.extend(source_result.failures);
+            if role_transition_recorded && !source_result.complete {
+                incomplete_source_transitions.insert(name.clone());
+            }
+        }
         sink.emit(ProgressEvent::SyncStageFinished {
             stage: SyncStage::Cleanup,
         });
-        (removed, failures, excluded)
+        (removed, failures, excluded, incomplete_source_transitions)
     };
 
     // Stage boundary: cancellation checked before the Save stage begins (D-12).
@@ -2660,6 +2723,20 @@ pub fn sync(
         generate_tome_home_gitignore(paths.config_dir())?;
         lockfile::save(&new_lockfile, paths.config_dir())
             .context("failed to save lockfile — sync completed but lockfile is stale; re-run `tome sync` to retry")?;
+        if role_history_can_be_updated
+            && let Err(error) = cleanup::save_directory_role_history(
+                config,
+                paths.config_dir(),
+                old_directory_role_history.as_ref(),
+                &incomplete_source_transitions,
+            )
+        {
+            tracing::warn!(
+                path = %paths.config_dir().join(".tome-role-history.json").display(),
+                error = %error,
+                "could not save directory role history; a later sync may retry legacy-link cleanup for this transition"
+            );
+        }
     }
     sink.emit(ProgressEvent::SyncStageFinished {
         stage: SyncStage::Save,
@@ -3026,7 +3103,7 @@ fn render_sync_report(report: &SyncReport) {
 
     if report.removed_from_targets > 0 {
         println!(
-            "  Cleaned {} stale target link(s)",
+            "  Cleaned {} stale distribution link(s)",
             style(report.removed_from_targets).yellow()
         );
     }
@@ -3175,12 +3252,13 @@ fn managed_note(count: usize) -> String {
 
 /// Generate a top-level `.gitignore` at `~/.tome/` to exclude internal files.
 ///
-/// The manifest is internal bookkeeping and should not be version-controlled.
-/// Everything else (skills/, tome.toml, tome.lock) is tracked.
+/// The manifest and local role history are internal bookkeeping and should not
+/// be version-controlled. Everything else (skills/, tome.toml, tome.lock) is tracked.
 fn generate_tome_home_gitignore(tome_home: &Path) -> Result<()> {
     let content = "# Auto-generated by tome — do not edit\n\
-                   # Internal manifest (recreated by tome sync)\n\
-                   .tome-manifest.json\n";
+                   # Internal state (recreated by tome sync)\n\
+                   .tome-manifest.json\n\
+                   .tome-role-history.json\n";
     let gitignore_path = tome_home.join(".gitignore");
 
     // Only write if content would change
