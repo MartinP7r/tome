@@ -15,6 +15,9 @@ Released CLI commands do not read or write `machine.toml`, and there is no
 global `--machine` option. Use `--config`, `--settings`, or `--tome-home` when
 the default locations are unsuitable.
 
+For manual conversion from the 0.16.4 flat config and machine preferences, see
+the [0.17.0 upgrade guide](upgrade-v0.17.md).
+
 ## Repository Policy
 
 The shared `tome.toml` is the repository policy:
@@ -24,9 +27,8 @@ library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
 [directories.team-skills]
-path = "https://github.com/myorg/team-skills"
+url = "https://github.com/myorg/team-skills"
 type = "git"
-role = "source"
 branch = "main"
 subdir = "skills"
 ```

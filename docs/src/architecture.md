@@ -16,8 +16,8 @@ The core flow that `tome sync` and `tome init` both invoke (`lib.rs::sync`):
 1. **Reconcile** (`reconcile.rs`) — Lockfile-authoritative drift detection for managed skills, run first against the previously saved manifest and `tome.lock`. Native tool adapters apply permitted installs or updates according to `managed_plugin_install` in local `settings.toml` and the `--no-install` one-run override.
 2. **Discover** (`discover.rs`) — Scan shared Git sources from repository policy and `managed`, `synced`, or `source` directories from the selected profile. Git sources are provenance inputs; they do not choose distribution destinations.
 3. **Consolidate** (`library.rs`) — Store managed and local skills as real-directory copies in the canonical library. `.tome-manifest.json` tracks SHA-256 content hashes, provenance, and shared user-managed tags. Re-consolidating the same skill preserves its tags.
-4. **Distribute** (`distribute.rs`) — Apply `RoutingPolicy` before existing origin safety checks. A configured destination route accepts a skill when any selected tag intersects its manifest tags; an explicit destination exclusion overrides the match. Untagged skills are library-only for routed destinations. Tome refuses to clobber foreign symlinks.
-5. **Cleanup** (`cleanup.rs`) — Remove stale library state and Tome-owned destination links, including links that become ineligible after a tag or route change. Foreign links remain protected.
+4. **Distribute** (`distribute.rs`) — Apply `RoutingPolicy` before existing origin safety checks. A configured destination route accepts a skill when any selected tag intersects its manifest tags; an explicit destination exclusion overrides the match. Untagged skills are library-only for routed destinations. Tome creates independent copies only at absent target paths and preserves existing target content.
+5. **Cleanup** (`cleanup.rs`) — Remove stale library state and only those legacy destination symlinks that persisted provenance proves Tome owns. Copy deployments and foreign or ambiguous links remain untouched.
 6. **Lockfile** (`lockfile.rs`) — Generate `tome.lock` capturing a reproducible snapshot of the library state for diffing on the next sync. Each entry now carries `previous_source` so cross-machine forks-in-place stay traceable to the directory that originally owned the skill.
 
 ### Other Modules
@@ -27,12 +27,12 @@ Listed roughly in alphabetical order:
 - `add.rs` — `tome add` command (plan/render/execute pattern). Git inputs register repository-owned discovery sources in shared `tome.toml`; local paths register in the selected profile. Git add has no routing prompt or `--to`, and rejects `--role`.
 - `backup.rs` — Git-backed snapshot/restore/diff for the library. The pre-restore safety snapshot is the only recovery path if a restore was accidental, so `restore` aborts if the snapshot fails (#415).
 - `browse/` — TUI browser (`tome browse`): `app.rs` (state + key handling), `ui.rs` (ratatui rendering), `theme.rs` (adaptive dark/light), `fuzzy.rs` (nucleo-matcher), and `markdown.rs` (preview rendering). Destination-ambiguous disable actions are rejected with guidance to use `tome route exclude`.
-- `cleanup.rs` — Three-bucket cleanup output (UX-01). `cleanup_library` emits Buckets A (removed-from-config — Owned-to-Unowned transition per LIB-04) and B (missing-from-disk — library entry removed); `lib.rs::cleanup_disabled_from_target` emits Bucket C (now-in-exclude-list — distribution symlinks removed, library content preserved). Bucket C entries are collected into a sibling `Vec<ExcludedSkill>` and rendered alongside A+B by `cleanup::render_cleanup_buckets` (called from `lib.rs::sync`) for a single user-facing surface. All output goes to stderr (D-UX01-4). Cleanup no longer auto-deletes orphaned skills (LIB-04); orphan transitions are the unowned-lifecycle entry point.
+- `cleanup.rs` — Three-bucket cleanup output (UX-01). `cleanup_library` emits Buckets A (removed-from-config — Owned-to-Unowned transition per LIB-04) and B (missing-from-disk — library entry removed); target cleanup removes only proven Tome-owned legacy symlinks. Copy deployments and foreign or ambiguous links are preserved. Bucket C entries are rendered alongside A+B by `cleanup::render_cleanup_buckets` for a single user-facing surface. All output goes to stderr (D-UX01-4). Cleanup no longer auto-deletes orphaned skills (LIB-04); orphan transitions are the unowned-lifecycle entry point.
 - `config/` — Effective directory and backup types plus validation. The layered resolver constructs `Config` after merging repository, profile, and project ownership.
 - `discover.rs` — Skill discovery from all configured directories. `ScanMode::{Local, ManagedNoProvenance, ManagedWith}` replaces the v0.9 `Option<Option<SkillProvenance>>` (HARD-05).
-- `distribute.rs` — Distribution to `synced` / `target` directories via Unix symlinks. HARD-09 foreign-symlink detection uses a 2x2 canonicalize-vs-lexical-prefix matrix to handle macOS `/var → /private/var`-style middle symlinks without false positives.
-- `doctor.rs` — Diagnoses library, directory, configuration, and foreign-symlink issues; surfaces Unowned skills; and safely repairs supported orphan and target-collision cases.
-- `eject.rs` — Remove all of tome's distribution symlinks (reversible via `tome sync`).
+- `distribute.rs` — Create-only copy deployment to `synced` / `target` directories. Legacy symlink safety checks preserve old links unless cleanup has provenance proving they are Tome-owned; foreign-symlink detection uses a canonicalize-vs-lexical-prefix check to handle macOS path aliases safely.
+- `doctor.rs` — Diagnoses library, directory, configuration, and foreign-symlink issues; surfaces Unowned skills; repairs only supported safe findings. Real target copies are preserved, including when an obsolete legacy finding reaches repair dispatch.
+- `eject.rs` — Remove supported Tome-owned legacy distribution symlinks; copy deployments are preserved.
 - `git.rs` — Git clone / pull for `type = "git"` directories. Shallow clones to `~/.tome/repos/<sha256>/`, with `branch`/`tag`/`rev` ref pinning and SHA captured in the lockfile.
 - `install.rs` — Shell completion installation. (The v0.9 reconcile-managed-plugins logic that used to live here moved to `reconcile.rs` in Phase 13.)
 - `library.rs` — Copies managed and local skills as real directories into the library and preserves existing manifest tags when refreshing a skill.
@@ -47,8 +47,8 @@ Listed roughly in alphabetical order:
 - `paths.rs` — `TomePaths` struct bundling `tome_home`/`library_dir`/`config_dir` to prevent parameter swaps. `expand_tilde` / `unexpand_tilde` round-trip pair (HARD-22). Symlink path utilities: resolves relative symlink targets to absolute paths and checks whether a symlink points to a given destination. `collapse_home` for display.
 - `reassign.rs` — `tome reassign <skill> --to <dir>` command. Plan/render/execute. Phase 14 D-API-1: accepts Unowned input (re-anchors `source_name: None` to a configured directory). The `--force` flag bypasses D-A1 different-content collision detection; D-A2 refuses target-only directory roles. Re-anchor clears `previous_source` (Phase 14 D-C1). HARD-19 plan/execute filesystem snapshot eliminates drift between phases. The originally-proposed `tome adopt` verb was folded into this command (vocabulary supersession; see [Unowned lifecycle](#unowned-lifecycle)).
 - `reconcile.rs` — Managed-skill reconciliation core. Resolves `managed_plugin_install` consent from local settings and invokes tool-specific marketplace adapters; tags and destination routing remain Tome-owned metadata.
-- `relocate.rs` — Move the skill library to a new path with full safety guarantees: detects cross-filesystem moves with a Phase 7 D-10 Conflict/Why/Suggestion recovery hint (HARD-18), re-anchors all distribution symlinks, calls `warn_if_unreadable_symlink` (intent-first naming per HARD-16) on unreadable managed-skill symlinks instead of silently dropping provenance.
-- `remove.rs` — `tome remove dir <name>` transitions owned entries to Unowned while preserving library content. `tome remove skill <name>` deletes an Unowned entry, its library directory, Tome-owned destination links, and lockfile state.
+- `relocate.rs` — Move the skill library to a new path with full safety guarantees: detects cross-filesystem moves with a Phase 7 D-10 Conflict/Why/Suggestion recovery hint (HARD-18), re-anchors supported legacy symlinks, and leaves independent target copies unchanged.
+- `remove.rs` — `tome remove dir <name>` transitions owned entries to Unowned while preserving library content. `tome remove skill <name>` deletes an Unowned entry, its library directory, supported Tome-owned legacy links, and lockfile state; target copies are preserved.
 - `status.rs` — Read-only summary of the selected profile, effective profile/project directories, library health, last sync, and Unowned skills.
 - `summary.rs` — `SkillSummary` shared type (NAME / LAST-KNOWN SOURCE / SYNCED columns) consumed by `status.rs` and `doctor.rs` Unowned sections. JSON-stable (`previous_source` serialises explicit `null` rather than being skipped).
 - `update.rs` — Lockfile diffing and interactive triage logic, invoked by `tome sync` to surface added/changed/removed skills and offer to disable unwanted new skills. (Per-managed-skill version reconciliation moved to `reconcile.rs` in Phase 13; this module retains only the pre-cleanup user-presented diff.)
@@ -56,7 +56,7 @@ Listed roughly in alphabetical order:
 
 ## Key Patterns
 
-- **Library-canonical model**: Discovery directories →(consolidate)→ Library →(distribute)→ Distribution directories. The library is the source of truth and every skill (managed or local) lives there as a real directory copy. Managed skills use a marketplace adapter (`reconcile.rs` + `marketplace.rs`) to pull updates from upstream; local skills are edited in-place in the library. Distribution always uses Unix symlinks (`std::os::unix::fs::symlink`) pointing into the library. Unix-only. See [Library-canonical model](#library-canonical-model) for the full mechanics.
+- **Library-canonical model**: Discovery directories →(consolidate)→ Library →(distribute)→ Distribution directories. The library is the source of truth and every skill (managed or local) lives there as a real directory copy. Managed skills use a marketplace adapter (`reconcile.rs` + `marketplace.rs`) to pull updates from upstream; local skills are edited in-place in the library. Current target deployments are independent copies created only at absent paths. Unix-only support remains because legacy symlink and managed-source operations still exist. See [Library-canonical model](#library-canonical-model) for the full mechanics.
 - **Directories are data-driven**: `config::directories` is a `BTreeMap<DirectoryName, DirectoryConfig>` — any tool can be added as a directory with a role without code changes. The wizard's `KNOWN_DIRECTORIES` registry is used purely for auto-discovery convenience.
 - **Roles, not "sources vs targets"**: A directory can be `managed` (read-only source), `source` (discovery only), `target` (distribution only), or `synced` (both — same dir is read AND written, e.g. `~/.claude/skills`). The pipeline asks each directory's role what to do with it; there is no separate "sources" vs "targets" config.
 - **`dry_run` threading**: Most operations accept a `dry_run: bool` that skips filesystem writes but still counts what *would* change. Results report the same counts either way.
@@ -65,7 +65,7 @@ Listed roughly in alphabetical order:
 - **Newtypes at boundaries**: `SkillName`, `DirectoryName`, `ContentHash`, `TomePaths` validate at construction so downstream code doesn't have to. The shared `validate_identifier` rejects empty names, path separators, `.`, and `..`.
 - **Error handling**: `anyhow` for the application; `.with_context()` adds path context to every fs error. Missing sources/paths produce stderr warnings rather than hard errors. Symlink operations always verify the link points into the library before deleting.
 - **Layered ownership**: Shared Git sources live in repository policy. Machine-wide paths and routes live in the selected profile. The nearest project `.tome.toml` adds project-only targets and routes. Local `settings.toml` selects the profile and stores runtime consent.
-- **Tags separate provenance from routing**: Sources explain where a skill came from. Manifest tags classify it, and destination-owned routes decide where it is linked.
+- **Tags separate provenance from routing**: Sources explain where a skill came from. Manifest tags classify it, and destination-owned routes decide where it is copied.
 
 ## Library-canonical model
 
@@ -223,8 +223,9 @@ captures the old `source_name` value (Phase 14 D-C1). `tome status` and
   `tome reassign` machinery; the work is identical (copy content into
   `<dir>`, update manifest `source_name`).
 - **Delete** — `tome remove skill <name>`. Confirmation prompt defaults
-  to no; `--yes`/`-y` skips. Cleans manifest entry + library directory +
-  distribution symlinks + lockfile entry. Refuses on Owned skills with a hint to run `tome remove dir`
+  to no; `--yes`/`-y` skips. Cleans the manifest entry, library directory,
+  supported Tome-owned legacy links, and lockfile entry; existing target copies
+  are preserved. Refuses on Owned skills with a hint to run `tome remove dir`
   first (D-B2).
 
 **Surfacing** — `tome status` and `tome doctor` show an

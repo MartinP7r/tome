@@ -158,14 +158,9 @@ pub enum RepairKind {
     /// `cleanup::cleanup_target` removes broken symlinks pointing into
     /// the library.
     RemoveStaleTargetSymlink,
-    /// Phase 24 (v0.16+): a real directory in a distribution dir whose
-    /// content matches a library skill byte-for-byte (typically a
-    /// pre-tome manual copy or a user dropping skills in by hand).
-    /// Repair removes the real directory and replaces it with a
-    /// symlink into the library — converging on the v0.10 distribution
-    /// model. Emit site: `check_distribution_dir` "matches library
-    /// content (should be a symlink)". Diverging content stays a
-    /// no-repair Warning (the user must reconcile).
+    /// Legacy wire variant retained for compatibility with older doctor
+    /// findings. The copy-only deployment model never emits this repair; if a
+    /// stale finding reaches the dispatcher, existing target content is kept.
     ConsolidateTargetRealDirToSymlink,
 }
 
@@ -228,9 +223,8 @@ pub enum FindingId {
         directory: DirectoryName,
         path: PathBuf,
     },
-    /// Real directory in a distribution directory whose content matches a
-    /// library skill byte-for-byte (Phase 24 — auto-fixable by replacing with
-    /// a symlink).
+    /// Legacy wire variant retained for older doctor findings. Current checks
+    /// do not emit it because target copies are never converted automatically.
     TargetRealDirToSymlink {
         directory: DirectoryName,
         path: PathBuf,
@@ -818,7 +812,7 @@ pub fn repair_kind_action_label(k: RepairKind) -> &'static str {
         RepairKind::RemoveBrokenLibrarySymlink => "will delete broken symlink",
         RepairKind::RemoveStaleTargetSymlink => "will delete stale symlink from distribution dir",
         RepairKind::ConsolidateTargetRealDirToSymlink => {
-            "will delete the real directory and replace it with a symlink into the library"
+            "legacy repair disabled; existing target directory will be preserved"
         }
     }
 }
@@ -1009,7 +1003,6 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
     // issue.
     let mut ran_library_repair = false;
     let mut ran_target_cleanup = false;
-    let mut ran_target_consolidation = false;
 
     for issue in report.all_issues() {
         match issue.repair_kind {
@@ -1038,27 +1031,10 @@ fn dispatch_repairs(report: &DoctorReport, config: &Config, paths: &TomePaths) -
                 }
             }
             Some(RepairKind::ConsolidateTargetRealDirToSymlink) => {
-                // Phase 24: batch handler — re-discover real-dir
-                // collisions per distribution dir and replace each with
-                // a symlink. Mirrors the RemoveStaleTargetSymlink
-                // pattern: the issue carries no per-instance state, the
-                // handler re-runs the same scan over `config`.
-                if !ran_target_consolidation {
-                    for (name, dir_config) in config.distribution_dirs() {
-                        let converted =
-                            consolidate_target_real_dirs(&dir_config.path, paths.library_dir())?;
-                        if converted > 0 {
-                            println!(
-                                "  {} Converted {} real director{} in {} to symlink(s)",
-                                style("fixed").green(),
-                                converted,
-                                if converted == 1 { "y" } else { "ies" },
-                                name
-                            );
-                        }
-                    }
-                    ran_target_consolidation = true;
-                }
+                println!(
+                    "  {} Legacy target-directory repair is disabled; preserving existing copies",
+                    style("skipped").yellow()
+                );
             }
             None => {
                 // Interactive-only or informational. The orphan-dir
@@ -1153,49 +1129,6 @@ pub(crate) fn repair_target_one(
     Ok(())
 }
 
-/// Replace a single matching real directory in a target dir with a symlink
-/// into the library (`TargetRealDirToSymlink`).
-pub(crate) fn consolidate_target_one(
-    _config: &Config,
-    paths: &TomePaths,
-    issue: &DiagnosticIssue,
-) -> Result<()> {
-    let Some(FindingId::TargetRealDirToSymlink { path, .. }) = issue.finding_id.as_ref() else {
-        bail!("internal: consolidate_target_one called with wrong FindingId");
-    };
-    let library_dir = paths.library_dir();
-    let Some(basename) = path.file_name().and_then(|n| n.to_str()) else {
-        bail!("target path has no valid basename: {}", path.display());
-    };
-    let library_skill = library_dir.join(basename);
-    if !library_skill.is_dir() {
-        bail!(
-            "library does not have a matching skill for {} — cannot consolidate",
-            path.display()
-        );
-    }
-    // Re-verify content matches before destroying anything (the disk may have
-    // shifted between `check()` and this call).
-    let target_hash = manifest::hash_directory(path)?;
-    let library_hash = manifest::hash_directory(&library_skill)?;
-    if target_hash != library_hash {
-        bail!(
-            "target content no longer matches library content — refusing to consolidate {}",
-            path.display()
-        );
-    }
-    std::fs::remove_dir_all(path)
-        .with_context(|| format!("failed to remove {}", path.display()))?;
-    std::os::unix::fs::symlink(&library_skill, path).with_context(|| {
-        format!(
-            "failed to create symlink {} -> {}",
-            path.display(),
-            library_skill.display()
-        )
-    })?;
-    Ok(())
-}
-
 /// Per-item repair dispatch (Phase 26 plan 26-05 / VIEW-05 / NF-04).
 ///
 /// Locates the live `DiagnosticIssue` matching `finding_id` by re-running
@@ -1226,7 +1159,7 @@ pub fn repair_one(finding_id: &FindingId, config: &Config, paths: &TomePaths) ->
         }
         RepairKind::RemoveStaleTargetSymlink => repair_target_one(config, paths, issue)?,
         RepairKind::ConsolidateTargetRealDirToSymlink => {
-            consolidate_target_one(config, paths, issue)?
+            bail!("legacy target-directory repair is disabled; existing copies are preserved")
         }
     }
     Ok(())
@@ -1715,55 +1648,6 @@ fn check_distribution_dir(
     }
 
     Ok(issues)
-}
-
-/// Phase 24: convert real directories under `target_dir` to symlinks
-/// into `library_dir` when their content matches byte-for-byte.
-///
-/// Same discovery logic as the corresponding `check_distribution_dir`
-/// branch — re-runs so the dispatcher does not need to carry per-issue
-/// path state. Diverging-content directories are skipped (the doctor
-/// check emits a no-repair Warning for those).
-///
-/// Returns the count of directories converted.
-fn consolidate_target_real_dirs(target_dir: &Path, library_dir: &Path) -> Result<usize> {
-    if !target_dir.is_dir() {
-        return Ok(0);
-    }
-    let mut fixed = 0;
-    let entries = std::fs::read_dir(target_dir)
-        .with_context(|| format!("failed to read target dir {}", target_dir.display()))?;
-    for entry in entries {
-        let entry =
-            entry.with_context(|| format!("failed to read entry in {}", target_dir.display()))?;
-        let path = entry.path();
-        if path.is_symlink() || !path.is_dir() {
-            continue;
-        }
-        let Some(basename) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let library_skill = library_dir.join(basename);
-        if !library_skill.is_dir() {
-            continue;
-        }
-        let target_hash = manifest::hash_directory(&path)?;
-        let library_hash = manifest::hash_directory(&library_skill)?;
-        if target_hash != library_hash {
-            continue;
-        }
-        std::fs::remove_dir_all(&path)
-            .with_context(|| format!("failed to remove {}", path.display()))?;
-        std::os::unix::fs::symlink(&library_skill, &path).with_context(|| {
-            format!(
-                "failed to create symlink {} -> {}",
-                path.display(),
-                library_skill.display()
-            )
-        })?;
-        fixed += 1;
-    }
-    Ok(fixed)
 }
 
 fn check_config(config: &Config) -> Result<Vec<DiagnosticIssue>> {
@@ -2348,6 +2232,67 @@ mod tests {
     }
 
     #[test]
+    fn dispatch_repairs_preserves_real_target_copy_for_legacy_repair_finding() {
+        let root = TempDir::new().unwrap();
+        let library = root.path().join("library");
+        let target = root.path().join("target");
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(&target).unwrap();
+        make_library_and_target_skill(&library, &target, "copy", false);
+        let target_copy = target.join("copy");
+        let original = std::fs::read(target_copy.join("SKILL.md")).unwrap();
+
+        // A stale/legacy finding must not be able to delete or replace a real
+        // target copy, even if a future diagnostic regression re-emits it.
+        let directory = DirectoryName::new("target").unwrap();
+        let issue = DiagnosticIssue::directory_repairable(
+            IssueSeverity::Warning,
+            "legacy matching target directory finding".to_string(),
+            RepairKind::ConsolidateTargetRealDirToSymlink,
+        )
+        .with_id(FindingId::TargetRealDirToSymlink {
+            directory: directory.clone(),
+            path: target_copy.clone(),
+        });
+        let report = DoctorReport {
+            configured: true,
+            library_issues: Vec::new(),
+            directory_issues: vec![DirectoryDiagnostic {
+                name: directory.to_string(),
+                issues: vec![issue],
+                override_applied: false,
+            }],
+            config_issues: Vec::new(),
+            unowned_skills: Vec::new(),
+        };
+        let config = Config {
+            library_dir: library.clone(),
+            directories: BTreeMap::from([(
+                directory,
+                DirectoryConfig {
+                    path: target,
+                    directory_type: DirectoryType::Directory,
+                    role: Some(DirectoryRole::Target),
+                    git_ref: None,
+                    subdir: None,
+                    git_url: None,
+                    override_applied: false,
+                },
+            )]),
+            ..Config::default()
+        };
+        let paths = TomePaths::new(root.path().to_path_buf(), library).unwrap();
+
+        dispatch_repairs(&report, &config, &paths).unwrap();
+
+        assert!(target_copy.is_dir() && !target_copy.is_symlink());
+        assert_eq!(
+            std::fs::read(target_copy.join("SKILL.md")).unwrap(),
+            original
+        );
+    }
+
+    #[test]
     fn check_distribution_dir_real_dir_diverging_is_warning_no_repair() {
         let library = TempDir::new().unwrap();
         let target = TempDir::new().unwrap();
@@ -2382,32 +2327,6 @@ mod tests {
         assert!(
             result.is_empty(),
             "real dirs with no library counterpart must be left alone, got: {result:?}"
-        );
-    }
-
-    #[test]
-    fn consolidate_target_real_dirs_replaces_with_symlink() {
-        let library = TempDir::new().unwrap();
-        let target = TempDir::new().unwrap();
-        make_library_and_target_skill(library.path(), target.path(), "twin", false);
-        // Also add a diverging dir — must NOT be touched.
-        make_library_and_target_skill(library.path(), target.path(), "left-alone", true);
-
-        let count = consolidate_target_real_dirs(target.path(), library.path()).unwrap();
-        assert_eq!(count, 1, "only the matching twin gets converted");
-
-        let twin_path = target.path().join("twin");
-        assert!(
-            twin_path.is_symlink(),
-            "twin target path must be a symlink after repair"
-        );
-        let dest = std::fs::read_link(&twin_path).unwrap();
-        assert_eq!(dest, library.path().join("twin"));
-
-        let diverged_path = target.path().join("left-alone");
-        assert!(
-            diverged_path.is_dir() && !diverged_path.is_symlink(),
-            "diverging dir must remain a real directory"
         );
     }
 

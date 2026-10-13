@@ -26,6 +26,13 @@ managed_plugin_install = "ask"
 backup_runtime = "ask"
 ```
 
+Version 0.17.0 uses create-only copies for absent target paths; copy deployment
+never overwrites an occupied path. Existing copy deployments are not refreshed,
+migrated, or removed. Separate cleanup may remove a legacy Tome-owned symlink
+only when persisted provenance proves ownership; foreign or ambiguous links are
+preserved. Read the [upgrade guide](upgrade-v0.17.md) before upgrading an
+installation that relies on symlink-based distribution.
+
 Released CLI commands do not use `machine.toml`; there is no `--machine`
 option.
 
@@ -87,7 +94,7 @@ Commit the shared repository after reviewing the result:
 
 ```bash
 git add tome.toml machines skills .tome-manifest.json tome.lock
-git commit -m "Update Tome library"
+git commit -S -m "Update Tome library"
 git push
 ```
 
@@ -173,9 +180,13 @@ library copy.
 ## Routing Changes Across Machines
 
 Tag changes are shared immediately through the manifest. Route changes are
-shared through the profile or project file that owns the destination. On the
-next sync, Tome creates newly eligible links and removes stale Tome-owned links
-that no longer match. Foreign symlinks remain untouched.
+shared through the profile or project file that owns the destination. In
+version 0.17.0, sync creates independent copies only at absent target paths;
+existing real directories and copies are preserved and are not refreshed or
+removed when routes change. Legacy Tome-owned symlinks are cleaned only when
+recorded provenance proves they are safe to remove; foreign symlinks remain
+untouched. Copy deployment migration and lifecycle management are not yet
+supported; see the [upgrade guide](upgrade-v0.17.md).
 
 Use explicit exclusions for one destination:
 

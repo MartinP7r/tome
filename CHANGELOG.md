@@ -7,16 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-13
+
 ### Fixed
 
-- **Cached Git sources now appear consistently in `tome list`, `tome browse`,
-  and `tome status` without read-only commands fetching from the network**
-  (Paperclip MCO-52). Read-only discovery resolves a verified local Git cache
-  even before a lockfile exists, rather than treating the remote URL as a
-  filesystem path or silently reporting zero skills. Status preserves the
-  configured remote URL and separately reports the effective local scan path;
-  an unavailable cache now gives the source name, cache path, remote URL, and
-  the concrete recovery command `tome sync`.
+- **Read-only listing and browsing now use the canonical library.** `tome list`
+  and `tome browse` enumerate valid on-disk `SKILL.md` directories, reject
+  symlinked skill entries, and report directory-iteration failures instead of
+  silently returning a partial view. Cached Git sources are visible without a
+  network request (Paperclip MCO-52).
+- **Role transitions clean up only proven legacy distribution links.** Tome
+  removes a stale symlink only when persisted role history proves that the same
+  directory object was formerly a distribution target and the link has the
+  expected library provenance. Ambiguous, drifted, foreign, and user-owned
+  content is preserved (Paperclip MCO-139).
+- **Doctor no longer replaces real target directories with symlinks.** Existing
+  target copies are treated as data and preserved, even when their contents
+  match the library; the obsolete destructive repair path and test were
+  removed.
+- **The init wizard labels directory roles explicitly** in its compact summary.
 
 ### Breaking
 
@@ -25,12 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sources are repository-owned; machine-wide directories and routes belong to
   `machines/<profile>.toml`; project files may add project-only destinations
   and routes. Released commands no longer read or write `machine.toml`, and the
-  global `--machine` option has been removed.
+  global `--machine` option has been removed. There is no automatic conversion;
+  follow the [0.17.0 upgrade guide](docs/src/upgrade-v0.17.md).
 - **Destination distribution is tag-routed and new skills are untagged by
   default.** Shared tags live on individual `.tome-manifest.json` entries. A
   configured destination route selects a skill when any tag matches, while an
   explicit per-destination exclusion wins. Untagged skills remain in the
-  library without being linked into tag-routed destinations.
+  library without being copied into tag-routed destinations.
+- **Target deployment is now create-only and copy-based.** Tome creates an
+  independent skill copy only at an absent target path; the copy operation
+  never overwrites an occupied path. Existing copy deployments are not
+  refreshed, migrated, or removed. Separate cleanup may remove a legacy
+  Tome-owned symlink only when persisted provenance proves ownership; foreign
+  or ambiguous links remain. `tome eject` removes supported legacy symlinks but
+  not copy deployments. If your workflow relies on symlink refresh/removal, stay
+  on 0.16.4 until target lifecycle migration is supported; see the upgrade guide.
 - **Obsolete compatibility commands have been removed.** Use `tome --version`
   instead of `tome version`; use `tome pool exclude` and `tome pool restore`
   instead of `tome remove pool`. The one-shot `tome migrate-library` command is
@@ -38,6 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Syntax-highlighted fenced code in `tome browse` previews**, with safe
+  fallback for unknown languages and terminals without color support.
 - **Official `using-tome` agent skill** for safe setup, configuration, sync,
   diagnosis, and recovery. The repository now doubles as a Claude plugin
   marketplace (`tome@tome`), and interactive `tome init` can add the same skill
@@ -59,7 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`tome add` separates source registration from routing.** Git URLs and
   GitHub slugs create shared discovery sources in repository policy and accept
   neither `--to` nor `--role`. Explicit local paths remain profile-owned and
-  may select a role.
+  may select a role; absolute, tilde-prefixed, and dot-relative paths are
+  anchored safely to the add-time location.
+- **Git sources now have an explicit `url` field** separate from local
+  filesystem `path`. Legacy remote-valued `path` entries remain readable, while
+  newly written examples use `url` (Paperclip MCO-123).
 - **Native tool plugins remain tool-specific adapters.** Tome owns desired
   skill/plugin state, the portable library copies, and their cross-tool tag
   routing; native plugin installation and updates still run through the
@@ -1163,7 +1187,8 @@ role = "target"
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.16.4...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/MartinP7r/tome/compare/v0.16.4...v0.17.0
 [0.16.4]: https://github.com/MartinP7r/tome/compare/v0.16.3...v0.16.4
 [0.7.0]: https://github.com/MartinP7r/tome/compare/v0.6.2...v0.7.0
 [0.6.0]: https://github.com/MartinP7r/tome/compare/v0.5.4...v0.6.0
