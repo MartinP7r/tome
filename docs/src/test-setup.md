@@ -153,7 +153,7 @@ Tests skill discovery from both Directory and ClaudePlugins source types, plus s
 
 ### `library.rs` — 31 tests
 
-Tests the consolidation step — copying local skills and symlinking managed skills into the library.
+Tests consolidating local and managed skills as independent copies in the library.
 
 | Test | What it verifies |
 |------|-----------------|
@@ -188,65 +188,54 @@ Tests the consolidation step — copying local skills and symlinking managed ski
 | `gitignore_idempotent` | Repeated gitignore writes are idempotent |
 | `gitignore_always_ignores_tmp_files` | `.gitignore` includes `*.tmp` pattern |
 
-### `distribute.rs` — 12 tests
+### `distribute.rs` — 27 tests
 
-Tests the distribution step — pushing skills from library to target tools.
-
-| Test | What it verifies |
-|------|-----------------|
-| `distribute_symlinks_creates_links` | Symlink method creates links in target dir |
-| `distribute_symlinks_idempotent` | Second run -> `linked=0, unchanged=1` |
-| `distribute_symlinks_force_recreates_links` | Force recreates all links |
-| `distribute_symlinks_updates_stale_link` | Stale link pointing elsewhere updated |
-| `distribute_symlinks_skips_non_symlink_collision` | Regular file at target path -> skipped |
-| `distribute_symlinks_skips_manifest_file` | `.tome-manifest.json` not distributed |
-| `distribute_symlinks_dry_run_doesnt_create_dir` | Target dir not created during dry run |
-| `distribute_symlinks_dry_run_with_nonexistent_library` | Dry run works with missing library |
-| `distribute_disabled_target_is_noop` | `enabled: false` -> no work done |
-| `distribute_skips_disabled_skills` | Machine-disabled skills not distributed |
-| `distribute_skips_skills_originating_from_target_dir` | Skills from target's own dir skipped |
-| `distribute_idempotent_with_canonicalized_paths` | Idempotent with canonicalized paths |
-
-### `cleanup.rs` — 8 tests
-
-Tests stale symlink and manifest cleanup from library and targets.
+Tests create-only copy deployment, routing, and safe handling of legacy and
+foreign symlinks.
 
 | Test | What it verifies |
 |------|-----------------|
-| `cleanup_removes_stale_manifest_entries` | Manifest entries for missing skills removed |
-| `cleanup_removes_broken_legacy_symlinks` | Broken legacy symlinks cleaned up |
-| `cleanup_removes_managed_symlink` | Stale managed symlinks removed |
-| `cleanup_preserves_current_skills` | Active skills preserved during cleanup |
-| `cleanup_dry_run_preserves_stale` | Dry run counts but doesn't delete |
-| `cleanup_target_removes_stale_links` | Broken target links removed |
-| `cleanup_target_dry_run_preserves_stale_links` | Target dry run preserves links |
-| `cleanup_target_preserves_external_symlinks` | Links pointing outside library preserved |
+| `distribute_creates_copies` | New target entries are independent directory copies |
+| `distribute_idempotent` | Existing healthy copies are not rewritten |
+| `distribute_force_preserves_healthy_copy` | `--force` does not overwrite a target copy |
+| `distribute_preserves_legacy_relative_symlink` | Existing relative legacy symlink remains untouched |
+| `distribute_preserves_stale_legacy_symlink` | Stale legacy link is preserved by distribution |
+| `distribute_skips_non_symlink_collision` | Occupied real target path is preserved |
+| `distribute_routes_tagged_skills_with_route_exclusions` | Routes select eligible copies and exclusions win |
+| `distribute_warns_and_skips_foreign_symlink` | Foreign target symlinks are not clobbered |
+| `distribute_dry_run_doesnt_create_dir` | Dry run does not create the target root |
 
-### `doctor.rs` — 20 tests
+### `cleanup.rs` — 27 tests
 
-Tests library diagnostics and repair.
+Tests manifest/library cleanup and conservative removal of proven legacy links.
+
+| Test | What it verifies |
+|------|-----------------|
+| `cleanup_removes_broken_legacy_symlinks` | Broken legacy library links are cleaned up |
+| `cleanup_target_removes_stale_links` | Eligible stale legacy target links are removed |
+| `cleanup_target_dry_run_preserves_stale_links` | Dry run leaves legacy target links unchanged |
+| `cleanup_target_preserves_external_symlinks` | Foreign links outside the library are preserved |
+| `cleanup_target_preserves_broken_foreign_symlink_through_library_redirect` | Redirected foreign links remain protected |
+| `cleanup_legacy_links_scans_symlinked_former_target_root` | Proven legacy cleanup handles an old symlinked target root |
+| `cleanup_retains_transition_when_deployment_record_probe_is_unreadable` | Unreadable provenance is retained for safe retry |
+| `cleanup_preserves_current_skills` | Active library skills are preserved |
+
+### `doctor.rs` — 78 tests
+
+Tests library, configuration, target, and foreign-symlink diagnostics and safe
+repair behavior.
 
 | Test | What it verifies |
 |------|-----------------|
 | `check_healthy_library_returns_no_issues` | Clean library has no issues |
-| `check_detects_orphan_directory` | Orphan dir (not in manifest) detected |
-| `check_detects_missing_source_path` | Missing source path flagged |
-| `check_library_no_issues` | Healthy library check passes |
-| `check_library_orphan_directory` | Orphan directory in library detected |
-| `check_library_missing_manifest_entry` | Missing manifest entry detected |
-| `check_library_broken_legacy_symlink` | Broken legacy symlink detected |
-| `check_library_missing_dir` | Missing library dir handled |
-| `check_config_valid_sources` | Valid source config passes |
-| `check_config_missing_source` | Missing source config flagged |
-| `check_target_dir_stale_symlink` | Stale target symlink detected |
-| `check_target_dir_missing_dir` | Missing target dir handled |
-| `check_target_dir_ignores_external_symlinks` | External symlinks ignored |
-| `check_unconfigured_returns_not_configured` | Unconfigured state detected |
-| `diagnose_shows_init_prompt_when_unconfigured` | Shows init prompt when no config |
-| `repair_library_healthy_is_noop` | Repair on healthy library is no-op |
-| `repair_library_removes_orphan_manifest_entry` | Repair removes orphan manifest entries |
-| `repair_library_removes_broken_legacy_symlink` | Repair removes broken legacy symlinks |
-| `repair_library_removes_broken_managed_symlink` | Repair removes broken managed symlinks |
+| `check_detects_orphan_directory` | Orphan directory is detected |
+| `check_distribution_dir_stale_symlink` | Stale legacy target symlink is diagnosed |
+| `check_distribution_dir_real_dir_matching_library_is_healthy` | Matching target copy is treated as healthy |
+| `dispatch_repairs_preserves_real_target_copy_for_legacy_repair_finding` | A stale repair finding cannot delete a target copy |
+| `check_distribution_dir_real_dir_diverging_is_warning_no_repair` | Divergent target content requires manual review |
+| `doctor_preserves_broken_foreign_symlink_through_library_redirect` | Foreign broken symlinks are preserved |
+| `repair_one_removes_single_broken_legacy_symlink` | Supported single-link repair removes only its target |
+| `check_reports_interrupted_deployment_transition` | Interrupted cleanup/deployment state is surfaced |
 
 ### `lockfile.rs` — 15 tests
 

@@ -190,7 +190,7 @@ pub enum Command {
         ///
         /// If omitted, defaults based on `type`: `claude-plugins` → managed,
         /// `directory` → synced, `git` → source. **The `directory` →
-        /// `synced` default writes distribution symlinks BACK into the
+        /// `synced` default writes distribution copies BACK into the
         /// source dir, which is the wrong choice for read-only package
         /// manager dirs like `~/.pfw/skills` — use `--role managed` for
         /// those.** Validated against `valid_roles()` for the chosen type.
@@ -227,7 +227,7 @@ pub enum Command {
         after_help = "Examples:\n  tome sync\n  tome sync --dry-run\n  tome sync --force\n  tome sync --no-triage\n  tome sync --no-input\n  tome sync --no-install"
     )]
     Sync {
-        /// Recreate all symlinks even if they appear up-to-date
+        /// Force recopy into the canonical library; existing target content is still preserved
         #[arg(short, long)]
         force: bool,
         /// Skip interactive triage of new/changed skills
@@ -252,7 +252,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Diagnose and repair broken symlinks or config issues
+    /// Diagnose library and deployment state; repair only supported safe issues
     #[command(
         after_help = "Examples:\n  tome doctor\n  tome doctor --dry-run\n  tome doctor --json"
     )]
@@ -262,7 +262,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// List all discovered skills with their directory
+    /// List canonical library skills with their source directory
     #[command(
         alias = "ls",
         after_help = "Examples:\n  tome list\n  tome list --json"
@@ -286,11 +286,11 @@ pub enum Command {
         format: LintFormat,
     },
 
-    /// Interactively browse discovered skills
+    /// Interactively browse canonical library skills
     #[command(after_help = "Examples:\n  tome browse")]
     Browse,
 
-    /// Remove tome's symlinks from all target tool directories (reversible via `tome sync`)
+    /// Remove supported Tome-owned symlinks; copy deployments are preserved
     #[command(after_help = "Examples:\n  tome eject\n  tome eject --dry-run")]
     Eject,
 
@@ -518,7 +518,8 @@ pub enum RemoveKind {
         force: bool,
     },
     /// Delete an Unowned skill from the library — manifest entry, library
-    /// directory, distribution symlinks, and lockfile entry. Owned skills are
+    /// directory, supported legacy symlinks, and lockfile entry. Existing copy
+    /// deployments are preserved. Owned skills are
     /// refused with a hint to run `tome remove dir` first (D-B2).
     Skill {
         /// Skill name to forget (must currently be Unowned)

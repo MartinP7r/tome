@@ -111,13 +111,17 @@ For repository workflow guidance, see [docs/src/development-workflow.md](docs/sr
 | `tome status`           | Show library, directories, last-sync, and health          |
 | `tome list`             | List canonical library skills with directory               |
 | `tome browse`           | Interactively browse canonical library skills (fuzzy search) |
-| `tome doctor`           | Diagnose Library / Directory / Config / Foreign-symlink issues; auto-repair broken symlinks, stale manifest entries, and target real-dir collisions |
+| `tome doctor`           | Diagnose library, config, and deployment state; repair only supported safe issues; preserve existing target copies |
 | `tome lint`             | Validate skill frontmatter and report issues              |
 | `tome config`           | Show current configuration                                |
 | `tome backup`           | Git-backed backup and restore for the skill library       |
-| `tome eject`            | Remove tome's symlinks from all targets (reversible)      |
+| `tome eject`            | Remove supported Tome-owned symlinks; preserve copy deployments |
 | `tome relocate`         | Move the skill library to a new location                  |
 | `tome completions`      | Install shell completions (bash, zsh, fish, powershell)   |
+
+**Upgrading from 0.16.4?** Read the [CLI upgrade guide](docs/src/upgrade-v0.17.md)
+before changing configuration or relying on target deployments; this release
+has no automatic config or target-copy migration.
 
 Use `tome --version` for version output. Global options include `--dry-run`,
 `--verbose`, `--quiet`, `--no-input`, `--config <path>`, `--settings <path>`,
@@ -140,9 +144,9 @@ graph LR
     end
 
     subgraph Targets
-        T1["Antigravity<br/>(symlinks)"]
-        T2["Codex<br/>(symlinks)"]
-        T3["OpenClaw<br/>(symlinks)"]
+        T1["Antigravity<br/>(copies)"]
+        T2["Codex<br/>(copies)"]
+        T3["OpenClaw<br/>(copies)"]
     end
 
     S1 --> L
@@ -156,8 +160,8 @@ graph LR
 1. **Reconcile** — Lockfile-authoritative drift detection for managed skills (Match / Drift / Vanished); applies updates via marketplace adapter when consent is granted
 2. **Discover** — Scan configured directories (role `managed`/`source`/`synced`) for `*/SKILL.md`
 3. **Consolidate** — Copy every skill — managed *and* local — into the library as a real directory (v0.10+ library-canonical model; managed are no longer symlinks). Deduplicates with first directory winning
-4. **Distribute** — Create symlinks for skills selected by each destination's tag route; any matching tag is sufficient and an explicit skill exclusion wins
-5. **Cleanup** — Three-bucket stale-skill report (removed-from-config / missing-from-disk / now-in-exclude-list); orphan transitions to Unowned preserve library content
+4. **Distribute** — Create-only independent copies for skills selected by each destination's tag route; any matching tag is sufficient and an explicit skill exclusion wins. Occupied target paths are not overwritten. Copy refresh/removal and legacy-link migration are not yet supported; separate cleanup removes a legacy link only when Tome can prove ownership.
+5. **Cleanup** — Three-bucket stale-skill report (removed-from-config / missing-from-disk / now-in-exclude-list); orphan transitions to Unowned preserve library content. Legacy links are cleaned only when Tome can prove ownership.
 
 ## Configuration
 
@@ -169,10 +173,9 @@ library_dir = "~/.tome/skills"
 exclude = ["deprecated-skill"]
 
 [directories.team-skills]
-path = "https://github.com/myorg/team-skills"
+url = "https://github.com/myorg/team-skills"
 type = "git"
 branch = "main"
-role = "source"
 ```
 
 The selected `machines/<profile>.toml` contains machine-wide directories and

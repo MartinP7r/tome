@@ -86,3 +86,36 @@ For a PR that implements a written design, include a compact traceability sectio
 - **Git / PR** = shipped evidence
 
 Do not create a parallel backlog, checklist, or status system in the repository. Keep task status in Paperclip.
+
+## CLI Stable Releases
+
+A merged version-bump PR is not a release. Keep this process CLI-only unless
+Martin explicitly reprioritizes the desktop crate:
+
+1. Check the latest published GitHub release/tag, Paperclip blockers, breaking
+   changes, and upgrade notes. Under 0.x semver, use a minor bump for breaking
+   CLI changes.
+2. Update the workspace version, `Cargo.lock`, and `CHANGELOG.md`; include an
+   upgrade guide for config or deployment changes.
+3. Run `cargo dist plan --tag vX.Y.Z`. It must list only the `tome` CLI package
+   and expected CLI artifacts; `tome-desktop` remains `dist = false`. Set
+   `precise-builds = true`: cargo-dist otherwise uses Cargo's workspace-wide
+   build, which can compile every workspace crate (including non-distributed
+   `tome-desktop`). This is build-graph coupling from the shared Cargo workspace,
+   not a runtime dependency; precise builds compile only the package needed for
+   each release binary. Leave Desktop source and release status unchanged.
+4. Keep `publish-jobs = []`. The stock cargo-dist Homebrew job commits to the
+   tap without a signature. Keep `installers = ["homebrew"]` so the formula is
+   included as a release asset, then update the tap in a separate locally signed
+   commit using the Bitwarden SSH agent.
+5. Review the release PR and require its CLI checks before merge. Create and
+   push an annotated signed `vX.Y.Z` tag only after the merged commit is read
+   back from `main`; this triggers cargo-dist's GitHub release workflow.
+6. Read back the completed workflow, exact release tag, and assets. Download the
+   generated formula, verify its version/checksums against the release assets,
+   run the formula checks, and publish it with a signed tap commit. Read that
+   commit back and verify its signature before closing the Paperclip task.
+
+Do not use `make release` for a stable cut: it auto-merges and tags without the
+guarded review/read-back sequence. Do not re-enable the built-in Homebrew
+publisher until it has a verified signing path.

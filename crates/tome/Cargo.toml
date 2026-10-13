@@ -5,7 +5,8 @@ edition.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "Sync AI coding skills across tools"
+description = "Manage and synchronize AI coding skills across tools."
+homepage = "https://github.com/MartinP7r/tome"
 
 [[bin]]
 name = "tome"

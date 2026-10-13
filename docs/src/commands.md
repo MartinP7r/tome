@@ -3,7 +3,7 @@
 | Command | Description |
 |---------|-------------|
 | `tome init` | Interactive wizard to configure directories |
-| `tome sync` | Reconcile, discover, consolidate, distribute, and clean up skills |
+| `tome sync` | Reconcile, discover, consolidate, create-only copy deployments, and clean up supported legacy links |
 | `tome add <url\|path>` | Register a shared Git source or a local directory in the selected profile |
 | `tome tag add\|remove\|list` | Manage shared tags on manifest skills |
 | `tome route tag add\|remove` | Manage tag selectors for a destination |
@@ -12,17 +12,17 @@
 | `tome paperclip-agents preview\|apply` | Preview and synchronize resolved use-case skill sets to Paperclip agents |
 | `tome pool exclude\|restore` | Exclude a skill from shared discovery or restore it |
 | `tome remove dir <name>` | Remove a directory entry (manifest entries transition to Unowned per LIB-04) |
-| `tome remove skill <name>` | Delete an Unowned skill from the library, manifest, distributions, and lockfile |
+| `tome remove skill <name>` | Delete an Unowned skill from the library, manifest, supported legacy distributions, and lockfile; existing copy deployments are preserved |
 | `tome reassign <skill> --to <directory>` | Reassign a skill to a different directory (accepts Owned + Unowned input per UNOWN-01) |
 | `tome fork <skill> --to <local-directory>` | Fork a managed skill to a local directory for customization |
 | `tome status` | Show library, directories, last-sync, and health summary |
-| `tome list` (alias: `ls`) | List all discovered skills with their directories (supports `--json`) |
-| `tome browse` | Interactively browse discovered skills with fuzzy search |
-| `tome doctor` | Diagnose and repair broken symlinks or config issues |
+| `tome list` (alias: `ls`) | List canonical library skills with their source directories (supports `--json`) |
+| `tome browse` | Interactively browse canonical library skills with fuzzy search |
+| `tome doctor` | Diagnose library, configuration, and deployment state; repair only supported safe issues |
 | `tome lint` | Validate skill frontmatter and report issues |
 | `tome config` | Show current configuration |
 | `tome backup` | Git-backed backup and restore for the skill library |
-| `tome eject` | Remove tome's symlinks from all distribution directories (reversible via `tome sync`) |
+| `tome eject` | Remove supported Tome-owned symlinks; preserve copy deployments |
 | `tome relocate <path>` | Move the skill library to a new location |
 | `tome completions <shell>` | Install shell completions (bash, zsh, fish, powershell) |
 | `tome --version` | Print version information through Clap's standard version flag |
@@ -73,7 +73,7 @@ and route newly imported skills.
 
 | Flag | Short | Description |
 |------|-------|-------------|
-| `--force` | `-f` | Recreate all symlinks even if they appear up-to-date |
+| `--force` | `-f` | Force recopy into the canonical library; existing target content is still preserved |
 | `--no-triage` | | Skip interactive triage of new/changed skills (for CI/scripts) |
 
 ### `tome add`
@@ -145,9 +145,9 @@ The `role` field decides what tome does with a configured directory:
 | Role | Behavior |
 |------|----------|
 | `managed` | Read-only upstream (package manager owns content). Discovery only. |
-| `synced` | Both discovery AND distribution — skills found here are pulled into the library, and distribution symlinks are also written back into this dir. |
+| `synced` | Both discovery AND distribution — skills found here are pulled into the library, and selected skills may be copied back into this dir when target paths are absent. |
 | `source` | Discovery only. tome reads but never writes here. |
-| `target` | Distribution only. tome writes symlinks here but doesn't scan for skills. |
+| `target` | Distribution only. Tome creates copies at absent paths here but doesn't scan for skills; existing target entries are preserved. |
 
 **The defaults bite if you don't know them.** When you omit `--role`, the directory's role falls back to its type default:
 
@@ -155,7 +155,7 @@ The `role` field decides what tome does with a configured directory:
 - `directory` → `synced`
 - `git` → `source`
 
-The `directory → synced` default is the one that surprises people. If you `tome add` a local directory owned by a package manager (e.g. `~/.pfw/skills/`), the `synced` default writes ~170 distribution symlinks INTO that source directory — polluting it with content tome propagated from other configured directories. **Use `--role source` or `--role managed` for read-only package manager directories** to keep them clean.
+The `directory → synced` default is the one that surprises people. If you `tome add` a local directory owned by a package manager (e.g. `~/.pfw/skills/`), the `synced` default can copy selected skills INTO that source directory. **Use `--role source` or `--role managed` for read-only package manager directories** to keep them clean.
 
 ```bash
 # WRONG (default role = synced; tome writes BACK into ~/.pfw/skills/)
@@ -321,10 +321,10 @@ summary. For Git directories, the cached clone in
 
 #### `tome remove skill <name>`
 
-Delete an **Unowned** skill from the library entirely: clear the manifest entry,
-remove the library directory, remove downstream distribution symlinks, and
-remove the lockfile entry. Refuses to operate on Owned skills with a hint to
-run `tome remove dir` first (per D-B2).
+Delete an **Unowned** skill from the library: clear the manifest entry, remove
+the library directory, remove supported legacy Tome-owned symlinks, and remove
+the lockfile entry. Existing copy deployments are preserved. Refuses to operate
+on Owned skills with a hint to run `tome remove dir` first (per D-B2).
 
 | Flag | Description |
 |------|-------------|
@@ -359,8 +359,8 @@ Fork a managed (read-only) skill into a local directory so it can be edited. The
 
 ### `tome browse`
 
-Full-screen interactive skill browser using fuzzy search. Supports sorting,
-grouping by source, viewing source, and copying paths. Destination-ambiguous
+Full-screen interactive browser of canonical library skills using fuzzy
+search. Supports sorting, grouping by source, viewing source, and copying paths. Destination-ambiguous
 disable actions are unavailable; use `tome route exclude add --to
 <destination> <skill>` explicitly.
 
@@ -388,13 +388,13 @@ When `tome doctor` finds a directory in the library that has no matching manifes
 
 These are **not auto-repairable** — the user must edit the SKILL.md file (or remove the skill) by hand. Without this check, the failure was only visible as a one-line stderr warning during `tome sync`; it now persists in the doctor surface so broken skills get triaged. Use `tome lint <PATH>` for a deeper per-field frontmatter audit.
 
-#### Real-dir-in-target repair (v0.16+)
+#### Existing target directories and copies
 
-If a distribution directory contains a real directory (not a symlink) whose name matches a library skill, `tome doctor` hash-compares the two:
-
-- **Identical content** — Surfaces as an auto-fixable Warning (`real directory in target matches library content (should be a symlink)`). The auto-repair pass deletes the real directory and replaces it with a symlink into the library. Typical cause: skills copied into the target dir manually before adopting tome, or by hand after the fact.
-- **Diverging content** — Surfaces as a no-repair Warning (`real directory in target diverges from library content — reconcile manually`). The user must decide whether to overwrite the local edits, fold them back into the library, or remove the target copy.
-- **No matching library skill** — Left alone; tome does not own un-paired directories in target dirs.
+Tome never replaces a real target directory with a symlink. A matching directory
+is preserved; divergent content is reported for manual review, and directories
+without a matching library skill are left alone. The CLI's create-only copy
+deployment does not refresh, migrate, or remove existing target copies. This
+also applies to `tome doctor --repair`.
 
 ### `tome lint`
 
@@ -429,11 +429,15 @@ Git-backed backup and restore. Subcommands:
 
 ### `tome eject`
 
-Removes all of tome's symlinks from distribution directories. Reversible — run `tome sync` to recreate them.
+Removes supported Tome-owned symlinks from target directories. It does not
+remove copy deployments. `tome sync` recreates eligible links/copies only when
+their target paths are absent; it does not overwrite existing target content.
 
 ### `tome relocate`
 
-Moves the skill library to a new path, updating symlinks in all distribution directories. Detects cross-filesystem moves and warns when target symlinks need to be re-anchored.
+Moves the skill library to a new path and re-anchors supported legacy
+symlinks. Independent copy deployments do not follow the library path and are
+not changed by relocation.
 
 ### `tome completions`
 

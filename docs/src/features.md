@@ -5,8 +5,10 @@ CLI release scope.
 
 ## Shared Library and Sync
 
-Tome consolidates skills into one canonical library and distributes selected
-portable skills through Unix symlinks.
+Tome consolidates skills into one canonical library and creates independent
+copies for selected portable skills at absent target paths. Existing target
+content is preserved; target-copy refresh, migration, and removal are not yet
+supported.
 
 | Capability | Current behavior |
 |---|---|
@@ -14,8 +16,8 @@ portable skills through Unix symlinks.
 | Canonical storage | Stores managed and local skills as real directory copies |
 | Provenance | Tracks source ownership and content hashes in `.tome-manifest.json` and `tome.lock` |
 | Classification | Stores shared user-managed tags on each manifest skill |
-| Distribution | Routes skills to destinations by OR-matching manifest tags |
-| Exceptions | A per-destination skill exclusion overrides a matching tag |
+| Distribution | Creates copies at absent destination paths using OR-matching manifest tags; never overwrites an existing target |
+| Exceptions | A per-destination skill exclusion overrides a matching tag; existing target paths remain unchanged |
 | Conflict handling | Shared exclusions and source pins resolve pool membership |
 
 Native tool plugins remain tool-specific installation adapters. Tome tracks the
@@ -53,8 +55,8 @@ tome route exclude add --to codex claude-only-skill
 
 A configured route uses OR matching, so either `coding` or `portable` can
 select a skill when both tags appear in the route. Untagged skills stay in the
-library but are not linked into routed destinations. Destinations without a
-route retain unrestricted legacy distribution behavior.
+library but are not copied into routed destinations. Destinations without a
+Destinations without a route retain unrestricted default selection behavior.
 
 ## Sync Pipeline
 
@@ -64,7 +66,7 @@ route retain unrestricted legacy distribution behavior.
 | Discover | Scans shared Git sources and selected-profile directory sources |
 | Consolidate | Copies skills into the canonical library while preserving manifest tags |
 | Distribute | Applies destination routes, explicit exclusions, and existing origin safety checks |
-| Cleanup | Removes stale Tome-owned links, including links that become unrouted |
+| Cleanup | Removes only proven stale legacy Tome-owned symlinks; existing target copies are preserved |
 | Lockfile | Writes reproducible provenance state for the next reconciliation |
 
 ## Command Surface
@@ -98,13 +100,13 @@ route retain unrestricted legacy distribution behavior.
 | Command | Current feature |
 |---|---|
 | `tome remove dir <name>` | Remove a configured directory and preserve its skills as Unowned |
-| `tome remove skill <name>` | Delete an Unowned skill from library, manifest, distributions, and lockfile |
+| `tome remove skill <name>` | Delete an Unowned skill from the library, manifest, supported legacy links, and lockfile; copy deployments remain |
 | `tome reassign <skill> --to <dir>` | Re-anchor an owned or Unowned skill |
 | `tome fork <skill> --to <dir>` | Convert a managed skill into a local editable copy |
 | `tome doctor` | Diagnose and safely repair supported library and destination problems |
 | `tome lint [path]` | Validate `SKILL.md` frontmatter in text or JSON form |
-| `tome relocate <path>` | Move the library and repair downstream links |
-| `tome eject` | Remove Tome-owned distribution symlinks without deleting the library |
+| `tome relocate <path>` | Move the library and re-anchor supported legacy symlinks; copies are independent |
+| `tome eject` | Remove supported Tome-owned symlinks without deleting the library; copy deployments remain |
 | `tome backup ...` | Create, list, diff, and restore Git-backed library snapshots |
 | `tome completions <shell>` | Install or print shell completions |
 
@@ -118,12 +120,15 @@ commands are not part of the current CLI.
 - `--dry-run` for state-changing flows and `--no-input` for automation.
 - `--no-install` and `--git-sync` one-run consent overrides.
 - Deterministic SHA-256 hashing for idempotent consolidation.
-- Foreign-symlink protection before cleanup removes destination entries.
+- Foreign-symlink protection before cleanup removes legacy destination links.
+- Create-only copy deployment preserves all existing target content; no refresh,
+  migration, or removal of copy deployments is performed.
 - Structured JSON output for status, doctor, list, and lint.
 - `tracing` logging through `--verbose`, `--quiet`, and `TOME_LOG`.
 
 ## Platform Boundary
 
-Tome is Unix-only because distribution uses symlinks. The CLI remains pre-1.0
+Tome is Unix-only because it retains legacy symlink lifecycle operations. New
+target deployments are copies. The CLI remains pre-1.0
 and does not promise backward compatibility. Desktop code exists in the
 workspace but is paused and outside this CLI release.

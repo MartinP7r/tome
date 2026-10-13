@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.16.4"
+version = "0.17.0"
 edition = "2024"
 rust-version = "1.85.0"
 license = "MIT"
@@ -83,8 +83,14 @@ tap = "MartinP7r/homebrew-tap"
 # Customize the Homebrew formula name
 formula = "tome"
 # Publish jobs to run in CI
-publish-jobs = ["homebrew"]
-# Allow CI file modifications (e.g. Dependabot bumps) without failing the release
+# The built-in Homebrew publisher creates unsigned commits in the tap.
+# Publish the formula separately as a signed commit after the release assets
+# are available.
+publish-jobs = []
+# Build only packages required for release artifacts; avoid compiling paused
+# workspace members (for example, tome-desktop) during a CLI-only release.
+precise-builds = true
+# Keep the generated workflow's security-relevant action pins maintained by PRs.
 allow-dirty = ["ci"]
 
 [profile.dist]
