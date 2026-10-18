@@ -208,9 +208,14 @@ tome route tag add --to antigravity portable
 tome route exclude add --to antigravity claude-only-skill
 ```
 
+Profile definitions under `~/.tome/machines/` are shared configuration and can
+be version-controlled with the repository policy. Each machine selects its
+active profile locally in `~/.config/tome/settings.toml`; Tome does not infer a
+profile from the hostname. Use separate profiles when machines need different
+local paths or routes.
+
 From a project tree, Tome searches upward for `.tome.toml` and adds its
-project-only target directories and routes. Local profile selection and runtime
-consent live in `~/.config/tome/settings.toml`. See
+project-only target directories and routes. See
 [docs/src/configuration.md](docs/src/configuration.md) for the complete schema.
 
 ## License

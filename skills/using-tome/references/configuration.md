@@ -1,42 +1,103 @@
 # Tome Configuration
 
-## Configuration Files
+## Tome 0.17.0 Configuration Layers
 
-- Portable config: `~/.tome/tome.toml`
-- Per-machine preferences: `~/.config/tome/machine.toml`
+Tome 0.17.0 separates shared repository policy, named machine profiles,
+project-local destinations, and settings local to each machine:
 
-Keep shared topology in the portable config. Keep machine-specific filtering, consent, and path differences in the per-machine file.
+| Layer | Default path | Contents |
+|---|---|---|
+| Repository policy | `~/.tome/tome.toml` | Library path, shared Git sources, shared exclusions, backup policy, source pins |
+| Machine profile | `~/.tome/machines/<profile>.toml` | Local sources, destinations, and destination routes for that profile |
+| Project | Nearest ancestor `.tome.toml` | Additive project-only destinations and routes |
+| Local settings | `~/.config/tome/settings.toml` | Active profile and local runtime consent |
+
+Profile files are shared definitions, normally version-controlled with the
+Tome repository. Each machine chooses its active profile locally in
+`settings.toml`. Profile names are user-defined; Tome does not infer one from
+the hostname. Use different profiles when local paths or routes differ.
+
+Released CLI commands do not read or write the legacy `machine.toml`, and there
+is no global `--machine` option. Use `--config`, `--settings`, or `--tome-home`
+when the defaults do not fit.
+
+## Manual Upgrade From 0.16.4
+
+There is no general automatic migration for the old flat configuration. Back
+up the Tome home and local settings before editing. Move shared Git sources and
+repository-policy fields into `tome.toml`; move ordinary local directories,
+resolved path overrides, and destinations/routes into the selected profile;
+put the selected profile and local consent in `settings.toml`.
+
+The old `machine.toml` preferences require deliberate conversion:
+
+- Per-destination enabled lists become skill tags plus `[routes.<destination>].tags`.
+- Per-destination disabled lists become `[routes.<destination>].exclude`.
+- A global disabled list has no exact one-field equivalent; do not guess.
+- Disabled directories have no disabled flag in profiles; omit them from the
+  active profile or use a separate profile only after confirming the intent.
+- Move local consent to `settings.toml`, using `managed_plugin_install`,
+  `git_sync`, and `backup_runtime` as applicable.
+
+For complete migration guidance, consult `docs/src/upgrade-v0.17.md` in the Tome
+repository. `tome migrate-library` is not a configuration migrator and is not
+shipped in 0.17.0; its legacy pre-0.10 library conversion had to be run on
+0.16.4 before upgrading.
+
+After converting and reviewing the files, verify with `tome profile list`,
+`tome status`, and `tome sync --dry-run --no-input --no-install`. Review the
+preview before any real sync.
 
 ## Directory Roles
 
-- `managed`: discover from a read-only upstream owned by a package manager; mark its skills as managed and never distribute back into it.
-- `source`: discover from a generic local or Git directory without distributing into it.
-- `target`: distribute library symlinks into the directory without discovering from it.
-- `synced`: both discover from and distribute into the directory. Use only when write-back is intentional.
+- `managed`: discover from a read-only upstream owned by a package manager; do
+  not distribute back into it.
+- `source`: discover from a local or Git directory without distributing into it.
+- `target`: distribute to the directory without discovering skills there.
+- `synced`: both discover from and distribute into the directory; use only when
+  write-back is intended.
 
-`type = "directory"` defaults to `synced`. Always specify `--role managed` or `--role source` for a read-only local directory so Tome does not pollute it with distribution symlinks.
+Check `tome add --help` before version-sensitive commands and specify roles
+explicitly when write-back is not intended.
 
-## Add Directories
+## Shared Git Sources
 
-Confirm the installed syntax with `tome add --help`, preview each supported mutation, then apply it.
+Git discovery sources belong in shared `tome.toml` and use `url`, not a
+remote-valued `path`:
 
-```bash
-tome add ~/.pfw/skills --role managed
-tome add ~/work/team-skills --role source
-tome add MartinP7r/tome --subdir skills --role source
-tome add owner/repo/tree/main/skills --role source
+```toml
+[directories.team-skills]
+url = "https://github.com/myorg/team-skills.git"
+type = "git"
+branch = "main"
+subdir = "skills"
 ```
 
-Use `--subdir skills` when `SKILL.md` directories live below a repository's `skills/` directory. A GitHub `/tree/<ref>/<subdir>` slug can encode the branch and subdirectory instead. `--branch`, `--tag`, and `--rev` are mutually exclusive; confirm their exact flags with `tome add --help`.
+Keep `branch`, `tag`, `rev`, and `subdir` as applicable. Local filesystem
+sources continue to use `path` in the selected profile.
 
-## Machine Preferences
+## Tags And Routes
 
-Use `disabled` to prevent named skills from being distributed on one machine. Use `disabled_directories` to skip complete configured directories on that machine.
+Tags are stored with skills in `.tome-manifest.json`. A destination route uses
+OR matching for `tags`; `exclude` overrides a match:
 
-Use one per-directory filter under `[directory.<name>]`: `disabled` is a blocklist and `enabled` is an allowlist. Do not set both for one directory.
+```toml
+[routes.codex]
+tags = ["portable", "coding"]
+exclude = ["claude-only-skill"]
+```
 
-Use `[directory_overrides.<name>].path` to replace a portable directory path on a machine with a different filesystem layout. `tome status` and `tome doctor` mark active overrides.
+Project `.tome.toml` files may add project-only destinations and routes; they
+cannot replace shared policy or select the machine profile.
 
-Use `auto_install_plugins = "always"`, `"ask"`, or `"never"` to control machine-local consent for managed-plugin reconciliation. Use `tome sync --no-install` for a one-run override that does not change the persisted preference.
+## Consent And Safe Changes
 
-Do not reproduce or guess the complete TOML schema. Inside the Tome repository, consult `docs/src/configuration.md`. Elsewhere, use `tome config` for effective directory topology and resolved paths, inspect `machine.toml` for filters and consent, locate the installed documentation, and use the installed CLI's help before changing configuration.
+`~/.config/tome/settings.toml` keeps local runtime choices such as
+`managed_plugin_install`, `git_sync`, and `backup_runtime`. Use
+`tome sync --no-install` for a one-run managed-plugin-install override.
+
+Before changing an existing setup, inspect the installed CLI's help and back up
+the relevant config. If `tome status` reports legacy flat configuration, follow
+the manual upgrade guide rather than trying `tome init` or an unsupported
+migration command. Validate the new files and review a dry-run before applying
+sync changes.

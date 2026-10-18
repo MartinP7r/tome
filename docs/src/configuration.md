@@ -1,8 +1,10 @@
 # Configuration
 
-Tome resolves four configuration layers. Shared policy and profiles are meant
-to be version-controlled together; project configuration is scoped to one
-project tree; local settings stay on the current machine.
+Tome resolves four configuration layers. Shared policy and named profiles are
+meant to be version-controlled together; project configuration is scoped to one
+project tree; local settings stay on the current machine. Profile names are
+user-defined, not fixed roles, and are not inferred from the hostname. Each
+machine selects its active profile locally in `settings.toml`.
 
 | Layer | Default path | Owns |
 |---|---|---|
