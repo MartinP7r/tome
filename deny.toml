@@ -13,8 +13,9 @@ feature-depth = 1
 # that we cannot remove without forking Tauri, dialoguer, ratatui, or
 # tauri-specta.
 #
-# Review cadence: revisit when Tauri migrates off GTK3 (see #560), and when
-# tauri-specta / dialoguer / ratatui drop their unmaintained transitive deps.
+# Review cadence: revisit when Tauri migrates off GTK3 (see #560), when the
+# Tauri plugins migrate to zbus 6 (see tauri-apps/plugins-workspace#3716), and
+# when tauri-specta / dialoguer / ratatui drop their unmaintained transitive deps.
 ignore = [
     # --- gtk-rs GTK3 family (transitive via tauri/wry on Linux only) ---
     # These cover the individual gtk-rs sys/binding crates (atk-sys, gdk,
@@ -61,6 +62,14 @@ ignore = [
     { id = "RUSTSEC-2025-0081", reason = "unic-char-property (transitive via tauri-specta/unic-langid)" },
     { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version (transitive via tauri-specta/unic-langid)" },
     { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident (transitive via tauri-specta/unic-langid)" },
+
+    # --- zbus 5 standalone crates (transitive via tauri-plugin-opener) ---
+    # Informational unmaintained notices, not vulnerabilities. These crates
+    # were absorbed into zbus 6.0.0, while current Tauri plugins still require
+    # zbus ^5; upstream is coordinating the migration in issue #3716.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant via Tauri opener's zbus 5 dependency; informational; Tauri migration tracked in plugins-workspace#3716" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names via Tauri opener's zbus 5 dependency; informational; Tauri migration tracked in plugins-workspace#3716" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive via Tauri opener's zbus 5 dependency; informational; Tauri migration tracked in plugins-workspace#3716" },
 ]
 
 # Allowed dependency licenses — all common OSI-approved licenses
