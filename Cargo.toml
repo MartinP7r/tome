@@ -35,7 +35,9 @@ terminal_size = "0.4"
 toml = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
-sha2 = "0.11"
+# `sha2` 0.11.1 raised its MSRV to Rust 1.88; Tome still supports Rust 1.85.
+# Revisit this cap when the workspace MSRV is raised or upstream restores 1.85 support.
+sha2 = ">=0.11.0, <0.11.1"
 walkdir = "2"
 serde_yaml = "0.9"
 # Myers line-diff for the Tauri Desktop GUI machine.toml preview-then-apply flow
