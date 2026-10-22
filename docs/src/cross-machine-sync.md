@@ -1,8 +1,10 @@
 # Cross-machine sync
 
 Tome's shared repository holds the canonical library, repository policy,
-machine profiles, manifest, and lockfile. Each machine keeps only profile
-selection and runtime consent in local `settings.toml`.
+named machine profiles, manifest, and lockfile. Each machine keeps only profile
+selection and runtime consent in local `settings.toml`. Profile names are
+user-defined, not fixed roles or hostname-derived; machines with different local
+paths can select different committed profiles.
 
 ## Shared and Local State
 

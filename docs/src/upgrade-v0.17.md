@@ -32,6 +32,11 @@ Version 0.17.0 separates them:
 - The nearest project `.tome.toml` — optional project-only destinations/routes.
 - `~/.config/tome/settings.toml` — the selected profile and local consent.
 
+Profile names are user-defined, not built-in roles. The profile files are shared
+configuration; each machine's local `settings.toml` selects which one it uses.
+Tome does not infer profile selection from the hostname. Reuse an appropriate
+existing profile or create a distinct one when machine paths/routes differ.
+
 Create a profile, then edit its TOML file:
 
 ```bash

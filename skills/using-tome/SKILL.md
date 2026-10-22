@@ -32,6 +32,11 @@ tome <command> --help
 
 Do not run all four mechanically for every request. Use status for topology and health, config for effective settings, doctor for damage, and help before constructing a version-sensitive or mutating command.
 
+If `tome status` reports legacy flat configuration after an upgrade to 0.17.0,
+stop and follow [the manual configuration migration reference](references/configuration.md).
+Do not recommend `tome migrate-library` for config migration; it is not shipped
+in 0.17.0. Do not run `tome init` or a real `tome sync` as a substitute.
+
 ## Role Decision
 
 - Use `managed` for read-only directories owned by a package manager. Tome discovers their skills but does not write back.
@@ -43,7 +48,8 @@ Never rely on the local `type = "directory"` default when write-back is unwanted
 
 ## Command Map
 
-- `tome init`: run interactive initial setup.
+- `tome init`: run interactive initial setup; it is not a migration tool for an
+  existing 0.16.4 configuration.
 - `tome add`: register a local or Git skill directory.
 - `tome sync`: reconcile managed state, discover, consolidate, distribute, clean up, and save.
 - `tome status`, `tome list`, `tome browse`: inspect topology, skills, and library contents.
