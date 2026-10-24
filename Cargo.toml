@@ -41,6 +41,7 @@ sha2 = ">=0.11.0, <0.11.1"
 walkdir = "2"
 serde_yaml = "0.9"
 unicode-normalization = "0.1"
+regex = "1"
 # Myers line-diff for the Tauri Desktop GUI machine.toml preview-then-apply flow
 # (SYNC-03 / D-GUI-09). Package legitimacy: MIT, mitsuhiko/similar (Armin
 # Ronacher), ~5 years on crates.io, present in insta + cargo-mutants reverse-dep
