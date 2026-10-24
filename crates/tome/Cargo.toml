@@ -33,6 +33,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 walkdir.workspace = true
 serde_yaml.workspace = true
+unicode-normalization.workspace = true
 # Myers line-diff for the v1.0 Desktop GUI machine.toml preview helper
 # (`machine::preview_save`). The diff feeds the PreviewPopover -> MachineTomlDiff
 # component in the Sync route (SYNC-03). Workspace-pinned `=3.1.1` (MIT,

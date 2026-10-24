@@ -5,6 +5,7 @@
 
 use console::style;
 use std::path::Path;
+use unicode_normalization::UnicodeNormalization;
 
 use crate::skill;
 
@@ -103,11 +104,17 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         }
     };
 
+    let raw_frontmatter = skill::extract_frontmatter(&content)
+        .and_then(|(yaml, _)| serde_yaml::from_str::<serde_yaml::Value>(yaml).ok());
+
     // --- Errors ---
 
-    // name present but doesn't match directory
+    // Name grammar and directory matching follow the Agent Skills reference
+    // validator, which applies NFKC before validating both values.
     if let Some(ref name) = fm.name {
-        if name != dir_name {
+        let normalized_name: String = name.nfkc().collect();
+        let normalized_dir_name: String = dir_name.nfkc().collect();
+        if normalized_name != normalized_dir_name {
             issues.push(LintIssue {
                 severity: Severity::Error,
                 message: format!(
@@ -116,27 +123,61 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
                 ),
             });
         }
-        if name.len() > 64 {
+        let char_count = normalized_name.chars().count();
+        if char_count == 0 {
             issues.push(LintIssue {
                 severity: Severity::Error,
-                message: format!("name exceeds 64 characters ({} chars)", name.len()),
+                message: "name must be a non-empty string".to_string(),
             });
         }
-        if !name
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        if char_count > 64 {
+            issues.push(LintIssue {
+                severity: Severity::Error,
+                message: format!("name exceeds 64 characters ({char_count} chars)"),
+            });
+        }
+        if normalized_name.starts_with('-')
+            || normalized_name.ends_with('-')
+            || normalized_name.contains("--")
         {
             issues.push(LintIssue {
                 severity: Severity::Error,
-                message: format!(
-                    "name '{}' uses invalid characters (expected [a-z0-9-])",
-                    name
-                ),
+                message: "name must not start or end with a hyphen or contain consecutive hyphens"
+                    .to_string(),
+            });
+        }
+        let lower_name: String = normalized_name
+            .chars()
+            .flat_map(char::to_lowercase)
+            .collect();
+        if normalized_name != lower_name {
+            issues.push(LintIssue {
+                severity: Severity::Error,
+                message: "name must use lowercase characters".to_string(),
+            });
+        }
+        if !normalized_name
+            .chars()
+            .all(|character| character.is_alphanumeric() || character == '-')
+        {
+            issues.push(LintIssue {
+                severity: Severity::Error,
+                message:
+                    "name contains invalid characters (expected lowercase alphanumeric or hyphens)"
+                        .to_string(),
             });
         }
     }
 
-    // Missing description
+    // Missing required name
+    if fm.name.is_none() {
+        issues.push(LintIssue {
+            severity: Severity::Error,
+            message: "missing required 'name' field".to_string(),
+        });
+    }
+
+    // Missing required description
     if fm.description.is_none() {
         issues.push(LintIssue {
             severity: Severity::Error,
@@ -144,38 +185,49 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         });
     }
 
-    // --- Warnings ---
-
-    // Missing name (not portable)
-    if fm.name.is_none() {
-        issues.push(LintIssue {
-            severity: Severity::Warning,
-            message:
-                "missing 'name' field -- Claude Code infers from directory, but other tools may not"
-                    .to_string(),
-        });
-    }
-
-    // Description length warnings
+    // Description must be non-empty and no longer than 1024 characters.
     if let Some(ref desc) = fm.description {
-        if desc.is_empty() {
+        let char_count = desc.chars().count();
+        if desc.trim().is_empty() {
             issues.push(LintIssue {
-                severity: Severity::Info,
-                message: "description is empty".to_string(),
+                severity: Severity::Error,
+                message: "description must be a non-empty string".to_string(),
             });
-        } else if desc.len() > 1024 {
+        } else if char_count > 1024 {
             issues.push(LintIssue {
-                severity: Severity::Warning,
-                message: format!("description exceeds 1024 characters ({} chars)", desc.len()),
+                severity: Severity::Error,
+                message: format!("description exceeds 1024 characters ({char_count} chars)"),
             });
-        } else if desc.len() > 500 {
+        } else if char_count > 500 {
             issues.push(LintIssue {
                 severity: Severity::Warning,
                 message: format!(
-                    "description exceeds 500 characters ({} chars) -- may be truncated by VS Code Copilot",
-                    desc.len()
+                    "description exceeds 500 characters ({char_count} chars) -- may be truncated by VS Code Copilot"
                 ),
             });
+        }
+    }
+
+    // Optional compatibility field is limited to 500 characters.
+    if let Some(ref compatibility) = fm.compatibility {
+        let char_count = compatibility.chars().count();
+        if char_count > 500 {
+            issues.push(LintIssue {
+                severity: Severity::Error,
+                message: format!("compatibility exceeds 500 characters ({char_count} chars)"),
+            });
+        }
+    }
+
+    // Metadata is a string-to-string mapping in the Agent Skills format.
+    if let Some(ref metadata) = fm.metadata {
+        for (key, value) in metadata {
+            if !matches!(value, serde_yaml::Value::String(_)) {
+                issues.push(LintIssue {
+                    severity: Severity::Error,
+                    message: format!("metadata values must be strings (key '{key}')"),
+                });
+            }
         }
     }
 
@@ -216,6 +268,18 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
     }
 
     // --- Info ---
+
+    if let Some(serde_yaml::Value::Mapping(frontmatter)) = raw_frontmatter.as_ref() {
+        let key = serde_yaml::Value::String("allowed-tools".to_string());
+        if let Some(value) = frontmatter.get(&key) {
+            if !matches!(value, serde_yaml::Value::String(_)) {
+                issues.push(LintIssue {
+                    severity: Severity::Error,
+                    message: "allowed-tools must be a space-separated string".to_string(),
+                });
+            }
+        }
+    }
 
     if fm.allowed_tools.is_some() {
         issues.push(LintIssue {
@@ -422,6 +486,56 @@ mod tests {
     }
 
     #[test]
+    fn lint_name_length_counts_unicode_characters() {
+        let tmp = TempDir::new().unwrap();
+        let name = "é".repeat(40);
+        let skill_md = format!(
+            r#"---
+name: {name}
+description: A valid description
+---
+body"#
+        );
+        create_skill_dir(tmp.path(), &name, &skill_md);
+        let issues = lint_skill(&name, &tmp.path().join(&name));
+        assert!(!issues.iter().any(|issue| {
+            issue.severity == Severity::Error && issue.message.contains("exceeds 64")
+        }));
+    }
+
+    #[test]
+    fn lint_enforces_agent_skill_name_grammar_and_nfkc_directory_match() {
+        let tmp = TempDir::new().unwrap();
+        let cases = [
+            ("-bad", "-bad", true),
+            ("bad-", "bad-", true),
+            ("bad--name", "bad--name", true),
+            ("café", "café", false),
+            ("ｍｙ-skill", "my-skill", false),
+            ("技能", "技能", false),
+        ];
+
+        for (name, dir_name, should_error) in cases {
+            let skill_md = format!(
+                r#"---
+name: '{name}'
+description: A valid description
+---
+body"#
+            );
+            create_skill_dir(tmp.path(), dir_name, &skill_md);
+            let issues = lint_skill(dir_name, &tmp.path().join(dir_name));
+            let has_name_error = issues
+                .iter()
+                .any(|issue| issue.severity == Severity::Error && issue.message.contains("name"));
+            assert_eq!(
+                has_name_error, should_error,
+                "unexpected name validation for {name:?} in {dir_name:?}: {issues:?}"
+            );
+        }
+    }
+
+    #[test]
     fn lint_missing_description() {
         let tmp = TempDir::new().unwrap();
         create_skill_dir(tmp.path(), "my-skill", "---\nname: my-skill\n---\nbody");
@@ -434,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn lint_missing_name_warning() {
+    fn lint_missing_name_is_error() {
         let tmp = TempDir::new().unwrap();
         create_skill_dir(
             tmp.path(),
@@ -442,15 +556,53 @@ mod tests {
             "---\ndescription: A test skill\n---\nbody",
         );
         let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
-        assert!(
-            issues
-                .iter()
-                .any(|i| i.severity == Severity::Warning && i.message.contains("missing 'name'"))
-        );
+        assert!(issues.iter().any(
+            |i| i.severity == Severity::Error && i.message.contains("missing required 'name'")
+        ));
     }
 
     #[test]
-    fn lint_description_too_long() {
+    fn lint_rejects_empty_or_whitespace_only_description() {
+        let tmp = TempDir::new().unwrap();
+        for description in ["''", "'   '"] {
+            let skill_md = format!(
+                r#"---
+name: my-skill
+description: {description}
+---
+body"#
+            );
+            create_skill_dir(tmp.path(), "my-skill", &skill_md);
+            let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+            assert!(issues.iter().any(|issue| {
+                issue.severity == Severity::Error
+                    && issue
+                        .message
+                        .contains("description must be a non-empty string")
+            }));
+        }
+    }
+
+    #[test]
+    fn lint_description_length_counts_unicode_characters() {
+        let tmp = TempDir::new().unwrap();
+        let description = "é".repeat(1024);
+        let skill_md = format!(
+            r#"---
+name: my-skill
+description: "{description}"
+---
+body"#
+        );
+        create_skill_dir(tmp.path(), "my-skill", &skill_md);
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(!issues.iter().any(|issue| {
+            issue.severity == Severity::Error && issue.message.contains("exceeds 1024")
+        }));
+    }
+
+    #[test]
+    fn lint_description_over_1024_is_error() {
         let tmp = TempDir::new().unwrap();
         let long_desc = "x".repeat(1025);
         create_skill_dir(
@@ -465,8 +617,86 @@ mod tests {
         assert!(
             issues
                 .iter()
-                .any(|i| i.severity == Severity::Warning && i.message.contains("exceeds 1024"))
+                .any(|i| i.severity == Severity::Error && i.message.contains("exceeds 1024"))
         );
+    }
+
+    #[test]
+    fn lint_rejects_allowed_tools_sequence() {
+        let tmp = TempDir::new().unwrap();
+        let skill_md = r#"---
+name: my-skill
+description: A valid description
+allowed-tools:
+  - Read
+  - Bash(git:*)
+---
+body"#;
+        create_skill_dir(tmp.path(), "my-skill", skill_md);
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(issues.iter().any(|issue| {
+            issue.severity == Severity::Error
+                && issue
+                    .message
+                    .contains("allowed-tools must be a space-separated string")
+        }));
+    }
+
+    #[test]
+    fn lint_rejects_non_string_metadata_values() {
+        let tmp = TempDir::new().unwrap();
+        let skill_md = r#"---
+name: my-skill
+description: A valid description
+metadata:
+  author: Example
+  version: 1
+---
+body"#;
+        create_skill_dir(tmp.path(), "my-skill", skill_md);
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(issues.iter().any(|issue| {
+            issue.severity == Severity::Error
+                && issue.message.contains("metadata values must be strings")
+        }));
+    }
+
+    #[test]
+    fn lint_compatibility_length_counts_unicode_characters() {
+        let tmp = TempDir::new().unwrap();
+        let compatibility = "é".repeat(500);
+        let skill_md = format!(
+            r#"---
+name: my-skill
+description: Valid
+compatibility: "{compatibility}"
+---
+body"#
+        );
+        create_skill_dir(tmp.path(), "my-skill", &skill_md);
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(!issues.iter().any(|issue| {
+            issue.severity == Severity::Error && issue.message.contains("compatibility exceeds 500")
+        }));
+    }
+
+    #[test]
+    fn lint_compatibility_over_500_is_error() {
+        let tmp = TempDir::new().unwrap();
+        let long_compatibility = "x".repeat(501);
+        let skill_md = format!(
+            r#"---
+name: my-skill
+description: Valid
+compatibility: {long_compatibility}
+---
+body"#
+        );
+        create_skill_dir(tmp.path(), "my-skill", &skill_md);
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(issues.iter().any(|issue| {
+            issue.severity == Severity::Error && issue.message.contains("compatibility exceeds 500")
+        }));
     }
 
     #[test]
