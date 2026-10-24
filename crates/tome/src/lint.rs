@@ -271,13 +271,14 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
 
     if let Some(serde_yaml::Value::Mapping(frontmatter)) = raw_frontmatter.as_ref() {
         let key = serde_yaml::Value::String("allowed-tools".to_string());
-        if let Some(value) = frontmatter.get(&key) {
-            if !matches!(value, serde_yaml::Value::String(_)) {
-                issues.push(LintIssue {
-                    severity: Severity::Error,
-                    message: "allowed-tools must be a space-separated string".to_string(),
-                });
-            }
+        if matches!(
+            frontmatter.get(&key),
+            Some(value) if !matches!(value, serde_yaml::Value::String(_))
+        ) {
+            issues.push(LintIssue {
+                severity: Severity::Error,
+                message: "allowed-tools must be a space-separated string".to_string(),
+            });
         }
     }
 
