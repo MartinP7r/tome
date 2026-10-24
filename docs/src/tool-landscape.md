@@ -231,7 +231,7 @@ Nanobot is essentially an OpenClaw-compatible agent in a fraction of the code. S
 | **Config** | Minimal — focuses on LLM backend configuration |
 | **MCP** | Supported for tool integration |
 
-PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP target rather than a skill directory target.
+PicoClaw prioritizes extreme minimalism. Tome has no MCP integration, so PicoClaw is neither a Tome MCP target nor a home-relative skill-directory preset.
 
 ---
 
@@ -254,7 +254,7 @@ PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP tar
 
 Gemini CLI is the simplest format for instructions — plain markdown files concatenated into context. No frontmatter, no structured fields. The `@file.md` import syntax and `!{command}` execution are unique.
 
-**Skills (2026):** Gemini CLI now supports SKILL.md directory scanning. Personal skills at `~/.gemini/skills/` and the portable `~/.agents/skills/` path. For tome, Gemini CLI is a Symlink target via `~/.gemini/skills/`.
+**Skills (2026):** Gemini CLI now supports SKILL.md directory scanning. Personal skills at `~/.gemini/skills/` and the portable `~/.agents/skills/` path. Tome includes `~/.gemini/skills/` as a known directory; Tome deploys copies rather than symlinks.
 
 ---
 
@@ -305,7 +305,7 @@ Amp is a useful case study — their migration from custom commands to Agent Ski
 | **MCP** | Core mechanism — 100+ servers in toolkit catalog. Auto-OAuth on HTTP 401. |
 | **Config** | TOML at `~/.config/goose/` |
 
-Goose now supports SKILL.md directory scanning alongside its MCP-centric extension model. For tome, Goose is a Symlink target via `~/.config/goose/skills/`.
+Goose now supports SKILL.md directory scanning alongside its MCP-centric extension model. Tome retains `~/.config/goose/skills/` as a known-directory preset; deployments are copies, not symlinks.
 
 ---
 
@@ -1318,7 +1318,7 @@ Auto-memories grow unbounded. Large instruction files consume context budget, le
 Cursor rules behave differently depending on which LLM backend is active. The same `.mdc` rule may work with Claude but fail with GPT-4. Agent Skills are more consistent because the SKILL.md body is pure natural language.
 
 ### Migration Pain
-No tool provides automatic format conversion. Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to anything else, requires manual work. This is the gap tome aims to fill.
+Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to another format, still requires manual work. Tome does not currently perform these format conversions.
 
 ---
 

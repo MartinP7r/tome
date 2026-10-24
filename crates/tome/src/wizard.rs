@@ -59,7 +59,7 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
         default_role: DirectoryRole::Synced,
     },
     KnownDirectory {
-        name: "antigravity",
+        name: "antigravity-global",
         display: "Antigravity",
         default_path: ".gemini/config/skills",
         directory_type: DirectoryType::Directory,
@@ -73,7 +73,7 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
         default_role: DirectoryRole::Synced,
     },
     KnownDirectory {
-        name: "antigravity-legacy",
+        name: "antigravity",
         display: "Antigravity (Legacy IDE)",
         default_path: ".gemini/antigravity/skills",
         directory_type: DirectoryType::Directory,
@@ -1488,9 +1488,9 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let expected = [
             ("cursor", ".cursor/skills"),
-            ("antigravity", ".gemini/config/skills"),
+            ("antigravity-global", ".gemini/config/skills"),
             ("antigravity-cli", ".gemini/antigravity-cli/skills"),
-            ("antigravity-legacy", ".gemini/antigravity/skills"),
+            ("antigravity", ".gemini/antigravity/skills"),
             ("agents-global", ".config/agents/skills"),
         ];
 

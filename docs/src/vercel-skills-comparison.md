@@ -1,6 +1,6 @@
 # Vercel Skills Comparison
 
-Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx skills`) — the closest comparable project to tome. Both manage AI coding skills across multiple tools. This doc catalogs features and tooling patterns tome is missing to inform roadmap decisions.
+Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx skills`) — a close comparison for cross-agent skill management. This document compares current capabilities and architecture trade-offs; it is not a list of Tome roadmap commitments.
 
 *Last updated: October 24, 2026*
 
@@ -42,8 +42,8 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **Skill scaffolding**         | ❌                | ✅ `skills init`         | Generates SKILL.md template                                                         |
 | **Public search/registry**    | ❌                | ✅ `skills find`         | API-backed search at skills.sh with install counts                                  |
 | **Remote update checking**    | ✅ `tome sync`    | ✅ `skills check`        | Tome synchronizes repository-owned Git sources under local consent                  |
-| **Agent auto-detection**      | 🔜 (wizard only)  | ✅                       | Async detection of 50+ installed agents                                             |
-| **Format transforms**         | 🔜 v0.4           | ❌                       | Planned: SKILL.md ↔ .mdc ↔ .instructions.md                                         |
+| **Installed-agent detection** | ❌ (known paths only) | ✅                    | Vercel detects installed agents; Tome's wizard discovers registered paths          |
+| **Format transforms**         | ❌                | ❌                       | Tome does not currently convert SKILL.md to `.mdc` or `.instructions.md`            |
 | **Frontmatter validation**    | ✅ `tome lint`    | Partial                 | Tome enforces required fields and Agent Skills base constraints.[1][2]             |
 | **Doctor/diagnostics**        | ✅ `tome doctor`  | ❌                       | Orphan detection, manifest repair, symlink health                                   |
 | **MCP server**                | ❌                | —                        | Tome does not implement an MCP server or MCP command.                              |
@@ -54,7 +54,7 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 
 ---
 
-## 3. Notable Features Tome Lacks
+## 3. Capability Details and Gaps
 
 ### 3.1 Remote Git Sources
 
@@ -83,7 +83,7 @@ npx skills init my-skill
 
 Generates a SKILL.md template with frontmatter boilerplate. Low complexity, high convenience for skill authors.
 
-**Tome status:** Not on roadmap. Would be a simple addition — `tome new <name>` that creates `<name>/SKILL.md` with a frontmatter template. Consider adding as a quick win.
+**Tome status:** Not implemented. A `tome new <name>` command could create `<name>/SKILL.md` with a frontmatter template if skill-authoring support is prioritized.
 
 ### 3.3 Public Search & Registry
 
@@ -94,7 +94,7 @@ Generates a SKILL.md template with frontmatter boilerplate. Low complexity, high
 
 The registry at skills.sh acts as a public directory of community skills. This creates a discovery loop: authors publish, users search, install counts drive ranking.
 
-**Tome status:** Not on roadmap. A public registry is a significant undertaking. However, integrating with skills.sh as a read-only source could be a lighter-weight option — tome could query the same API without building its own registry.
+**Tome status:** Not implemented. A public registry is a significant undertaking. Integrating with skills.sh as a read-only source could be a lighter-weight option if public discovery is prioritized.
 
 ### 3.4 Remote Update Checking
 
@@ -108,7 +108,7 @@ controls shared-repository synchronization.
 
 Vercel supports RFC 8615 `/.well-known/skills/index.json` endpoints — any HTTP server can advertise available skills by hosting a JSON manifest at a well-known URL. This enables decentralized skill distribution without a central registry.
 
-**Tome status:** Not on roadmap. Novel approach worth considering for the connector architecture. Could be a lightweight alternative to a full registry.
+**Tome status:** Not implemented. This could be a lightweight discovery option if Tome adds support for HTTP-hosted skill catalogs.
 
 ### 3.6 Agent Target Coverage
 
@@ -143,7 +143,7 @@ frontmatter.
 
 `skills experimental_sync` scans `node_modules/` for packages containing skills. This supports distributing skills as npm packages — a novel distribution channel.
 
-**Tome status:** Not on roadmap. Low priority given the Rust ecosystem focus, but the concept of "skills as packages" in language-specific package managers is worth noting.
+**Tome status:** Not implemented. Skills distributed through package managers remain a possible integration, not a current capability.
 
 ### 3.8 Plugin Manifest Compatibility
 
@@ -170,13 +170,13 @@ type ParsedSource = {
 }
 ```
 
-This decouples source resolution from installation logic. When tome implements git sources, a similar parser would be valuable.
+This decouples source resolution from installation logic. Tome already supports GitHub/GitLab sources, refs, and subdirectories; Vercel's normalized `ParsedSource` model is a useful comparison for future parser maintenance.
 
 ### Lockfile Versioning
 
 Vercel's lockfile has a `version` field (currently v3). When an old-format lockfile is detected, it's wiped entirely — users must reinstall. This aggressive migration strategy avoids complex upgrade code at the cost of user inconvenience.
 
-Tome's `tome.lock` doesn't yet have a version migration strategy. Worth adding a version field early to avoid future pain.
+Tome's `tome.lock` already includes schema `version: 1`, but the loader does not yet dispatch explicit migrations or reject unsupported versions with a dedicated compatibility error. Future schema changes should add that handling before the version is incremented.
 
 ### Agent Auto-Detection
 
@@ -212,11 +212,11 @@ Prioritized by effort-to-value ratio, mapped to existing roadmap items where app
 
 ### Quick Wins (small effort, immediate value)
 
-1. **Expand KnownTarget list** — Add 15–20 more agents from Vercel's list to wizard auto-discovery. Data-only change in `wizard.rs`. *(Extends #248)*
+1. **Maintain verified wizard presets** — Add home-relative paths only when current vendor documentation confirms them; keep project-local paths out of global discovery. The registry is data-driven in `wizard.rs`.
 
 2. **`tome new <name>` scaffolding** — Generate a `<name>/SKILL.md` template with standard frontmatter. Simple new command. *(New issue)*
 
-3. **Lockfile version field** — Add `"version": 1` to `tome.lock` now, before we need migration logic. *(New issue)*
+3. **Lockfile migration handling** — Add an explicit compatibility path for unsupported `tome.lock` schema versions before changing the current `version: 1` format.
 
 ### Medium-Term (aligns with existing roadmap)
 
@@ -228,7 +228,7 @@ Prioritized by effort-to-value ratio, mapped to existing roadmap items where app
    `/tree/<ref>/<subdir>`; evaluate single-skill selectors and other provider
    conventions only if users need them.
 
-6. **Remote update checking** — Extend `tome sync` to check remote sources, not just local lockfile diffs. *(After v0.6)*
+6. **Status-only update checks** — `tome sync` already synchronizes configured Git sources; consider a separate non-mutating update check only if users need discovery without syncing.
 
 7. **Agent auto-detection** — Upgrade wizard to detect installed agents dynamically rather than just checking path existence. *(Enhancement to wizard)*
 

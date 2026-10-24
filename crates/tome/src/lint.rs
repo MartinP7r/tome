@@ -93,7 +93,7 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         }
     };
 
-    let (fm, body) = match skill::parse(&content) {
+    let (fm, body, allowed_tools_is_string) = match skill::parse_for_lint(&content) {
         Ok(result) => result,
         Err(e) => {
             issues.push(LintIssue {
@@ -104,15 +104,12 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
         }
     };
 
-    let raw_frontmatter = skill::extract_frontmatter(&content)
-        .and_then(|(yaml, _)| serde_yaml::from_str::<serde_yaml::Value>(yaml).ok());
-
     // --- Errors ---
 
     // Name grammar and directory matching follow the Agent Skills reference
-    // validator, which applies NFKC before validating both values.
+    // validator: trim the frontmatter value, then apply NFKC before validation.
     if let Some(ref name) = fm.name {
-        let normalized_name: String = name.nfkc().collect();
+        let normalized_name: String = name.trim().nfkc().collect();
         let normalized_dir_name: String = dir_name.nfkc().collect();
         if normalized_name != normalized_dir_name {
             issues.push(LintIssue {
@@ -269,17 +266,11 @@ pub fn lint_skill(dir_name: &str, skill_dir: &Path) -> Vec<LintIssue> {
 
     // --- Info ---
 
-    if let Some(serde_yaml::Value::Mapping(frontmatter)) = raw_frontmatter.as_ref() {
-        let key = serde_yaml::Value::String("allowed-tools".to_string());
-        if matches!(
-            frontmatter.get(&key),
-            Some(value) if !matches!(value, serde_yaml::Value::String(_))
-        ) {
-            issues.push(LintIssue {
-                severity: Severity::Error,
-                message: "allowed-tools must be a space-separated string".to_string(),
-            });
-        }
+    if !allowed_tools_is_string {
+        issues.push(LintIssue {
+            severity: Severity::Error,
+            message: "allowed-tools must be a space-separated string".to_string(),
+        });
     }
 
     if fm.allowed_tools.is_some() {
@@ -534,6 +525,24 @@ body"#
                 "unexpected name validation for {name:?} in {dir_name:?}: {issues:?}"
             );
         }
+    }
+
+    #[test]
+    fn lint_trims_name_before_normalizing_and_matching_directory() {
+        let tmp = TempDir::new().unwrap();
+        create_skill_dir(
+            tmp.path(),
+            "my-skill",
+            "---\nname: ' my-skill '\ndescription: A valid description\n---\nbody",
+        );
+
+        let issues = lint_skill("my-skill", &tmp.path().join("my-skill"));
+        assert!(
+            !issues
+                .iter()
+                .any(|issue| issue.severity == Severity::Error && issue.message.contains("name")),
+            "surrounding whitespace should be trimmed like skills-ref: {issues:?}"
+        );
     }
 
     #[test]

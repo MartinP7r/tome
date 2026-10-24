@@ -6,16 +6,19 @@ SKILL.md files use YAML frontmatter to declare metadata. The base standard comes
 
 | Field | Required | Constraints |
 |-------|----------|-------------|
-| `name` | Yes | 1–64 Unicode lowercase alphanumeric characters plus hyphens; no leading, trailing, or consecutive hyphens; must match the parent directory name.[1] |
+| `name` | Yes | 1–64 lowercase letters, digits, and hyphens; no leading or trailing hyphen; must match the parent directory name.[1] |
 | `description` | Yes | 1–1024 characters. Non-empty.[1] |
 | `license` | No | License name or reference to a bundled license file.[1] |
 | `compatibility` | No | Max 500 characters. Environment requirements.[1] |
 | `metadata` | No | String-to-string mapping (`string` keys and `string` values).[1] |
 | `allowed-tools` | No | Space-separated string of pre-approved tools. Experimental.[1] |
 
-The specification requires the `name` to match its parent directory. The
-official `skills-ref` validator normalizes both values with Unicode NFKC before
-comparing them; Tome follows that reference behavior.[2]
+The published specification defines the name constraints above.[1] The
+`skills-ref` reference validator additionally trims surrounding whitespace from
+the frontmatter value, applies Unicode NFKC normalization to both the value and
+the directory name before comparing them, and rejects consecutive hyphens.
+Tome follows those reference-validator behaviors; they should not be confused
+with additional constraints stated by the published specification.[2]
 
 ## Platform Extensions
 
