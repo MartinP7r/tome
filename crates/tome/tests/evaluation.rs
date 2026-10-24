@@ -6,8 +6,8 @@ use tempfile::TempDir;
 use tome::evaluation::fake::{DeterministicFakeAdapter, FreshWorkspaceProvider};
 use tome::evaluation::{
     ArtifactIdentity, EvaluationCase, EvaluationSuite, ExecutionPolicy, GraderSpec, ModelPin,
-    ObservationCapability, RunKey, RunObservation, RunnerIdentity, Variant, evaluate_suite,
-    hash_artifact_directory,
+    ObservationCapability, RetentionPolicy, RunKey, RunObservation, RunnerIdentity, Variant,
+    evaluate_suite, hash_artifact_directory, parse_suite_toml,
 };
 
 fn create_inputs(root: &Path) -> (std::path::PathBuf, std::path::PathBuf, tome::ContentHash) {
@@ -199,4 +199,39 @@ fn missing_observation_capability_is_not_comparable() {
             .no_delta_reasons
             .contains(&tome::evaluation::NoDeltaReason::MissingRequiredEvidence)
     );
+}
+
+#[test]
+fn full_trace_is_retained_only_when_explicitly_requested() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+    let mut suite = suite(hash);
+    suite.policy.retention = RetentionPolicy::FullTrace;
+    let mut adapter = adapter_with_pair([ObservationCapability::FinalText], &suite, None);
+    let mut workspaces = FreshWorkspaceProvider::new(root.path().join("workspaces"));
+
+    let result = evaluate_suite(
+        &suite_root,
+        &artifact,
+        &suite,
+        &mut workspaces,
+        &mut adapter,
+    )
+    .unwrap();
+
+    assert!(result.runs.iter().all(|run| {
+        run.evidence.final_text.as_deref() == Some("answer is 42")
+            && run.evidence.final_text_sha256.is_some()
+    }));
+    assert!(result.to_json().unwrap().contains("answer is 42"));
+}
+
+#[test]
+fn documented_suite_example_parses() {
+    let suite = parse_suite_toml(include_str!(
+        "../../../docs/src/examples/evaluation-suite.toml"
+    ))
+    .expect("documentation suite example must remain valid");
+    assert_eq!(suite.suite_id, "answer-check");
+    assert_eq!(suite.cases.len(), 1);
 }
