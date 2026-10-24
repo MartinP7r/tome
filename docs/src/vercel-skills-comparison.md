@@ -2,7 +2,9 @@
 
 Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx skills`) — the closest comparable project to tome. Both manage AI coding skills across multiple tools. This doc catalogs features and tooling patterns tome is missing to inform roadmap decisions.
 
-*Last updated: March 2026*
+*Last updated: October 24, 2026*
+
+> **Scope note:** Tome's current status and path presets were checked on this date. Vercel details not cited below remain comparison snapshots and were not all revalidated for this update.
 
 ---
 
@@ -12,7 +14,7 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | ---------------- | -------------------------------------------------- | -------------------------------------------------- |
 | **Language**     | Rust (edition 2024)                                | TypeScript (Node.js 18+)                           |
 | **Install**      | `cargo install tome` / Homebrew                    | `npx skills` (zero-install)                        |
-| **Version**      | v0.3.1                                             | v1.4.5                                             |
+| **Version**      | v0.17.0                                            | Not rechecked for this update                      |
 | **Architecture** | Library-first: discover → consolidate → distribute | Installer-first: fetch → install (symlink/copy)    |
 | **Scope**        | Multi-machine library manager with lockfile sync   | Single-machine skill installer with remote sources |
 
@@ -30,9 +32,8 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **GitLab remote sources**     | ✅                | ✅                       | Full URL support                                                                    |
 | **Well-known HTTP providers** | ❌                | ✅                       | RFC 8615 `/.well-known/skills/index.json` endpoints                                 |
 | **npm/node_modules sync**     | ❌                | ✅ (experimental)        | Crawls node_modules for skills                                                      |
-| **Symlink distribution**      | ✅                | ✅                       | Both use symlinks as primary distribution method                                    |
-| **MCP distribution**          | ❌ (removed)      | ❌                       | Was removed — all tools now scan SKILL.md dirs natively                              |
-| **Copy fallback**             | ❌                | ✅                       | Vercel falls back to copy when symlinks fail                                        |
+| **Directory-copy deployments** | ✅                | ✅ (option)              | Tome deploys copies; Vercel offers symlink or direct-copy modes.[14]                |
+| **MCP distribution**          | ❌                | ❌                       | Tome has no MCP-based skill distribution.                                           |
 | **Lockfile**                  | ✅ `tome.lock`    | ✅ `.skill-lock.json` v3 | Both track content hashes and provenance                                            |
 | **Persistent destination routing** | ✅ profile/project routes | ❌              | Tome OR-matches shared skill tags and supports explicit destination exclusions      |
 | **Multi-machine sync**        | ✅ `tome sync`    | ❌                       | Lockfile diffing with interactive triage                                            |
@@ -43,13 +44,13 @@ Research into [vercel-labs/skills](https://github.com/vercel-labs/skills) (`npx 
 | **Remote update checking**    | ✅ `tome sync`    | ✅ `skills check`        | Tome synchronizes repository-owned Git sources under local consent                  |
 | **Agent auto-detection**      | 🔜 (wizard only)  | ✅                       | Async detection of 50+ installed agents                                             |
 | **Format transforms**         | 🔜 v0.4           | ❌                       | Planned: SKILL.md ↔ .mdc ↔ .instructions.md                                         |
-| **Frontmatter validation**    | 🔜 v0.4           | Partial                 | Vercel parses name/description/metadata.internal                                    |
+| **Frontmatter validation**    | ✅ `tome lint`    | Partial                 | Tome enforces required fields and Agent Skills base constraints.[1][2]             |
 | **Doctor/diagnostics**        | ✅ `tome doctor`  | ❌                       | Orphan detection, manifest repair, symlink health                                   |
-| **MCP server**                | ❌ (removed)      | ❌                       | Was removed — no known consumers                                                    |
+| **MCP server**                | ❌                | —                        | Tome does not implement an MCP server or MCP command.                              |
 | **Dry-run mode**              | ✅                | ❌                       | Preview changes without filesystem writes                                           |
 | **Git commit integration**    | ✅                | ❌                       | Auto-offers commit after sync when library is a git repo                            |
 | **Telemetry**                 | ❌                | ✅                       | Anonymous usage tracking (disabled in CI)                                           |
-| **Known agent targets**       | 7                | 50+                     | Significant coverage gap                                                            |
+| **Home-relative wizard presets** | 15             | Large catalog            | Tome's exact preset list is documented in the [Tool Landscape](tool-landscape.md#home-relative-wizard-directory-presets); project paths are separate. |
 
 ---
 
@@ -109,42 +110,14 @@ Vercel supports RFC 8615 `/.well-known/skills/index.json` endpoints — any HTTP
 
 **Tome status:** Not on roadmap. Novel approach worth considering for the connector architecture. Could be a lightweight alternative to a full registry.
 
-### 3.6 Agent Target Coverage (50+)
+### 3.6 Agent Target Coverage
 
-Vercel supports 50+ agents. Their `agents.ts` defines per-agent configuration including:
-- Project and global skill paths
-- Whether the agent shares the universal `.agents/skills/` directory
-- Installation detection method
+Tome's wizard currently defines 15 home-relative directory presets. See the [current Tome wizard preset list](tool-landscape.md#home-relative-wizard-directory-presets); these are known directories for discovery, not a claim that every agent integration is complete. The linked preset list cites the vendor documentation behind each path.
 
-**Agents in Vercel not in tome's KnownTarget list:**
+Keep home-relative/global paths distinct from project-local directories. For example, `.github/skills/` is project-local and must not be described as a global target.[5][7] Project-local paths are configured separately and may vary by project. The preset list links to the vendor documentation used to verify each global path.
 
-| Agent            | Skills Path                 | Notes             |
-| ---------------- | --------------------------- | ----------------- |
-| Cline            | `.cline/skills/`            | VS Code extension |
-| Warp             | `.warp/skills/`             | Terminal-native   |
-| OpenCode         | `.agents/skills/`           | Universal path    |
-| CodeBuddy        | `.codebuddy/skills/`        |                   |
-| Goose            | `.goose/skills/`            |                   |
-| Amp              | `.amp/skills/`              |                   |
-| Aider            | `.aider/skills/`            |                   |
-| Kilo Code        | `.kilo-code/skills/`        |                   |
-| RooCode          | `.roo-code/skills/`         |                   |
-| Zed              | `.zed/skills/`              |                   |
-| Trae             | `.trae/skills/`             |                   |
-| Melty            | `.melty/skills/`            |                   |
-| otto-eng         | `.otto/skills/`             |                   |
-| Pear             | `.pear/skills/`             |                   |
-| Sourcegraph Cody | `.sourcegraph-cody/skills/` |                   |
-| Void             | `.void/skills/`             |                   |
-| Junie            | `.junie/skills/`            |                   |
-| Augment          | `.augment/skills/`          |                   |
-| Aide             | `.aide/skills/`             |                   |
-| Blackbox AI      | `.blackbox-ai/skills/`      |                   |
-| Qodo             | `.qodo/skills/`             |                   |
-| Tabnine          | `.tabnine/skills/`          |                   |
-| GitHub Spark     | `.spark/skills/`            |                   |
+The agent-path list formerly compared here was a historical snapshot, not a verified current catalog, so this page no longer presents it as current Tome support.
 
-Many share the universal `.agents/skills/` path. Tome's data-driven target config already supports arbitrary agents, but expanding `KnownTarget` auto-discovery would improve the wizard experience.
 
 **Notable exception — OpenClaw:** Unlike most tools that have a single skills path, OpenClaw has a two-level structure: a shared `.openclaw/skills/` directory across all agents *plus* per-agent `skills/` directories under each agent's workspace. This may require a multi-path target model or an OpenClaw-specific connector extension.
 
@@ -265,4 +238,10 @@ Prioritized by effort-to-value ratio, mapped to existing roadmap items where app
 
 9. **skills.sh integration** — Read-only integration with Vercel's public registry as a discovery source. Avoids building our own registry while providing discoverability.
 
-10. **Copy fallback** — Vercel supports copy when symlinks fail. Tome is Unix-only and symlink-only. Worth considering if Windows support ever becomes a goal.
+## Sources
+
+[1] https://agentskills.io/specification — Agent Skills specification
+[2] https://github.com/agentskills/agentskills/blob/main/skills-ref/src/skills_ref/validator.py — Agent Skills reference validator
+[5] https://code.visualstudio.com/docs/agent-customization/agent-skills — VS Code Agent Skills docs
+[7] https://learn.microsoft.com/en-us/visualstudio/ide/copilot-agent-skills?view=visualstudio — Microsoft Copilot Agent Skills locations
+[14] https://github.com/vercel-labs/skills/blob/main/docs/commands.md — Vercel Skills CLI commands

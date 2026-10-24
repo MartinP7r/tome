@@ -101,6 +101,13 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
         default_role: DirectoryRole::Synced,
     },
     KnownDirectory {
+        name: "agents-global",
+        display: "Shared Agent Skills (XDG)",
+        default_path: ".config/agents/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
         name: "openclaw",
         display: "OpenClaw",
         default_path: ".openclaw/skills",
@@ -1484,6 +1491,7 @@ mod tests {
             ("antigravity", ".gemini/config/skills"),
             ("antigravity-cli", ".gemini/antigravity-cli/skills"),
             ("antigravity-legacy", ".gemini/antigravity/skills"),
+            ("agents-global", ".config/agents/skills"),
         ];
 
         for (_, path) in expected {

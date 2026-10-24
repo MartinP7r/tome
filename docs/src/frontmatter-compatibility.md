@@ -1,37 +1,41 @@
 # Frontmatter Compatibility
 
-SKILL.md files use YAML frontmatter to declare metadata. The base standard comes from the [Agent Skills spec](https://agentskills.io), but each platform extends it with its own fields. This page documents the current state of compatibility across tools.
+SKILL.md files use YAML frontmatter to declare metadata. The base standard comes from the [Agent Skills specification](https://agentskills.io/specification).[1] Platforms may add their own fields, but those extensions do not change the base format.
 
 ## Base Standard (agentskills.io)
 
 | Field | Required | Constraints |
 |-------|----------|-------------|
-| `name` | Yes | Max 64 chars. Lowercase letters, numbers, hyphens only. Must match directory name. |
-| `description` | Yes | Max 1024 chars. Non-empty. |
-| `license` | No | License name or reference. |
-| `compatibility` | No | Max 500 chars. Environment requirements. |
-| `metadata` | No | Arbitrary key-value map. |
-| `allowed-tools` | No | Space-delimited tool list. (Experimental) |
+| `name` | Yes | 1–64 Unicode lowercase alphanumeric characters plus hyphens; no leading, trailing, or consecutive hyphens; must match the parent directory name.[1] |
+| `description` | Yes | 1–1024 characters. Non-empty.[1] |
+| `license` | No | License name or reference to a bundled license file.[1] |
+| `compatibility` | No | Max 500 characters. Environment requirements.[1] |
+| `metadata` | No | String-to-string mapping (`string` keys and `string` values).[1] |
+| `allowed-tools` | No | Space-separated string of pre-approved tools. Experimental.[1] |
+
+The specification requires the `name` to match its parent directory. The
+official `skills-ref` validator normalizes both values with Unicode NFKC before
+comparing them; Tome follows that reference behavior.[2]
 
 ## Platform Extensions
 
-These fields are valid on their respective platforms but will be silently ignored (or warned about) elsewhere.
+These are platform-specific extensions, not fields in the base standard. Their behavior is host-specific; Tome's base-format validation does not guarantee support by a target agent.
 
 | Field | Platform | Purpose |
 |-------|----------|---------|
-| `disable-model-invocation` | Claude Code | User-only invocation (no auto-trigger) |
-| `user-invocable` | Claude Code | `false` = model-only background knowledge |
-| `argument-hint` | Claude Code | Hint for argument parsing |
-| `context` | Claude Code | `fork` = run in isolated subagent |
-| `agent` | Claude Code | Specify subagent type (e.g., `Explore`) |
-| `hooks` | Claude Code | Lifecycle hooks scoped to the skill |
-| `excludeAgent` | VS Code Copilot | Target `coding-agent` vs `code-review` |
+| `disable-model-invocation` | Claude Code | User-only invocation (no auto-trigger).[8] |
+| `user-invocable` | Claude Code | `false` = model-only background knowledge.[8] |
+| `argument-hint` | Claude Code | Hint for argument parsing.[8] |
+| `context` | Claude Code | `fork` = run in isolated subagent.[8] |
+| `agent` | Claude Code | Specify subagent type (e.g., `Explore`).[8] |
+| `hooks` | Claude Code | Lifecycle hooks scoped to the skill.[8] |
+| `excludeAgent` | VS Code Copilot | Target `coding-agent` vs `code-review`.[5] |
 
-Codex uses a separate `agents/openai.yaml` file instead of extending SKILL.md frontmatter.
+Codex uses a separate `agents/openai.yaml` file for UI metadata and invocation policy instead of extending the standard SKILL.md frontmatter.[6]
 
 ## Non-Standard Fields Found in the Wild
 
-These appear in community skills but are **not part of any spec**. They will be silently ignored by standard-compliant tools.
+These appear in community skills but are **not defined by the base specification**.[1] Prefer `metadata` for non-standard values; host behavior for unknown fields varies.
 
 | Field | Issue | Recommendation |
 |-------|-------|----------------|
@@ -41,67 +45,43 @@ These appear in community skills but are **not part of any spec**. They will be 
 | `last-updated` | Not in any spec | Move to `metadata.last-updated` |
 | `model` | Agent frontmatter field, not SKILL.md | Remove or move to agent config |
 
-## Known Bugs & Gotchas
+## Compatibility Notes
 
-### VSCode validator flags valid fields
-
-The VS Code Copilot extension's skill validator has an outdated schema that flags `allowed-tools` as unsupported, even though it's part of the base spec. This is a [known issue](https://github.com/microsoft/vscode-copilot-release/issues).
-
-### Multiline YAML descriptions break on Claude Code
-
-Claude Code's SKILL.md parser does not handle implicit YAML folding (Prettier-style wrapped lines). Descriptions that span multiple lines without an explicit block scalar will be silently truncated.
-
-**Breaks:**
-```yaml
----
-description: This is a long description that has been
-  wrapped by Prettier across multiple lines
----
-```
-
-**Works:**
-```yaml
----
-description: This is a long description on a single line
----
-```
-
-**Also works (explicit block scalar):**
-```yaml
----
-description: |
-  This is a long description that uses
-  an explicit block scalar indicator
----
-```
-
-### Unknown fields are silently ignored
-
-All standard-compliant tools silently ignore unknown frontmatter fields. The VS Code extension is an exception — it shows warnings for unrecognized fields. This means non-standard fields won't cause errors but also won't do anything.
+The specification includes `allowed-tools` as an experimental, space-separated string.[1] Host parsers and validators can differ; for example, OpenCode documents its own handling of unknown fields.[13] Validate the target agent's current documentation when relying on a platform extension. Tome reports base-format issues only and does not certify runtime compatibility.
 
 ### Case sensitivity
 
-- All field names must be **lowercase**
-- The filename must be exactly `SKILL.md` (uppercase)
+- Use the exact lowercase field names defined by the format.[1]
+- The filename must be exactly `SKILL.md` (uppercase).
 
 ## Platform Limits
 
 | Constraint | Limit | Platform |
 |------------|-------|----------|
-| `name` length | 64 chars | All (base spec) |
-| `description` length | 1024 chars | All (base spec) |
-| `description` length | 500 chars | VS Code Copilot (stricter) |
-| `compatibility` length | 500 chars | All (base spec) |
-| Skill body size | ~6000 chars | Windsurf |
-| Skill body size | ~5000 tokens | General recommendation |
+| `name` length | 1–64 characters | Agent Skills base specification.[1] |
+| `description` length | 1–1024 characters | Agent Skills base specification.[1] |
+| `compatibility` length | Up to 500 characters | Agent Skills base specification.[1] |
 
-## How tome Uses This
+This page does not claim stricter limits for a particular host; check current vendor documentation before relying on host-specific limits.
 
-tome currently symlinks skill directories as-is without parsing frontmatter. The v0.3.x release will add:
+## How Tome Uses This
 
-- **Frontmatter parsing** during discovery
-- **`tome lint`** command with tiered validation (errors, warnings, info)
-- **`tome doctor`** frontmatter health checks
-- **`tome status`** metadata summary per skill
+`tome lint` parses `SKILL.md` frontmatter and reports format violations. It
+errors on missing or invalid required fields, invalid names or directory-name
+mismatches, a blank or over-1024-character description, compatibility text over
+500 characters, non-string metadata values, and a non-string `allowed-tools`
+value. Name comparison and the name-length check use NFKC-normalized text. The
+linter also reports selected compatibility and non-standard-field warnings;
+those warnings do not replace validation by a target agent.
 
-See the [Roadmap](roadmap.md) for details.
+This is format validation only. It does not guarantee that every platform
+extension or tool named in a skill is supported by a particular agent.
+
+## Sources
+
+[1] https://agentskills.io/specification — Agent Skills specification
+[2] https://github.com/agentskills/agentskills/blob/main/skills-ref/src/skills_ref/validator.py — Agent Skills reference validator
+[5] https://code.visualstudio.com/docs/agent-customization/agent-skills — VS Code Agent Skills docs
+[6] https://developers.openai.com/codex/skills — Codex skills docs
+[8] https://code.claude.com/docs/en/skills — Claude Code skills documentation
+[13] https://opencode.ai/docs/skills — OpenCode Agent Skills documentation
