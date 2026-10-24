@@ -20,8 +20,9 @@ pub use contract::{
 pub use grader::grade_case;
 pub use materialize::{MaterializedWorkspace, hash_artifact_directory, materialize_run_workspace};
 pub use result::{
-    ComparisonResult, ComparisonStatus, EvaluationResult, EvidenceRef, GraderResult, GraderStatus,
-    NoDeltaReason, RunEvidence, RunRecord, VariantScore, parse_result_json,
+    ArtifactEvidence, ComparisonResult, ComparisonStatus, EvaluationResult, EventEvidence,
+    EvidenceRef, GraderResult, GraderStatus, NoDeltaReason, RunEvidence, RunRecord, VariantScore,
+    parse_result_json,
 };
 pub use runner::{RunKey, RunRequest, RunnerAdapter, WorkspaceProvider, evaluate_suite};
 pub use suite::{

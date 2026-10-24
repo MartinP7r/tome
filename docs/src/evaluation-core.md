@@ -6,7 +6,7 @@ This is not a user-facing CLI or a model/provider integration. The core does not
 
 ## Suite files
 
-A suite is a `suite.toml` file with `schema_version = 1`. The artifact identity must match the exact artifact directory passed to evaluation. Use Tome's `hash_artifact_directory` function to obtain the `sha256` value; it is a deterministic directory hash, not a hash of an archive. The example below uses a placeholder digest and must be replaced with the real value before evaluation.
+A suite is a `suite.toml` file with `schema_version = 1`. The artifact identity must match the exact artifact directory passed to evaluation. Use Tome's `hash_artifact_directory` function to obtain the `sha256` value; it is a deterministic, length-delimited directory-content hash, not a hash of an archive or Tome's sync-manifest hash. The example below uses a placeholder digest and must be replaced with the real value before evaluation.
 
 ```toml
 {{#include examples/evaluation-suite.toml}}
@@ -29,15 +29,15 @@ Every grader declares the observation capability it needs. Missing capabilities 
 
 `evaluate_suite` validates the suite and hashes the source artifact before creating a workspace or calling the adapter. Each case, control/treatment variant, and repetition receives a distinct empty workspace. The core copies fixtures into the workspace and copies the skill artifact only for treatment runs; the canonical artifact and suite inputs are not passed to the adapter as writable paths. Symlinks and hash mismatches are rejected during materialization.
 
-The `ExecutionPolicy` records the requested timeout, output-size limit, network policy, fresh-workspace requirement, permissions, and result-retention policy. Defaults are a 120-second timeout request, a 1 MiB output limit, disabled network, fresh workspaces, no additional permissions, and summary-only result retention. These are contract values: an adapter is responsible for enforcing runtime limits and returning the observed policy. The core validates normalized observation bounds after the adapter returns, but cannot interrupt a non-cooperating provider.
+The `ExecutionPolicy` records the requested timeout, output-size limit, network policy, fresh-workspace requirement, permissions, and result-retention policy. Defaults are a 120-second timeout request, a 1 MiB normalized-output limit, disabled network, fresh workspaces, no additional permissions, and summary-only result retention. The core bounds normalized text, event names, manifest paths, event/manifest counts, cumulative evidence, grader references, and encoded result size. These policy values are still contract values: an adapter is responsible for enforcing runtime limits and reporting the observed policy. Reported model identity and policy are adapter self-attestations, not proof of provider behavior; the core cannot interrupt a non-cooperating provider.
 
 `RunRequest` contains identifiers, prompts, hashes, the optional model pin, and policy; it contains no source-library path or credential field. `RunObservation` carries normalized evidence, not provider-specific raw payloads. Free-form adapter error text is discarded so it cannot accidentally persist prompts, paths, or credentials.
 
 ## Comparison and results
 
-Control and treatment runs are aggregated as matched observations. A score delta is emitted only when the runs are comparable and have score-bearing evidence. Failures, missing capabilities, model-pin mismatches, and policy mismatches are retained as explicit no-delta reasons instead of being turned into a misleading numeric result.
+Control and treatment runs are aggregated as matched observations. A score delta is emitted only when the runs are comparable and have score-bearing evidence. Any failure—including a contradictory `completed` state with a failure—is non-comparable. Missing capabilities, model-pin mismatches, and policy mismatches are retained as explicit no-delta reasons instead of being turned into a misleading numeric result.
 
-`EvaluationResult::to_json()` emits the versioned result document; `parse_result_json()` validates a document when reading it back. By default, results retain the final-text SHA-256 and grader evidence, but omit the raw final response. `RetentionPolicy::FullTrace` explicitly opts into storing normalized final text; use it only when the data is appropriate to persist. Result extensions must not shadow reserved schema fields.
+`EvaluationResult::to_json()` emits result schema version 2; `parse_result_json()` rejects unsupported versions and validates a document when reading it back. By default, results retain hashes of final text, artifact paths, and event names, but omit those raw values and the raw final response. Grader evidence references are bounded, with omitted-reference counts recorded. `RetentionPolicy::FullTrace` explicitly opts into storing normalized final text, event names, and artifact paths; use it only when that data is appropriate to persist. Result extensions must not shadow reserved schema fields.
 
 The library returns JSON as a string and does not choose a persistence location. The caller owns result-file creation, retention, and access control.
 

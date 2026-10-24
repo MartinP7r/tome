@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use crate::validation::{ContentHash, validate_identifier};
 
 use super::contract::{
-    ActivationState, EventKind, ExecutionPolicy, ModelPin, ObservationCapability, Variant,
+    ActivationState, EventKind, ExecutionPolicy, MAX_ARTIFACT_PATH_BYTES, MAX_EVENT_NAME_BYTES,
+    MAX_GRADERS_PER_CASE, ModelPin, ObservationCapability, Variant, validate_model_pin,
+    validate_safe_token,
 };
 
 /// Current author-authored suite schema version.
@@ -19,7 +21,7 @@ pub const SUITE_SCHEMA_VERSION: u32 = 1;
 /// Bound repetitions so an untrusted suite cannot schedule unbounded work later.
 pub const MAX_REPETITIONS: u32 = 100;
 /// Bound the number of runs produced by a single suite.
-pub const MAX_RUNS: usize = 10_000;
+pub(crate) const MAX_RUNS: usize = 10_000;
 
 /// A validated provider-neutral evaluation suite.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +67,7 @@ pub struct EvaluationCase {
 
 /// A deterministic grader declaration. `kind` is the TOML discriminator.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum GraderSpec {
     TextContains {
         id: String,
@@ -195,7 +197,7 @@ impl GraderSpec {
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
-        validate_identifier(self.id(), "grader id")?;
+        validate_safe_token(self.id(), "grader id", 128, false)?;
         ensure!(
             self.weight() > 0,
             "grader '{}' weight must be positive",
@@ -217,10 +219,15 @@ impl GraderSpec {
             Self::ArtifactExists { path, .. } | Self::ArtifactSha256 { path, .. } => {
                 validate_relative_path(path, "grader artifact path")?;
             }
-            Self::EventCount { name, .. } => {
+            Self::EventCount {
+                name,
+                expected_count,
+                ..
+            } => {
+                validate_safe_token(name, "grader event name", MAX_EVENT_NAME_BYTES, false)?;
                 ensure!(
-                    !name.trim().is_empty(),
-                    "grader '{}' event name cannot be empty",
+                    *expected_count <= super::contract::MAX_GRADER_EVIDENCE_REFS,
+                    "grader '{}' expected event count exceeds evidence limit",
                     self.id()
                 );
             }
@@ -230,12 +237,18 @@ impl GraderSpec {
                     "grader '{}' event sequence cannot be empty",
                     self.id()
                 );
+                ensure!(
+                    sequence.len() <= super::contract::MAX_GRADER_EVIDENCE_REFS,
+                    "grader '{}' event sequence exceeds evidence limit",
+                    self.id()
+                );
                 for selector in sequence {
-                    ensure!(
-                        !selector.name.trim().is_empty(),
-                        "grader '{}' event name cannot be empty",
-                        self.id()
-                    );
+                    validate_safe_token(
+                        &selector.name,
+                        "grader event name",
+                        MAX_EVENT_NAME_BYTES,
+                        false,
+                    )?;
                 }
             }
             Self::ArtifactAllowlist { allowed_paths, .. } => {
@@ -288,46 +301,9 @@ impl EvaluationSuite {
             (1..=MAX_REPETITIONS).contains(&self.repetitions),
             "repetitions must be between 1 and {MAX_REPETITIONS}"
         );
-        ensure!(
-            self.policy.timeout_ms > 0,
-            "policy.timeout_ms must be positive"
-        );
-        ensure!(
-            self.policy.max_output_bytes > 0,
-            "policy.max_output_bytes must be positive"
-        );
-        for permission in &self.policy.permissions {
-            ensure!(
-                !permission.trim().is_empty() && permission.trim() == permission,
-                "policy permission must be non-empty and trimmed"
-            );
-        }
+        self.policy.validate()?;
         if let Some(pin) = &self.model_pin {
-            ensure!(
-                !pin.provider.trim().is_empty(),
-                "model pin provider cannot be empty"
-            );
-            ensure!(
-                !pin.model.trim().is_empty(),
-                "model pin model cannot be empty"
-            );
-            ensure!(
-                pin.provider.trim() == pin.provider,
-                "model pin provider must be trimmed"
-            );
-            ensure!(
-                pin.model.trim() == pin.model,
-                "model pin model must be trimmed"
-            );
-            for value in [pin.version.as_deref(), pin.prompt_version.as_deref()]
-                .into_iter()
-                .flatten()
-            {
-                ensure!(
-                    !value.trim().is_empty() && value.trim() == value,
-                    "model pin values must be non-empty and trimmed"
-                );
-            }
+            validate_model_pin(pin)?;
         }
         ensure!(
             !self.cases.is_empty(),
@@ -371,6 +347,11 @@ impl EvaluationSuite {
                 "case '{}' must define at least one grader",
                 case.id
             );
+            ensure!(
+                case.graders.len() <= MAX_GRADERS_PER_CASE,
+                "case '{}' exceeds the {MAX_GRADERS_PER_CASE}-grader limit",
+                case.id
+            );
             let mut grader_ids = BTreeSet::new();
             for grader in &case.graders {
                 grader.validate()?;
@@ -389,6 +370,10 @@ impl EvaluationSuite {
 /// Reject absolute, empty, dot, parent, and platform-specific paths.
 pub fn validate_relative_path(value: &str, label: &str) -> Result<()> {
     ensure!(!value.is_empty(), "{label} cannot be empty");
+    ensure!(
+        value.len() <= MAX_ARTIFACT_PATH_BYTES,
+        "{label} exceeds {MAX_ARTIFACT_PATH_BYTES} bytes"
+    );
     ensure!(
         !value.starts_with('/')
             && !value.as_bytes().contains(&92)
@@ -544,5 +529,11 @@ needle = "two"
                 .to_string()
                 .contains("duplicate grader id")
         );
+    }
+
+    #[test]
+    fn rejects_unknown_grader_fields_instead_of_ignoring_typos() {
+        let input = MINIMAL_SUITE.replace(r#"needle = "42""#, "needle = \"42\"\nweigth = 9");
+        assert!(parse_suite_toml(&input).is_err());
     }
 }

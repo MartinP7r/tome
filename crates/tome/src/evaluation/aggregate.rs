@@ -1,6 +1,6 @@
 //! Matched treatment/control scoring with explicit non-comparability reasons.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::contract::{TerminalState, Variant};
 use super::result::{
@@ -12,27 +12,20 @@ use super::suite::{EvaluationCase, EvaluationSuite};
 /// score delta is emitted unless every comparison precondition is satisfied.
 pub fn aggregate(suite: &EvaluationSuite, runs: &[RunRecord]) -> ComparisonResult {
     let mut reasons = BTreeSet::new();
-    let control = score_variant(suite, runs, Variant::Control);
-    let treatment = score_variant(suite, runs, Variant::Treatment);
+    let run_index = index_runs(runs);
+    let control = score_variant(suite, &run_index, Variant::Control);
+    let treatment = score_variant(suite, &run_index, Variant::Treatment);
 
     for case in &suite.cases {
         for repetition in 0..suite.repetitions {
-            let controls: Vec<_> = runs
-                .iter()
-                .filter(|run| {
-                    run.case_id == case.id
-                        && run.repetition == repetition
-                        && run.variant == Variant::Control
-                })
-                .collect();
-            let treatments: Vec<_> = runs
-                .iter()
-                .filter(|run| {
-                    run.case_id == case.id
-                        && run.repetition == repetition
-                        && run.variant == Variant::Treatment
-                })
-                .collect();
+            let controls = run_index
+                .get(&(case.id.clone(), Variant::Control, repetition))
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let treatments = run_index
+                .get(&(case.id.clone(), Variant::Treatment, repetition))
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
 
             if controls.len() != 1 {
                 reasons.insert(NoDeltaReason::MissingControlRun);
@@ -40,8 +33,7 @@ pub fn aggregate(suite: &EvaluationSuite, runs: &[RunRecord]) -> ComparisonResul
             if treatments.len() != 1 {
                 reasons.insert(NoDeltaReason::MissingTreatmentRun);
             }
-            if let (Some(control_run), Some(treatment_run)) = (controls.first(), treatments.first())
-            {
+            if let ([control_run], [treatment_run]) = (controls, treatments) {
                 compare_pair(case, control_run, treatment_run, &mut reasons);
             }
         }
@@ -86,6 +78,19 @@ pub fn aggregate(suite: &EvaluationSuite, runs: &[RunRecord]) -> ComparisonResul
     }
 }
 
+type RunIndex<'a> = BTreeMap<(String, Variant, u32), Vec<&'a RunRecord>>;
+
+fn index_runs(runs: &[RunRecord]) -> RunIndex<'_> {
+    let mut index = BTreeMap::new();
+    for run in runs {
+        index
+            .entry((run.case_id.clone(), run.variant, run.repetition))
+            .or_insert_with(Vec::new)
+            .push(run);
+    }
+    index
+}
+
 fn compare_pair(
     case: &EvaluationCase,
     control: &RunRecord,
@@ -94,6 +99,8 @@ fn compare_pair(
 ) {
     if control.terminal_state != TerminalState::Completed
         || treatment.terminal_state != TerminalState::Completed
+        || control.failure.is_some()
+        || treatment.failure.is_some()
     {
         reasons.insert(NoDeltaReason::TerminalRunFailure);
     }
@@ -162,22 +169,29 @@ fn actual_score_set(run: &RunRecord) -> BTreeSet<(String, u32)> {
 }
 
 fn has_uncomparable_score(run: &RunRecord) -> bool {
-    run.graders.iter().any(|grader| {
-        grader.score_bearing && !matches!(grader.status, GraderStatus::Pass | GraderStatus::Fail)
-    })
+    run.failure.is_some()
+        || run.terminal_state != TerminalState::Completed
+        || run.graders.iter().any(|grader| {
+            grader.score_bearing
+                && !matches!(grader.status, GraderStatus::Pass | GraderStatus::Fail)
+        })
 }
 
-fn score_variant(suite: &EvaluationSuite, runs: &[RunRecord], variant: Variant) -> VariantScore {
+fn score_variant(suite: &EvaluationSuite, runs: &RunIndex<'_>, variant: Variant) -> VariantScore {
     let mut passed_weight = 0_u64;
     let mut observed_weight = 0_u64;
     let mut total_weight = 0_u64;
     for case in &suite.cases {
         for repetition in 0..suite.repetitions {
-            let mut matching_runs = runs.iter().filter(|run| {
-                run.case_id == case.id && run.repetition == repetition && run.variant == variant
-            });
-            let run = matching_runs.next();
-            let has_duplicate_run = matching_runs.next().is_some();
+            let matching_runs = runs
+                .get(&(case.id.clone(), variant, repetition))
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let run = if matching_runs.len() == 1 {
+                matching_runs.first().copied()
+            } else {
+                None
+            };
             for expected in case
                 .graders
                 .iter()
@@ -185,12 +199,12 @@ fn score_variant(suite: &EvaluationSuite, runs: &[RunRecord], variant: Variant) 
             {
                 let weight = u64::from(expected.weight());
                 total_weight = total_weight.saturating_add(weight);
-                if has_duplicate_run {
-                    continue;
-                }
                 let Some(run) = run else {
                     continue;
                 };
+                if run.failure.is_some() || run.terminal_state != TerminalState::Completed {
+                    continue;
+                }
                 let mut matching_graders = run.graders.iter().filter(|grader| {
                     grader.score_bearing
                         && grader.grader_id == expected.id()
@@ -285,6 +299,7 @@ mod tests {
                 status,
                 score_bearing: true,
                 weight: 2,
+                omitted_evidence_references: 0,
                 reason: None,
                 evidence: vec![EvidenceRef::FinalTextHash {
                     sha256: ContentHash::new("b".repeat(64)).unwrap(),
@@ -374,6 +389,7 @@ mod tests {
                 status: GraderStatus::Pass,
                 score_bearing: true,
                 weight: 10,
+                omitted_evidence_references: 0,
                 reason: None,
                 evidence: vec![EvidenceRef::Activation {
                     state: ActivationState::NotActivated,
@@ -402,6 +418,7 @@ mod tests {
             status: GraderStatus::Pass,
             score_bearing: true,
             weight: 10,
+            omitted_evidence_references: 0,
             reason: None,
             evidence: vec![EvidenceRef::Activation {
                 state: ActivationState::NotActivated,
@@ -412,6 +429,7 @@ mod tests {
             status: GraderStatus::Pass,
             score_bearing: false,
             weight: 10,
+            omitted_evidence_references: 0,
             reason: None,
             evidence: vec![EvidenceRef::Activation {
                 state: ActivationState::Activated,

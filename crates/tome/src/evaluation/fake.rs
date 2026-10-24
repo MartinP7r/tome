@@ -89,20 +89,12 @@ impl FreshWorkspaceProvider {
 }
 
 impl WorkspaceProvider for FreshWorkspaceProvider {
-    type Workspace = PathBuf;
-
-    fn create_workspace(&mut self, key: &RunKey) -> Result<Self::Workspace> {
-        fs::create_dir_all(&self.root).with_context(|| {
-            format!("failed to create workspace root '{}'", self.root.display())
-        })?;
+    fn workspace_path(&mut self, key: &RunKey) -> Result<PathBuf> {
         let variant = match key.variant {
             Variant::Control => "control",
             Variant::Treatment => "treatment",
         };
         let name = format!("{}-{variant}-{}", key.case_id, key.repetition);
-        let path = self.root.join(name);
-        fs::create_dir(&path)
-            .with_context(|| format!("failed to create fresh workspace '{}'", path.display()))?;
-        Ok(path)
+        Ok(self.root.join(name))
     }
 }

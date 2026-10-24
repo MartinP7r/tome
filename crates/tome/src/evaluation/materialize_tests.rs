@@ -34,8 +34,8 @@ fn copies_treatment_and_fixtures_without_changing_sources() {
     fs::create_dir_all(&artifact).unwrap();
     write(&artifact.join("SKILL.md"), b"source skill");
     write(&suite.join("fixtures/case/input.txt"), b"fixture");
-    let expected = hash_directory(&artifact).unwrap();
-    let fixture_hash = hash_directory(&suite.join("fixtures/case")).unwrap();
+    let expected = hash_artifact_directory(&artifact).unwrap();
+    let fixture_hash = hash_artifact_directory(&suite.join("fixtures/case")).unwrap();
     let treatment = TempDir::new().unwrap();
     let control = TempDir::new().unwrap();
     let treatment_paths = materialize_run_workspace(
@@ -44,6 +44,7 @@ fn copies_treatment_and_fixtures_without_changing_sources() {
         Variant::Treatment,
         &artifact,
         &expected,
+        Some(&fixture_hash),
         treatment.path(),
     )
     .unwrap();
@@ -53,6 +54,7 @@ fn copies_treatment_and_fixtures_without_changing_sources() {
         Variant::Control,
         &artifact,
         &expected,
+        Some(&fixture_hash),
         control.path(),
     )
     .unwrap();
@@ -71,10 +73,28 @@ fn copies_treatment_and_fixtures_without_changing_sources() {
         &treatment_paths.artifact_path.unwrap().join("SKILL.md"),
         b"mutated copy",
     );
-    assert_eq!(hash_directory(&artifact).unwrap(), expected);
+    assert_eq!(hash_artifact_directory(&artifact).unwrap(), expected);
     assert_eq!(
         fs::read(artifact.join("SKILL.md")).unwrap(),
         b"source skill"
+    );
+}
+
+#[test]
+fn directory_hash_is_unambiguous_for_embedded_nul_file_content() {
+    let root = TempDir::new().unwrap();
+    let single_file = root.path().join("single");
+    let split_files = root.path().join("split");
+    fs::create_dir_all(&single_file).unwrap();
+    fs::create_dir_all(&split_files).unwrap();
+    write(&single_file.join("a"), b"xb\0y");
+    write(&split_files.join("a"), b"x");
+    write(&split_files.join("b"), b"y");
+
+    assert_ne!(
+        hash_artifact_directory(&single_file).unwrap(),
+        hash_artifact_directory(&split_files).unwrap(),
+        "different directory trees must not share an ambiguous hash preimage"
     );
 }
 
@@ -93,6 +113,7 @@ fn refuses_hash_mismatch_before_writing_anything() {
             Variant::Treatment,
             &artifact,
             &wrong,
+            None,
             workspace.path(),
         )
         .is_err()
@@ -112,7 +133,8 @@ fn rejects_symlinked_source_files_and_fixtures() {
     let outside = root.path().join("outside");
     fs::create_dir_all(&outside).unwrap();
     write(&outside.join("input.txt"), b"outside");
-    let expected = hash_directory(&artifact).unwrap();
+    let outside_hash = hash_artifact_directory(&outside).unwrap();
+    let expected = hash_artifact_directory(&artifact).unwrap();
 
     symlink(outside.join("input.txt"), artifact.join("linked.txt")).unwrap();
     let artifact_workspace = TempDir::new().unwrap();
@@ -123,6 +145,7 @@ fn rejects_symlinked_source_files_and_fixtures() {
             Variant::Treatment,
             &artifact,
             &expected,
+            None,
             artifact_workspace.path(),
         )
         .is_err()
@@ -146,6 +169,7 @@ fn rejects_symlinked_source_files_and_fixtures() {
             Variant::Control,
             &artifact,
             &expected,
+            Some(&outside_hash),
             fixture_workspace.path(),
         )
         .is_err()

@@ -5,7 +5,9 @@ use std::collections::BTreeSet;
 use anyhow::Result;
 use regex::Regex;
 
-use super::contract::{ObservationCapability, RunObservation, TerminalState, Variant};
+use super::contract::{
+    MAX_GRADER_EVIDENCE_REFS, ObservationCapability, RunObservation, TerminalState, Variant,
+};
 use super::result::{EvidenceRef, GraderResult, GraderStatus, text_hash};
 use super::suite::{EvaluationCase, GraderSpec};
 
@@ -35,6 +37,7 @@ fn grade_one(
         status: GraderStatus::NotComparable,
         score_bearing,
         weight,
+        omitted_evidence_references: 0,
         reason: None,
         evidence: Vec::new(),
     };
@@ -52,8 +55,8 @@ fn grade_one(
         return Ok(result);
     }
 
-    if !matches!(observation.terminal_state, TerminalState::Completed) {
-        result.reason = Some("run did not complete".to_string());
+    if observation.failure.is_some() || observation.terminal_state != TerminalState::Completed {
+        result.reason = Some("run did not complete successfully".to_string());
         return Ok(result);
     }
 
@@ -107,7 +110,9 @@ fn grade_one(
             let present = observation.artifact_manifest.contains_key(path);
             let matched = present == *expected_present;
             let evidence = present
-                .then(|| EvidenceRef::ArtifactPath { path: path.clone() })
+                .then(|| EvidenceRef::ArtifactPath {
+                    path_sha256: text_hash(path),
+                })
                 .into_iter()
                 .collect();
             (
@@ -134,7 +139,7 @@ fn grade_one(
                 (actual != expected_sha256)
                     .then(|| "artifact hash did not match expectation".to_string()),
                 vec![EvidenceRef::ArtifactHash {
-                    path: path.clone(),
+                    path_sha256: text_hash(path),
                     sha256: actual.clone(),
                 }],
             ),
@@ -159,6 +164,8 @@ fn grade_one(
                 })
                 .collect();
             let matched = indices.len() == *expected_count;
+            result.omitted_evidence_references +=
+                indices.len().saturating_sub(MAX_GRADER_EVIDENCE_REFS);
             (
                 if matched {
                     GraderStatus::Pass
@@ -168,6 +175,7 @@ fn grade_one(
                 (!matched).then(|| "event count did not match expectation".to_string()),
                 indices
                     .into_iter()
+                    .take(MAX_GRADER_EVIDENCE_REFS)
                     .map(|index| EvidenceRef::EventIndex { index })
                     .collect(),
             )
@@ -191,6 +199,8 @@ fn grade_one(
                 }
             }
             let matched = indices.len() == sequence.len();
+            result.omitted_evidence_references +=
+                indices.len().saturating_sub(MAX_GRADER_EVIDENCE_REFS);
             (
                 if matched {
                     GraderStatus::Pass
@@ -200,6 +210,7 @@ fn grade_one(
                 (!matched).then(|| "required event sequence was not observed in order".to_string()),
                 indices
                     .into_iter()
+                    .take(MAX_GRADER_EVIDENCE_REFS)
                     .map(|index| EvidenceRef::EventIndex { index })
                     .collect(),
             )
@@ -211,6 +222,8 @@ fn grade_one(
                 .filter(|path| !allowed_paths.contains(path))
                 .cloned()
                 .collect();
+            result.omitted_evidence_references +=
+                unexpected.len().saturating_sub(MAX_GRADER_EVIDENCE_REFS);
             (
                 if unexpected.is_empty() {
                     GraderStatus::Pass
@@ -221,7 +234,10 @@ fn grade_one(
                     .then(|| "artifact manifest contains a non-allowlisted path".to_string()),
                 unexpected
                     .into_iter()
-                    .map(|path| EvidenceRef::ArtifactPath { path })
+                    .take(MAX_GRADER_EVIDENCE_REFS)
+                    .map(|path| EvidenceRef::ArtifactPath {
+                        path_sha256: text_hash(&path),
+                    })
                     .collect(),
             )
         }
@@ -492,8 +508,38 @@ mod tests {
         assert_eq!(
             graded[0].evidence,
             vec![EvidenceRef::ArtifactPath {
-                path: "unexpected.txt".to_string()
+                path_sha256: text_hash("unexpected.txt")
             }]
         );
+    }
+
+    #[test]
+    fn event_grader_bounds_references_and_reports_omitted_count() {
+        let mut obs = observation(ObservationCapability::Events);
+        obs.events = (0..300)
+            .map(|_| NormalizedEvent {
+                kind: EventKind::ToolCall,
+                name: "search".to_string(),
+                succeeded: Some(true),
+            })
+            .collect();
+        let case = grader(GraderSpec::EventCount {
+            id: "search".to_string(),
+            event_kind: EventKind::ToolCall,
+            name: "search".to_string(),
+            expected_count: 300,
+            weight: 1,
+        });
+        let graded = grade_case(
+            &case,
+            Variant::Treatment,
+            &caps(&[ObservationCapability::Events]),
+            &obs,
+        )
+        .unwrap();
+
+        assert_eq!(graded[0].status, GraderStatus::Pass);
+        assert_eq!(graded[0].evidence.len(), MAX_GRADER_EVIDENCE_REFS);
+        assert_eq!(graded[0].omitted_evidence_references, 44);
     }
 }

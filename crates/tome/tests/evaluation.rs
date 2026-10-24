@@ -1,13 +1,14 @@
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tempfile::TempDir;
 use tome::evaluation::fake::{DeterministicFakeAdapter, FreshWorkspaceProvider};
 use tome::evaluation::{
-    ArtifactIdentity, EvaluationCase, EvaluationSuite, ExecutionPolicy, GraderSpec, ModelPin,
-    ObservationCapability, RetentionPolicy, RunKey, RunObservation, RunnerIdentity, Variant,
-    evaluate_suite, hash_artifact_directory, parse_suite_toml,
+    ArtifactIdentity, EvaluationCase, EvaluationSuite, EventKind, ExecutionPolicy, FailureKind,
+    GraderSpec, ModelPin, NormalizedEvent, ObservationCapability, RetentionPolicy, RunKey,
+    RunObservation, RunRequest, RunnerAdapter, RunnerIdentity, Variant, evaluate_suite,
+    hash_artifact_directory, parse_suite_toml,
 };
 
 fn create_inputs(root: &Path) -> (std::path::PathBuf, std::path::PathBuf, tome::ContentHash) {
@@ -84,6 +85,36 @@ fn adapter_with_pair(
         }
     }
     adapter
+}
+
+struct MutatingFixtureAdapter {
+    identity: RunnerIdentity,
+    capabilities: BTreeSet<ObservationCapability>,
+    fixture_path: PathBuf,
+    calls: usize,
+}
+
+impl RunnerAdapter for MutatingFixtureAdapter {
+    fn identity(&self) -> &RunnerIdentity {
+        &self.identity
+    }
+
+    fn capabilities(&self) -> &BTreeSet<ObservationCapability> {
+        &self.capabilities
+    }
+
+    fn run(&mut self, request: &RunRequest, _workspace: &Path) -> anyhow::Result<RunObservation> {
+        self.calls += 1;
+        let mut observation = RunObservation::completed();
+        observation.capabilities = self.capabilities.clone();
+        observation.final_text = Some("answer is 42".to_string());
+        observation.model_pin = request.model_pin.clone();
+        observation.execution_policy = Some(request.policy.clone());
+        if self.calls == 2 {
+            fs::write(&self.fixture_path, b"mutated between repetitions")?;
+        }
+        Ok(observation)
+    }
 }
 
 #[test]
@@ -234,4 +265,244 @@ fn documented_suite_example_parses() {
     .expect("documentation suite example must remain valid");
     assert_eq!(suite.suite_id, "answer-check");
     assert_eq!(suite.cases.len(), 1);
+}
+
+#[test]
+fn rejects_workspace_roots_inside_artifact_or_suite_before_creating_them() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+    let suite = suite(hash.clone());
+
+    for workspace_root in [artifact.join("workspaces"), suite_root.join("workspaces")] {
+        let mut adapter = adapter_with_pair([ObservationCapability::FinalText], &suite, None);
+        let mut workspaces = FreshWorkspaceProvider::new(workspace_root.clone());
+        assert!(
+            evaluate_suite(
+                &suite_root,
+                &artifact,
+                &suite,
+                &mut workspaces,
+                &mut adapter
+            )
+            .is_err()
+        );
+        assert!(
+            !workspace_root.exists(),
+            "overlap check must precede creation"
+        );
+        assert!(adapter.invocations().is_empty());
+        assert_eq!(hash_artifact_directory(&artifact).unwrap(), hash);
+    }
+}
+
+#[test]
+fn completed_observation_with_failure_cannot_produce_a_comparable_delta() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+    let suite = suite(hash);
+    let mut adapter = adapter_with_pair([ObservationCapability::FinalText], &suite, None);
+    let mut contradictory = RunObservation::completed();
+    contradictory.capabilities = [ObservationCapability::FinalText].into_iter().collect();
+    contradictory.final_text = Some("answer is 42".to_string());
+    contradictory.model_pin = suite.model_pin.clone();
+    contradictory.execution_policy = Some(suite.policy.clone());
+    contradictory.failure = Some(FailureKind::AdapterError);
+    adapter.insert_observation(
+        RunKey {
+            case_id: "case".to_string(),
+            variant: Variant::Control,
+            repetition: 0,
+        },
+        contradictory,
+    );
+    let mut workspaces = FreshWorkspaceProvider::new(root.path().join("workspaces"));
+
+    let result = evaluate_suite(
+        &suite_root,
+        &artifact,
+        &suite,
+        &mut workspaces,
+        &mut adapter,
+    )
+    .unwrap();
+
+    let failed_run = result
+        .runs
+        .iter()
+        .find(|run| run.variant == Variant::Control && run.repetition == 0)
+        .unwrap();
+    assert_eq!(
+        failed_run.terminal_state,
+        tome::evaluation::TerminalState::RunnerError
+    );
+    assert_eq!(failed_run.failure, Some(FailureKind::InvalidObservation));
+    assert_eq!(result.comparison.delta_basis_points, None);
+}
+
+#[test]
+fn fixture_mutation_between_matched_repetitions_aborts_evaluation() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+    let suite = suite(hash);
+    let fixture_path = suite_root.join("fixtures/case/input.txt");
+    let mut adapter = MutatingFixtureAdapter {
+        identity: RunnerIdentity {
+            id: "fixture-mutator".to_string(),
+            version: Some("1".to_string()),
+        },
+        capabilities: [ObservationCapability::FinalText].into_iter().collect(),
+        fixture_path,
+        calls: 0,
+    };
+    let mut workspaces = FreshWorkspaceProvider::new(root.path().join("workspaces"));
+
+    assert!(
+        evaluate_suite(
+            &suite_root,
+            &artifact,
+            &suite,
+            &mut workspaces,
+            &mut adapter
+        )
+        .is_err()
+    );
+    assert_eq!(
+        adapter.calls, 2,
+        "changed fixture must be rejected before run 3"
+    );
+}
+
+#[test]
+fn summary_retention_redacts_adapter_event_names_and_artifact_paths() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+    let suite = suite(hash);
+    let mut adapter = DeterministicFakeAdapter::new(
+        RunnerIdentity {
+            id: "fake-adapter".to_string(),
+            version: Some("1".to_string()),
+        },
+        [
+            ObservationCapability::FinalText,
+            ObservationCapability::Events,
+        ],
+    );
+    for repetition in 0..suite.repetitions {
+        for variant in Variant::ALL {
+            let mut observation = RunObservation::completed();
+            observation.capabilities = [
+                ObservationCapability::FinalText,
+                ObservationCapability::Events,
+            ]
+            .into_iter()
+            .collect();
+            observation.final_text = Some("answer is 42".to_string());
+            observation.events.push(NormalizedEvent {
+                kind: EventKind::ToolCall,
+                name: "customer-secret".to_string(),
+                succeeded: Some(true),
+            });
+            observation.artifact_manifest.insert(
+                "customer-secret/token.txt".to_string(),
+                tome::ContentHash::new("b".repeat(64)).unwrap(),
+            );
+            observation.model_pin = suite.model_pin.clone();
+            observation.execution_policy = Some(suite.policy.clone());
+            adapter.insert_observation(
+                RunKey {
+                    case_id: "case".to_string(),
+                    variant,
+                    repetition,
+                },
+                observation,
+            );
+        }
+    }
+    let mut workspaces = FreshWorkspaceProvider::new(root.path().join("workspaces"));
+
+    let result = evaluate_suite(
+        &suite_root,
+        &artifact,
+        &suite,
+        &mut workspaces,
+        &mut adapter,
+    )
+    .unwrap();
+    let json = result.to_json().unwrap();
+
+    assert!(!json.contains("customer-secret"));
+    assert!(!json.contains("token.txt"));
+}
+
+#[test]
+fn output_byte_limit_covers_events_and_artifact_manifest_paths() {
+    let root = TempDir::new().unwrap();
+    let (artifact, suite_root, hash) = create_inputs(root.path());
+
+    for include_event in [true, false] {
+        let mut suite = suite(hash.clone());
+        suite.policy.max_output_bytes = 4;
+        let capabilities: BTreeSet<ObservationCapability> = if include_event {
+            [ObservationCapability::Events].into_iter().collect()
+        } else {
+            [ObservationCapability::ArtifactManifest]
+                .into_iter()
+                .collect()
+        };
+        let mut adapter = DeterministicFakeAdapter::new(
+            RunnerIdentity {
+                id: "fake-adapter".to_string(),
+                version: Some("1".to_string()),
+            },
+            capabilities.clone(),
+        );
+        for repetition in 0..suite.repetitions {
+            for variant in Variant::ALL {
+                let mut observation = RunObservation::completed();
+                observation.capabilities = capabilities.clone();
+                if include_event {
+                    observation.events.push(NormalizedEvent {
+                        kind: EventKind::ToolCall,
+                        name: "event".to_string(),
+                        succeeded: Some(true),
+                    });
+                } else {
+                    observation.artifact_manifest.insert(
+                        "out.txt".to_string(),
+                        tome::ContentHash::new("c".repeat(64)).unwrap(),
+                    );
+                }
+                observation.model_pin = suite.model_pin.clone();
+                observation.execution_policy = Some(suite.policy.clone());
+                adapter.insert_observation(
+                    RunKey {
+                        case_id: "case".to_string(),
+                        variant,
+                        repetition,
+                    },
+                    observation,
+                );
+            }
+        }
+        let mut workspaces = FreshWorkspaceProvider::new(root.path().join(if include_event {
+            "event-workspaces"
+        } else {
+            "manifest-workspaces"
+        }));
+
+        let result = evaluate_suite(
+            &suite_root,
+            &artifact,
+            &suite,
+            &mut workspaces,
+            &mut adapter,
+        )
+        .unwrap();
+        assert!(
+            result
+                .runs
+                .iter()
+                .all(|run| { run.failure == Some(FailureKind::InvalidObservation) })
+        );
+    }
 }
