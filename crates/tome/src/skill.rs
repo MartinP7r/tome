@@ -99,6 +99,28 @@ pub fn parse(content: &str) -> anyhow::Result<(SkillFrontmatter, String)> {
     }
 }
 
+/// Parse frontmatter once into a YAML value, then convert it to the typed
+/// representation while retaining whether `allowed-tools` was a string.
+///
+/// The linter needs that scalar-vs-sequence distinction, which the public
+/// `SkillFrontmatter` projection intentionally flattens for compatibility.
+pub(crate) fn parse_for_lint(content: &str) -> anyhow::Result<(SkillFrontmatter, String, bool)> {
+    let Some((yaml, body)) = extract_frontmatter(content) else {
+        bail!("no frontmatter found (expected --- delimiters)");
+    };
+
+    let raw: serde_yaml::Value = serde_yaml::from_str(yaml).context("invalid YAML frontmatter")?;
+    let key = serde_yaml::Value::String("allowed-tools".to_string());
+    let allowed_tools_is_string = raw
+        .as_mapping()
+        .and_then(|mapping| mapping.get(&key))
+        .is_none_or(serde_yaml::Value::is_string);
+    let frontmatter: SkillFrontmatter =
+        serde_yaml::from_value(raw).context("invalid YAML frontmatter")?;
+
+    Ok((frontmatter, body.to_string(), allowed_tools_is_string))
+}
+
 // ---------------------------------------------------------------------------
 // GUI-facing surface (Phase 26 plan 26-03 / VIEW-03)
 // ---------------------------------------------------------------------------
@@ -379,6 +401,19 @@ mod tests {
         let content = "---\nallowed-tools: Read, Write\n---\nbody";
         let (fm, _) = parse(content).unwrap();
         assert_eq!(fm.allowed_tools, Some(vec!["Read, Write".to_string()]));
+    }
+
+    #[test]
+    fn parse_for_lint_reports_allowed_tools_shape() {
+        let scalar = "---\nname: my-skill\nallowed-tools: Read, Write\n---\nbody";
+        let (fm, body, allowed_tools_is_string) = parse_for_lint(scalar).unwrap();
+        assert_eq!(fm.name.as_deref(), Some("my-skill"));
+        assert_eq!(body, "body");
+        assert!(allowed_tools_is_string);
+
+        let sequence = "---\nname: my-skill\nallowed-tools:\n  - Read\n  - Write\n---\nbody";
+        let (_, _, allowed_tools_is_string) = parse_for_lint(sequence).unwrap();
+        assert!(!allowed_tools_is_string);
     }
 
     #[test]

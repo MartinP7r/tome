@@ -27,6 +27,13 @@
 | `tome completions <shell>` | Install shell completions (bash, zsh, fish, powershell) |
 | `tome --version` | Print version information through Clap's standard version flag |
 
+## MCP Support
+
+Tome currently has no `tome mcp` command and does not ship an MCP server or
+MCP-based skill distribution. Skills are managed through the filesystem
+commands listed above; an agent's own MCP configuration is outside Tome's
+current command surface.
+
 ## Global Flags
 
 | Flag | Short | Description |

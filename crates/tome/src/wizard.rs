@@ -41,6 +41,8 @@ struct KnownDirectory {
 /// `KNOWN_SOURCES` and `KNOWN_TARGETS` arrays.
 ///
 /// Entries are ordered roughly by popularity / likelihood of being present.
+/// Paths are relative to the user's home directory; project-local paths belong
+/// in per-project configuration rather than this registry.
 const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
     KnownDirectory {
         name: "claude-plugins",
@@ -57,9 +59,30 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
         default_role: DirectoryRole::Synced,
     },
     KnownDirectory {
-        name: "antigravity",
+        name: "antigravity-global",
         display: "Antigravity",
+        default_path: ".gemini/config/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "antigravity-cli",
+        display: "Antigravity CLI",
+        default_path: ".gemini/antigravity-cli/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "antigravity",
+        display: "Antigravity (Legacy IDE)",
         default_path: ".gemini/antigravity/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "cursor",
+        display: "Cursor",
+        default_path: ".cursor/skills",
         directory_type: DirectoryType::Directory,
         default_role: DirectoryRole::Synced,
     },
@@ -74,6 +97,13 @@ const KNOWN_DIRECTORIES: &[KnownDirectory] = &[
         name: "codex-agents",
         display: "Codex Agents",
         default_path: ".agents/skills",
+        directory_type: DirectoryType::Directory,
+        default_role: DirectoryRole::Synced,
+    },
+    KnownDirectory {
+        name: "agents-global",
+        display: "Shared Agent Skills (XDG)",
+        default_path: ".config/agents/skills",
         directory_type: DirectoryType::Directory,
         default_role: DirectoryRole::Synced,
     },
@@ -1451,6 +1481,40 @@ mod tests {
                 valid,
             );
         }
+    }
+
+    #[test]
+    fn find_known_directories_includes_current_global_agent_paths() {
+        let tmp = TempDir::new().unwrap();
+        let expected = [
+            ("cursor", ".cursor/skills"),
+            ("antigravity-global", ".gemini/config/skills"),
+            ("antigravity-cli", ".gemini/antigravity-cli/skills"),
+            ("antigravity", ".gemini/antigravity/skills"),
+            ("agents-global", ".config/agents/skills"),
+        ];
+
+        for (_, path) in expected {
+            std::fs::create_dir_all(tmp.path().join(path)).unwrap();
+        }
+
+        let found = find_known_directories_in(tmp.path()).unwrap();
+        for (name, path) in expected {
+            let expected_path = tmp.path().join(path);
+            assert!(
+                found
+                    .iter()
+                    .any(|(known, actual)| known.name == name && actual == &expected_path),
+                "missing known global path {name} (~/{path})"
+            );
+        }
+        assert_eq!(found.len(), expected.len());
+        assert!(
+            !KNOWN_DIRECTORIES
+                .iter()
+                .any(|known| known.default_path == ".github/skills"),
+            "project-local Copilot skills must not be a home-directory preset"
+        );
     }
 
     #[test]

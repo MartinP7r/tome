@@ -2,7 +2,7 @@
 
 Research into agent file formats (skills, rules, memory, hooks, agents, plugins), invocation methods, context loading strategies, and format differences across AI coding tools — informing tome's connector architecture.
 
-*Last updated: March 2026*
+*Last updated: October 24, 2026 — Tome's current scope and wizard directory registry were rechecked; third-party catalog counts below remain dated snapshots.*
 
 ---
 
@@ -231,7 +231,7 @@ Nanobot is essentially an OpenClaw-compatible agent in a fraction of the code. S
 | **Config** | Minimal — focuses on LLM backend configuration |
 | **MCP** | Supported for tool integration |
 
-PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP target rather than a skill directory target.
+PicoClaw prioritizes extreme minimalism. Tome has no MCP integration, so PicoClaw is neither a Tome MCP target nor a home-relative skill-directory preset.
 
 ---
 
@@ -254,7 +254,7 @@ PicoClaw prioritizes extreme minimalism. For tome, it would likely be an MCP tar
 
 Gemini CLI is the simplest format for instructions — plain markdown files concatenated into context. No frontmatter, no structured fields. The `@file.md` import syntax and `!{command}` execution are unique.
 
-**Skills (2026):** Gemini CLI now supports SKILL.md directory scanning. Personal skills at `~/.gemini/skills/` and the portable `~/.agents/skills/` path. For tome, Gemini CLI is a Symlink target via `~/.gemini/skills/`.
+**Skills (2026):** Gemini CLI now supports SKILL.md directory scanning. Personal skills at `~/.gemini/skills/` and the portable `~/.agents/skills/` path. Tome includes `~/.gemini/skills/` as a known directory; Tome deploys copies rather than symlinks.
 
 ---
 
@@ -305,7 +305,7 @@ Amp is a useful case study — their migration from custom commands to Agent Ski
 | **MCP** | Core mechanism — 100+ servers in toolkit catalog. Auto-OAuth on HTTP 401. |
 | **Config** | TOML at `~/.config/goose/` |
 
-Goose now supports SKILL.md directory scanning alongside its MCP-centric extension model. For tome, Goose is a Symlink target via `~/.config/goose/skills/`.
+Goose now supports SKILL.md directory scanning alongside its MCP-centric extension model. Tome retains `~/.config/goose/skills/` as a known-directory preset; deployments are copies, not symlinks.
 
 ---
 
@@ -1238,39 +1238,12 @@ graph TD
     OClaw --> Nano
 ```
 
-### tome Connector Mapping
+### Tome's Current Filesystem Flow
 
 ```mermaid
 graph LR
-    subgraph "Source Connectors"
-        S1["Claude Plugins<br/>(installed_plugins.json)"]
-        S2["SKILL.md directories"]
-        S3["Cursor .mdc rules"]
-        S4["Windsurf rules"]
-        S5["OpenClaw workspace"]
-        S6["Copilot .instructions.md"]
-    end
-
-    subgraph "tome Library"
-        L["Canonical format<br/>(SKILL.md standard)"]
-    end
-
-    subgraph "Target Connectors"
-        T1["Symlink targets<br/>(Claude, Codex, Antigravity,<br/>OpenClaw, Copilot, OpenCode, Amp)"]
-        T2["MCP targets<br/>(Goose, PicoClaw)"]
-        T3["Format transform targets<br/>(Cursor .mdc, Windsurf rules,<br/>Copilot .instructions.md)"]
-    end
-
-    S1 --> L
-    S2 --> L
-    S3 -. "transform<br/>.mdc → SKILL.md" .-> L
-    S4 -. "transform<br/>rules → SKILL.md" .-> L
-    S5 --> L
-    S6 -. "transform<br/>.instructions.md → SKILL.md" .-> L
-
-    L --> T1
-    L --> T2
-    L -. "transform<br/>SKILL.md → native" .-> T3
+    Sources["Configured source directories"] -->|discover/import| Library["Tome library<br/>SKILL.md + manifest"]
+    Library -->|copy deployment| Targets["Configured filesystem targets"]
 ```
 
 ---
@@ -1345,93 +1318,53 @@ Auto-memories grow unbounded. Large instruction files consume context budget, le
 Cursor rules behave differently depending on which LLM backend is active. The same `.mdc` rule may work with Claude but fail with GPT-4. Agent Skills are more consistent because the SKILL.md body is pure natural language.
 
 ### Migration Pain
-No tool provides automatic format conversion. Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to anything else, requires manual work. This is the gap tome aims to fill.
+Moving from `.cursorrules` to SKILL.md, or from Windsurf rules to another format, still requires manual work. Tome does not currently perform these format conversions.
 
 ---
 
-## 19. What This Means for tome
+## 19. Tome's Current Agent Skills Scope
 
-### Format Families to Support
+Tome is a file-based Agent Skills manager. It stores canonical skills as `SKILL.md`, validates their standard frontmatter with `tome lint`, and deploys copies to configured filesystem directories.[1][2] Tome does **not** currently implement an MCP server, MCP command, or MCP-based skill distribution; see the [CLI command reference](commands.md) for the shipped command surface.
 
-Based on this research, tome's connector architecture needs to handle four format families:
+### Home-relative wizard directory presets
 
-| Family | Tools | Distribution Method | Translation Needed |
-|--------|-------|-------------------|--------------------|
-| **SKILL.md standard** | Claude Code, Codex, Copilot, Antigravity, OpenClaw, OpenCode, Amp | Symlink (same format) | No — canonical format |
-| **Custom rules** | Cursor (.mdc), Windsurf (activation modes), Copilot (.instructions.md) | Copy with transform | Yes — SKILL.md ↔ native rules |
-| **MCP-only** | Goose, PicoClaw | MCP config injection | No transform, just config entry |
-| **Config-only** | Aider | Config injection | Minimal (YAML config entry) |
+The wizard's `KNOWN_DIRECTORIES` registry contains the following home-relative paths. They are directory-discovery presets, not a guarantee of complete integration with each vendor. Some entries are compatibility or legacy locations; project-local paths are intentionally separate.
 
-### Syncable Structures (Today)
+| Wizard entry | Path relative to `$HOME` | Scope / caveat |
+|---|---|---|
+| Claude Code Plugins | `.claude/plugins` | Plugin source directory, not a general `SKILL.md` target. |
+| Claude Code Skills | `.claude/skills` | User skills directory.[8] |
+| Antigravity | `.gemini/config/skills` | Current global location documented for Antigravity 2.0.[3] |
+| Antigravity CLI | `.gemini/antigravity-cli/skills` | CLI-specific preset retained for compatible installations.[3] |
+| Antigravity (Legacy IDE) | `.gemini/antigravity/skills` | Legacy path retained for existing installations.[3] |
+| Cursor | `.cursor/skills` | Supported global location; Cursor also supports `~/.agents/skills`.[4] |
+| Codex | `.codex/skills` | Compatibility location; current Codex documentation also lists the shared `~/.agents/skills` path.[6] |
+| Codex Agents | `.agents/skills` | Shared Agent Skills location used by multiple agents, not Codex alone.[6][9][12] |
+| Shared Agent Skills (XDG) | `.config/agents/skills` | Amp's current `amp skill add --global` destination.[12] |
+| OpenClaw | `.openclaw/skills` | Node-hosted/compatibility directory; OpenClaw's other skill roots depend on state and workspace.[10] |
+| Goose | `.config/goose/skills` | Historical platform-config candidate retained by Tome; Goose currently recommends `~/.agents/skills`.[11] |
+| Gemini CLI | `.gemini/skills` | Gemini CLI user path; the docs note a 2026 transition to Antigravity CLI for some users.[9] |
+| Amp | `.config/amp/skills` | Lower-priority Amp fallback; the shared XDG path above is preferred.[12] |
+| OpenCode | `.config/opencode/skills` | Global OpenCode skills location.[13] |
+| VS Code Copilot | `.copilot/skills` | User-scope path; `.github/skills` is project-local and is not a home-relative preset.[5][7] |
 
-| Structure | How to Sync | Complexity |
-|-----------|------------|------------|
-| **Skills (SKILL.md)** | Symlink — same format everywhere | Low |
-| **Instruction files** | Symlink with rename (CLAUDE.md → AGENTS.md → GEMINI.md) | Low |
-| **MCP config** | Config injection (write entry into tool's .mcp.json) | Medium |
+Cursor, VS Code Copilot, and Codex recognize the shared `~/.agents/skills` location.[4][5][6]
 
-### Syncable with Transforms (Future)
+Gemini CLI and Goose also document it.[9][11]
 
-| Structure | Transform Needed |
-|-----------|-----------------|
-| **Cursor rules** | SKILL.md ↔ `.mdc` (add/strip `globs`, `alwaysApply`) |
-| **Windsurf rules** | SKILL.md ↔ `.md` with activation mode |
-| **Copilot instructions** | SKILL.md ↔ `.instructions.md` (add/strip `applyTo`) |
+Amp and OpenCode recognize it as well.[12][13]
 
-### Not Syncable (Tool-Specific)
+Tome registers this path once under the wizard label `Codex Agents`. The registry does not add project directories such as `.github/skills` to the home-relative discovery list.
 
-| Structure | Why |
-|-----------|-----|
-| **Hooks** | Fundamentally different event models, different config formats |
-| **Agents** | Different frontmatter fields, capability models, isolation strategies |
-| **Plugins** | Different manifest formats, different bundling conventions |
-| **Memory** | Different storage, different lifecycle, different retrieval |
-| **Settings/Permissions** | Different security models entirely |
+### Scope boundary
 
-### Connector Design Recommendations
-
-1. **SKILL.md as canonical format** — The library stores everything in Agent Skills standard format. This is already what most tools natively understand. As of Feb 2026, 7+ major tools read SKILL.md natively.
-
-2. **Symlink-first for SKILL.md tools** — Claude Code, Codex, Copilot, Antigravity, OpenCode, and Amp all read SKILL.md natively. Symlinks from library to target skill directory are zero-cost and keep everything in sync.
-
-3. **Transform pipeline for custom rules** — Three tools need format transforms:
-   - **Cursor:** Generate `.mdc` files with `description`, `globs`, and `alwaysApply` frontmatter from SKILL.md metadata
-   - **Windsurf:** Generate rules with appropriate activation mode from skill description
-   - **Copilot:** Generate `.instructions.md` with `description` and `applyTo` frontmatter
-
-4. **MCP config for tool-based targets** — Tools that consume skills via MCP get a config entry pointing at the tome MCP server rather than direct file access. Goose is the primary MCP-only target.
-
-5. **OpenClaw/Nanobot as special cases** — Their 8-file workspace model means a connector needs to map skills into the appropriate slot (AGENTS.md for instructions, TOOLS.md for capabilities, etc.) or just target their skills directory.
-
-### What's Portable vs. What's Not
-
-| Layer | Portable? | Details |
-|-------|-----------|---------|
-| **Skills** | Yes | SKILL.md standard fields translate across 7+ tools |
-| **MCP** | Yes | Open standard, every major tool supports it |
-| **Instruction files** | Partially | Same markdown content, different filenames — symlinkable |
-| **Rules** | Partially | Need format transforms for Cursor (.mdc), Windsurf, Copilot (.instructions.md) |
-| **Hooks** | No | 4 tools have hooks, all with incompatible formats and event models |
-| **Agents** | No | 5 tools have agents, all with different frontmatter, capabilities, isolation |
-| **Plugins** | No | 3 tools have plugin systems, all with different manifests |
-| **Memory** | No | 7 tools have memory, all with different storage, lifecycle, retrieval |
-
-Tool-specific skill extensions are lost in translation — tome should preserve them in metadata when syncing between tools of the same type, but can safely drop them when translating to a different format family.
-
-### The Convergence Trend
-
-As of Feb 2026, the industry is consolidating around:
-1. **Agent Skills (SKILL.md)** for portable instructions — the clear winner
-2. **MCP** for portable tool integrations — universal adoption
-3. **Markdown instruction files** for project rules — same concept, different filenames
-
-Everything else (hooks, agents, plugins, memory) remains fragmented with no signs of standardization. For tome, this means the v1 focus on skills + MCP + instruction files covers the portable surface area. Extended structures would require per-tool connectors with no format translation possible.
+MCP remains a separate tool-integration protocol in the wider agent ecosystem, but it is not a Tome skill transport or a shipped Tome feature. No current documentation should describe Goose, PicoClaw, or other tools as Tome MCP targets. Likewise, Tome does not currently transform Cursor `.mdc`, Windsurf rules, or Copilot instruction files into `SKILL.md`; those are distinct formats.
 
 ---
 
 ## 20. Skill Installers: `npx skills` (Vercel Labs)
 
-[`npx skills`](https://github.com/vercel-labs/skills) is a JavaScript-based skill installer with a polished interactive CLI. It supports **41 agent targets** and uses a two-tier architecture remarkably similar to tome's library model.
+[`npx skills`](https://github.com/vercel-labs/skills) is a JavaScript-based skill installer with a polished interactive CLI. The 41-agent count and the target catalog in this section are a March 2026 snapshot, not current product guarantees.
 
 **Registry:** [skills.sh](https://skills.sh) — browsable skill registry with per-skill detail pages.
 
@@ -1439,7 +1372,7 @@ Everything else (hooks, agents, plugins, memory) remains fragmented with no sign
 
 Canonical copies are stored in `.agents/skills/<name>/` (the emerging universal path) or tool-specific directories. Distribution to individual tools uses symlinks from their native skill dirs back to the canonical location.
 
-**Install flow:** clone repo → select skills → select targets → choose scope (project/global) → choose method (symlink/copy) → security assessment → install.
+**Install flow:** clone repo → select skills → select targets → choose scope (project/global) → choose method (symlink/copy) → security assessment → install.[14]
 
 ### `.skill-lock.json` (v3)
 
@@ -1466,7 +1399,7 @@ Lockfile at `.agents/.skill-lock.json` tracks installed skills with provenance a
 
 Key fields: `sourceType` + `sourceUrl` for provenance, `skillFolderHash` for content-based idempotency (similar to tome's SHA-256 manifest hashes), `installedAt`/`updatedAt` timestamps.
 
-### Agent Targets (41 total)
+### Agent Targets (41 total in the March 2026 snapshot)
 
 **Universal agents** (share `.agents/skills/` as project-scoped path):
 
@@ -1542,17 +1475,35 @@ The installer integrates security risk assessment with three providers:
 
 Each skill gets a security rating before installation, with a link to details on skills.sh.
 
-### Implications for tome
+### Implications for Tome
 
-1. **`.agents/skills/` is the emerging universal path** — 9 agents converge on it. Tome's `Directory` source type can discover skills there today.
-2. **Lockfile as prior art for `tome.lock`** — `.skill-lock.json` v3 tracks the same concepts tome needs: content hashes for idempotency, source provenance, install timestamps.
-3. **Symlink vs copy choice** — `npx skills` offers both, recommending symlink. Tome already uses this model (library copies + symlink distribution).
-4. **Security assessment** — interesting prior art for a future `tome audit` command.
-5. **41-agent coverage** — significantly expands the known agent landscape beyond tome's current connector list.
+1. **Shared skill paths are useful, but scope matters** — `.agents/skills/` and `~/.config/agents/skills/` are recognized by multiple agents; Tome records each as one filesystem directory rather than claiming per-agent integration.
+2. **Lockfile concepts remain useful prior art** — `.skill-lock.json` tracks content hashes, source provenance, and installation timestamps, concepts that can be compared with Tome's manifest.
+3. **Deployment semantics differ** — `npx skills` offers symlink and copy modes; Tome's current target deployment is copy-based.[14]
+4. **Security assessment** — an interesting prior-art pattern for a possible future `tome audit` command, not a current feature.
+5. **Catalog counts are snapshots** — the list below was captured in March 2026 and should not be treated as the current number of supported agents or as Tome integration coverage.
 
 ---
 
 ## Sources
+
+### Numbered citations for Tome's current scope
+
+Sources:
+[1] https://agentskills.io/specification — Agent Skills specification
+[2] https://github.com/agentskills/agentskills/blob/main/skills-ref/src/skills_ref/validator.py — Agent Skills reference validator
+[3] https://antigravity.google/docs/skills — Google Antigravity skills docs
+[4] https://cursor.com/docs/skills.md — Cursor Agent Skills docs
+[5] https://code.visualstudio.com/docs/agent-customization/agent-skills — VS Code Agent Skills docs
+[6] https://developers.openai.com/codex/skills — Codex skills docs
+[7] https://learn.microsoft.com/en-us/visualstudio/ide/copilot-agent-skills?view=visualstudio — Microsoft Copilot Agent Skills locations
+[8] https://code.claude.com/docs/en/skills — Claude Code skills documentation
+[9] https://geminicli.com/docs/cli/using-agent-skills — Gemini CLI Agent Skills documentation
+[10] https://docs.openclaw.ai/skills — OpenClaw skills documentation
+[11] https://goose-docs.ai/docs/guides/context-engineering/using-skills — Goose Agent Skills documentation
+[12] https://ampcode.com/docs/customize/skills — Amp skills documentation
+[13] https://opencode.ai/docs/skills — OpenCode Agent Skills documentation
+[14] https://github.com/vercel-labs/skills/blob/main/docs/commands.md — Vercel Skills CLI commands
 
 ### Standards & Specifications
 - [Agent Skills Open Standard](https://agentskills.io) — format specification
