@@ -5462,7 +5462,7 @@ dependencies = [
 
 [[package]]
 name = "tome"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "arboard",
@@ -5502,7 +5502,7 @@ dependencies = [
 
 [[package]]
 name = "tome-desktop"
-version = "0.17.0"
+version = "0.17.1"
 dependencies = [
  "anyhow",
  "notify",
