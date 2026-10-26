@@ -19,7 +19,7 @@ anyhow = "1"
 # exhaustive — a new variant unobserved is a silent UX regression because
 # the fall-through `Could not copy: {other}` branch hides the semantic
 # of the new error from the user. Closes #463 / POLISH-06 (D6).
-arboard = { version = ">=3.6, <3.7", default-features = false, features = ["wayland-data-control"] }
+arboard = { version = ">=3.6, <3.8", default-features = false, features = ["wayland-data-control"] }
 clap = { version = "4", features = ["derive"] }
 clap_complete = "4"
 console = "0.16"
@@ -37,7 +37,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 # `sha2` 0.11.1 raised its MSRV to Rust 1.88; Tome still supports Rust 1.85.
 # Revisit this cap when the workspace MSRV is raised or upstream restores 1.85 support.
-sha2 = ">=0.11.0, <0.11.1"
+sha2 = ">=0.11.0, <0.11.2"
 walkdir = "2"
 serde_yaml = "0.9"
 unicode-normalization = "0.1"
