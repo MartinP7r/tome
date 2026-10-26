@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-26
+
+### Fixed
+
+- **Agent Skills lint validation follows the published frontmatter contract.**
+  Validate names after Unicode NFKC normalization, check description and metadata
+  constraints, and preserve supported scalar/sequence `allowed-tools` forms
+  (PR #630; Paperclip MCO-189).
+- **The init wizard discovers current global skill directories.** Add Cursor,
+  Antigravity global and CLI locations, and the shared XDG Agent Skills directory,
+  while preserving the legacy Antigravity entry. Project-local `.github/skills`
+  remains a per-project configuration path, not a home-directory preset.
+- **Dependency maintenance preserves Rust 1.85 support.** Update locked
+  dependencies while keeping `sha2` below 0.11.1, which requires Rust 1.88
+  (PR #628).
+
+### Documentation
+
+- Clarify that profiles are shared, user-named definitions selected locally on
+  each machine, and correct configuration/migration examples and the bundled
+  `using-tome` skill (PR #629; Paperclip MCO-181).
+- Refresh Agent Skills compatibility and tool-path guidance. Clarify that Tome
+  has no MCP server or command and uses copy-based filesystem deployment.
+
+### Upgrade notes
+
+- This CLI-only maintenance release adds no configuration migration. The
+  [0.17.0 upgrade guide](docs/src/upgrade-v0.17.md) still applies when upgrading
+  from 0.16.x. Existing target copies are not automatically refreshed or removed.
+- Desktop artifacts and the unmerged evaluation-core PR #631 are not included.
+
 ## [0.17.0] - 2026-10-13
 
 ### Fixed
@@ -1187,7 +1218,8 @@ role = "target"
 - CI on Ubuntu and macOS (fmt, clippy, test, release build)
 - cargo-dist release workflow for cross-platform binaries
 
-[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/MartinP7r/tome/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/MartinP7r/tome/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/MartinP7r/tome/compare/v0.16.4...v0.17.0
 [0.16.4]: https://github.com/MartinP7r/tome/compare/v0.16.3...v0.16.4
 [0.7.0]: https://github.com/MartinP7r/tome/compare/v0.6.2...v0.7.0
