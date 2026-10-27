@@ -22,6 +22,8 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Release recipe regression tests
+        run: make release-test
       - name: Format
         run: cargo fmt -p tome -- --check
       - name: Clippy
