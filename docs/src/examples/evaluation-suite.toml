@@ -1,0 +1,30 @@
+schema_version = 1
+suite_id = "answer-check"
+repetitions = 3
+artifact = { name = "example-skill", sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+
+[policy]
+timeout_ms = 120000
+max_output_bytes = 1048576
+network = "disabled"
+isolation = "fresh_workspace"
+permissions = []
+retention = "summary_only"
+
+[model_pin]
+provider = "example-provider"
+model = "example-model"
+version = "pinned-version"
+prompt_version = "prompt-v1"
+
+[[cases]]
+id = "answers-question"
+prompt = "What is 6 times 7?"
+fixture = "fixtures/answer-check"
+tags = ["example"]
+
+[[cases.graders]]
+id = "contains-answer"
+kind = "text_contains"
+needle = "42"
+weight = 1

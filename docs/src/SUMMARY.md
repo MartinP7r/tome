@@ -8,6 +8,7 @@
 - [Upgrade from 0.16.4 to 0.17.0](upgrade-v0.17.md)
 - [Cross-machine sync](cross-machine-sync.md)
 - [Skill-organization architecture](skill-organization-architecture.md)
+- [Skill evaluation core](evaluation-core.md)
 - [MCO-144 implementation plan — copy deployments](mco-144-implementation-plan.md)
 - [Development Workflow](development-workflow.md)
 - [Architecture](architecture.md)

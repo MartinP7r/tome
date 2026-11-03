@@ -5481,6 +5481,7 @@ dependencies = [
  "nucleo-matcher",
  "predicates",
  "ratatui",
+ "regex",
  "serde",
  "serde_json",
  "serde_yaml",

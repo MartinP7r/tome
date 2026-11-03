@@ -60,6 +60,7 @@ pub mod config;
 pub(crate) mod deployment;
 pub(crate) mod discover;
 pub(crate) mod distribute;
+pub mod evaluation;
 // `doctor` is `pub` since Phase 26 plan 26-05: the GUI Health view's two
 // Tauri commands (`get_doctor_report` / `doctor_repair_one`) call into
 // `tome::doctor::collect_doctor_view` + `tome::doctor::repair_one`, and the
